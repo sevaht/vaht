@@ -4,6 +4,8 @@
 //! Requests on one connection reach vaht in order, so a screenshot taken
 //! after pointer input shows that input's effect.
 
+use std::fs::File;
+use std::os::fd::AsFd as _;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
@@ -11,7 +13,9 @@ use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Fra
 use smithay_client_toolkit::dispatch2::Dispatch2;
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::client::globals::{GlobalList, registry_queue_init};
-use smithay_client_toolkit::reexports::client::protocol::{wl_output, wl_pointer, wl_shm, wl_surface};
+use smithay_client_toolkit::reexports::client::protocol::{wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
+use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
+use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue, QueueHandle};
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1;
@@ -41,6 +45,16 @@ pub const WINDOW_COLOR: [u8; 3] = [0x20, 0x60, 0xc0];
 /// The Linux input code of the left mouse button (`BTN_LEFT`).
 pub const BUTTON_LEFT: u32 = 0x110;
 
+/// The Linux input code of the right mouse button (`BTN_RIGHT`).
+pub const BUTTON_RIGHT: u32 = 0x111;
+
+/// `wl_keyboard.keymap_format.no_keymap`: the keyboard uses the seat's keymap.
+const NO_KEYMAP_FORMAT: u32 = 0;
+
+/// The modifier mask of Alt in the default xkb keymap, where Alt is Mod1:
+/// the fourth real modifier, after Shift, Lock and Control.
+const ALT_MODIFIER_MASK: u32 = 1 << 3;
+
 /// Bytes per pixel of an ARGB8888 buffer.
 const BYTES_PER_PIXEL: u32 = 4;
 
@@ -53,6 +67,10 @@ pub struct TestClient {
     state: ClientState,
     /// The pointer it moves, and the output it moves on.
     pointer: ZwlrVirtualPointerV1,
+    /// The keyboard it holds modifiers with.
+    keyboard: ZwpVirtualKeyboardV1,
+    /// The empty file sent as the keyboard's keymap; kept open until sent.
+    _no_keymap: File,
     /// The milliseconds clock stamped on pointer events.
     time: u32,
 }
@@ -77,6 +95,14 @@ impl TestClient {
         let pointer_manager: ZwlrVirtualPointerManagerV1 =
             bind(&globals, &handle, "zwlr_virtual_pointer_manager_v1");
         let pointer = pointer_manager.create_virtual_pointer(None, &handle, NoEvents);
+        let seat: wl_seat::WlSeat = bind(&globals, &handle, "wl_seat");
+        let keyboard_manager: ZwpVirtualKeyboardManagerV1 =
+            bind(&globals, &handle, "zwp_virtual_keyboard_manager_v1");
+        let keyboard = keyboard_manager.create_virtual_keyboard(&seat, &handle, NoEvents);
+        // `no_keymap`: the keyboard's modifier masks are read with vaht's own
+        // keymap, so no keymap needs writing. The protocol still wants a file.
+        let no_keymap = File::open("/dev/null").expect("/dev/null opens");
+        keyboard.keymap(NO_KEYMAP_FORMAT, no_keymap.as_fd(), 0);
         let mut state = ClientState {
             registry: RegistryState::new(&globals),
             outputs: OutputState::new(&globals, &handle),
@@ -105,6 +131,8 @@ impl TestClient {
             queue,
             state,
             pointer,
+            keyboard,
+            _no_keymap: no_keymap,
             time: 0,
         }
     }
@@ -188,6 +216,38 @@ impl TestClient {
         self.move_pointer_to(x, y);
         self.press(button);
         self.release(button);
+    }
+
+    /// Presses and holds `button` at `from`, moves to `to`, and releases.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn drag(&mut self, from: (u32, u32), to: (u32, u32), button: u32) {
+        self.move_pointer_to(from.0, from.1);
+        self.press(button);
+        self.move_pointer_to(to.0, to.1);
+        self.release(button);
+    }
+
+    /// Holds Alt down until [`Self::release_modifiers`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn hold_alt(&mut self) {
+        self.keyboard.modifiers(ALT_MODIFIER_MASK, 0, 0, 0);
+        self.roundtrip();
+    }
+
+    /// Lets go of every held modifier.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn release_modifiers(&mut self) {
+        self.keyboard.modifiers(0, 0, 0, 0);
+        self.roundtrip();
     }
 
     /// Captures the output as vaht shows it now.
@@ -346,10 +406,11 @@ struct ClientState {
 }
 
 impl ClientState {
-    /// Fills `window` with [`WINDOW_COLOR`] and asks to hear when it is shown.
-    fn draw(&mut self, window: &Window, handle: &QueueHandle<Self>) {
-        let width = i32::try_from(WINDOW_SIZE.0).expect("small");
-        let height = i32::try_from(WINDOW_SIZE.1).expect("small");
+    /// Fills `window`, `size` pixels large, with [`WINDOW_COLOR`] and asks
+    /// to hear when it is shown.
+    fn draw(&mut self, window: &Window, handle: &QueueHandle<Self>, size: (u32, u32)) {
+        let width = i32::try_from(size.0).expect("window sizes fit in i32");
+        let height = i32::try_from(size.1).expect("window sizes fit in i32");
         let stride = width * i32::try_from(BYTES_PER_PIXEL).expect("4 fits in i32");
         let (buffer, canvas) = self
             .pool
@@ -392,6 +453,9 @@ macro_rules! ignore_events {
 }
 
 ignore_events!(
+    wl_seat::WlSeat,
+    ZwpVirtualKeyboardManagerV1,
+    ZwpVirtualKeyboardV1,
     ZwlrVirtualPointerManagerV1,
     ZwlrVirtualPointerV1,
     ExtOutputImageCaptureSourceManagerV1,
@@ -509,10 +573,16 @@ impl WindowHandler for ClientState {
         _: &Connection,
         handle: &QueueHandle<Self>,
         window: &Window,
-        _: WindowConfigure,
+        configure: WindowConfigure,
         _: u32,
     ) {
-        self.draw(window, handle);
+        // Take the size vaht asks for, as real clients do; with none, pick.
+        let (width, height) = configure.new_size;
+        let size = (
+            width.map_or(WINDOW_SIZE.0, std::num::NonZeroU32::get),
+            height.map_or(WINDOW_SIZE.1, std::num::NonZeroU32::get),
+        );
+        self.draw(window, handle, size);
     }
 }
 

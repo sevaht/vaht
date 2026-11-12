@@ -25,6 +25,7 @@ use vaht_ui::{
     Glyph, Panel, PanelContent, SizePolicy, Theme, ThemeElement, Typesetter, Widget, WidgetState,
 };
 
+use super::resize::ResizeEdges;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 use crate::scene::SceneElement;
 
@@ -58,13 +59,15 @@ impl TitlebarButton {
 pub(crate) enum FramePart {
     /// The titlebar, at this point in the titlebar's own pixels.
     Titlebar(vaht_ui::Point),
-    /// A border line.
-    Border,
+    /// A border line, and the edges dragging it there resizes.
+    Border(ResizeEdges),
 }
 
 /// Where each part of a frame goes, in global coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FrameGeometry {
+    /// Everything the frame covers, borders included.
+    pub(crate) outer: Rectangle<i32, Logical>,
     /// The titlebar, exactly as wide as the content.
     pub(crate) titlebar: Rectangle<i32, Logical>,
     /// Top, separator (between titlebar and content), bottom, left, right.
@@ -84,6 +87,7 @@ impl FrameGeometry {
         let outer_height = height + titlebar_height + 3 * border;
         let rectangle = |x, y, width, height| Rectangle::new((x, y).into(), (width, height).into());
         Self {
+            outer: rectangle(outer_left, outer_top, outer_width, outer_height),
             titlebar: rectangle(x, y - border - titlebar_height, width, titlebar_height),
             borders: [
                 rectangle(outer_left, outer_top, outer_width, border),
@@ -102,10 +106,11 @@ impl FrameGeometry {
             let inside = pixel - self.titlebar.loc;
             return Some(FramePart::Titlebar(vaht_ui::Point::new(inside.x, inside.y)));
         }
+        let corner = self.titlebar.size.h;
         self.borders
             .iter()
             .any(|border| border.contains(pixel))
-            .then_some(FramePart::Border)
+            .then(|| FramePart::Border(ResizeEdges::for_border_point(self.outer, pixel, corner)))
     }
 }
 
@@ -364,7 +369,13 @@ mod tests {
             frame.part_at((15.0, 25.0).into()),
             Some(FramePart::Titlebar(vaht_ui::Point::new(5, 6)))
         );
-        assert_eq!(frame.part_at((9.0, 60.0).into()), Some(FramePart::Border));
+        assert_eq!(
+            frame.part_at((9.0, 60.0).into()),
+            Some(FramePart::Border(ResizeEdges {
+                horizontal: super::super::HorizontalEdge::Left,
+                vertical: super::super::VerticalEdge::None,
+            }))
+        );
         assert_eq!(
             frame.part_at((50.0, 60.0).into()),
             None,

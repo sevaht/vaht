@@ -8,7 +8,8 @@
 use std::path::Path;
 
 use vaht_test_support::{
-    BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR, WINDOW_SIZE,
+    BUTTON_LEFT, BUTTON_RIGHT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR,
+    WINDOW_SIZE,
 };
 
 /// The executable cargo built for these tests.
@@ -76,6 +77,14 @@ impl OneWindow {
             bounds.left + (bounds.right - bounds.left) / 2,
             bounds.top + (bounds.bottom - bounds.top) / 2,
         )
+    }
+
+    /// Finds the window's content again, after it moved or resized.
+    fn find_content(&mut self) -> Bounds {
+        self.client
+            .screenshot()
+            .bounds_of(WINDOW_COLOR)
+            .expect("the window's content is on screen")
     }
 
     /// Returns a point on the title, well left of the buttons.
@@ -173,5 +182,113 @@ fn holding_the_title_does_not_change_the_titlebar() {
     assert!(
         !held.differs_within(&before, window.titlebar()),
         "the titlebar looks the same while the title is held"
+    );
+}
+
+/// Returns `bounds` moved by `x`, `y`.
+fn shifted(bounds: Bounds, x: i32, y: i32) -> Bounds {
+    let shift = |value: u32, by: i32| value.checked_add_signed(by).expect("stays on screen");
+    Bounds {
+        left: shift(bounds.left, x),
+        top: shift(bounds.top, y),
+        right: shift(bounds.right, x),
+        bottom: shift(bounds.bottom, y),
+    }
+}
+
+#[test]
+fn dragging_the_title_moves_the_window() {
+    let mut window = OneWindow::open();
+    let (x, y) = window.title_point();
+    window.client.drag((x, y), (x + 60, y + 40), BUTTON_LEFT);
+    assert_eq!(window.find_content(), shifted(window.content, 60, 40));
+}
+
+#[test]
+fn alt_dragging_anywhere_on_the_window_moves_it() {
+    let mut window = OneWindow::open();
+    let (x, y) = OneWindow::middle(window.content);
+    window.client.hold_alt();
+    window.client.drag((x, y), (x + 50, y + 70), BUTTON_LEFT);
+    window.client.release_modifiers();
+    assert_eq!(window.find_content(), shifted(window.content, 50, 70));
+}
+
+#[test]
+fn dragging_the_bottom_right_corner_resizes_and_keeps_the_top_left() {
+    let mut window = OneWindow::open();
+    let content = window.content;
+    // The bottom border's right end: one pixel below and right of the content.
+    let corner = (content.right + 1, content.bottom + 1);
+    window
+        .client
+        .drag(corner, (corner.0 + 40, corner.1 + 30), BUTTON_LEFT);
+    assert_eq!(
+        window.find_content(),
+        Bounds {
+            right: content.right + 40,
+            bottom: content.bottom + 30,
+            ..content
+        }
+    );
+}
+
+#[test]
+fn dragging_the_left_border_resizes_and_keeps_the_right_edge() {
+    let mut window = OneWindow::open();
+    let content = window.content;
+    let (_, middle_y) = OneWindow::middle(content);
+    let border = (content.left - 1, middle_y);
+    window
+        .client
+        .drag(border, (border.0 - 25, border.1), BUTTON_LEFT);
+    assert_eq!(
+        window.find_content(),
+        Bounds {
+            left: content.left - 25,
+            ..content
+        }
+    );
+}
+
+#[test]
+fn alt_right_dragging_resizes_from_the_nearest_corner() {
+    let mut window = OneWindow::open();
+    let content = window.content;
+    // Inside the content's top-left quarter: the top-left corner moves.
+    let start = (content.left + 20, content.top + 20);
+    window.client.hold_alt();
+    window
+        .client
+        .drag(start, (start.0 - 30, start.1 - 15), BUTTON_RIGHT);
+    window.client.release_modifiers();
+    assert_eq!(
+        window.find_content(),
+        Bounds {
+            left: content.left - 30,
+            top: content.top - 15,
+            ..content
+        }
+    );
+}
+
+#[test]
+fn dragging_an_edge_past_the_opposite_one_stops_at_the_smallest_size() {
+    let mut window = OneWindow::open();
+    let content = window.content;
+    let (_, middle_y) = OneWindow::middle(content);
+    let border = (content.right + 1, middle_y);
+    // To the screen's left edge, past the window's: the raw width would be
+    // negative (the window is narrower than its distance from the right).
+    assert!(
+        content.right + 1 > WINDOW_SIZE.0,
+        "the drag overshoots the left edge"
+    );
+    window.client.drag(border, (0, middle_y), BUTTON_LEFT);
+    let resized = window.find_content();
+    assert_eq!(resized.left, content.left, "the left edge stays");
+    assert_eq!(
+        resized.right, resized.left,
+        "one pixel wide: the smallest a window can be"
     );
 }

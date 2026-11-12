@@ -5,15 +5,17 @@
 //! never be reached through a stale reference (01 §1).
 
 mod frame;
+mod resize;
 mod toplevel;
 
 use std::fmt;
 
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle};
+use smithay::utils::{Logical, Point, Rectangle, Size};
 use vaht_ui::theme::Metrics;
 
 pub(crate) use frame::{Frame, FrameGeometry, FramePart, TitlebarButton, TitlebarHit};
+pub(crate) use resize::{HorizontalEdge, ResizeAnchor, ResizeEdges, VerticalEdge};
 pub(crate) use toplevel::Toplevel;
 
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
@@ -53,6 +55,9 @@ pub(crate) struct Window {
     location: Point<i32, Logical>,
     /// What vaht draws around it.
     frame: Frame,
+    /// The resize in progress, which positions the window as the client
+    /// applies new sizes.
+    resize: Option<ResizeAnchor>,
     /// Counts the window while it exists.
     _tracked: Tracked,
 }
@@ -70,6 +75,7 @@ impl Window {
             toplevel,
             location,
             frame: Frame::new(ledger),
+            resize: None,
             _tracked: ledger.track(ResourceKind::Window),
         }
     }
@@ -109,11 +115,51 @@ impl Window {
         &mut self.frame
     }
 
-    /// Brings the frame up to date with what the client last committed (its
-    /// title); returns whether anything changed.
-    pub(crate) fn sync_with_client(&mut self) -> bool {
+    /// Moves the content's top-left corner to `location`.
+    pub(crate) const fn set_location(&mut self, location: Point<i32, Logical>) {
+        self.location = location;
+    }
+
+    /// Starts a resize moving `edges`.
+    pub(crate) fn begin_resize(&mut self, edges: ResizeEdges) {
+        self.resize = Some(ResizeAnchor {
+            edges,
+            initial: self.content_area(),
+            is_finishing: false,
+        });
+        self.toplevel.set_resizing(true);
+    }
+
+    /// Asks the client for the size the resize in progress has reached,
+    /// `delta` being how far the pointer moved since it began.
+    pub(crate) fn resize_by(&self, delta: Point<i32, Logical>) {
+        if let Some(anchor) = self.resize {
+            let limits = self.toplevel.size_limits();
+            let size: Size<i32, Logical> = anchor.edges.resize(anchor.initial.size, delta, limits);
+            self.toplevel.request_size(size);
+        }
+    }
+
+    /// Ends the resize in progress; the client's next size is still anchored.
+    pub(crate) fn finish_resize(&mut self) {
+        if let Some(anchor) = &mut self.resize {
+            anchor.is_finishing = true;
+            self.toplevel.set_resizing(false);
+        }
+    }
+
+    /// Brings vaht's view up to date with what the client last committed:
+    /// its title, and its position while a resize keeps an edge still.
+    pub(crate) fn sync_with_client(&mut self) {
         let title = self.toplevel.title().unwrap_or_default();
-        self.frame.set_title(&title)
+        self.frame.set_title(&title);
+        if let Some(anchor) = self.resize {
+            let size = self.toplevel.geometry().size;
+            self.location = anchor.edges.anchored_location(anchor.initial, size);
+            if anchor.is_finishing {
+                self.resize = None;
+            }
+        }
     }
 
     /// Returns where the client's surface is drawn: the content location,

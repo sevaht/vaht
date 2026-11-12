@@ -18,6 +18,8 @@ allow-renamed-params-for = [
     "core::fmt::Debug",
     # Smithay's parameter `type_` works around a keyword; vaht names it.
     "smithay::wayland::selection::data_device::WaylandDndGrabHandler",
+    # Smithay calls the compositor state `data`; vaht says what it is.
+    "smithay::input::pointer::PointerGrab",
     # The client toolkit calls its queue handle `qh`; vaht's tests use words.
     "smithay_client_toolkit::shell::xdg::window::WindowHandler",
 ]

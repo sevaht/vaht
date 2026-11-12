@@ -12,6 +12,6 @@ mod client;
 mod headless;
 mod screenshot;
 
-pub use client::{BUTTON_LEFT, TestClient, WINDOW_COLOR, WINDOW_SIZE};
+pub use client::{BUTTON_LEFT, BUTTON_RIGHT, TestClient, WINDOW_COLOR, WINDOW_SIZE};
 pub use headless::{ExitReport, HeadlessVaht};
 pub use screenshot::{Bounds, Screenshot};

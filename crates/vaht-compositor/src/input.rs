@@ -10,12 +10,14 @@ use smithay::backend::input::{
     PointerMotionEvent,
 };
 use smithay::input::keyboard::{FilterResult, KeyboardSource, Keycode, KeymapFile};
-use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
-use smithay::utils::{Logical, Point, SERIAL_COUNTER};
+use smithay::input::pointer::{AxisFrame, ButtonEvent, GrabStartData, MotionEvent};
+use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
 use smithay::wayland::virtual_keyboard::VirtualKeyboardKeyEvent;
 
 use crate::Compositor;
-use crate::window::{FramePart, TitlebarButton, TitlebarHit, Window, WindowId};
+use crate::grab::GrabKind;
+use crate::mouse_bindings::{self, MouseAction};
+use crate::window::{FramePart, ResizeEdges, TitlebarButton, TitlebarHit, WindowId};
 use crate::windows::WindowTarget;
 
 /// Scroll distance per wheel notch, in the 120ths that high-resolution
@@ -201,12 +203,38 @@ impl Compositor {
                     self.raise_window(id);
                 }
                 self.focus_window(clicked, serial);
-                if let Some(WindowTarget::Frame {
-                    window,
-                    part: FramePart::Titlebar(point),
-                }) = target
-                {
-                    self.press_titlebar(window, point);
+                let start = GrabStartData {
+                    focus: None,
+                    button: event.button_code(),
+                    location,
+                };
+                let keyboard = self
+                    .seat
+                    .get_keyboard()
+                    .expect("the seat gets a keyboard at startup");
+                let bound = clicked.zip(mouse_bindings::window_action(
+                    &keyboard.modifier_state(),
+                    event.button_code(),
+                ));
+                if let Some((window, action)) = bound {
+                    self.run_window_binding(window, action, start, serial);
+                } else {
+                    match target {
+                        Some(WindowTarget::Frame {
+                            window,
+                            part: FramePart::Titlebar(point),
+                        }) => self.press_titlebar(window, point, start, serial),
+                        Some(WindowTarget::Frame {
+                            window,
+                            part: FramePart::Border(edges),
+                        }) => self.start_window_grab(
+                            window,
+                            GrabKind::Resize { edges },
+                            start,
+                            serial,
+                        ),
+                        Some(WindowTarget::Surface { .. }) | None => {}
+                    }
                 }
             }
             ButtonState::Pressed => {}
@@ -224,12 +252,56 @@ impl Compositor {
         pointer.frame(self);
     }
 
-    /// Holds down the titlebar widget at `point` of `window`'s titlebar.
-    fn press_titlebar(&mut self, window: WindowId, point: vaht_ui::Point) {
-        if let Some(frame) = self.windows.get_mut(window).map(Window::frame_mut) {
-            frame.titlebar_mut().press(point);
-            self.held_titlebar = Some(window);
-            self.schedule_render();
+    /// Runs a bound press on `window`.
+    fn run_window_binding(
+        &mut self,
+        window: WindowId,
+        action: MouseAction,
+        start: GrabStartData<Self>,
+        serial: Serial,
+    ) {
+        let metrics = self.theme.metrics();
+        let Some(target) = self.windows.get(window) else {
+            return;
+        };
+        let kind = match action {
+            MouseAction::StartMoving => GrabKind::Move {
+                initial_location: target.location(),
+            },
+            MouseAction::StartResizingNearestCorner => GrabKind::Resize {
+                edges: ResizeEdges::nearest_corner(
+                    target.frame_geometry(metrics).outer,
+                    start.location,
+                ),
+            },
+        };
+        self.start_window_grab(window, kind, start, serial);
+    }
+
+    /// Presses `window`'s titlebar at `point`: the title starts moving the
+    /// window, a button is held down until released.
+    fn press_titlebar(
+        &mut self,
+        window: WindowId,
+        point: vaht_ui::Point,
+        start: GrabStartData<Self>,
+        serial: Serial,
+    ) {
+        let Some(target) = self.windows.get_mut(window) else {
+            return;
+        };
+        let initial_location = target.location();
+        let titlebar = target.frame_mut().titlebar_mut();
+        match titlebar.hit_at(point) {
+            Some(TitlebarHit::Label) => {
+                self.start_window_grab(window, GrabKind::Move { initial_location }, start, serial);
+            }
+            Some(TitlebarHit::Button(_)) => {
+                titlebar.press(point);
+                self.held_titlebar = Some(window);
+                self.schedule_render();
+            }
+            None => {}
         }
     }
 

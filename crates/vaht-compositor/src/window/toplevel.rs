@@ -12,10 +12,13 @@ use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::{ImportAll, Renderer};
 use smithay::desktop::{Window as SurfaceWindow, WindowSurface, WindowSurfaceType};
 use smithay::output::Output;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size};
 use smithay::wayland::compositor::with_states;
-use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
+use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
+
+use super::resize::SizeLimits;
 
 /// The client's side of a window.
 #[derive(Debug, Clone, PartialEq)]
@@ -106,6 +109,35 @@ impl Toplevel {
         }
     }
 
+    /// Returns the content sizes the client accepts.
+    pub(crate) fn size_limits(&self) -> SizeLimits {
+        with_states(self.wl_surface(), |states| {
+            let mut cached = states.cached_state.get::<SurfaceCachedState>();
+            let current = cached.current();
+            SizeLimits::from_client(current.min_size, current.max_size)
+        })
+    }
+
+    /// Asks the client to make its content `size`.
+    pub(crate) fn request_size(&self, size: Size<i32, Logical>) {
+        self.xdg()
+            .with_pending_state(|state| state.size = Some(size));
+        self.send_configure_if_ready();
+    }
+
+    /// Tells the client whether the user is resizing it, so it can redraw
+    /// cheaply meanwhile.
+    pub(crate) fn set_resizing(&self, is_resizing: bool) {
+        self.xdg().with_pending_state(|state| {
+            if is_resizing {
+                state.states.set(xdg_toplevel::State::Resizing);
+            } else {
+                state.states.unset(xdg_toplevel::State::Resizing);
+            }
+        });
+        self.send_configure_if_ready();
+    }
+
     /// Asks the client to close the window.
     pub(crate) fn close(&self) {
         self.xdg().send_close();
@@ -114,6 +146,14 @@ impl Toplevel {
     /// Returns whether `surface` is this window's root surface.
     pub(crate) fn has_surface(&self, surface: &WlSurface) -> bool {
         self.wl_surface() == surface
+    }
+
+    /// Sends pending changes, once the client has had its first configure;
+    /// before that, they go out with it.
+    fn send_configure_if_ready(&self) {
+        if self.xdg().is_initial_configure_sent() {
+            self.xdg().send_pending_configure();
+        }
     }
 
     /// Returns the xdg-shell side of the window.

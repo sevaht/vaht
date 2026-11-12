@@ -1,6 +1,10 @@
 //! Application windows and their popups: `xdg_wm_base`.
 
 use smithay::desktop::{PopupKind, find_popup_root_surface, get_popup_toplevel_coords};
+use smithay::input::Seat;
+use smithay::input::pointer::GrabStartData;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
+use smithay::reexports::wayland_server::Resource as _;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::utils::Serial;
 use smithay::wayland::shell::xdg::{
@@ -8,6 +12,8 @@ use smithay::wayland::shell::xdg::{
 };
 
 use crate::Compositor;
+use crate::grab::GrabKind;
+use crate::window::{HorizontalEdge, ResizeEdges, VerticalEdge, Window, WindowId};
 
 impl XdgShellHandler for Compositor {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -49,9 +55,76 @@ impl XdgShellHandler for Compositor {
     // Popup grabs (menus that close on an outside click) come with input
     // grabs in general.
     fn grab(&mut self, _surface: PopupSurface, _seat: WlSeat, _serial: Serial) {}
+
+    fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
+        let Some((window, start)) = self.client_drag(&surface, &seat, serial) else {
+            return;
+        };
+        let Some(initial_location) = self.windows.get(window).map(Window::location) else {
+            return;
+        };
+        self.start_window_grab(window, GrabKind::Move { initial_location }, start, serial);
+    }
+
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        let Some(edges) = resize_edges(edges) else {
+            return;
+        };
+        if let Some((window, start)) = self.client_drag(&surface, &seat, serial) {
+            self.start_window_grab(window, GrabKind::Resize { edges }, start, serial);
+        }
+    }
+}
+
+/// Returns the edges an xdg-shell resize request names, or `None` for none.
+const fn resize_edges(edge: xdg_toplevel::ResizeEdge) -> Option<ResizeEdges> {
+    let (horizontal, vertical) = match edge {
+        xdg_toplevel::ResizeEdge::Top => (HorizontalEdge::None, VerticalEdge::Top),
+        xdg_toplevel::ResizeEdge::Bottom => (HorizontalEdge::None, VerticalEdge::Bottom),
+        xdg_toplevel::ResizeEdge::Left => (HorizontalEdge::Left, VerticalEdge::None),
+        xdg_toplevel::ResizeEdge::Right => (HorizontalEdge::Right, VerticalEdge::None),
+        xdg_toplevel::ResizeEdge::TopLeft => (HorizontalEdge::Left, VerticalEdge::Top),
+        xdg_toplevel::ResizeEdge::TopRight => (HorizontalEdge::Right, VerticalEdge::Top),
+        xdg_toplevel::ResizeEdge::BottomLeft => (HorizontalEdge::Left, VerticalEdge::Bottom),
+        xdg_toplevel::ResizeEdge::BottomRight => (HorizontalEdge::Right, VerticalEdge::Bottom),
+        // Values from protocol versions newer than vaht's mean nothing to it.
+        xdg_toplevel::ResizeEdge::None | _ => return None,
+    };
+    Some(ResizeEdges {
+        horizontal,
+        vertical,
+    })
 }
 
 impl Compositor {
+    /// Returns the window a client asks to drag, and where the drag starts,
+    /// if the request is genuine: the pointer button behind `serial` is
+    /// still held, on a surface of the same client. Anything else is a
+    /// stale or forged request, and is ignored.
+    fn client_drag(
+        &self,
+        surface: &ToplevelSurface,
+        seat: &WlSeat,
+        serial: Serial,
+    ) -> Option<(WindowId, GrabStartData<Self>)> {
+        let pointer = Seat::<Self>::from_resource(seat)?.get_pointer()?;
+        if !pointer.has_grab(serial) {
+            return None;
+        }
+        let start = pointer.grab_start_data()?;
+        let (focus, _) = start.focus.as_ref()?;
+        if !focus.id().same_client_as(&surface.wl_surface().id()) {
+            return None;
+        }
+        Some((self.windows.id_of(surface.wl_surface())?, start))
+    }
+
     /// Keeps a popup within its window's output, flipping or sliding it as its
     /// positioner allows.
     fn unconstrain_popup(&self, popup: &PopupSurface) {
