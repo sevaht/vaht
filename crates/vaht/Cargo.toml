@@ -1,0 +1,22 @@
+[package]
+name = "vaht"
+description = "A stacking Wayland compositor descended from Fluxbox: the vaht command."
+keywords = ["wayland", "compositor", "window-manager", "desktop"]
+categories = ["gui"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+# Single-character names allowed by convention (General N3). This is clippy's
+# default list, written out so it is visible; setting the key replaces the
+# default rather than extending it. If clippy flags generic parameters, add the
+# conventional ones here ("T", "K", "V", …).
+allowed-idents-below-min-chars = ["i", "j", "n", "x", "y", "z", "w"]
+too-many-arguments-threshold = 5           # more means a missing type (F3)
+max-fn-params-bools = 1                    # boolean traps (F2, C-CUSTOM-TYPE)
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-print-in-tests = true
+doc-valid-idents = ["..", "PulseAudio", "XEmbed"]   # extend per project
+# Trait methods whose standard parameter names are single letters (`f` in
+# `fmt`), so implementations may use whole words (N3) without tripping
+# `renamed_function_params`. ".." keeps clippy's own defaults.
+allow-renamed-params-for = ["..", "core::fmt::Display", "core::fmt::Debug"]

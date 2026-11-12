@@ -1,0 +1,15 @@
+[package]
+name = "vaht-ipc"
+description = "The vaht IPC protocol: JSON messages over a Unix socket, and a client."
+keywords = ["wayland", "ipc", "json", "compositor"]
+categories = ["api-bindings"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+
+[lints]
+workspace = true

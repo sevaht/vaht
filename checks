@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Runs every check this repository gates on, stopping at the first failure.
+# With --docs, runs only the documentation checks, and those gate instead.
+# With --coverage, runs the tests and reports how much code they exercise.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+# Lints about documentation. They warn in ordinary builds and in the regular
+# checks, and fail only under --docs.
+documentation_lints=(
+    missing_docs
+    clippy::missing_docs_in_private_items
+    clippy::missing_errors_doc
+    clippy::missing_panics_doc
+    clippy::doc_markdown
+)
+
+run_check() {
+    local description=${1}
+    shift
+    echo "Running ${1} ${2}... (${description})"
+    "${@}"
+    echo
+}
+
+# Builds "--<level> lint" argument pairs for every documentation lint.
+documentation_lint_arguments() {
+    local level=${1}
+    local lint
+    for lint in "${documentation_lints[@]}"; do
+        echo "--${level}" "${lint}"
+    done
+}
+
+check_code() {
+    # --force-warn keeps the documentation lints from failing this run.
+    run_check "formatting code" cargo fmt --all
+    run_check "linting" cargo clippy --workspace --all-targets --all-features \
+        -- --deny warnings $(documentation_lint_arguments force-warn)
+    run_check "executing tests" cargo nextest run --workspace --all-features \
+        --no-tests=warn
+    run_check "executing doctests" cargo test --workspace --doc
+    run_check "auditing dependencies" cargo deny check
+    run_check "finding unused dependencies" cargo machete
+}
+
+check_documentation() {
+    run_check "linting documentation" cargo clippy --workspace --all-targets \
+        --all-features -- $(documentation_lint_arguments deny)
+    RUSTDOCFLAGS="--deny warnings" run_check "building documentation" \
+        cargo doc --workspace --no-deps --document-private-items
+}
+
+check_coverage() {
+    # llvm-cov fails to report when no test ran; say so plainly instead.
+    local tests
+    tests=$(cargo nextest list --workspace --all-features \
+        --message-format oneline)
+    if [[ -z ${tests} ]]; then
+        echo "No tests to measure coverage of."
+        return
+    fi
+    run_check "measuring test coverage" cargo llvm-cov nextest --workspace \
+        --all-features --no-tests=warn --no-report
+    run_check "summarizing coverage" cargo llvm-cov report
+    run_check "writing the coverage report" cargo llvm-cov report --html
+    echo "Line-by-line report: target/llvm-cov/html/index.html"
+}
+
+case ${1:-} in
+    "") check_code ;;
+    --docs) check_documentation ;;
+    --coverage) check_coverage ;;
+    *)
+        echo "usage: ${0} [--docs | --coverage]" >&2
+        exit 2
+        ;;
+esac
+echo "All checks completed successfully!"

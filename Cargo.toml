@@ -1,0 +1,85 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+# Metadata every crate inherits (`field.workspace = true`). Each crate states
+# its own `description`, `keywords` and `categories`.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The toolchain vaht is built and tested with. Smithay itself needs 1.88; this
+# is higher because nothing checks that vaht still builds on anything older.
+rust-version = "1.99"
+authors = ["Jacob McIntosh"]
+license = "Unlicense"
+repository = "https://github.com/sevaht/vaht"
+readme = "README.md"
+
+# Every dependency's version is chosen once, here (P5); crates name them with
+# `dependency.workspace = true`.
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+vaht-compositor = { path = "crates/vaht-compositor" }
+vaht-ipc = { path = "crates/vaht-ipc" }
+vaht-ui = { path = "crates/vaht-ui" }
+
+[profile.release]
+lto = true          # optimize across crate boundaries
+codegen-units = 1   # optimize the crate as one unit
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+missing_debug_implementations = "warn"   # M-STATIC-VERIFICATION set:
+ambiguous_negative_literals = "warn"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "warn"
+missing_crate_level_docs = "warn"
+
+[workspace.lints.clippy]
+# Every major group, at warn; individual lints below override (priority).
+cargo = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+
+# Selected `restriction` lints: each one enforces a rule in these standards.
+allow_attributes = "warn"                  # use #[expect], never #[allow] (V4)
+allow_attributes_without_reason = "warn"   # every override states why (V4)
+min_ident_chars = "warn"                   # whole-word names (N1, N3)
+missing_docs_in_private_items = "warn"     # docs for everything (R-D1); gates only under --docs
+mod_module_files = "warn"                  # name.rs + name/, never mod.rs (R-T3)
+unwrap_used = "warn"                       # expect-with-reason or ? (R-E5)
+wildcard_enum_match_arm = "warn"           # exhaustive matches (E7, R-M11)
+map_err_ignore = "warn"                    # preserve causes (E5)
+unused_result_ok = "warn"                  # no silent discards (R-E7)
+undocumented_unsafe_blocks = "warn"        # SAFETY comments (R-X2)
+print_stdout = "warn"                      # expected only at the CLI output layer
+print_stderr = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+clone_on_ref_ptr = "warn"                  # Arc::clone(&x) makes sharing visible
+if_then_some_else_none = "warn"
+renamed_function_params = "warn"
+empty_structs_with_brackets = "warn"
+
+# Opt-outs, each with its reason.
+multiple_crate_versions = "allow"          # transitive duplicates are not ours to fix

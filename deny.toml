@@ -1,0 +1,11 @@
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC",
+         "Unicode-3.0", "Unlicense", "Zlib"]
+unused-allowed-license = "allow"   # the list is policy, not an inventory
+
+[advisories]
+yanked = "deny"
+
+[bans]
+wildcards = "deny"           # no `version = "*"` dependencies
+multiple-versions = "allow"  # transitive duplicates are not ours to fix (as in clippy)

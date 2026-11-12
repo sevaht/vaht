@@ -1,0 +1,15 @@
+[package]
+name = "vaht-compositor"
+description = "The vaht Wayland compositor: windows, outputs, input and rendering on Smithay."
+keywords = ["wayland", "compositor", "window-manager", "smithay"]
+categories = ["gui"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+
+[lints]
+workspace = true
