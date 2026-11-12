@@ -8,10 +8,10 @@
 use std::fmt;
 
 use cosmic_text::{
-    Attrs, Buffer, Command, Family, FontSystem, Metrics, Shaping, Style as SlantStyle, SwashCache,
-    Weight, Wrap,
+    Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Style as SlantStyle, SwashCache, Weight,
+    Wrap,
 };
-use tiny_skia::{Paint, PathBuilder, Pixmap, PixmapPaint, PremultipliedColorU8, Stroke, Transform};
+use tiny_skia::{Pixmap, PixmapPaint, PremultipliedColorU8, Transform};
 
 use crate::color::Color;
 use crate::geometry::Rect;
@@ -70,6 +70,20 @@ pub enum Justify {
     Right,
 }
 
+impl TextEffect {
+    /// Returns how far the effect reaches beyond the letters, in pixels.
+    #[must_use]
+    pub fn reach(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Halo(_) => 1,
+            Self::Shadow {
+                offset_x, offset_y, ..
+            } => offset_x.unsigned_abs().max(offset_y.unsigned_abs()),
+        }
+    }
+}
+
 impl Justify {
     /// Returns how far from the left a line of `line_width` starts in an
     /// area `area_width` wide; never negative, so long text stays readable
@@ -118,8 +132,18 @@ impl Typesetter {
     /// Points in an inch: a point is 1/72 inch.
     const POINTS_PER_INCH: f32 = 72.0;
 
-    /// The width of a halo's outline, in pixels; fluxland draws the same.
-    const HALO_WIDTH: f32 = 2.0;
+    /// Where a halo's copies of the letters go: one pixel away in every
+    /// direction, the 1-pixel outline Fluxbox and fluxland draw.
+    const HALO_DIRECTIONS: [(f32, f32); 8] = [
+        (-1.0, -1.0),
+        (0.0, -1.0),
+        (1.0, -1.0),
+        (-1.0, 0.0),
+        (1.0, 0.0),
+        (-1.0, 1.0),
+        (0.0, 1.0),
+        (1.0, 1.0),
+    ];
 
     /// Loads the system's fonts, for a screen of `dots_per_inch`.
     #[must_use]
@@ -166,7 +190,11 @@ impl Typesetter {
         if text.is_empty() {
             return;
         }
-        let Some(mut layer) = Pixmap::new(area.width, area.height) else {
+        // The layer extends past the area by the effect's reach, so a halo
+        // or shadow around the outermost letters is never clipped.
+        let margin = style.effect.reach();
+        let extra = 2 * u32::from(margin);
+        let Some(mut layer) = Pixmap::new(area.width + extra, area.height + extra) else {
             return;
         };
         #[expect(
@@ -174,29 +202,41 @@ impl Typesetter {
             reason = "panel heights are far below 2^24"
         )]
         let line_height = area.height as f32;
+        let margin_pixels = f32::from(margin);
         let mut buffer = self.lay_out(text, &style.font, line_height);
         let Some(line_width) = buffer.layout_runs().next().map(|line| line.line_w) else {
             return;
         };
-        let offset_x = style.justify.offset(line_width, area.width);
+        let origin = (
+            style.justify.offset(line_width, area.width) + margin_pixels,
+            margin_pixels,
+        );
+        let at = |shift_x: f32, shift_y: f32| (origin.0 + shift_x, origin.1 + shift_y);
         match style.effect {
             TextEffect::None => {}
-            TextEffect::Halo(color) => self.stroke_outlines(&mut layer, &buffer, offset_x, color),
+            // The letters' own coverage, drawn one pixel away in each of the
+            // eight directions: an outline exactly aligned with the letters.
+            TextEffect::Halo(color) => {
+                for (shift_x, shift_y) in Self::HALO_DIRECTIONS {
+                    self.fill_glyphs(&mut layer, &mut buffer, at(shift_x, shift_y), color);
+                }
+            }
             TextEffect::Shadow {
                 color,
-                offset_x: shadow_x,
-                offset_y: shadow_y,
+                offset_x,
+                offset_y,
             } => self.fill_glyphs(
                 &mut layer,
                 &mut buffer,
-                (offset_x + f32::from(shadow_x), f32::from(shadow_y)),
+                at(f32::from(offset_x), f32::from(offset_y)),
                 color,
             ),
         }
-        self.fill_glyphs(&mut layer, &mut buffer, (offset_x, 0.0), style.color);
+        self.fill_glyphs(&mut layer, &mut buffer, origin, style.color);
+        let margin_offset = i32::from(margin);
         target.draw_pixmap(
-            area.x,
-            area.y,
+            area.x - margin_offset,
+            area.y - margin_offset,
             layer.as_ref(),
             &PixmapPaint::default(),
             Transform::identity(),
@@ -265,68 +305,6 @@ impl Typesetter {
             },
         );
     }
-
-    /// Strokes every glyph's outline in `color`: Fluxbox's halo.
-    fn stroke_outlines(
-        &mut self,
-        layer: &mut Pixmap,
-        buffer: &Buffer,
-        offset_x: f32,
-        color: Color,
-    ) {
-        let mut path = PathBuilder::new();
-        for line in buffer.layout_runs() {
-            for glyph in line.glyphs {
-                let physical = glyph.physical((offset_x, 0.0), 1.0);
-                let Some(commands) = self
-                    .cache
-                    .get_outline_commands(&mut self.font_system, physical.cache_key)
-                else {
-                    continue;
-                };
-                #[expect(clippy::cast_precision_loss, reason = "glyph positions are small")]
-                let (origin_x, origin_y) = (physical.x as f32, line.line_y + physical.y as f32);
-                // Outlines have y pointing up; the layer's points down.
-                let at = |x: f32, y: f32| (origin_x + x, origin_y - y);
-                for command in commands {
-                    match *command {
-                        Command::MoveTo(point) => {
-                            let (x, y) = at(point.x, point.y);
-                            path.move_to(x, y);
-                        }
-                        Command::LineTo(point) => {
-                            let (x, y) = at(point.x, point.y);
-                            path.line_to(x, y);
-                        }
-                        Command::QuadTo(control, point) => {
-                            let ((control_x, control_y), (x, y)) =
-                                (at(control.x, control.y), at(point.x, point.y));
-                            path.quad_to(control_x, control_y, x, y);
-                        }
-                        Command::CurveTo(first, second, point) => {
-                            let ((first_x, first_y), (second_x, second_y), (x, y)) = (
-                                at(first.x, first.y),
-                                at(second.x, second.y),
-                                at(point.x, point.y),
-                            );
-                            path.cubic_to(first_x, first_y, second_x, second_y, x, y);
-                        }
-                        Command::Close => path.close(),
-                    }
-                }
-            }
-        }
-        if let Some(path) = path.finish() {
-            let mut paint = Paint::default();
-            paint.set_color(color.to_skia());
-            paint.anti_alias = true;
-            let stroke = Stroke {
-                width: Self::HALO_WIDTH,
-                ..Stroke::default()
-            };
-            layer.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
-        }
-    }
 }
 
 impl fmt::Debug for Typesetter {
@@ -378,6 +356,89 @@ mod tests {
         assert!(
             (Justify::Center.offset(140.0, 100) - 0.0).abs() < f32::EPSILON,
             "text wider than its area starts at the left edge"
+        );
+    }
+
+    /// A pixel rectangle's left, top, right and bottom columns and rows.
+    type Bounds = (u32, u32, u32, u32);
+
+    /// The bounds of the pixels `matches` selects.
+    fn bounds(pixmap: &Pixmap, matches: impl Fn(PremultipliedColorU8) -> bool) -> Bounds {
+        let mut found = (u32::MAX, u32::MAX, 0, 0);
+        for y in 0..pixmap.height() {
+            for x in 0..pixmap.width() {
+                if pixmap.pixel(x, y).is_some_and(&matches) {
+                    found = (
+                        found.0.min(x),
+                        found.1.min(y),
+                        found.2.max(x),
+                        found.3.max(y),
+                    );
+                }
+            }
+        }
+        found
+    }
+
+    /// The test text's style: white bold letters with a black halo.
+    fn haloed_style() -> TextStyle {
+        TextStyle {
+            font: Font {
+                family: "DejaVu Sans".to_owned(),
+                size_points: 12,
+                weight: FontWeight::Bold,
+                is_italic: false,
+            },
+            color: Color::WHITE,
+            effect: TextEffect::Halo(Color::BLACK),
+            justify: Justify::Left,
+        }
+    }
+
+    /// Draws "I" in `area` of a grey canvas; returns the bounds of the
+    /// letter (nearly white pixels) and of its halo (nearly black ones).
+    fn draw_haloed_letter(typesetter: &mut Typesetter, area: Rect) -> (Bounds, Bounds) {
+        let mut target = Pixmap::new(60, 30).expect("a small pixmap");
+        target.fill(tiny_skia::Color::from_rgba8(128, 128, 128, 255));
+        typesetter.draw(&mut target, "I", &haloed_style(), area);
+        (
+            bounds(&target, |pixel| pixel.red() >= 200),
+            bounds(&target, |pixel| pixel.red() < 40),
+        )
+    }
+
+    #[test]
+    fn a_halo_surrounds_the_letters_evenly() {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let (letter, halo) = draw_haloed_letter(&mut typesetter, Rect::new(20, 5, 30, 20));
+        let (left, top) = (letter.0 - halo.0, letter.1 - halo.1);
+        let (right, bottom) = (halo.2 - letter.2, halo.3 - letter.3);
+        assert!(left >= 1 && top >= 1, "the halo lies outside the letter");
+        assert_eq!(left, right, "as much halo left as right");
+        assert_eq!(top, bottom, "as much halo above as below");
+    }
+
+    #[test]
+    fn an_effect_reaching_past_its_area_is_not_clipped() {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut target = Pixmap::new(60, 30).expect("a small pixmap");
+        target.fill(tiny_skia::Color::from_rgba8(128, 128, 128, 255));
+        // A shadow four pixels left of left-justified text lies partly left
+        // of the area, which is where clipping would cut it off.
+        let style = TextStyle {
+            effect: TextEffect::Shadow {
+                color: Color::BLACK,
+                offset_x: -4,
+                offset_y: 0,
+            },
+            ..haloed_style()
+        };
+        let area = Rect::new(20, 5, 30, 20);
+        typesetter.draw(&mut target, "I", &style, area);
+        let shadow = bounds(&target, |pixel| pixel.red() < 40);
+        assert!(
+            i32::try_from(shadow.0).expect("small") < area.x,
+            "the shadow extends left of the area instead of being cut off"
         );
     }
 

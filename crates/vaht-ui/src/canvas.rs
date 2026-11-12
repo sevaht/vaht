@@ -10,7 +10,7 @@ use tiny_skia::{
 
 use crate::color::Color;
 use crate::geometry::Rect;
-use crate::layout::{Content, Layout};
+use crate::layout::{Content, Layout, Placed};
 use crate::text::Typesetter;
 use crate::texture::{Bevel, Fill, GradientDirection, Texture};
 use crate::theme::{Theme, WidgetState};
@@ -25,16 +25,16 @@ const BEVEL_ALPHA: u8 = 96;
 const GLYPH_STROKE_WIDTH: f32 = 1.5;
 
 /// Paints every widget of `layout` into `pixmap`, styled by `theme` in the
-/// state `state_of` gives for each widget's hit.
+/// state `state_of` gives for each placed widget.
 pub(crate) fn paint<Hit: Copy>(
     pixmap: &mut Pixmap,
     layout: &Layout<Hit>,
     theme: &Theme,
     typesetter: &mut Typesetter,
-    state_of: impl Fn(Option<Hit>) -> WidgetState,
+    state_of: impl Fn(&Placed<Hit>) -> WidgetState,
 ) {
     for placed in layout.placed() {
-        let style = theme.style(placed.element, state_of(placed.hit));
+        let style = theme.style(placed.element, state_of(placed));
         fill_texture(pixmap, style.texture, placed.rect);
         let inner = placed.rect.inset(style.padding);
         match &placed.content {

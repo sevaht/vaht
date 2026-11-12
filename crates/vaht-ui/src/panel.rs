@@ -145,8 +145,8 @@ impl<Content: PanelContent> Panel<Content> {
         if let Some(pixels) = &mut self.pixels {
             let base = self.content.state();
             let pressed = self.pressed;
-            canvas::paint(pixels, &layout, theme, typesetter, |hit| {
-                if hit.is_some() && hit == pressed {
+            canvas::paint(pixels, &layout, theme, typesetter, |placed| {
+                if placed.is_button && placed.hit.is_some() && placed.hit == pressed {
                     WidgetState::Pressed
                 } else {
                     base
@@ -201,7 +201,8 @@ mod tests {
                     Widget::text(ThemeElement::Label, self.title.clone())
                         .with_size(crate::widget::SizePolicy::Fill { weight: 1 })
                         .with_hit(TitlebarHit::Label),
-                    Widget::glyph(ThemeElement::Button, Glyph::Close).with_hit(TitlebarHit::Close),
+                    Widget::glyph(ThemeElement::Button, Glyph::Close)
+                        .with_button(TitlebarHit::Close),
                 ],
             )
         }
@@ -277,6 +278,20 @@ mod tests {
         panel.press(Point::new(190, 10));
         assert!(panel.paint(&theme, &mut typesetter));
         assert_ne!(pixel(&panel, 181, 18), before);
+    }
+
+    #[test]
+    fn pressing_a_plain_hit_region_does_not_change_its_look() {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let theme = Theme::built_in();
+        let mut panel = painted_titlebar(&mut typesetter);
+        let before = panel.pixels().expect("painted").clone();
+        assert_eq!(panel.press(Point::new(20, 10)), Some(TitlebarHit::Label));
+        panel.paint(&theme, &mut typesetter);
+        assert!(
+            panel.pixels().expect("painted").data() == before.data(),
+            "the title looks the same while held"
+        );
     }
 
     #[test]

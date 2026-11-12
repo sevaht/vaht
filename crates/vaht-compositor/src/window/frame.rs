@@ -287,7 +287,7 @@ impl PanelContent for Titlebar {
         ];
         children.extend(Frame::BUTTONS.iter().map(|button| {
             Widget::glyph(ThemeElement::Button, button.glyph())
-                .with_hit(TitlebarHit::Button(*button))
+                .with_button(TitlebarHit::Button(*button))
         }));
         Widget::row(ThemeElement::Titlebar, children)
     }

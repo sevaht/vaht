@@ -31,6 +31,8 @@ pub struct Placed<Hit> {
     pub content: Content,
     /// What clicking it reports.
     pub hit: Option<Hit>,
+    /// Whether it is drawn pressed while held.
+    pub is_button: bool,
 }
 
 /// A widget tree placed in an area.
@@ -125,6 +127,7 @@ fn place<Hit: Copy>(
         element: widget.element,
         content,
         hit: widget.hit,
+        is_button: widget.is_button,
     });
     let (axis, children) = match &widget.kind {
         WidgetKind::Row(children) => (Axis::Horizontal, children),

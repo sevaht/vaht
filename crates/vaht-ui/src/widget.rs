@@ -4,7 +4,8 @@
 //! the tree draws itself or handles input. Each widget names the
 //! [`ThemeElement`] that styles it, how much room it wants
 //! ([`SizePolicy`]), and optionally the `Hit` value the content wants back
-//! when the widget is clicked.
+//! when the widget is clicked. A *button* also looks pressed while held; a
+//! plain hit region (a title to drag, say) never changes look.
 
 use crate::theme::ThemeElement;
 
@@ -19,6 +20,8 @@ pub struct Widget<Hit> {
     pub size: SizePolicy,
     /// What clicking it reports, if it can be clicked.
     pub hit: Option<Hit>,
+    /// Whether it is a button: drawn pressed while the pointer holds it.
+    pub is_button: bool,
 }
 
 impl<Hit> Widget<Hit> {
@@ -68,10 +71,21 @@ impl<Hit> Widget<Hit> {
         self
     }
 
-    /// Returns the widget reporting `hit` when clicked.
+    /// Returns the widget reporting `hit` when clicked, without changing its
+    /// look while held: a region to drag or double-click, not a button.
     #[must_use]
     pub fn with_hit(mut self, hit: Hit) -> Self {
         self.hit = Some(hit);
+        self.is_button = false;
+        self
+    }
+
+    /// Returns the widget as a button: it reports `hit` when clicked and is
+    /// drawn pressed while held.
+    #[must_use]
+    pub fn with_button(mut self, hit: Hit) -> Self {
+        self.hit = Some(hit);
+        self.is_button = true;
         self
     }
 
@@ -82,6 +96,7 @@ impl<Hit> Widget<Hit> {
             element,
             size,
             hit: None,
+            is_button: false,
         }
     }
 }

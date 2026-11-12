@@ -38,8 +38,8 @@ impl PanelContent for Titlebar {
             vec![
                 Widget::text(ThemeElement::Label, self.title)
                     .with_size(SizePolicy::Fill { weight: 1 }),
-                Widget::glyph(ThemeElement::Button, Glyph::Minimize).with_hit(Button::Minimize),
-                Widget::glyph(ThemeElement::Button, Glyph::Close).with_hit(Button::Close),
+                Widget::glyph(ThemeElement::Button, Glyph::Minimize).with_button(Button::Minimize),
+                Widget::glyph(ThemeElement::Button, Glyph::Close).with_button(Button::Close),
             ],
         )
     }
