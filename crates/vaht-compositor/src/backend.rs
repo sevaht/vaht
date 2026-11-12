@@ -101,6 +101,14 @@ impl Backend {
         }
     }
 
+    /// Frees textures cached for client buffers that no longer exist.
+    pub(crate) fn release_unused_textures(&mut self) {
+        match self {
+            Self::Winit(backend) => backend.release_unused_textures(),
+            Self::Headless(backend) => backend.release_unused_textures(),
+        }
+    }
+
     /// Draws a frame of `windows`, their frames sized by `metrics`.
     ///
     /// # Errors

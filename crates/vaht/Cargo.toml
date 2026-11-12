@@ -25,9 +25,8 @@ vaht-compositor.workspace = true
 xdg.workspace = true
 
 [dev-dependencies]
-nix.workspace = true
-smithay-client-toolkit.workspace = true
 tempfile.workspace = true
+vaht-test-support.workspace = true
 
 [lints]
 workspace = true

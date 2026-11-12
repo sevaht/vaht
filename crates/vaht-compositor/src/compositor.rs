@@ -67,6 +67,9 @@ pub struct Compositor {
     typesetter: Typesetter,
     /// vaht's own keymap, restored after a virtual keyboard used its own.
     pub(crate) physical_keymap: KeymapFile,
+    /// Whether a client released a surface or a capture session since the
+    /// last cleanup: renderers and Smithay may still reference its memory.
+    pub(crate) client_cleanup_pending: bool,
     /// The window whose titlebar the pointer is holding down, if any.
     pub(crate) held_titlebar: Option<WindowId>,
     /// The window with keyboard focus.
@@ -119,6 +122,7 @@ impl Compositor {
                 .dispatch_clients(&mut compositor)
                 .map_err(RunError::DispatchClients)?;
             compositor.popups.cleanup();
+            compositor.release_dead_client_resources();
             if let Err(error) = display.flush_clients() {
                 tracing::warn!(
                     error = &error as &dyn std::error::Error,
@@ -192,6 +196,7 @@ impl Compositor {
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             held_titlebar: None,
+            client_cleanup_pending: false,
             physical_keymap,
             focused: None,
             start_time: Instant::now(),
@@ -199,6 +204,24 @@ impl Compositor {
             socket_name,
             _event_sources: [listening, display_wakeup, termination],
         })
+    }
+
+    /// Lets go of everything still referencing what clients released, if
+    /// anything was released since the last call.
+    ///
+    /// Smithay keeps a list of capture sessions and renderers cache client
+    /// buffers; both are pruned only when asked. Without this, a closed
+    /// capture session keeps its client's memory pool mapped forever, and
+    /// the list grows with every session (found by the screenshot leak test).
+    fn release_dead_client_resources(&mut self) {
+        if std::mem::take(&mut self.client_cleanup_pending) {
+            self.protocols.image_copy_capture.cleanup();
+            self.backend.release_unused_textures();
+            self.capture.release_unused_textures();
+            // The last references to a gone client's buffers go with the next
+            // frame, so make sure there is one.
+            self.schedule_render();
+        }
     }
 
     /// Asks vaht to stop after the current events.
@@ -213,19 +236,28 @@ impl Compositor {
 
     /// Draws a frame, then tells the windows in it that they were shown.
     pub(crate) fn render(&mut self) {
+        self.prepare_panels();
         let metrics = self.theme.metrics();
-        for window in self.windows.iter_mut() {
-            let geometry = window.frame_geometry(metrics);
-            window
-                .frame_mut()
-                .prepare(&geometry, &self.theme, &mut self.typesetter);
-        }
         if let Err(error) = self.backend.render(&self.windows, metrics) {
             tracing::warn!(error = &error as &dyn std::error::Error, "frame skipped");
         }
         let time = self.start_time.elapsed();
         for window in self.windows.iter() {
             window.toplevel().send_frame(self.backend.output(), time);
+        }
+        tracing::trace!("frame drawn");
+    }
+
+    /// Brings every panel's pixels up to date with what it shows; drawing a
+    /// frame and taking a screenshot both start here, so a screenshot shows
+    /// the same as the screen would.
+    pub(crate) fn prepare_panels(&mut self) {
+        let metrics = self.theme.metrics();
+        for window in self.windows.iter_mut() {
+            let geometry = window.frame_geometry(metrics);
+            window
+                .frame_mut()
+                .prepare(&geometry, &self.theme, &mut self.typesetter);
         }
     }
 

@@ -12,7 +12,7 @@
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::pixman::{PixmanError, PixmanRenderer};
-use smithay::backend::renderer::{Bind as _, ExportMem as _};
+use smithay::backend::renderer::{Bind as _, ExportMem as _, Renderer as _};
 use smithay::output::WeakOutput;
 use smithay::reexports::pixman::{FormatCode, Image};
 use smithay::reexports::wayland_server::protocol::wl_shm::Format;
@@ -54,6 +54,16 @@ impl ScreenCapture {
             renderer: PixmanRenderer::new()?,
             sessions: Vec::new(),
         })
+    }
+
+    /// Frees textures cached for client buffers that no longer exist.
+    pub(crate) fn release_unused_textures(&mut self) {
+        if let Err(error) = self.renderer.cleanup_texture_cache() {
+            tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "could not free unused textures"
+            );
+        }
     }
 
     /// Returns the scene of `windows` as packed 32-bit BGRA rows (ARGB8888
@@ -113,6 +123,7 @@ impl std::fmt::Debug for ScreenCapture {
 impl Compositor {
     /// Fills `frame` with the output's current image, or fails it.
     fn capture_frame(&mut self, frame: Frame) {
+        self.prepare_panels();
         let output = self.backend.output();
         let Some(mode) = output.current_mode() else {
             frame.fail(CaptureFailureReason::Stopped);
@@ -186,6 +197,7 @@ impl ImageCopyCaptureHandler for Compositor {
 
     fn session_destroyed(&mut self, session: SessionRef) {
         self.capture.sessions.retain(|(kept, _)| *kept != session);
+        self.client_cleanup_pending = true;
     }
 
     fn frame(&mut self, _session: &SessionRef, frame: Frame) {

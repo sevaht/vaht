@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+use smithay::backend::renderer::Renderer as _;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::winit::{self as host_window, WinitEvent, WinitGraphicsBackend};
@@ -139,6 +140,16 @@ impl WinitBackend {
                 .map_err(RenderError::Submit)?;
         }
         Ok(())
+    }
+
+    /// Frees textures cached for client buffers that no longer exist.
+    pub(crate) fn release_unused_textures(&mut self) {
+        if let Err(error) = self.graphics.renderer().cleanup_texture_cache() {
+            tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "could not free unused textures"
+            );
+        }
     }
 
     /// Matches the output to the host window's new size.

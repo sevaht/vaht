@@ -20,19 +20,33 @@ repeating them.
 | `crates/vaht-compositor` | The compositor |
 | `crates/vaht-ui` | The panel toolkit; no Wayland |
 | `crates/vaht-ipc` | IPC message types |
+| `crates/vaht-test-support` | Test-only: a headless vaht, a client that clicks and takes screenshots |
 
 The remaining crates in 01 §2 (`vaht-dialog`, `vaht-import`, `vaht-menu-gtk`)
 are added when work on them starts.
 
 ## Testing
 
-`crates/vaht/tests/headless.rs` runs the real binary with `--backend
-headless` (Smithay's software renderer, frames in memory) and private
-runtime and log directories, drives it with Wayland test clients, stops it
-with SIGTERM and reads its exit report: no windows or clients may remain, and
-the open descriptor count must equal the one at startup. Removing the
-clipboard-focus fix below makes all of them fail, which is how they were
-checked to catch leaks.
+`crates/vaht-test-support` runs the real binary with `--backend headless`
+(Smithay's software renderer, frames in memory) and private runtime and log
+directories. Its `TestClient` is an ordinary Wayland client: it opens
+solid-colored windows, moves and clicks a virtual pointer
+(`zwlr_virtual_pointer_v1`), and takes screenshots through
+`ext-image-copy-capture`, the protocol `grim` uses. Nothing reaches the
+developer's session, so tests can drag and click freely.
+
+- `crates/vaht/tests/headless.rs`: leak tests. After clients come and go, vaht
+  is stopped with SIGTERM and its exit report must show no windows, frames,
+  clients or capture sessions, and as many open descriptors as at startup.
+  They found two real leaks: clipboard focus keeping a gone client alive, and
+  Smithay's capture session list, which grows unless pruned.
+- `crates/vaht/tests/ui.rs`: UI tests. Positions come from the screenshot
+  (the window's fill color), clicks go through the virtual pointer, and
+  results are checked in pixels.
+
+`wtype` and `grim` work against a headless vaht too, for looking by hand:
+run `vaht --backend headless` with `XDG_RUNTIME_DIR` set to a short private
+directory.
 
 ## Invariants that are easy to break
 
@@ -47,6 +61,10 @@ checked to catch leaks.
   it, skipping the clean stop.
 - The Wayland `Display` lives beside the `Compositor`, not inside it, so
   clients are dispatched without `unsafe` (R-X3).
+- After clients release surfaces or capture sessions,
+  `Compositor::release_dead_client_resources` prunes Smithay's capture session
+  list and the renderers' caches, and schedules a frame: a gone client's last
+  buffers are let go when that frame is drawn.
 - Clipboard focus is set together with keyboard focus in
   `Compositor::focus_window`: Smithay clears the focus of a destroyed
   surface silently, and the clipboard would otherwise keep a disconnected

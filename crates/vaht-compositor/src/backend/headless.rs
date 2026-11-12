@@ -8,9 +8,9 @@
 use std::fmt;
 use std::time::Duration;
 
-use smithay::backend::renderer::Bind as _;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::pixman::PixmanRenderer;
+use smithay::backend::renderer::{Bind as _, Renderer as _};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::pixman::{FormatCode, Image};
@@ -155,6 +155,16 @@ impl HeadlessBackend {
                     "could not schedule a frame"
                 );
             }
+        }
+    }
+
+    /// Frees textures cached for client buffers that no longer exist.
+    pub(crate) fn release_unused_textures(&mut self) {
+        if let Err(error) = self.renderer.cleanup_texture_cache() {
+            tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "could not free unused textures"
+            );
         }
     }
 

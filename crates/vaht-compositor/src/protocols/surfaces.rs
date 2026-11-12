@@ -23,6 +23,10 @@ impl CompositorHandler for Compositor {
             .compositor_state
     }
 
+    fn destroyed(&mut self, _surface: &WlSurface) {
+        self.client_cleanup_pending = true;
+    }
+
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
         self.handle_commit(surface);

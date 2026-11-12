@@ -2051,8 +2051,6 @@ dependencies = [
  "anyhow",
  "clap",
  "file-rotate",
- "nix",
- "smithay-client-toolkit",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
@@ -2060,6 +2058,7 @@ dependencies = [
  "tracing-journald",
  "tracing-subscriber",
  "vaht-compositor",
+ "vaht-test-support",
  "xdg",
 ]
 
@@ -2079,6 +2078,16 @@ dependencies = [
 [[package]]
 name = "vaht-ipc"
 version = "0.1.0"
+
+[[package]]
+name = "vaht-test-support"
+version = "0.1.0"
+dependencies = [
+ "nix",
+ "smithay-client-toolkit",
+ "tempfile",
+ "tiny-skia",
+]
 
 [[package]]
 name = "vaht-ui"

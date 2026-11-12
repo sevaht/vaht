@@ -104,8 +104,9 @@ pub enum DescriptorKind {
     Socket,
     /// A pipe.
     Pipe,
-    /// An anonymous memory file (shared-memory buffers).
-    Memory,
+    /// An anonymous memory file, by its name: a client's shared-memory pool,
+    /// a keymap, and so on.
+    Memory(String),
     /// An inode-less descriptor, by the name the kernel gives it: `eventfd`,
     /// `timerfd`, `pidfd`, `inotify`, `sync_file`, `dmabuf` and so on.
     Anonymous(String),
@@ -124,7 +125,7 @@ impl DescriptorKind {
             FDTarget::Path(_) => Self::File,
             FDTarget::Socket(_) | FDTarget::Net(_) => Self::Socket,
             FDTarget::Pipe(_) => Self::Pipe,
-            FDTarget::MemFD(_) => Self::Memory,
+            FDTarget::MemFD(name) => Self::Memory(name.clone()),
             FDTarget::AnonInode(name) => Self::Anonymous(
                 name.trim_start_matches('[')
                     .trim_end_matches(']')
@@ -142,7 +143,7 @@ impl fmt::Display for DescriptorKind {
             Self::Device => formatter.write_str("device"),
             Self::Socket => formatter.write_str("socket"),
             Self::Pipe => formatter.write_str("pipe"),
-            Self::Memory => formatter.write_str("memory"),
+            Self::Memory(name) => write!(formatter, "memory ({name})"),
             Self::Anonymous(name) => write!(formatter, "anonymous ({name})"),
             Self::Other => formatter.write_str("other"),
         }
