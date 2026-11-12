@@ -1,9 +1,34 @@
 //! vaht's panel toolkit: widgets, layout, themes and drawing.
 //!
 //! Every surface vaht draws itself (window frames, the taskbar, menus,
-//! tooltips) is content described as `Widget`s and shown by one `Panel` type
-//! that lays it out, paints it with tiny-skia and cosmic-text, and hit-tests
-//! it. This crate knows nothing about Wayland, so panels can be rendered and
-//! tested on their own. See `docs/design/01-object-model.md` §6.
+//! tooltips) is a [`Panel`]: its [`PanelContent`] describes what it shows as
+//! a tree of [`Widget`]s, and the panel lays them out, paints them with a
+//! [`Theme`] and a [`Typesetter`], and hit-tests them. Content types never
+//! draw or hit-test anything themselves, which is what keeps vaht to one
+//! drawing path (01 §6).
 //!
-//! Nothing is implemented yet.
+//! The crate knows nothing about Wayland: panels paint into plain pixel
+//! buffers, so they can be rendered and tested on their own.
+
+mod canvas;
+pub mod color;
+pub mod geometry;
+pub mod layout;
+pub mod panel;
+pub mod text;
+pub mod texture;
+pub mod theme;
+pub mod widget;
+
+#[doc(inline)]
+pub use color::Color;
+#[doc(inline)]
+pub use geometry::{Insets, Point, Rect, Size};
+#[doc(inline)]
+pub use panel::{Panel, PanelContent};
+#[doc(inline)]
+pub use text::Typesetter;
+#[doc(inline)]
+pub use theme::{Theme, ThemeElement, WidgetState};
+#[doc(inline)]
+pub use widget::{Glyph, SizePolicy, Widget};

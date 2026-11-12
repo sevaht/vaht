@@ -12,6 +12,10 @@ ignore = [
     # build-time macro reached only through pixman, Smithay's software
     # renderer. Recheck whenever Smithay is bumped.
     { id = "RUSTSEC-2024-0436", reason = "build-time only, via pixman; no vulnerability" },
+    # `ttf-parser` is unmaintained. It reaches vaht through fontdb 0.23, which
+    # cosmic-text 0.19 pins; fontdb 0.24 no longer uses it, so the next
+    # cosmic-text release should drop it. vaht only parses installed fonts.
+    { id = "RUSTSEC-2026-0192", reason = "via cosmic-text's fontdb 0.23; fontdb 0.24 dropped it" },
 ]
 
 [bans]
