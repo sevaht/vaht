@@ -10,6 +10,7 @@ mod decoration;
 mod output;
 mod seat;
 mod surfaces;
+mod virtual_input;
 mod xdg_shell;
 
 use smithay::input::SeatState;
@@ -22,6 +23,8 @@ use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
+use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
+use smithay::wayland::virtual_pointer::VirtualPointerManagerState;
 
 use crate::Compositor;
 
@@ -48,6 +51,12 @@ pub(crate) struct ProtocolStates {
     pub(crate) output_capture_source: OutputCaptureSourceState,
     /// `ext_image_copy_capture_manager_v1`: screenshots and recording.
     pub(crate) image_copy_capture: ImageCopyCaptureState,
+    /// `zwlr_virtual_pointer_manager_v1`: pointer input from programs. Held
+    /// only to keep the global alive.
+    _virtual_pointer: VirtualPointerManagerState,
+    /// `zwp_virtual_keyboard_manager_v1`: key input from programs. Held only
+    /// to keep the global alive.
+    _virtual_keyboard: VirtualKeyboardManagerState,
 }
 
 impl ProtocolStates {
@@ -63,6 +72,17 @@ impl ProtocolStates {
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
             output_capture_source: OutputCaptureSourceState::new::<Compositor>(display),
             image_copy_capture: ImageCopyCaptureState::new::<Compositor>(display),
+            // TODO(security): every client may inject input, as on other
+            // wlroots-style compositors; restrict with security-context once
+            // sandboxed clients exist.
+            _virtual_pointer: VirtualPointerManagerState::new::<Compositor, _>(
+                display,
+                |_client| true,
+            ),
+            _virtual_keyboard: VirtualKeyboardManagerState::new::<Compositor, _>(
+                display,
+                |_client| true,
+            ),
         }
     }
 }

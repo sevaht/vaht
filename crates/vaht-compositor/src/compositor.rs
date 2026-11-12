@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use smithay::desktop::{PopupKind, PopupManager};
-use smithay::input::keyboard::XkbConfig;
+use smithay::input::keyboard::{KeymapFile, XkbConfig};
 use smithay::input::{Seat, SeatState};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, Mode, PostAction};
@@ -65,6 +65,8 @@ pub struct Compositor {
     pub(crate) capture: ScreenCapture,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
+    /// vaht's own keymap, restored after a virtual keyboard used its own.
+    pub(crate) physical_keymap: KeymapFile,
     /// The window whose titlebar the pointer is holding down, if any.
     pub(crate) held_titlebar: Option<WindowId>,
     /// The window with keyboard focus.
@@ -141,6 +143,10 @@ impl Compositor {
         let ledger = ResourceLedger::new();
         let mut protocols = ProtocolStates::new(&display_handle);
         let seat = Self::create_seat(&mut protocols.seat, &display_handle)?;
+        let physical_keymap = seat
+            .get_keyboard()
+            .expect("create_seat adds a keyboard")
+            .keymap_file();
         let backend = Backend::start(options.backend, handle, &display_handle, &ledger)?;
 
         let socket = ListeningSocketSource::new_auto().map_err(RunError::Listen)?;
@@ -186,6 +192,7 @@ impl Compositor {
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             held_titlebar: None,
+            physical_keymap,
             focused: None,
             start_time: Instant::now(),
             is_running: true,

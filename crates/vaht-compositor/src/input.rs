@@ -6,11 +6,13 @@
 
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-    KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    PointerMotionEvent,
 };
-use smithay::input::keyboard::FilterResult;
+use smithay::input::keyboard::{FilterResult, KeyboardSource, Keycode, KeymapFile};
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
+use smithay::wayland::virtual_keyboard::VirtualKeyboardKeyEvent;
 
 use crate::Compositor;
 use crate::window::{FramePart, TitlebarButton, TitlebarHit, Window, WindowId};
@@ -29,6 +31,7 @@ impl Compositor {
         )]
         match event {
             InputEvent::Keyboard { event } => self.handle_key::<B>(&event),
+            InputEvent::PointerMotion { event } => self.handle_pointer_motion::<B>(&event),
             InputEvent::PointerMotionAbsolute { event } => {
                 self.handle_pointer_position::<B>(&event);
             }
@@ -38,26 +41,125 @@ impl Compositor {
         }
     }
 
-    /// Sends a key to the focused window.
+    /// Sends a key from a physical keyboard to the focused window.
     fn handle_key<B: InputBackend>(&mut self, event: &B::KeyboardKeyEvent) {
+        self.activate_keymap(None);
+        self.press_key(
+            KeyboardSource::Physical,
+            event.key_code(),
+            event.state(),
+            event.time(),
+        );
+    }
+
+    /// Sends a key from a virtual keyboard, read with that keyboard's own
+    /// keymap (or the seat's, when it sent none).
+    pub(crate) fn handle_virtual_key(&mut self, event: &VirtualKeyboardKeyEvent) {
+        let device = event.device();
+        self.activate_keymap(device.keymap());
+        self.press_key(
+            device.source(),
+            event.key_code(),
+            event.state(),
+            event.time(),
+        );
+    }
+
+    /// Releases every key a virtual keyboard still holds; it is going away.
+    pub(crate) fn release_virtual_keys(&mut self, source: KeyboardSource) {
         let keyboard = self
             .seat
             .get_keyboard()
             .expect("the seat gets a keyboard at startup");
-        keyboard.input::<(), _>(
+        keyboard.release_source(self, source);
+    }
+
+    /// Sets the modifier state a virtual keyboard asks for: `masks` are its
+    /// depressed, latched and locked modifiers and its layout group, relative
+    /// to its `keymap` (or the seat's).
+    pub(crate) fn set_virtual_modifiers(&mut self, keymap: Option<KeymapFile>, masks: [u32; 4]) {
+        self.activate_keymap(keymap);
+        let [depressed, latched, locked, group] = masks;
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .expect("the seat gets a keyboard at startup");
+        keyboard.with_xkb_state(self, |mut context| {
+            context.set_modifier_mask(depressed, latched, locked, group);
+        });
+    }
+
+    /// Makes `keymap` the seat's keymap, or vaht's own for `None`, if it is
+    /// not already: a virtual keyboard's keycodes mean something only in its
+    /// own keymap.
+    fn activate_keymap(&mut self, keymap: Option<KeymapFile>) {
+        let wanted = keymap.unwrap_or_else(|| self.physical_keymap.clone());
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .expect("the seat gets a keyboard at startup");
+        if keyboard.keymap_file().id() != wanted.id()
+            && let Err(error) = keyboard.set_keymap_from_keymap_file(self, wanted)
+        {
+            tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "could not switch keymaps"
+            );
+        }
+    }
+
+    /// Sends a key from `source` to the focused window.
+    fn press_key(
+        &mut self,
+        source: KeyboardSource,
+        keycode: Keycode,
+        state: KeyState,
+        time: InputTime,
+    ) {
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .expect("the seat gets a keyboard at startup");
+        keyboard.input_from_source::<(), _>(
+            source,
             self,
-            event.key_code(),
-            event.state(),
+            keycode,
+            state,
             SERIAL_COUNTER.next_serial(),
-            event.time(),
+            time,
             |_, _, _| FilterResult::Forward,
         );
+    }
+
+    /// Moves the pointer by a relative distance, kept on the output.
+    fn handle_pointer_motion<B: InputBackend>(&mut self, event: &B::PointerMotionEvent) {
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        let output = self.backend.output_geometry().to_f64();
+        let moved = pointer.current_location() + event.delta();
+        // The far edges are outside the output, so stop just short of them.
+        let location = Point::from((
+            moved
+                .x
+                .clamp(output.loc.x, output.loc.x + output.size.w - 1.0),
+            moved
+                .y
+                .clamp(output.loc.y, output.loc.y + output.size.h - 1.0),
+        ));
+        self.move_pointer_to(location, event.time());
     }
 
     /// Moves the pointer to an absolute position on the output.
     fn handle_pointer_position<B: InputBackend>(&mut self, event: &B::PointerMotionAbsoluteEvent) {
         let output = self.backend.output_geometry();
         let location = event.position_transformed(output.size) + output.loc.to_f64();
+        self.move_pointer_to(location, event.time());
+    }
+
+    /// Moves the pointer to `location`, telling the surface under it.
+    fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
         // Over a frame, no client has the pointer: the frame is vaht's.
         let under = match self.windows.target_at(location, self.theme.metrics()) {
             Some(WindowTarget::Surface {
@@ -75,7 +177,7 @@ impl Compositor {
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
-                time: event.time(),
+                time,
             },
         );
         pointer.frame(self);
