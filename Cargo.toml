@@ -19,8 +19,12 @@ readme = "README.md"
 # `dependency.workspace = true`.
 [workspace.dependencies]
 anyhow = "1"
+# The version Smithay uses, so the two unify into one event loop type.
+calloop = "0.14.5"
 clap = { version = "4", features = ["derive", "env"] }
 file-rotate = "0.8"
+procfs = "0.18"
+strum = { version = "0.28", features = ["derive"] }
 tempfile = "3"
 thiserror = "2"
 tracing = "0.1"

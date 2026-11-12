@@ -5,5 +5,9 @@
 //! `Input`, `Overlays`, the services) and routes between them, with policy
 //! in plain types and the Smithay handler traits as thin gateways.
 //!
-//! Nothing is implemented yet; this crate exists so the workspace has its
-//! final shape from the start.
+//! So far it provides the resource foundations every subsystem builds on:
+//! counted resources ([`resources`]) and self-removing event-loop
+//! registrations ([`event_source`]).
+
+pub mod event_source;
+pub mod resources;
