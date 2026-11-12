@@ -11,7 +11,7 @@ edition = "2024"
 # is higher because nothing checks that vaht still builds on anything older.
 rust-version = "1.99"
 authors = ["Jacob McIntosh"]
-license = "Unlicense"
+license = "MIT"
 repository = "https://github.com/sevaht/vaht"
 readme = "README.md"
 

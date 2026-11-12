@@ -1,6 +1,8 @@
 [licenses]
+# Permissive licenses, plus MPL-2.0: its copyleft covers only the dependency's
+# own files, never vaht's. Strong copyleft (GPL, AGPL) is decided case by case.
 allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC",
-         "Unicode-3.0", "Unlicense", "Zlib"]
+         "MPL-2.0", "Unicode-3.0", "Unlicense", "Zlib"]
 unused-allowed-license = "allow"   # the list is policy, not an inventory
 
 [advisories]

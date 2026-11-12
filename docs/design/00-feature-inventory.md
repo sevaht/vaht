@@ -19,7 +19,7 @@ target. A ★ marks features it actually uses.
 |---|---|
 | First milestone | Parity with the ★ features. Everything else marked keep or later is designed for, but built afterwards |
 | Config | TOML in several files. The split is ours to choose, not Fluxbox's |
-| License | The Unlicense. Dependencies must be compatible (Smithay is MIT) |
+| License | MIT, matching Smithay. Dependencies may be permissive or MPL-2.0 (file-level copyleft); strong copyleft is decided case by case |
 | Slit, tabs and groups, Remember | Dropped (Remember is a proposal) |
 | Keyboard | Nothing requires a mouse: every taskbar operation is a bindable action. The taskbar never takes keyboard focus; menus and dialogs do |
 | Writing config | Only through SaveSettings, explicitly, preserving formatting. Never implicitly |

@@ -32,4 +32,4 @@ $ cargo doc --workspace --document-private-items --open
 
 ## License
 
-[The Unlicense](LICENSE): public domain.
+[MIT](LICENSE), the same license as Smithay.
