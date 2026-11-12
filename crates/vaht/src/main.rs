@@ -10,11 +10,15 @@ use vaht::Arguments;
 /// Runs the application and converts its outcome to an exit code.
 fn main() -> ExitCode {
     let arguments = Arguments::parse();
-    if let Err(error) = arguments.logging.install() {
-        report_without_logging(&error.into());
-        return ExitCode::FAILURE;
-    }
-    match vaht::run(&arguments) {
+    // Held until main returns: dropping it flushes the log file.
+    let logging = match arguments.logging.install() {
+        Ok(logging) => logging,
+        Err(error) => {
+            report_without_logging(&error.into());
+            return ExitCode::FAILURE;
+        }
+    };
+    match vaht::run(&arguments, &logging) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!("{error:#}");

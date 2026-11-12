@@ -10,14 +10,20 @@ pub mod arguments;
 pub mod logging;
 
 pub use arguments::Arguments;
+pub use logging::Logging;
 
-/// Runs the application with the parsed command line.
+/// Runs the command line's request, with diagnostic output already installed.
 ///
 /// # Errors
 ///
-/// Returns an error describing why the application could not finish.
-pub fn run(arguments: &Arguments) -> anyhow::Result<()> {
-    tracing::debug!(?arguments, "starting");
-    tracing::warn!("application code goes here!");
+/// Returns an error describing why the request could not finish.
+pub fn run(arguments: &Arguments, logging: &Logging) -> anyhow::Result<()> {
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        log_file = ?logging.log_file_path(),
+        filter = %logging.filter().directives(),
+        "vaht starting"
+    );
+    tracing::debug!(?arguments, "command line");
     Ok(())
 }

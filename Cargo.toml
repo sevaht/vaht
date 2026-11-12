@@ -19,14 +19,15 @@ readme = "README.md"
 # `dependency.workspace = true`.
 [workspace.dependencies]
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
+file-rotate = "0.8"
+tempfile = "3"
 thiserror = "2"
 tracing = "0.1"
-tracing-subscriber = "0.3"
-
-vaht-compositor = { path = "crates/vaht-compositor" }
-vaht-ipc = { path = "crates/vaht-ipc" }
-vaht-ui = { path = "crates/vaht-ui" }
+tracing-appender = "0.2"
+tracing-journald = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+xdg = "3"
 
 [profile.release]
 lto = true          # optimize across crate boundaries

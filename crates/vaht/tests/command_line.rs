@@ -1,21 +1,32 @@
 //! The executable, exercised the way a user runs it.
 
+use std::path::Path;
 use std::process::{Command, Output};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 
-/// Runs the executable with `arguments` and returns what it produced.
-fn run_executable(arguments: &[&str]) -> Output {
+/// Runs the executable with `arguments`, logging only into `log_directory`
+/// so the tests never touch the real state directory or the journal.
+fn run_executable(arguments: &[&str], log_directory: &Path) -> Output {
     Command::new(EXECUTABLE)
         .args(arguments)
+        .env("VAHT_LOG_DIRECTORY", log_directory)
+        .env("VAHT_JOURNALD", "off")
+        .env_remove("VAHT_LOG")
         .output()
         .expect("cargo builds the executable before running integration tests")
 }
 
+/// A fresh directory for one test's logs.
+fn log_directory() -> tempfile::TempDir {
+    tempfile::tempdir().expect("a temporary directory")
+}
+
 #[test]
 fn version_reports_the_package_version() {
-    let output = run_executable(&["--version"]);
+    let logs = log_directory();
+    let output = run_executable(&["--version"], logs.path());
     assert!(output.status.success());
     let version = String::from_utf8_lossy(&output.stdout);
     let expected = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"));
@@ -24,7 +35,8 @@ fn version_reports_the_package_version() {
 
 #[test]
 fn verbosity_options_are_mutually_exclusive() {
-    let output = run_executable(&["--verbose", "--quiet"]);
+    let logs = log_directory();
+    let output = run_executable(&["--verbose", "--quiet"], logs.path());
     assert_eq!(
         output.status.code(),
         Some(2),
@@ -33,6 +45,25 @@ fn verbosity_options_are_mutually_exclusive() {
 }
 
 #[test]
-fn runs_successfully_without_arguments() {
-    assert!(run_executable(&[]).status.success());
+fn a_run_records_its_start_in_the_log_file() {
+    let logs = log_directory();
+    assert!(run_executable(&[], logs.path()).status.success());
+    let log = std::fs::read_to_string(logs.path().join("vaht.log")).expect("the log file exists");
+    assert!(log.contains("vaht starting"), "log was: {log}");
+}
+
+#[test]
+fn an_invalid_filter_fails_before_anything_runs() {
+    let logs = log_directory();
+    let output = run_executable(&["--log", "vaht=loud"], logs.path());
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid log filter"));
+}
+
+#[test]
+fn an_unusable_log_directory_does_not_stop_vaht() {
+    let logs = log_directory();
+    let blocker = logs.path().join("not-a-directory");
+    std::fs::write(&blocker, "").expect("writable");
+    assert!(run_executable(&[], &blocker.join("logs")).status.success());
 }
