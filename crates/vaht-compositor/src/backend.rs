@@ -19,6 +19,7 @@ pub(crate) use self::winit::WinitBackend;
 use crate::Compositor;
 use crate::resources::ResourceLedger;
 use crate::windows::Windows;
+use vaht_ui::theme::Metrics;
 
 /// The environment variables whose presence means a host compositor is
 /// running, so vaht can open a window in it.
@@ -100,15 +101,19 @@ impl Backend {
         }
     }
 
-    /// Draws a frame of `windows`.
+    /// Draws a frame of `windows`, their frames sized by `metrics`.
     ///
     /// # Errors
     ///
     /// Returns an error if the frame could not be drawn or shown.
-    pub(crate) fn render(&mut self, windows: &Windows) -> Result<(), RenderError> {
+    pub(crate) fn render(
+        &mut self,
+        windows: &Windows,
+        metrics: Metrics,
+    ) -> Result<(), RenderError> {
         match self {
-            Self::Winit(backend) => backend.render(windows),
-            Self::Headless(backend) => backend.render(windows),
+            Self::Winit(backend) => backend.render(windows, metrics),
+            Self::Headless(backend) => backend.render(windows, metrics),
         }
     }
 }

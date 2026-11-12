@@ -10,9 +10,11 @@ use smithay::backend::input::{
 };
 use smithay::input::keyboard::FilterResult;
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
-use smithay::utils::SERIAL_COUNTER;
+use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
 use crate::Compositor;
+use crate::window::{FramePart, TitlebarButton, TitlebarHit, Window, WindowId};
+use crate::windows::WindowTarget;
 
 /// Scroll distance per wheel notch, in the 120ths that high-resolution
 /// wheels report: a notch is 120, and libinput maps it to 15 units.
@@ -56,10 +58,13 @@ impl Compositor {
     fn handle_pointer_position<B: InputBackend>(&mut self, event: &B::PointerMotionAbsoluteEvent) {
         let output = self.backend.output_geometry();
         let location = event.position_transformed(output.size) + output.loc.to_f64();
-        let under = self
-            .windows
-            .surface_under(location)
-            .map(|(_, surface, origin)| (surface, origin));
+        // Over a frame, no client has the pointer: the frame is vaht's.
+        let under = match self.windows.target_at(location, self.theme.metrics()) {
+            Some(WindowTarget::Surface {
+                surface, origin, ..
+            }) => Some((surface, origin)),
+            Some(WindowTarget::Frame { .. }) | None => None,
+        };
         let pointer = self
             .seat
             .get_pointer()
@@ -76,23 +81,34 @@ impl Compositor {
         pointer.frame(self);
     }
 
-    /// Presses or releases a pointer button; a press focuses and raises the
-    /// window under the pointer.
+    /// Presses or releases a pointer button. A press focuses and raises the
+    /// window under the pointer and, on its titlebar, holds the widget there
+    /// down; the release completes a titlebar click.
     fn handle_pointer_button<B: InputBackend>(&mut self, event: &B::PointerButtonEvent) {
         let pointer = self
             .seat
             .get_pointer()
             .expect("the seat gets a pointer at startup");
         let serial = SERIAL_COUNTER.next_serial();
-        if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
-            let clicked = self
-                .windows
-                .surface_under(pointer.current_location())
-                .map(|(id, _, _)| id);
-            if let Some(id) = clicked {
-                self.raise_window(id);
+        let location = pointer.current_location();
+        match event.state() {
+            ButtonState::Pressed if !pointer.is_grabbed() => {
+                let target = self.windows.target_at(location, self.theme.metrics());
+                let clicked = target.as_ref().map(WindowTarget::window);
+                if let Some(id) = clicked {
+                    self.raise_window(id);
+                }
+                self.focus_window(clicked, serial);
+                if let Some(WindowTarget::Frame {
+                    window,
+                    part: FramePart::Titlebar(point),
+                }) = target
+                {
+                    self.press_titlebar(window, point);
+                }
             }
-            self.focus_window(clicked, serial);
+            ButtonState::Pressed => {}
+            ButtonState::Released => self.release_titlebar(location),
         }
         pointer.button(
             self,
@@ -104,6 +120,38 @@ impl Compositor {
             },
         );
         pointer.frame(self);
+    }
+
+    /// Holds down the titlebar widget at `point` of `window`'s titlebar.
+    fn press_titlebar(&mut self, window: WindowId, point: vaht_ui::Point) {
+        if let Some(frame) = self.windows.get_mut(window).map(Window::frame_mut) {
+            frame.titlebar_mut().press(point);
+            self.held_titlebar = Some(window);
+            self.schedule_render();
+        }
+    }
+
+    /// Lets go of a held titlebar widget at global `location`, acting on it
+    /// if the pointer is still on it.
+    fn release_titlebar(&mut self, location: Point<f64, Logical>) {
+        let Some(id) = self.held_titlebar.take() else {
+            return;
+        };
+        let metrics = self.theme.metrics();
+        let Some(window) = self.windows.get_mut(id) else {
+            return;
+        };
+        let titlebar = window.frame_geometry(metrics).titlebar;
+        let inside = location.to_i32_floor() - titlebar.loc;
+        let clicked = window
+            .frame_mut()
+            .titlebar_mut()
+            .release(vaht_ui::Point::new(inside.x, inside.y));
+        match clicked {
+            Some(TitlebarHit::Button(TitlebarButton::Close)) => window.toplevel().close(),
+            Some(TitlebarHit::Label) | None => {}
+        }
+        self.schedule_render();
     }
 
     /// Scrolls the surface under the pointer.

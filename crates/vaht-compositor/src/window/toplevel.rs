@@ -106,6 +106,11 @@ impl Toplevel {
         }
     }
 
+    /// Asks the client to close the window.
+    pub(crate) fn close(&self) {
+        self.xdg().send_close();
+    }
+
     /// Returns whether `surface` is this window's root surface.
     pub(crate) fn has_surface(&self, surface: &WlSurface) -> bool {
         self.wl_surface() == surface

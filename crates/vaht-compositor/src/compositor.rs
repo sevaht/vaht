@@ -26,11 +26,12 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
-use smithay::utils::{Logical, Point, Serial};
+use smithay::utils::{Logical, Point, Rectangle, Serial};
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
 use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::shell::xdg::ToplevelSurface;
 use smithay::wayland::socket::ListeningSocketSource;
+use vaht_ui::{Theme, Typesetter};
 
 use crate::backend::{Backend, BackendChoice, BackendError};
 use crate::client::ClientState;
@@ -38,7 +39,7 @@ use crate::event_source::EventSource;
 use crate::protocols::ProtocolStates;
 use crate::resources::{ProcessUsage, ResourceLedger};
 use crate::termination::TerminationSignals;
-use crate::window::{Toplevel, WindowId};
+use crate::window::{FrameGeometry, Toplevel, WindowId};
 use crate::windows::Windows;
 
 /// The running compositor.
@@ -57,6 +58,12 @@ pub struct Compositor {
     pub(crate) windows: Windows,
     /// Popups, by the surface they belong to.
     pub(crate) popups: PopupManager,
+    /// How everything vaht draws looks.
+    pub(crate) theme: Theme,
+    /// Shapes and draws text; shared by every panel.
+    typesetter: Typesetter,
+    /// The window whose titlebar the pointer is holding down, if any.
+    pub(crate) held_titlebar: Option<WindowId>,
     /// The window with keyboard focus.
     focused: Option<WindowId>,
     /// When vaht started; frame times are measured from it.
@@ -172,6 +179,9 @@ impl Compositor {
             backend,
             windows: Windows::default(),
             popups: PopupManager::default(),
+            theme: Theme::built_in(),
+            typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
+            held_titlebar: None,
             focused: None,
             start_time: Instant::now(),
             is_running: true,
@@ -192,7 +202,14 @@ impl Compositor {
 
     /// Draws a frame, then tells the windows in it that they were shown.
     pub(crate) fn render(&mut self) {
-        if let Err(error) = self.backend.render(&self.windows) {
+        let metrics = self.theme.metrics();
+        for window in self.windows.iter_mut() {
+            let geometry = window.frame_geometry(metrics);
+            window
+                .frame_mut()
+                .prepare(&geometry, &self.theme, &mut self.typesetter);
+        }
+        if let Err(error) = self.backend.render(&self.windows, metrics) {
             tracing::warn!(error = &error as &dyn std::error::Error, "frame skipped");
         }
         let time = self.start_time.elapsed();
@@ -242,11 +259,16 @@ impl Compositor {
     /// Gives keyboard focus to the window with `id`, or to nothing.
     pub(crate) fn focus_window(&mut self, id: Option<WindowId>, serial: Serial) {
         if self.focused != id {
-            if let Some(previous) = self.focused.and_then(|previous| self.windows.get(previous)) {
+            if let Some(previous) = self
+                .focused
+                .and_then(|previous| self.windows.get_mut(previous))
+            {
                 previous.toplevel().set_activated(false);
+                previous.frame_mut().set_focused(false);
             }
-            if let Some(window) = id.and_then(|id| self.windows.get(id)) {
+            if let Some(window) = id.and_then(|id| self.windows.get_mut(id)) {
                 window.toplevel().set_activated(true);
+                window.frame_mut().set_focused(true);
                 tracing::debug!(window = %window.id(), title = ?window.toplevel().title(), "focused");
             }
             self.focused = id;
@@ -280,11 +302,12 @@ impl Compositor {
             if let Some(window) = self
                 .windows
                 .id_of(&root)
-                .and_then(|id| self.windows.get(id))
+                .and_then(|id| self.windows.get_mut(id))
             {
                 window.toplevel().on_commit();
                 if &root == surface {
                     window.toplevel().configure_if_unconfigured();
+                    window.sync_with_client();
                 }
             }
         }
@@ -312,13 +335,16 @@ impl Compositor {
         }
     }
 
-    /// Returns where the next window opens: each one further down and right
-    /// than the last, starting over every few windows.
+    /// Returns where the next window's content goes: each window further
+    /// down and right than the last, starting over every few windows, with
+    /// room above for its frame.
     fn cascade_location(&self) -> Point<i32, Logical> {
         let step = i32::try_from(self.windows.len() % Self::CASCADE_LENGTH)
             .expect("the cascade is far shorter than i32::MAX steps");
         let offset = Self::CASCADE_STEP * (step + 1);
-        self.backend.output_geometry().loc + Point::from((offset, offset))
+        let frame_top =
+            FrameGeometry::around(Rectangle::default(), self.theme.metrics()).borders[0].loc;
+        self.backend.output_geometry().loc + Point::from((offset, offset)) - frame_top
     }
 
     /// Creates the seat with its keyboard and pointer.

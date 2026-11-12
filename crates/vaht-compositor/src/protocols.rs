@@ -6,6 +6,7 @@
 //! family. They are gateways (M4): they translate protocol events into calls
 //! on vaht's own types and decide nothing themselves.
 
+mod decoration;
 mod output;
 mod seat;
 mod surfaces;
@@ -17,6 +18,7 @@ use smithay::wayland::compositor::CompositorState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::xdg::XdgShellState;
+use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 
 use crate::Compositor;
@@ -36,6 +38,9 @@ pub(crate) struct ProtocolStates {
     pub(crate) seat: SeatState<Compositor>,
     /// `wl_data_device_manager`: the clipboard and drag and drop.
     pub(crate) data_device: DataDeviceState,
+    /// `zxdg_decoration_manager_v1`: vaht draws every frame. Held only to
+    /// keep the global alive.
+    _xdg_decoration: XdgDecorationState,
 }
 
 impl ProtocolStates {
@@ -48,6 +53,7 @@ impl ProtocolStates {
             _output_manager: OutputManagerState::new_with_xdg_output::<Compositor>(display),
             seat: SeatState::new(),
             data_device: DataDeviceState::new::<Compositor>(display),
+            _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
         }
     }
 }

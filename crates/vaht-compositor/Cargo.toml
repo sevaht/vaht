@@ -19,6 +19,7 @@ smithay.workspace = true
 strum.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+vaht-ui.workspace = true
 
 [lints]
 workspace = true

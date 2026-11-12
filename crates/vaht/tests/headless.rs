@@ -206,6 +206,12 @@ impl ExitReport {
             self.log
         );
         assert_eq!(
+            self.live_count("frame"),
+            0,
+            "frames left behind:\n{}",
+            self.log
+        );
+        assert_eq!(
             self.descriptors("at exit"),
             self.descriptors("at start"),
             "descriptors leaked:\n{}",

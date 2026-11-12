@@ -12,10 +12,41 @@ use std::collections::HashMap;
 
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point};
+use vaht_ui::theme::Metrics;
 
 use self::stack::Stack;
 use crate::resources::ResourceLedger;
-use crate::window::{Toplevel, Window, WindowId};
+use crate::window::{FramePart, Toplevel, Window, WindowId};
+
+/// What of a window is under a point.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum WindowTarget {
+    /// One of the client's surfaces.
+    Surface {
+        /// The window it belongs to.
+        window: WindowId,
+        /// The surface.
+        surface: WlSurface,
+        /// The surface's origin, in global coordinates.
+        origin: Point<f64, Logical>,
+    },
+    /// Part of the frame vaht draws around it.
+    Frame {
+        /// The window the frame surrounds.
+        window: WindowId,
+        /// Which part.
+        part: FramePart,
+    },
+}
+
+impl WindowTarget {
+    /// Returns the window the target belongs to.
+    pub(crate) const fn window(&self) -> WindowId {
+        match self {
+            Self::Surface { window, .. } | Self::Frame { window, .. } => *window,
+        }
+    }
+}
 
 /// All managed windows, by id, and their stacking order.
 #[derive(Debug, Default)]
@@ -63,16 +94,35 @@ impl Windows {
         self.by_id.values()
     }
 
-    /// Returns the topmost window under `point`, the client surface there,
-    /// and that surface's origin, all in global coordinates.
-    pub(crate) fn surface_under(
+    /// Returns the window with `id`, to change it.
+    pub(crate) fn get_mut(&mut self, id: WindowId) -> Option<&mut Window> {
+        self.by_id.get_mut(&id)
+    }
+
+    /// Returns every window, in no particular order, to change them.
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut Window> + '_ {
+        self.by_id.values_mut()
+    }
+
+    /// Returns what is under `point` (global coordinates): the topmost
+    /// window's client surface or frame there, with frames sized by
+    /// `metrics`.
+    pub(crate) fn target_at(
         &self,
         point: Point<f64, Logical>,
-    ) -> Option<(WindowId, WlSurface, Point<f64, Logical>)> {
+        metrics: Metrics,
+    ) -> Option<WindowTarget> {
         self.stack.top_down().find_map(|id| {
             let window = self.by_id.get(&id)?;
-            let (surface, origin) = window.surface_under(point)?;
-            Some((id, surface, origin))
+            if let Some((surface, origin)) = window.surface_under(point) {
+                return Some(WindowTarget::Surface {
+                    window: id,
+                    surface,
+                    origin,
+                });
+            }
+            let part = window.frame_geometry(metrics).part_at(point)?;
+            Some(WindowTarget::Frame { window: id, part })
         })
     }
 
