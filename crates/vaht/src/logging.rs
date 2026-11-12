@@ -13,7 +13,8 @@
 //!   ([`Logging::dropped_line_count`]), never allowed to stall a frame;
 //! - **journald**, whenever its socket exists, with structured fields as
 //!   journal fields;
-//! - **standard error**, when it is a terminal.
+//! - **standard error**, when it is a terminal, or when neither of the others
+//!   could be used, so that no error is ever lost without a trace.
 //!
 //! See `docs/design/03-resources-logging.md` §4. Records from libraries that
 //! use the `log` crate arrive as events too, through `tracing-subscriber`'s
@@ -103,8 +104,8 @@ impl LoggingArguments {
                 .map(|layer| layer.with_syslog_identifier(PROGRAM_NAME.to_owned())),
             JournaldUse::Off => None,
         };
-        let terminal_layer = io::stderr()
-            .is_terminal()
+        let has_other_destination = file_layer.is_some() || journald_layer.is_some();
+        let terminal_layer = (io::stderr().is_terminal() || !has_other_destination)
             .then(|| tracing_subscriber::fmt::layer().with_writer(io::stderr));
 
         tracing_subscriber::registry()

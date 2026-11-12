@@ -1,13 +1,28 @@
 //! The vaht compositor: windows, outputs, input and rendering, built on Smithay.
 //!
-//! The design is in `docs/design/01-object-model.md`: one `Compositor` state
-//! that holds the subsystems (`Outputs`, `Windows`, `Workspaces`, `Focus`,
-//! `Input`, `Overlays`, the services) and routes between them, with policy
-//! in plain types and the Smithay handler traits as thin gateways.
+//! The design is in `docs/design/01-object-model.md`. One [`Compositor`]
+//! state holds the subsystems and routes between them; policy lives in plain
+//! types, and the Smithay handler traits in `protocols` are thin gateways.
 //!
-//! So far it provides the resource foundations every subsystem builds on:
-//! counted resources ([`resources`]) and self-removing event-loop
+//! Today vaht runs nested in a window of another compositor: it accepts
+//! clients, shows their windows stacked, focuses and raises on click, and
+//! routes keyboard and pointer input. The foundations every subsystem uses
+//! are public: counted resources ([`resources`]) and self-removing event-loop
 //! registrations ([`event_source`]).
 
+mod backend;
+mod client;
+mod compositor;
 pub mod event_source;
+mod input;
+mod protocols;
 pub mod resources;
+mod scene;
+mod termination;
+mod window;
+mod windows;
+
+pub use backend::{BackendError, RenderError};
+pub use compositor::{Compositor, RunError};
+pub use termination::TerminationSignals;
+pub use window::WindowId;

@@ -14,16 +14,21 @@ authors = ["Jacob McIntosh"]
 license = "MIT"
 repository = "https://github.com/sevaht/vaht"
 readme = "README.md"
+# vaht depends on a Smithay git revision, which crates.io does not accept.
+publish = false
 
 # Every dependency's version is chosen once, here (P5); crates name them with
 # `dependency.workspace = true`.
 [workspace.dependencies]
 anyhow = "1"
 # The version Smithay uses, so the two unify into one event loop type.
-calloop = "0.14.5"
+calloop = { version = "0.14.5", features = ["signals"] }
 clap = { version = "4", features = ["derive", "env"] }
 file-rotate = "0.8"
 procfs = "0.18"
+# Pinned to a reviewed master revision (Smithay's releases lag far behind);
+# bump deliberately, one bump per commit (docs/design/04 §5).
+smithay = { version = "0.7.0", git = "https://github.com/Smithay/smithay", rev = "ae6921bbbf464ae90122f0c184e95e89093a4257", default-features = false, features = ["backend_winit", "desktop", "renderer_gl", "wayland_frontend"] }
 strum = { version = "0.28", features = ["derive"] }
 tempfile = "3"
 thiserror = "2"
@@ -31,6 +36,7 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-journald = "0.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+vaht-compositor = { path = "crates/vaht-compositor" }
 xdg = "3"
 
 [profile.release]

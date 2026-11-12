@@ -12,7 +12,13 @@ doc-valid-idents = ["..", "PulseAudio", "XEmbed"]   # extend per project
 # Trait methods whose standard parameter names are single letters (`f` in
 # `fmt`), so implementations may use whole words (N3) without tripping
 # `renamed_function_params`. ".." keeps clippy's own defaults.
-allow-renamed-params-for = ["..", "core::fmt::Display", "core::fmt::Debug"]
+allow-renamed-params-for = [
+    "..",
+    "core::fmt::Display",
+    "core::fmt::Debug",
+    # Smithay's parameter `type_` works around a keyword; vaht names it.
+    "smithay::wayland::selection::data_device::WaylandDndGrabHandler",
+]
 # Registrations that bypass vaht's guards would leak (03 §2).
 disallowed-methods = [
     { path = "calloop::LoopHandle::insert_source", reason = "register through vaht_compositor::event_source::EventSource, which unregisters on drop" },

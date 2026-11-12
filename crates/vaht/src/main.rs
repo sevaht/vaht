@@ -10,6 +10,16 @@ use vaht::Arguments;
 /// Runs the application and converts its outcome to an exit code.
 fn main() -> ExitCode {
     let arguments = Arguments::parse();
+    // Before any thread starts: logging starts the first one.
+    let termination = match vaht_compositor::TerminationSignals::block() {
+        Ok(termination) => termination,
+        Err(error) => {
+            report_without_logging(
+                &anyhow::Error::new(error).context("could not block termination signals"),
+            );
+            return ExitCode::FAILURE;
+        }
+    };
     // Held until main returns: dropping it flushes the log file.
     let logging = match arguments.logging.install() {
         Ok(logging) => logging,
@@ -18,7 +28,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match vaht::run(&arguments, &logging) {
+    match vaht::run(&arguments, &logging, termination) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!("{error:#}");

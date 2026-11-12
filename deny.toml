@@ -10,4 +10,9 @@ yanked = "deny"
 
 [bans]
 wildcards = "deny"           # no `version = "*"` dependencies
+allow-wildcard-paths = true  # the workspace's own crates, which are not published
 multiple-versions = "allow"  # transitive duplicates are not ours to fix (as in clippy)
+
+[sources]
+# Smithay is used from its git repository (see Cargo.toml).
+allow-git = ["https://github.com/Smithay/smithay"]

@@ -30,4 +30,14 @@ are added when work on them starts.
 - Only `window/toplevel.rs` knows whether a window is Xdg or X11 (01 §4.1).
 - Only `Outputs::apply` changes output modes (01 §5.1).
 - Only `Launcher` spawns processes (03 §2).
-- Every event-loop registration is an `EventSource` guard (03 §2).
+- Every event-loop registration is an `EventSource` guard (03 §2); clippy
+  forbids calling `insert_source` anywhere else.
+- `TerminationSignals::block()` runs at the top of `main`, before any thread
+  starts. A thread started earlier would leave SIGTERM unblocked and die with
+  it, skipping the clean stop.
+- The Wayland `Display` lives beside the `Compositor`, not inside it, so
+  clients are dispatched without `unsafe` (R-X3).
+- Clipboard focus is set together with keyboard focus in
+  `Compositor::focus_window`: Smithay clears the focus of a destroyed
+  surface silently, and the clipboard would otherwise keep a disconnected
+  client's state alive.

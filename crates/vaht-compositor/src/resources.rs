@@ -41,6 +41,10 @@ pub use process::{DescriptorCensus, DescriptorKind, ProcessUsage, ProcessUsageEr
 pub enum ResourceKind {
     /// A source registered with the event loop (timers included).
     EventSource,
+    /// A connected Wayland client.
+    Client,
+    /// A managed window.
+    Window,
 }
 
 impl ResourceKind {
@@ -210,6 +214,9 @@ mod tests {
     fn display_lists_every_kind() {
         let ledger = ResourceLedger::new();
         let _tracked = ledger.track(ResourceKind::EventSource);
-        assert_eq!(ledger.to_string(), "event-source: 1 (peak 1)\n");
+        assert_eq!(
+            ledger.to_string(),
+            "event-source: 1 (peak 1)\nclient: 0 (peak 0)\nwindow: 0 (peak 0)\n"
+        );
     }
 }

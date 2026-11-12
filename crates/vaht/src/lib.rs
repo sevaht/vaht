@@ -17,7 +17,11 @@ pub use logging::Logging;
 /// # Errors
 ///
 /// Returns an error describing why the request could not finish.
-pub fn run(arguments: &Arguments, logging: &Logging) -> anyhow::Result<()> {
+pub fn run(
+    arguments: &Arguments,
+    logging: &Logging,
+    termination: vaht_compositor::TerminationSignals,
+) -> anyhow::Result<()> {
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         log_file = ?logging.log_file_path(),
@@ -25,5 +29,6 @@ pub fn run(arguments: &Arguments, logging: &Logging) -> anyhow::Result<()> {
         "vaht starting"
     );
     tracing::debug!(?arguments, "command line");
+    vaht_compositor::Compositor::run(termination)?;
     Ok(())
 }
