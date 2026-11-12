@@ -1,0 +1,5 @@
+# A test that hangs (a client waiting on a compositor that never answers) is
+# reported as slow after 15 seconds and killed after 60, instead of stalling
+# ./checks.
+[profile.default]
+slow-timeout = { period = "15s", terminate-after = 4 }

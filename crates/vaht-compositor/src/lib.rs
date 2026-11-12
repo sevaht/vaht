@@ -22,7 +22,7 @@ mod termination;
 mod window;
 mod windows;
 
-pub use backend::{BackendError, RenderError};
-pub use compositor::{Compositor, RunError};
+pub use backend::{BackendChoice, BackendError, RenderError};
+pub use compositor::{Compositor, RunError, RunOptions};
 pub use termination::TerminationSignals;
 pub use window::WindowId;

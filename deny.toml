@@ -7,6 +7,12 @@ unused-allowed-license = "allow"   # the list is policy, not an inventory
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # `paste` is archived (unmaintained, no known vulnerability). It is a
+    # build-time macro reached only through pixman, Smithay's software
+    # renderer. Recheck whenever Smithay is bumped.
+    { id = "RUSTSEC-2024-0436", reason = "build-time only, via pixman; no vulnerability" },
+]
 
 [bans]
 wildcards = "deny"           # no `version = "*"` dependencies

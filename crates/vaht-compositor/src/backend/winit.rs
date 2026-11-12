@@ -167,8 +167,9 @@ impl Compositor {
     fn handle_host_window_event(&mut self, event: WinitEvent) {
         match event {
             WinitEvent::Resized { size, .. } => {
-                let super::Backend::Winit(backend) = &self.backend;
-                backend.resize(size);
+                if let super::Backend::Winit(backend) = &self.backend {
+                    backend.resize(size);
+                }
                 self.schedule_render();
             }
             WinitEvent::Input(input) => self.handle_input(input),

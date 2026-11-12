@@ -32,11 +32,11 @@ use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::shell::xdg::ToplevelSurface;
 use smithay::wayland::socket::ListeningSocketSource;
 
-use crate::backend::{Backend, BackendError};
+use crate::backend::{Backend, BackendChoice, BackendError};
 use crate::client::ClientState;
 use crate::event_source::EventSource;
 use crate::protocols::ProtocolStates;
-use crate::resources::ResourceLedger;
+use crate::resources::{ProcessUsage, ResourceLedger};
 use crate::termination::TerminationSignals;
 use crate::window::{Toplevel, WindowId};
 use crate::windows::Windows;
@@ -89,15 +89,16 @@ impl Compositor {
     /// # Errors
     ///
     /// Returns an error if vaht cannot start, or if waiting for events fails.
-    pub fn run(termination: TerminationSignals) -> Result<(), RunError> {
+    pub fn run(options: RunOptions, termination: TerminationSignals) -> Result<(), RunError> {
         let mut event_loop: EventLoop<'static, Self> =
             EventLoop::try_new().map_err(RunError::EventLoop)?;
         let mut display: Display<Self> = Display::new().map_err(RunError::Display)?;
-        let mut compositor = Self::new(&event_loop.handle(), &display, termination)?;
+        let mut compositor = Self::new(&event_loop.handle(), &display, options, termination)?;
         tracing::info!(
             socket = %compositor.socket_name.to_string_lossy(),
             "accepting clients; start them with WAYLAND_DISPLAY set to the socket"
         );
+        log_process_usage("at start");
         while compositor.is_running {
             event_loop
                 .dispatch(None, &mut compositor)
@@ -115,6 +116,7 @@ impl Compositor {
         }
         tracing::info!("stopping");
         tracing::debug!(resources = %compositor.ledger, "resources at exit");
+        log_process_usage("at exit");
         Ok(())
     }
 
@@ -122,13 +124,14 @@ impl Compositor {
     fn new(
         handle: &LoopHandle<'static, Self>,
         display: &Display<Self>,
+        options: RunOptions,
         termination: TerminationSignals,
     ) -> Result<Self, RunError> {
         let display_handle = display.handle();
         let ledger = ResourceLedger::new();
         let mut protocols = ProtocolStates::new(&display_handle);
         let seat = Self::create_seat(&mut protocols.seat, &display_handle)?;
-        let backend = Backend::from_environment(handle, &display_handle, &ledger)?;
+        let backend = Backend::start(options.backend, handle, &display_handle, &ledger)?;
 
         let socket = ListeningSocketSource::new_auto().map_err(RunError::Listen)?;
         let socket_name = socket.socket_name().to_os_string();
@@ -183,7 +186,7 @@ impl Compositor {
     }
 
     /// Asks for a frame to be drawn soon.
-    pub(crate) fn schedule_render(&self) {
+    pub(crate) fn schedule_render(&mut self) {
         self.backend.schedule_render();
     }
 
@@ -343,6 +346,32 @@ impl fmt::Debug for Compositor {
             .field("windows", &self.windows.len())
             .field("focused", &self.focused)
             .finish_non_exhaustive()
+    }
+}
+
+/// How vaht should run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RunOptions {
+    /// Which backend to run on.
+    pub backend: BackendChoice,
+}
+
+/// Logs the process's open descriptors and memory, `moment` saying when.
+///
+/// The counts at start and at exit match when nothing leaked; the tests
+/// compare them.
+fn log_process_usage(moment: &str) {
+    match ProcessUsage::read() {
+        Ok(usage) => tracing::debug!(
+            descriptors = usage.descriptors.total(),
+            resident_bytes = ?usage.resident_bytes,
+            census = %usage.descriptors,
+            "process usage {moment}"
+        ),
+        Err(error) => tracing::warn!(
+            error = &error as &dyn std::error::Error,
+            "could not read process usage {moment}"
+        ),
     }
 }
 

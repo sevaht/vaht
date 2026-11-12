@@ -25,10 +25,13 @@ anyhow = "1"
 calloop = { version = "0.14.5", features = ["signals"] }
 clap = { version = "4", features = ["derive", "env"] }
 file-rotate = "0.8"
+nix = { version = "0.31", features = ["signal"] }
 procfs = "0.18"
 # Pinned to a reviewed master revision (Smithay's releases lag far behind);
 # bump deliberately, one bump per commit (docs/design/04 §5).
-smithay = { version = "0.7.0", git = "https://github.com/Smithay/smithay", rev = "ae6921bbbf464ae90122f0c184e95e89093a4257", default-features = false, features = ["backend_winit", "desktop", "renderer_gl", "wayland_frontend"] }
+smithay = { version = "0.7.0", git = "https://github.com/Smithay/smithay", rev = "ae6921bbbf464ae90122f0c184e95e89093a4257", default-features = false, features = ["backend_winit", "desktop", "renderer_gl", "renderer_pixman", "wayland_frontend"] }
+# Test clients only; no default features, so no event loop or keymap code.
+smithay-client-toolkit = { version = "0.21", default-features = false }
 strum = { version = "0.28", features = ["derive"] }
 tempfile = "3"
 thiserror = "2"

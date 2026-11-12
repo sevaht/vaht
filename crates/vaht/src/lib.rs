@@ -29,6 +29,6 @@ pub fn run(
         "vaht starting"
     );
     tracing::debug!(?arguments, "command line");
-    vaht_compositor::Compositor::run(termination)?;
+    vaht_compositor::Compositor::run(arguments.run_options(), termination)?;
     Ok(())
 }

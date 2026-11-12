@@ -24,6 +24,16 @@ repeating them.
 The remaining crates in 01 §2 (`vaht-dialog`, `vaht-import`, `vaht-menu-gtk`)
 are added when work on them starts.
 
+## Testing
+
+`crates/vaht/tests/headless.rs` runs the real binary with `--backend
+headless` (Smithay's software renderer, frames in memory) and private
+runtime and log directories, drives it with Wayland test clients, stops it
+with SIGTERM and reads its exit report: no windows or clients may remain, and
+the open descriptor count must equal the one at startup. Removing the
+clipboard-focus fix below makes all of them fail, which is how they were
+checked to catch leaks.
+
 ## Invariants that are easy to break
 
 - Only `Windows` owns a `Window`; everything else holds a `WindowId` (01 §1).

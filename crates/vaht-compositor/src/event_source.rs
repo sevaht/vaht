@@ -7,7 +7,9 @@
 //! [`Timer`] therefore cannot leave a timer firing after it closes. Each
 //! registration is counted in the [`ResourceLedger`].
 
+use std::cell::Cell;
 use std::fmt;
+use std::rc::Rc;
 use std::time::Duration;
 
 use calloop::timer::{TimeoutAction, Timer as LoopTimer};
@@ -16,6 +18,11 @@ use calloop::{InsertError, LoopHandle, RegistrationToken};
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 
 /// A source registered with the event loop for as long as this value lives.
+///
+/// Never drop an `EventSource` from inside its own callback: calloop is still
+/// dispatching it then, and unregistering it at that moment panics. A
+/// callback that wants its source gone records that, and the owner drops the
+/// source afterwards ([`Timer::has_fired`] is the pattern).
 pub struct EventSource<State: 'static> {
     /// The loop the source is registered with.
     handle: LoopHandle<'static, State>,
@@ -77,6 +84,8 @@ impl<State: 'static> fmt::Debug for EventSource<State> {
 pub struct Timer<State: 'static> {
     /// The registered timer.
     _source: EventSource<State>,
+    /// Set once the timer has fired; calloop has removed it by then.
+    fired: Rc<Cell<bool>>,
 }
 
 impl<State: 'static> Timer<State> {
@@ -92,11 +101,14 @@ impl<State: 'static> Timer<State> {
         callback: impl FnOnce(&mut State) + 'static,
     ) -> Result<Self, calloop::Error> {
         let mut callback = Some(callback);
+        let fired = Rc::new(Cell::new(false));
+        let fired_in_callback = Rc::clone(&fired);
         let source = EventSource::insert(
             handle,
             ledger,
             LoopTimer::from_duration(delay),
             move |_deadline, (), state| {
+                fired_in_callback.set(true);
                 if let Some(callback) = callback.take() {
                     callback(state);
                 }
@@ -104,7 +116,17 @@ impl<State: 'static> Timer<State> {
             },
         )
         .map_err(|error| error.error)?;
-        Ok(Self { _source: source })
+        Ok(Self {
+            _source: source,
+            fired,
+        })
+    }
+
+    /// Returns whether the timer has fired; it can then be dropped or
+    /// replaced (outside its own callback).
+    #[must_use]
+    pub fn has_fired(&self) -> bool {
+        self.fired.get()
     }
 }
 
@@ -169,6 +191,7 @@ mod tests {
         )
         .expect("the timer registers");
         let mut events = Events::new();
+        assert!(!timer.has_fired());
         event_loop
             .dispatch(TIMER_WAIT, &mut events)
             .expect("dispatch");
@@ -176,6 +199,7 @@ mod tests {
             .dispatch(TIMER_WAIT, &mut events)
             .expect("dispatch");
         assert_eq!(events, ["fired"]);
+        assert!(timer.has_fired());
         drop(timer);
         assert_eq!(ledger.count(ResourceKind::EventSource).live, 0);
     }

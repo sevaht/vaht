@@ -1,10 +1,12 @@
 //! Where vaht's frames go and its input comes from.
 //!
-//! [`Backend`] is an enum of the ways vaht can run (rung 2 of R-M15): today
-//! nested in a window of another compositor ([`WinitBackend`]); directly on
-//! the hardware (DRM, libinput) comes next. The rest of the compositor never
-//! knows which one it has.
+//! [`Backend`] is an enum of the ways vaht can run (rung 2 of R-M15): nested
+//! in a window of another compositor ([`WinitBackend`]), or without any
+//! screen for tests ([`HeadlessBackend`]); directly on the hardware (DRM,
+//! libinput) comes next. The rest of the compositor never knows which one it
+//! has.
 
+mod headless;
 mod winit;
 
 use smithay::output::Output;
@@ -12,6 +14,7 @@ use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{Logical, Rectangle};
 
+pub(crate) use self::headless::HeadlessBackend;
 pub(crate) use self::winit::WinitBackend;
 use crate::Compositor;
 use crate::resources::ResourceLedger;
@@ -21,33 +24,55 @@ use crate::windows::Windows;
 /// running, so vaht can open a window in it.
 const HOST_DISPLAY_VARIABLES: [&str; 2] = ["WAYLAND_DISPLAY", "DISPLAY"];
 
+/// Which backend vaht should run on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BackendChoice {
+    /// Whichever the environment allows: nested when a host compositor runs.
+    #[default]
+    Automatic,
+    /// No screen at all; frames are drawn in memory. For tests.
+    Headless,
+}
+
 /// How vaht shows frames and receives input.
+///
+/// The variants are boxed: backends are large and differ in size by a factor
+/// of ten, and there is only ever one, so the indirection costs nothing.
 #[derive(Debug)]
 pub(crate) enum Backend {
     /// In a window of a host compositor.
-    Winit(WinitBackend),
+    Winit(Box<WinitBackend>),
+    /// In memory only.
+    Headless(Box<HeadlessBackend>),
 }
 
 impl Backend {
-    /// Picks the backend the environment allows: nested when a host
-    /// compositor is running.
+    /// Starts the backend `choice` asks for.
     ///
     /// # Errors
     ///
     /// Returns an error if no backend can run here, or the chosen one fails
     /// to start.
-    pub(crate) fn from_environment(
+    pub(crate) fn start(
+        choice: BackendChoice,
         handle: &LoopHandle<'static, Compositor>,
         display: &DisplayHandle,
         ledger: &ResourceLedger,
     ) -> Result<Self, BackendError> {
-        if HOST_DISPLAY_VARIABLES
-            .iter()
-            .any(|variable| std::env::var_os(variable).is_some())
-        {
-            Ok(Self::Winit(WinitBackend::new(handle, display, ledger)?))
-        } else {
-            Err(BackendError::NoHostDisplay)
+        match choice {
+            BackendChoice::Headless => Ok(Self::Headless(Box::new(HeadlessBackend::new(
+                handle, display, ledger,
+            )?))),
+            BackendChoice::Automatic
+                if HOST_DISPLAY_VARIABLES
+                    .iter()
+                    .any(|variable| std::env::var_os(variable).is_some()) =>
+            {
+                Ok(Self::Winit(Box::new(WinitBackend::new(
+                    handle, display, ledger,
+                )?)))
+            }
+            BackendChoice::Automatic => Err(BackendError::NoHostDisplay),
         }
     }
 
@@ -55,6 +80,7 @@ impl Backend {
     pub(crate) const fn output(&self) -> &Output {
         match self {
             Self::Winit(backend) => backend.output(),
+            Self::Headless(backend) => backend.output(),
         }
     }
 
@@ -62,13 +88,15 @@ impl Backend {
     pub(crate) fn output_geometry(&self) -> Rectangle<i32, Logical> {
         match self {
             Self::Winit(backend) => backend.output_geometry(),
+            Self::Headless(backend) => backend.output_geometry(),
         }
     }
 
     /// Asks for a frame to be drawn soon.
-    pub(crate) fn schedule_render(&self) {
+    pub(crate) fn schedule_render(&mut self) {
         match self {
             Self::Winit(backend) => backend.schedule_render(),
+            Self::Headless(backend) => backend.schedule_render(),
         }
     }
 
@@ -80,6 +108,7 @@ impl Backend {
     pub(crate) fn render(&mut self, windows: &Windows) -> Result<(), RenderError> {
         match self {
             Self::Winit(backend) => backend.render(windows),
+            Self::Headless(backend) => backend.render(windows),
         }
     }
 }
@@ -101,6 +130,14 @@ pub enum BackendError {
         /// of Smithay's causes cannot be sent between threads.
         reason: String,
     },
+
+    /// The software renderer could not be created.
+    #[error("could not create the software renderer")]
+    SoftwareRenderer(#[source] smithay::backend::renderer::pixman::PixmanError),
+
+    /// The in-memory image frames are drawn into could not be created.
+    #[error("could not create the in-memory frame image")]
+    FrameImage(#[source] smithay::reexports::pixman::CreateFailed),
 
     /// The window's events could not be registered with the event loop.
     #[error("could not receive the window's events")]
@@ -134,6 +171,17 @@ pub enum RenderError {
     Draw(
         #[source]
         smithay::backend::renderer::damage::Error<smithay::backend::renderer::gles::GlesError>,
+    ),
+
+    /// The in-memory image could not be drawn into.
+    #[error("could not draw into the in-memory frame image")]
+    BindSoftware(#[source] smithay::backend::renderer::pixman::PixmanError),
+
+    /// Drawing in software failed.
+    #[error("could not draw the frame in software")]
+    DrawSoftware(
+        #[source]
+        smithay::backend::renderer::damage::Error<smithay::backend::renderer::pixman::PixmanError>,
     ),
 
     /// The frame could not be shown.
