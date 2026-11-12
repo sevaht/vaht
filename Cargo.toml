@@ -51,7 +51,9 @@ codegen-units = 1   # optimize the crate as one unit
 
 [workspace.lints.rust]
 missing_docs = "warn"
-unsafe_code = "forbid"
+# deny, not forbid: one documented site, the shared-memory copy in
+# vaht-compositor (R-X3), carries an #[expect]; anywhere else still fails.
+unsafe_code = "deny"
 unreachable_pub = "warn"
 unused_qualifications = "warn"
 missing_debug_implementations = "warn"   # M-STATIC-VERIFICATION set:

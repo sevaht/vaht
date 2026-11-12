@@ -15,6 +15,8 @@ mod xdg_shell;
 use smithay::input::SeatState;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::wayland::compositor::CompositorState;
+use smithay::wayland::image_capture_source::OutputCaptureSourceState;
+use smithay::wayland::image_copy_capture::ImageCopyCaptureState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::shell::xdg::XdgShellState;
@@ -41,6 +43,11 @@ pub(crate) struct ProtocolStates {
     /// `zxdg_decoration_manager_v1`: vaht draws every frame. Held only to
     /// keep the global alive.
     _xdg_decoration: XdgDecorationState,
+    /// `ext_output_image_capture_source_manager_v1`: outputs as things to
+    /// capture.
+    pub(crate) output_capture_source: OutputCaptureSourceState,
+    /// `ext_image_copy_capture_manager_v1`: screenshots and recording.
+    pub(crate) image_copy_capture: ImageCopyCaptureState,
 }
 
 impl ProtocolStates {
@@ -54,6 +61,8 @@ impl ProtocolStates {
             seat: SeatState::new(),
             data_device: DataDeviceState::new::<Compositor>(display),
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
+            output_capture_source: OutputCaptureSourceState::new::<Compositor>(display),
+            image_copy_capture: ImageCopyCaptureState::new::<Compositor>(display),
         }
     }
 }

@@ -47,6 +47,8 @@ pub enum ResourceKind {
     Window,
     /// A window's frame: its titlebar panel and border buffers.
     Frame,
+    /// An open screenshot or recording session.
+    CaptureSession,
 }
 
 impl ResourceKind {
@@ -218,7 +220,7 @@ mod tests {
         let _tracked = ledger.track(ResourceKind::EventSource);
         assert_eq!(
             ledger.to_string(),
-            "event-source: 1 (peak 1)\nclient: 0 (peak 0)\nwindow: 0 (peak 0)\nframe: 0 (peak 0)\n"
+            "event-source: 1 (peak 1)\nclient: 0 (peak 0)\nwindow: 0 (peak 0)\nframe: 0 (peak 0)\ncapture-session: 0 (peak 0)\n"
         );
     }
 }

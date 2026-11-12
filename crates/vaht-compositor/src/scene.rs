@@ -15,6 +15,9 @@ use vaht_ui::theme::Metrics;
 
 use crate::windows::Windows;
 
+/// What is drawn where nothing else is: a dark grey, until wallpapers exist.
+pub(crate) const BACKGROUND_COLOR: [f32; 4] = [0.1, 0.1, 0.1, 1.0];
+
 smithay::backend::renderer::element::render_elements! {
     /// One drawable part of a frame.
     pub(crate) SceneElement<R> where R: ImportAll + ImportMem;

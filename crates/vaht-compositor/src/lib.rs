@@ -11,6 +11,7 @@
 //! registrations ([`event_source`]).
 
 mod backend;
+mod capture;
 mod client;
 mod compositor;
 pub mod event_source;
@@ -18,6 +19,7 @@ mod input;
 mod protocols;
 pub mod resources;
 mod scene;
+mod shared_memory;
 mod termination;
 mod window;
 mod windows;

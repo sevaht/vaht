@@ -34,6 +34,7 @@ use smithay::wayland::socket::ListeningSocketSource;
 use vaht_ui::{Theme, Typesetter};
 
 use crate::backend::{Backend, BackendChoice, BackendError};
+use crate::capture::ScreenCapture;
 use crate::client::ClientState;
 use crate::event_source::EventSource;
 use crate::protocols::ProtocolStates;
@@ -60,6 +61,8 @@ pub struct Compositor {
     pub(crate) popups: PopupManager,
     /// How everything vaht draws looks.
     pub(crate) theme: Theme,
+    /// Draws screenshots for capture clients.
+    pub(crate) capture: ScreenCapture,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
     /// The window whose titlebar the pointer is holding down, if any.
@@ -67,7 +70,7 @@ pub struct Compositor {
     /// The window with keyboard focus.
     focused: Option<WindowId>,
     /// When vaht started; frame times are measured from it.
-    start_time: Instant,
+    pub(crate) start_time: Instant,
     /// False once vaht has been asked to stop.
     is_running: bool,
     /// The name of the socket clients connect to (`WAYLAND_DISPLAY`).
@@ -180,6 +183,7 @@ impl Compositor {
             windows: Windows::default(),
             popups: PopupManager::default(),
             theme: Theme::built_in(),
+            capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             held_titlebar: None,
             focused: None,
@@ -423,6 +427,10 @@ pub enum RunError {
     /// The keyboard's keymap could not be compiled.
     #[error("could not set up the keyboard")]
     Keyboard(#[source] smithay::input::keyboard::Error),
+
+    /// The software renderer that draws screenshots could not be created.
+    #[error("could not create the screenshot renderer")]
+    CaptureRenderer(#[source] smithay::backend::renderer::pixman::PixmanError),
 
     /// No backend could start.
     #[error("could not start a backend")]

@@ -59,9 +59,6 @@ impl HeadlessBackend {
     /// The time between frames at that rate.
     const FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
-    /// What is drawn where no window is.
-    const BACKGROUND_COLOR: [f32; 4] = [0.1, 0.1, 0.1, 1.0];
-
     /// Creates the in-memory output and advertises it.
     ///
     /// # Errors
@@ -183,7 +180,7 @@ impl HeadlessBackend {
                 &mut framebuffer,
                 0,
                 &elements,
-                Self::BACKGROUND_COLOR,
+                scene::BACKGROUND_COLOR,
             )
             .map_err(RenderError::DrawSoftware)?;
         Ok(())

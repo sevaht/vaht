@@ -39,9 +39,6 @@ impl WinitBackend {
     /// rate; clients only use this as a hint.
     const REFRESH_MILLIHERTZ: i32 = 60_000;
 
-    /// What is drawn where no window is: a dark grey, until wallpapers exist.
-    const BACKGROUND_COLOR: [f32; 4] = [0.1, 0.1, 0.1, 1.0];
-
     /// Opens a window in the host compositor and advertises it as an output.
     ///
     /// # Errors
@@ -129,7 +126,7 @@ impl WinitBackend {
                     &mut framebuffer,
                     age,
                     &elements,
-                    Self::BACKGROUND_COLOR,
+                    scene::BACKGROUND_COLOR,
                 )
                 .map_err(RenderError::Draw)?
                 .damage
