@@ -1,0 +1,668 @@
+# 02 — Configuration format
+
+How vaht is configured, shown with my current fluxland setup converted. This
+is a draft for discussion. Names follow the glossary in 00. Types are those of
+01.
+
+---
+
+## 1. Principles
+
+1. **TOML, parsed once into typed values** (M6). Every file deserializes with
+   serde into `Config`, and unknown keys are errors (`deny_unknown_fields`).
+   An error names the file, line and column (from `toml`'s spans) and says
+   what was expected (E3).
+2. **One concept per file**, split by what changes together, not by Fluxbox's
+   historical split.
+3. **Defaults live in code, documented in one place.** Every file and every key
+   is optional; an empty config directory gives a working desktop.
+   `vaht check --print-defaults` prints the complete effective config, so the
+   defaults can be read without opening the source (K3: they are written down
+   only once).
+4. **No paths to other config files.** File names are fixed (K3). Fluxbox's
+   `session.keyFile`, `session.menuFile` and the rest are gone.
+5. **A bad reload keeps the old config.** vaht logs the error and posts a
+   desktop notification over `org.freedesktop.Notifications`, the same channel
+   other programs use. `vaht check` validates without running.
+6. **vaht writes config only on SaveSettings**, through `toml_edit`, which
+   keeps comments and layout (00 decision).
+7. **Spelling.** Keys are `snake_case`, as is usual in TOML. Values that name
+   things (actions, edges, modes) are `kebab-case` strings.
+
+## 2. Files
+
+Everything lives under `$XDG_CONFIG_HOME/vaht/` (normally `~/.config/vaht/`):
+
+| File | Contains | Replaces (fluxland) |
+|---|---|---|
+| `settings.toml` | Behavior: focus, placement, workspaces, taskbar, menus, windows, Xwayland, session, theme choice, wallpaper | `init` |
+| `bindings.toml` | Key and mouse bindings, key modes | `keys` |
+| `rules.toml` | Per-window rules | `apps` |
+| `menus.toml` | Root menu, window menu, custom menus | `menu`, `windowmenu` |
+| `outputs.toml` | Per-output settings, display profiles, profile hooks | `session.output.*` in `init`, av-output-switcher's `profiles.json` (video part) |
+| `themes/<name>.toml` | Themes; also read from `/usr/share/vaht/themes/` | `styles/*`, `overlay` |
+
+- **`overlay` disappears.** My overlay existed only to stop styles from
+  setting the background. In vaht themes cannot set the wallpaper at all; it
+  belongs to `settings.toml`.
+- **`startup` becomes `session.autostart`.** It is a list of commands, and my
+  existing script can simply be one entry.
+- **Reloading** happens automatically when a file changes (decided), and also
+  on the `reload` action and on SIGHUP. Rules apply to windows opened after the
+  change.
+  - **No polling.** One inotify watch on the config directory and one on
+    `themes/` are registered as a calloop source. vaht watches directories,
+    not files, because editors save by writing a temporary file and renaming
+    it, which a watch on the file would lose.
+  - **Debounced.** An editor's burst of events (write, rename, chmod) settles
+    into one reload after 200 ms of quiet.
+  - **All or nothing.** Every file is parsed and validated into a complete new
+    `Config` first. Only if all of it is valid does vaht apply it. Otherwise the
+    running config stays exactly as it was, and the user gets a desktop notification
+    naming the file, line and problem (plus a log entry). Fixing the file
+    triggers the next attempt by itself.
+
+---
+
+## 3. `settings.toml`
+
+### 3.1 My `init`, converted
+
+Only keys that differ from the default would be written. They are all shown
+here so the mapping can be checked.
+
+```toml
+theme = "nacitar"
+dpi = 96
+
+[focus]
+model = "click"                 # click | sloppy | strict-sloppy
+raise_on_click = true
+auto_raise = true               # applies to sloppy focus only, as in Fluxbox
+auto_raise_delay_ms = 250
+focus_new_windows = true
+stay_on_output = false          # focusSameHead
+typing_grace_ms = 0             # noFocusWhileTypingDelay
+
+[placement]
+strategy = "row-min-overlap"    # row | column | row-min-overlap | cascade | under-pointer | center
+row_direction = "left-to-right"
+column_direction = "top-to-bottom"
+
+[windows]
+move = "opaque"                 # opaque | wireframe
+resize = "wireframe"
+resize_redraw_delay_ms = 50     # opaqueResizeDelay
+show_position = false
+edge_snap_distance = 10         # edgeSnapThreshold
+edge_resize_snap_distance = 0
+snap_zones = true               # enableWindowSnapping
+snap_layout_picker = true
+double_click_ms = 250
+tooltip_delay_ms = 500
+
+[windows.frame]
+titlebar_left = []
+titlebar_right = ["shade", "minimize", "maximize", "close"]
+handle = false                  # defaultDeco 0x3fd = everything except the handle
+
+[windows.maximize]
+ignore_size_increments = true   # maxIgnoreIncrement
+cover_taskbar = false           # fullMaximization
+allow_move = true               # maxDisableMove = false
+allow_resize = true
+
+[workspaces]
+names = ["Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4"]
+wrap_at_edges = false           # workspacewarping (its offsets/axes keep their defaults)
+
+[taskbar]
+outputs = "primary"             # primary | all | [output matches]   (onhead 1)
+edge = "bottom"                 # placement BottomCenter
+alignment = "center"
+width_percent = 100
+height = "theme"                # or pixels (height 0 = from the theme)
+rows = 1                        # new: several rows (00 §5)
+auto_hide = false
+reserve_space = true            # maxOver = false
+layer = "dock"
+widgets = ["workspace-previous", "workspace-name", "workspace-next", "window-list", "tray", "clock"]
+
+[taskbar.window_list]
+show = { workspace = "current" }    # a window matcher (§5); iconbar.mode (workspace)
+scope = "all-outputs"               # new: all-outputs | this-output
+order = "stable"                    # {static}: opening order, not focus order
+entry_width = { max = 128 }         # iconWidth with alignment Relative
+icons = true                        # usePixmap
+text_padding = 10                   # iconTextPadding
+
+[taskbar.clock]
+format = "%k:%M"
+format_tall = "%k:%M\n%a %d %b"     # new: used when the taskbar has room for two lines
+
+[taskbar.tray]
+pin_left = []
+pin_right = []
+activation_grace_ms = 500
+
+[menus]
+presenter = "built-in"          # built-in | gtk (01 §6.4)
+submenu_delay_ms = 200
+search = "item-start"           # off | item-start | anywhere
+
+[wallpaper]                     # new: native (00 §4)
+image = "~/Pictures/wallpaper/gucken/Starry_Night_by_gucken_1920x1080.png"
+fit = "fill"                    # fill | fit | center | tile | stretch
+# per_workspace = ["a.png", "b.png", ...]    # optional
+
+[xwayland]
+resources = "~/.Xresources"
+input_emulation = { default = "ask", allow = ["steam"], deny = [] }
+
+[ipc]
+allow_commands = true           # allowRemoteActions
+
+[session]
+autostart = ["~/.config/vaht/autostart"]
+```
+
+### 3.2 Settings dropped in conversion
+
+| fluxland key | Why |
+|---|---|
+| `tabs.*`, `tab.*`, `tabFocusModel`, `tabsAttachArea`, `tabPadding` | Tabs removed |
+| `slit.*`, `slitlistFile` | Slit removed |
+| `*.alpha: 255` (window, menu, toolbar, slit) | Fully opaque is the default. Other values are kept and moved to the theme, since opacity is appearance |
+| `colorsPerChannel`, `cacheMax`, `cacheLife`, `configVersion`, `forcePseudoTransparency` | Have no effect on Wayland, or are already ignored by fluxland |
+| `ignoreBorder` | The border is always part of the frame's move handle |
+| `appsFile`, `keyFile`, `menuFile`, `windowMenu`, `styleFile`, `styleOverlay`, `slitlistFile` | Fixed file names (§1.4) |
+| `toolbar.autoRaise`, `slit.autoRaise` | They raise a dock-layer panel that is already above windows |
+
+---
+
+## 4. Commands (shared by bindings, menus and IPC)
+
+A command is written in one of three forms:
+
+1. **An action**, as a string or as a table (both accepted, decided):
+
+   | String | Table |
+   |---|---|
+   | `"close"` | `{ close = {} }` |
+   | `"exec kitty"` | `{ exec = "kitty" }` |
+   | `"workspace 3"` | `{ workspace = 3 }` |
+   | `"snap-step left"` | `{ snap-step = "left" }` |
+   | `"start-resizing nearest-corner"` | `{ start-resizing = "nearest-corner" }` |
+   | `"set-setting taskbar.auto_hide true"` | `{ set-setting = { key = "taskbar.auto_hide", value = true } }` |
+
+   - **One parser for both.** Each `Action` variant's serde form is the table;
+     the string form is split into a name and its arguments and fed through
+     the same typed parsing, so the two cannot disagree. A test round-trips
+     every action through both forms.
+   - **Writing.** Wherever vaht writes config (`vaht import`, SaveSettings),
+     it uses the string form, so generated files look alike (P8).
+   - **Reserved keys.** The structured forms below (`toggle`, `if`,
+     `for_each`, `delay_ms`, `repeat`, `action`) are never action names, so a
+     table is never ambiguous.
+2. **An array**, meaning a sequence (MacroCmd): `["raise", "focus", "start-moving"]`.
+3. **A table**, for the structured forms:
+
+   | Table | Meaning (Fluxbox) |
+   |---|---|
+   | `{ toggle = [cmd, cmd, ...] }` | ToggleCmd |
+   | `{ if = condition, then = cmd, else = cmd }` | If / Cond |
+   | `{ for_each = matcher, do = cmd }` | ForEach / Map |
+   | `{ delay_ms = 300, do = cmd }` | Delay |
+   | `{ repeat = cmd, rate = 20 }` | Repeat (rate per second, optional) |
+   | `{ action = "next-window", windows = matcher }` | Action plus a window matcher argument |
+
+   A **condition** is a window matcher (§5), or `{ all = [..] }`,
+   `{ any = [..] }`, or `{ not = .. }`.
+
+**Action names (abridged).** All tab actions and Fluxbox aliases are gone.
+`exec` is the only way to run a program.
+
+| Area | Actions |
+|---|---|
+| Programs and session | `exec <command line>`, `reload`, `exit`, `restart`, `set-environment NAME value`, `set-setting key value`, `save-settings` |
+| Window state | `close`, `kill`, `minimize`, `maximize [horizontal\|vertical]`, `fullscreen`, `shade`, `stick`, `raise`, `lower`, `set-layer <layer>`, `set-alpha <n>`, `toggle-frame`, `set-title`, `mark-window <key>`, `go-to-marked-window <key>` |
+| Window placement | `move <dx> <dy>`, `move-to <x> <y>`, `resize <dw> <dh>`, `resize-to <w> <h>`, `snap-step <direction>`, `tile <cell>`, `send-to-output next\|previous\|<n>`, `arrange <style>` |
+| Grabs | `start-moving`, `start-resizing [nearest-corner\|<corner>]` |
+| Focus | `focus`, `next-window`, `previous-window`, `focus-direction <direction>`, `show-desktop` |
+| Workspaces | `workspace <n\|next\|previous\|last>`, `send-to-workspace <target>`, `take-to-workspace <target>`, `add-workspace`, `remove-last-workspace`, `rename-workspace` |
+| Menus and dialogs | `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`, `custom-menu <name>`, `hide-menus`, `run-dialog`, `command-dialog` |
+| Taskbar | `activate-window-list-entry <n>`, `activate-tray-item <n>`, `tray-item-menu <n>`, `toggle-taskbar`, `taskbar-to-output <target>` |
+| Outputs | `apply-profile <name>`, `cycle-profile`, `cycle-primary-output` |
+| Theme | `set-theme <name>`, `reload-theme` |
+
+The complete table is generated from the `Action` enum's documentation, so it
+cannot drift (D1).
+
+---
+
+## 5. Window matchers
+
+These are used by rules, conditions, `for_each`, `next-window` and the window
+list:
+
+```toml
+{ app_id = "kitty" }                              # exact: Wayland app_id, or X11 WM_CLASS class
+{ app_id = "steam", title = { regex = "^Steam$" } }
+{ instance = "Navigator", role = "browser" }      # X11 instance and role; also tag, layer, output
+{ workspace = "current" }                         # or a number; output = "current" | name
+{ minimized = false, hidden_from_window_list = false }
+{ not = { app_id = "kitty" } }
+```
+
+- Plain strings match exactly. `{ regex = "..." }` is an anchored regex,
+  compiled once at load. Fluxbox patterns were always regexes, which made
+  `firefox.desktop` match `firefox_desktop`.
+- All keys must match, so a matcher with several keys means "and".
+- The `{N}` count from Fluxbox patterns is dropped; nothing in my setup uses
+  it.
+
+---
+
+## 6. `bindings.toml`
+
+My `keys`, converted (repetitive lines shortened):
+
+```toml
+# Keys: modifiers Super, Alt, Ctrl, Shift joined by "+", then an xkb key name.
+# A chain is several chords separated by spaces: "Super+A Super+B".
+[keys]
+"Alt+Tab"         = { action = "next-window",     windows = { workspace = "current" } }
+"Alt+Shift+Tab"   = { action = "previous-window", windows = { workspace = "current" } }
+"Super+R"         = "run-dialog"
+"Super+D"         = "exec discord"
+"Super+T"         = "exec kitty"
+"Super+B"         = "exec brave"
+"Super+S"         = "exec spotify-launcher"
+"Super+L"         = "exec xlock -mode noof -delay 7500"
+"Super+minus"     = "cycle-profile"           # was av-output-switcher --cycle-profile
+"Super+backslash" = "cycle-primary-output"    # was --cycle-primary
+"Super+apostrophe" = "exec av-output-switcher --cycle-pactl-sink"   # audio stays external
+
+"XF86AudioRaiseVolume"     = { repeat = "exec amixer sset Master 2%+" }
+"XF86AudioLowerVolume"     = { repeat = "exec amixer sset Master 2%-" }
+"XF86AudioMute"            = "exec amixer sset Master toggle"
+"Alt+XF86AudioRaiseVolume" = { repeat = "exec mpris-control volume 0.02+" }
+"Alt+XF86AudioLowerVolume" = { repeat = "exec mpris-control volume 0.02-" }
+"Alt+XF86AudioPrev"        = { repeat = "exec mpris-control position 5-" }
+"Alt+XF86AudioNext"        = { repeat = "exec mpris-control position 5+" }
+"XF86AudioNext" = "exec mpris-control next"
+"XF86AudioPlay" = "exec mpris-control play-pause"
+"XF86AudioPrev" = "exec mpris-control previous"
+"XF86AudioStop" = "exec mpris-control stop"
+
+"Alt+F4"    = "close"
+"Alt+F5"    = "kill"
+"Alt+F9"    = "minimize"
+"Alt+F10"   = "maximize"
+"Alt+F11"   = "fullscreen"
+"Alt+space" = "window-menu"
+
+"Ctrl+Alt+Left"     = "workspace previous"
+"Ctrl+Alt+Right"    = "workspace next"
+"Super+Prior"       = "workspace previous"
+"Super+Next"        = "workspace next"
+"Super+Shift+Prior" = "take-to-workspace previous"
+"Super+Shift+Next"  = "take-to-workspace next"
+"Ctrl+Super+Left"   = "take-to-workspace previous"
+"Ctrl+Super+Right"  = "take-to-workspace next"
+"Super+Left"  = "snap-step left"
+"Super+Right" = "snap-step right"
+"Super+Up"    = "snap-step up"
+"Super+Down"  = "snap-step down"
+"Ctrl+F1"       = "workspace 1"            # ... through F12
+"Super+F1"      = "send-to-workspace 1"    # ... through F12
+"Ctrl+Super+F1" = "take-to-workspace 1"    # ... through F12
+
+# Key modes: [keys.mode.<name>] holds bindings active after "key-mode <name>".
+
+# Mouse: [mouse.<context>]. Contexts: desktop, taskbar, window-list-entry,
+# titlebar, window (anywhere on a window, normally with a modifier), border,
+# grip-left, grip-right, handle.
+# Events: Left, Middle, Right, ScrollUp, ScrollDown, Back, Forward; prefix
+# "Double+" for a double click, "Drag+" for a drag that starts with that
+# button (Fluxbox's MoveN).
+[mouse.desktop]
+"Left"       = "hide-menus"
+"Middle"     = "workspace-menu"
+"Right"      = "root-menu"
+"ScrollUp"   = "workspace previous"
+"ScrollDown" = "workspace next"
+
+[mouse.taskbar]
+"ScrollUp"   = { action = "previous-window", windows = { minimized = "any", hidden_from_window_list = false } }
+"ScrollDown" = { action = "next-window",     windows = { minimized = "any", hidden_from_window_list = false } }
+
+[mouse.window]
+"Alt+Left"   = ["raise", "focus", "start-moving"]
+"Alt+Right"  = ["raise", "focus", "start-resizing nearest-corner"]
+"Alt+Middle" = "lower"
+
+[mouse.grip-left]
+"Drag+Left" = "start-resizing bottom-left"
+
+[mouse.grip-right]
+"Drag+Left" = "start-resizing bottom-right"
+
+[mouse.titlebar]
+"Double+Left" = "maximize"
+"Left"        = ["raise", "focus"]
+"Drag+Left"   = "start-moving"
+"Middle"      = "lower"
+"Right"       = "window-menu"
+```
+
+Dropped in conversion, and reported by `vaht import`:
+- `Mod4 Tab`, `Mod4 Shift Tab`, `Mod4 1`–`9`, `OnTitlebar Control Mouse1 :StartTabbing` (tabs removed);
+- the `ActivateTab` part of the titlebar click.
+
+Key names are xkb keysym names. Both `Super` and `Mod4` are accepted when
+parsing, but `vaht` itself always writes `Super`.
+
+---
+
+## 7. `rules.toml`
+
+```toml
+# Only kitty shows the wallpaper through its translucency
+[[rule]]
+match = { app_id = "kitty" }
+pseudo_transparent = true
+
+# Steam's tray icon cannot pass a focus token; let its windows take focus
+[[rule]]
+match = { app_id = "steam" }
+focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
+```
+
+- The `fluxland-run` centering rule is not needed: `vaht dialog` windows open
+  centered by default.
+- **Rule keys:**
+  - placement: `workspace`, `output`, `layer`, `position` (with an anchor and
+    offset), `size`, `placement` (`maximized`, `fullscreen`, `tile <cell>`);
+  - window state: `minimized`, `sticky`, `shaded`;
+  - frame and appearance: `frame` (`full`, `titlebar-only`, `border-only`,
+    `none`), `alpha` (focused, unfocused);
+  - behavior: `focus_stealing`, `hidden_from_window_list`,
+    `hidden_from_cycling`, `pseudo_transparent`, `ignore_size_hints`,
+    `refuse_maximize`, `refuse_fullscreen`.
+- Rules apply in file order, and later matching rules override earlier ones
+  key by key.
+
+---
+
+## 8. `menus.toml`
+
+Menus are named tables. Submenus refer to other menus by name, which keeps
+deep menus flat and readable in TOML.
+
+```toml
+[menu.root]
+title = "vaht"
+items = [
+    { label = "kitty",   command = "exec kitty" },
+    { label = "brave",   command = "exec brave" },
+    { label = "steam",   command = "exec steam" },
+    { label = "discord", command = "exec discord" },
+    { label = "spotify", command = "exec spotify-launcher" },
+    { label = "Misc",    submenu = "misc" },
+    { label = "vaht",    submenu = "system" },
+]
+
+[menu.misc]
+items = [{ label = "xterm", command = "exec xterm" }]
+
+[menu.system]
+items = [
+    { label = "Themes",     generate = "themes" },
+    { label = "Workspaces", generate = "workspaces" },
+    { label = "Command",    command = "command-dialog" },
+    { label = "Reload",     command = "reload" },
+    { label = "Restart",    command = "restart" },
+    { separator = true },
+    { label = "Exit",       command = "exit" },
+]
+
+[menu.window]       # my windowmenu
+items = [
+    { toggle = "shade" }, { toggle = "stick" }, { toggle = "maximize" },
+    { toggle = "minimize" }, { command = "raise" }, { command = "lower" },
+    { command = "set-title" }, { generate = "send-to-workspace" },
+    { generate = "layer" }, { generate = "alpha" },
+    { separator = true }, { command = "close" },
+]
+```
+
+- **Item forms:**
+  - `command` (with a `label`; a missing label defaults to the action's name);
+  - `submenu`;
+  - `toggle` (a window state shown with a check mark);
+  - `generate`: `themes`, `workspaces`, `window-list`, `send-to-workspace`,
+    `layer`, `alpha`, `outputs`, `profiles`;
+  - `pipe` (a command whose output is a menu in this same TOML form);
+  - `separator`;
+  - `icon` (optional on any item).
+- **Dropped:**
+  - Fluxbox's `[config]` editor menu: settings are reached through
+    `set-setting`.
+  - `[extramenus]`: nothing in vaht adds menus to it.
+  - The fluxbox-generate_menu header and the `[encoding]` tag: TOML is UTF-8.
+
+---
+
+## 9. `outputs.toml`
+
+```toml
+# vaht prints a ready-to-paste `match` for each output: vaht msg outputs
+[[output]]
+match = { connector = "HDMI-A-1" }    # or { make = "...", model = "...", serial = "..." }
+mode = "1920x1080@60"
+position = [0, 0]
+vrr = "fullscreen"                    # off | on | fullscreen (default)
+
+[[output]]
+match = { connector = "DP-2" }
+mode = "1920x1080@60"
+position = [1920, 0]
+
+[[output]]
+match = { connector = "eDP-1" }
+enabled = false
+
+# Display profiles (av-output-switcher's video half). Optional.
+[[profile]]
+name = "desk"
+when_connected = [{ connector = "HDMI-A-1" }, { connector = "DP-2" }]
+primary = [{ connector = "HDMI-A-1" }, { connector = "DP-2" }]   # candidates, in order
+outputs = [
+    { match = { connector = "HDMI-A-1" }, mode = "1920x1080@60", position = [0, 0] },
+    { match = { connector = "DP-2" },     mode = "1920x1080@60", position = [1920, 0] },
+]
+# outputs not listed are turned off while this profile is applied
+
+[hooks]
+profile_applied = "~/bin/on-profile"           # JSON on stdin, VAHT_PROFILE in the environment
+primary_output_changed = "~/bin/on-primary"
+```
+
+- **How the two sections combine.** `[[output]]` entries are the baseline.
+  When `when_connected` selects a profile, that profile overrides the baseline
+  for the outputs it lists. With no profiles, the baseline is everything.
+- **What `vaht import` does.**
+  - It converts fluxland's `session.output.*` into `[[output]]` entries, using
+    connector names, because those are all fluxland records.
+  - It converts av-output-switcher's `profiles.json` into `[[profile]]`
+    entries. Its `pactl_sink_option_regexes` are written out as a commented
+    example hook script, not as config.
+
+---
+
+## 10. Themes: `themes/<name>.toml`
+
+### 10.1 Model
+
+A theme gives a `Style` to each **element** in each **state** (01 §6). Styles
+are resolved in four layers, each overriding the one before:
+
+1. `[default]`: applies to everything (`*.font`, `*.color` in Fluxbox).
+2. `[state.<state>]`: one state, any element (`*.unfocused.textColor`).
+3. `[<element>]`: one element, any state.
+4. `[<element>.<state>]`: one element, one state.
+
+These four fixed layers replace Fluxbox's wildcard resource matching.
+`vaht check --theme <name>` prints the fully resolved table, so it shows
+exactly what each element gets.
+
+- **Elements:**
+  - window: `window.titlebar`, `window.label`, `window.button`,
+    `window.handle`, `window.grip`, `window.border`;
+  - taskbar: `taskbar`, `taskbar.workspace`, `taskbar.clock`,
+    `taskbar.window-list.entry`, `taskbar.window-list.empty`, `taskbar.tray`;
+  - menus: `menu.title`, `menu.frame`, `menu.item`;
+  - other: `tooltip`, `snap-picker`, `wireframe`.
+- **States:** `focused`, `unfocused`, `hovered`, `pressed`, `active`,
+  `disabled`. A menu item's highlight is its `hovered` state.
+- **Style keys:**
+  - `texture`: `{ solid = "#rrggbb" }`, or
+    `{ gradient = "vertical", from, to, bevel = "raised"|"sunken", interlaced }`,
+    or `{ image = "path", fit = "tile"|"stretch" }`, or `"parent"`;
+  - text: `font = { family, size, weight, style }`, `text_color`,
+    `text_effect` (`{ halo = color }` or `{ shadow = color, offset = [x, y] }`),
+    `justify`;
+  - box: `border = { width, color }`, `padding = [top, right, bottom, left]`,
+    `corner_radius`, `corners`, `alpha`;
+  - sizes: `height` for bars and items;
+  - glyphs: `glyph_color` for button pictures.
+- **Colors are `#rrggbb`, `#rrggbbaa`, or an X11 color name** such as `grey55`
+  or `SteelBlue` (decided).
+  - The X11 list (`rgb.txt`) is large, about 750 names, but it has been frozen
+    since the 1990s, so it needs no maintenance.
+  - The importer needs it anyway to read fluxbox styles, so accepting names in
+    themes reuses the same table. That table is a static, sorted array in
+    `vaht-ui::color`, generated once from X.org's `rgb.txt` and checked against
+    fluxland's `x11_colors.h` in a test.
+  - The published crates for this are tiny and little used (the most popular
+    has fewer than 200 downloads), so vaht doesn't add a dependency for it (X2).
+  - `vaht import` keeps names as written, so my converted theme still says
+    `grey55`.
+
+### 10.2 `nacitar_fbstyle`, converted
+
+Shown in hex, with the original names in comments, so the values can be
+checked. The importer itself would keep the names (`from = "grey55"`).
+
+```toml
+# themes/nacitar.toml (from nacitar_fbstyle by nacitar sevaht)
+[default]
+font = { family = "DejaVu Sans", size = 8, weight = "bold" }
+text_effect = { halo = "#000000" }
+text_color = "#ffffff"
+glyph_color = "#ffffff"
+justify = "center"
+texture = { gradient = "vertical", from = "#4d4d4d", to = "#0d0d0d" }   # grey30 to grey5
+border = { width = 0, color = "#999999" }                               # grey60
+
+[state.focused]
+texture = { gradient = "vertical", from = "#8c8c8c", to = "#0d0d0d" }   # grey55 to grey5
+
+[state.unfocused]
+text_color = "#8c8c8c"
+glyph_color = "#8c8c8c"
+
+[state.pressed]
+texture = { gradient = "cross-diagonal", from = "#333333", to = "#666666", bevel = "sunken" }
+
+[state.disabled]
+text_color = "#8c8c8c"
+
+[window.titlebar]
+height = 20
+
+[window.border]
+border = { width = 1, color = "#999999" }
+
+[window.handle]
+height = 1
+texture = { gradient = "vertical", from = "#ffffff", to = "#999999", bevel = "raised" }
+
+[window.grip]
+texture = { gradient = "vertical", from = "#ffffff", to = "#999999", bevel = "raised" }
+
+[taskbar]
+height = 20
+
+[taskbar.window-list.entry.focused]
+texture = { gradient = "vertical", from = "#8c8c8c", to = "#0d0d0d", bevel = "raised" }
+
+[taskbar.window-list.entry.unfocused]
+texture = { gradient = "vertical", from = "#4d4d4d", to = "#0d0d0d", bevel = "sunken" }
+
+[menu.frame]
+font = { family = "DejaVu Sans", size = 8 }
+justify = "left"
+texture = { solid = "#000000" }
+border = { width = 1, color = "#999999" }
+corner_radius = 4
+submenu_indicator = { glyph = "triangle", side = "right" }
+
+[menu.title]
+height = 20
+
+[menu.item]
+height = 20
+justify = "left"
+
+[menu.item.hovered]
+texture = { gradient = "vertical", from = "#8c8c8c", to = "#0d0d0d", bevel = "raised" }
+
+[tooltip]
+font = { family = "DejaVu Sans", size = 11 }
+text_effect = "none"
+texture = { solid = "#000000" }
+border = { width = 1, color = "#191919" }
+padding = [8, 14, 8, 13]
+corner_radius = 5
+```
+
+**What changed in the conversion.**
+- `window.font.effect: none` was there only for fluxland's clock-format
+  dialog. Dialogs are now client windows, so it goes away.
+- The tray tooltip settings became the `tooltip` element, which covers every
+  tooltip (00 §5).
+- `bevelWidth: 0` and `toolbar.shaped: false` are the defaults.
+
+---
+
+## 11. `vaht import`
+
+```
+vaht import fluxland [--from ~/.config/fluxland] [--to ~/.config/vaht] [--force]
+vaht import fluxbox  [--from ~/.fluxbox]         [--to ~/.config/vaht] [--force]
+vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/themes/<name>.toml
+vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profiles.json]
+```
+
+- It never overwrites an existing file without `--force`, and never touches
+  the source.
+- It writes only keys that differ from vaht's defaults, with a header comment
+  naming the source.
+- It prints a report of every source line it dropped, and why: tabs, slit,
+  ignored settings, unsupported pattern features.
+- It converts fluxbox styles (resource cascade, X11 color names, XPM and other
+  pixmaps to PNG beside the theme).
+- `vaht check` runs on the result before it reports success.
+
+---
+
+## 12. Resolved questions
+
+1. **Reload on change:** yes, with inotify, debounced, all or nothing (§2).
+2. **Colors:** hex or X11 names (§10.1).
+3. **Commands:** both string and table forms (§4).
+4. **Profile keys:** vaht's own profile actions. Audio stays on
+   av-output-switcher for now. Tighter audio integration is a later topic, and
+   the profile hook (`outputs.toml [hooks]`) is the seam for it.
