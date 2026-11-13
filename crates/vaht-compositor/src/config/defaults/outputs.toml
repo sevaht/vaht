@@ -1,0 +1,16 @@
+# How each output is set up. An output no entry matches keeps its
+# preferred mode and goes to the right of the others; the first output
+# found is primary unless an entry says otherwise. `vaht msg outputs`
+# lists the outputs with a ready-to-paste match for each.
+#
+# [[output]]
+# match = { connector = "HDMI-A-1" }  # or { make = "...", model = "...", serial = "..." }
+# mode = "1920x1080@60"               # or "1920x1080" for the fastest refresh
+# position = [0, 0]                   # its top left corner in the layout
+# scale = 1.0                         # 0.25 to 8
+# primary = true                      # the taskbar's and windows' default
+# vrr = "fullscreen"                  # off, on, or fullscreen (the default)
+#
+# [[output]]
+# match = { connector = "eDP-1" }
+# enabled = false

@@ -781,14 +781,24 @@ impl WindowManager {
     }
 
     /// Places maximized, tiled and fullscreen windows again, each in its
-    /// output's areas and with frames sized as they are now.
+    /// output's areas and with frames sized as they are now; a floating
+    /// window no output shows any more, its output gone, moves onto the
+    /// primary one.
     fn refit_placed_windows(&mut self) {
         let metrics = self.metrics;
         for window in self.windows.iter_mut() {
+            if !window.is_placed() {
+                continue;
+            }
+            let outer = window.outer_area(metrics);
             let placement = window.placement().clone();
-            if window.is_placed() && placement != Placement::Floating {
-                let output = self.outputs.for_area(window.outer_area(metrics));
-                window.place(placement, output, metrics);
+            if placement == Placement::Floating {
+                let corner = self.outputs.corner_shown(outer);
+                if corner != outer.loc {
+                    window.move_by(corner - outer.loc, metrics);
+                }
+            } else {
+                window.place(placement, self.outputs.for_area(outer), metrics);
             }
         }
         self.is_redraw_needed = true;

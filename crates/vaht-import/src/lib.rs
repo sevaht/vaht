@@ -17,6 +17,7 @@ mod apps;
 mod command;
 mod keys;
 mod menu;
+mod outputs;
 mod pattern;
 mod report;
 mod resources;
@@ -127,7 +128,14 @@ impl FluxboxSetup {
         };
         let mut files = Vec::new();
         let init_path = self.init.path().to_path_buf();
-        let mut settings = InitFile::new(self.init).convert(&mut report);
+        let init = InitFile::new(self.init).convert(&mut report);
+        let mut settings = init.settings;
+        if let Some(outputs) = init.outputs {
+            files.push(OutputFile {
+                name: "outputs.toml".to_owned(),
+                text: header(&init_path) + &outputs.to_string(),
+            });
+        }
         if let Some((path, text)) = &self.style {
             let name = Self::theme_name(path);
             let theme = StyleFile::new(path, text).convert(&mut report);

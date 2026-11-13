@@ -9,6 +9,7 @@
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 use vaht_compositor::Config;
 
+use crate::outputs::OutputResources;
 use crate::pattern::ClientPattern;
 use crate::report::{Reason, Report};
 use crate::resources::Resources;
@@ -87,6 +88,16 @@ impl Decoration {
     }
 }
 
+/// What an `init` file becomes: `settings.toml`, and `outputs.toml` if it
+/// sets any output up.
+#[derive(Debug)]
+pub(crate) struct InitConversion {
+    /// `settings.toml`.
+    pub(crate) settings: DocumentMut,
+    /// `outputs.toml`.
+    pub(crate) outputs: Option<DocumentMut>,
+}
+
 /// An `init` file being converted.
 #[derive(Debug)]
 pub(crate) struct InitFile {
@@ -116,7 +127,9 @@ impl InitFile {
     }
 
     /// Converts the resources, noting in `report` what it leaves out.
-    pub(crate) fn convert(mut self, report: &mut Report) -> DocumentMut {
+    pub(crate) fn convert(mut self, report: &mut Report) -> InitConversion {
+        let outputs = OutputResources::convert(&mut self.resources, report);
+        self.convert_taskbar_output(&outputs, report);
         self.convert_focus(report);
         self.convert_placement(report);
         self.convert_windows(report);
@@ -143,7 +156,47 @@ impl InitFile {
         }
         self.accept_what_vaht_does();
         self.report_unused(report);
-        self.document
+        InitConversion {
+            settings: self.document,
+            outputs: outputs.document(),
+        }
+    }
+
+    /// The toolbar's output: `onoutput` names it; `onhead` counts heads,
+    /// and head 1, or 0 for none, is vaht's primary output anyway.
+    fn convert_taskbar_output(&mut self, outputs: &OutputResources, report: &mut Report) {
+        let path = ["taskbar", "output"];
+        if let Some(name) = self
+            .resources
+            .value(&format!("{SCREEN}toolbar.onoutput"))
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+        {
+            self.set(&path, Value::from(name));
+            return;
+        }
+        let Some(head) = self
+            .resources
+            .get(&format!("{SCREEN}toolbar.onhead"))
+            .cloned()
+        else {
+            return;
+        };
+        match head.value.parse::<usize>() {
+            Ok(0 | 1) => {}
+            Ok(head) if let Some(connector) = outputs.head(head) => {
+                let connector = connector.to_owned();
+                self.set(&path, Value::from(connector));
+            }
+            Ok(_) | Err(_) => self.note(
+                report,
+                head.line,
+                format!(
+                    "{} = {} (which output that head is: set [taskbar] output)",
+                    head.name, head.value
+                ),
+            ),
+        }
     }
 
     /// Resources whose value asks for what vaht does anyway, so there is
@@ -476,12 +529,7 @@ impl InitFile {
         self.convert_clock(report);
         self.convert_window_list(report);
         self.convert_tray_pins();
-        for (name, default) in [
-            ("height", "0"),
-            ("onhead", "1"),
-            ("autoRaise", "false"),
-            ("layer", "Dock"),
-        ] {
+        for (name, default) in [("height", "0"), ("autoRaise", "false"), ("layer", "Dock")] {
             self.resources.accept_default(&toolbar(name), default);
         }
     }
@@ -751,8 +799,9 @@ session.screen0.toolbar.alpha:\t255
 session.screen0.toolbar.widthPercent:\t80
 ";
         let mut report = Report::default();
-        let document =
-            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        let document = InitFile::new(Resources::parse(Path::new("init"), init))
+            .convert(&mut report)
+            .settings;
         assert_eq!(
             document.to_string(),
             "[placement]\nstrategy = \"row-min-overlap\"\n\n[windows.frame]\n\
@@ -777,6 +826,7 @@ session.screen0.toolbar.widthPercent:\t80
             let mut report = Report::default();
             InitFile::new(Resources::parse(Path::new("init"), init))
                 .convert(&mut report)
+                .settings
                 .to_string()
         };
         assert_eq!(
@@ -795,8 +845,9 @@ session.screen0.toolbar.widthPercent:\t80
                     session.screen0.snapLayoutPicker:\ttrue\n\
                     session.screen0.snapLayouts:\t0,0,66.7,100 66.7,0,33.3,100;0,0,50,100 50,0,50,100\n";
         let mut report = Report::default();
-        let document =
-            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        let document = InitFile::new(Resources::parse(Path::new("init"), init))
+            .convert(&mut report)
+            .settings;
         assert_eq!(
             document.to_string(),
             "[windows.snapping]\nenabled = true\nlayout_picker = true\n\
@@ -809,8 +860,9 @@ session.screen0.toolbar.widthPercent:\t80
     fn the_menu_search_converts() {
         let init = "session.menuSearch:\tsomewhere\n";
         let mut report = Report::default();
-        let document =
-            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        let document = InitFile::new(Resources::parse(Path::new("init"), init))
+            .convert(&mut report)
+            .settings;
         assert_eq!(document.to_string(), "[menus]\nsearch = \"anywhere\"\n");
     }
 
@@ -821,8 +873,9 @@ session.screen0.toolbar.widthPercent:\t80
                     session.dpi:\t96\n\
                     session.screen0.noFocusWhileTypingDelay:\t250\n";
         let mut report = Report::default();
-        let document =
-            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        let document = InitFile::new(Resources::parse(Path::new("init"), init))
+            .convert(&mut report)
+            .settings;
         assert_eq!(document.to_string(), "");
         let notes: Vec<String> = report.notes().iter().map(ToString::to_string).collect();
         assert_eq!(
@@ -837,8 +890,9 @@ session.screen0.toolbar.widthPercent:\t80
     fn an_outline_resize_is_kept_and_an_opaque_move_is_vahts_own() {
         let init = "session.screen0.opaqueResize:\tfalse\nsession.screen0.opaqueMove:\ttrue\n";
         let mut report = Report::default();
-        let document =
-            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        let document = InitFile::new(Resources::parse(Path::new("init"), init))
+            .convert(&mut report)
+            .settings;
         assert_eq!(document.to_string(), "[windows]\nopaque_resize = false\n");
         assert!(report.notes().is_empty(), "{report}");
     }
@@ -848,8 +902,9 @@ session.screen0.toolbar.widthPercent:\t80
         let convert = |value: &str| {
             let init = format!("session.screen0.defaultDeco:\t{value}\n");
             let mut report = Report::default();
-            let document =
-                InitFile::new(Resources::parse(Path::new("init"), &init)).convert(&mut report);
+            let document = InitFile::new(Resources::parse(Path::new("init"), &init))
+                .convert(&mut report)
+                .settings;
             (document.to_string(), report.notes().len())
         };
         assert_eq!(
@@ -879,8 +934,9 @@ session.screen0.systray.pinLeft:\tnm-applet, Discord
 session.screen0.systray.pinRight:\t
 ";
         let mut report = Report::default();
-        let document =
-            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        let document = InitFile::new(Resources::parse(Path::new("init"), init))
+            .convert(&mut report)
+            .settings;
         assert_eq!(
             document.to_string(),
             "[taskbar]\nedge = \"top\"\nalign = \"left\"\nreserve_space = false\n\

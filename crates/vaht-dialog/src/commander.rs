@@ -51,11 +51,12 @@ impl Commander for IpcCommander {
         match reply {
             Reply::Done {} => Ok(()),
             Reply::Error { message } => Err(CommandError::Refused(message)),
-            other @ (Reply::Version { .. } | Reply::Windows { .. } | Reply::Workspaces { .. }) => {
-                Err(CommandError::Unreachable(format!(
-                    "vaht answered something else: {other:?}"
-                )))
-            }
+            other @ (Reply::Version { .. }
+            | Reply::Windows { .. }
+            | Reply::Workspaces { .. }
+            | Reply::Outputs { .. }) => Err(CommandError::Unreachable(format!(
+                "vaht answered something else: {other:?}"
+            ))),
         }
     }
 }

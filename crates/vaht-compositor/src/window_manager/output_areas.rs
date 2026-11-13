@@ -48,6 +48,29 @@ impl OutputAreas {
             .map_or(self.primary, |(output, _)| *output)
     }
 
+    /// Returns where `area`'s corner goes so that an output shows it: where
+    /// it is if one does, else the nearest place in the primary output's
+    /// usable area, as when its own output is gone.
+    pub(crate) fn corner_shown(&self, area: Area) -> Point<i32, Logical> {
+        if self
+            .iter()
+            .any(|output| output.whole.intersection(area).is_some())
+        {
+            return area.loc;
+        }
+        let usable = self.primary.usable;
+        let within = |start: i32, length: i32, room_start: i32, room_length: i32| {
+            start.clamp(
+                room_start,
+                room_start.max(room_start + room_length - length),
+            )
+        };
+        Point::from((
+            within(area.loc.x, area.size.w, usable.loc.x, usable.size.w),
+            within(area.loc.y, area.size.h, usable.loc.y, usable.size.h),
+        ))
+    }
+
     /// Returns the areas of the output `point` is on, or the primary
     /// output's if it is on none.
     pub(crate) fn at(&self, point: Point<i32, Logical>) -> OutputArea {
@@ -85,6 +108,15 @@ mod tests {
         assert_eq!(outputs.for_area(mostly_second), output(800, (640, 480)));
         let nowhere = Rectangle::new((5000, 0).into(), (10, 10).into());
         assert_eq!(outputs.for_area(nowhere), outputs.primary());
+    }
+
+    #[test]
+    fn an_area_no_output_shows_moves_onto_the_primary_one() {
+        let outputs = two();
+        let shown = Rectangle::new((900, 10).into(), (100, 100).into());
+        assert_eq!(outputs.corner_shown(shown), shown.loc);
+        let lost = Rectangle::new((3000, 700).into(), (100, 100).into());
+        assert_eq!(outputs.corner_shown(lost), Point::from((700, 500)));
     }
 
     #[test]

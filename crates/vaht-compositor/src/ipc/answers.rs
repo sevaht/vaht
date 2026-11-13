@@ -1,12 +1,13 @@
 //! What the compositor answers each IPC request with.
 
-use vaht_ipc::{Reply, Request, WindowInfo, WorkspaceInfo};
+use vaht_ipc::{ModeInfo, OutputInfo, Reply, Request, WindowInfo, WorkspaceInfo};
 
 use super::IpcHandler;
 use crate::Compositor;
 use crate::WindowId;
 use crate::config::{Action, Command};
 use crate::execution::ExecutionContext;
+use crate::outputs::Outputs;
 
 impl IpcHandler for Compositor {
     fn answer(&mut self, request: Request, peer: Option<i32>) -> Reply {
@@ -77,6 +78,41 @@ impl IpcHandler for Compositor {
                     .collect();
                 Reply::Workspaces { workspaces }
             }
+            Request::Outputs {} => Reply::Outputs {
+                outputs: self.output_infos(),
+            },
         }
+    }
+}
+
+impl Compositor {
+    /// Describes every output, on or off, for IPC.
+    fn output_infos(&self) -> Vec<OutputInfo> {
+        self.outputs
+            .connected()
+            .map(|output| {
+                let identity = Outputs::identity(output);
+                let is_enabled = self.outputs.iter().any(|on| on == output);
+                let location = output.current_location();
+                OutputInfo {
+                    connector: identity.connector,
+                    make: identity.make,
+                    model: identity.model,
+                    serial: identity.serial,
+                    is_enabled,
+                    is_primary: output == self.outputs.primary(),
+                    mode: output
+                        .current_mode()
+                        .filter(|_| is_enabled)
+                        .map(|mode| ModeInfo {
+                            width: mode.size.w,
+                            height: mode.size.h,
+                            refresh_millihertz: mode.refresh,
+                        }),
+                    position: [location.x, location.y],
+                    scale: output.current_scale().fractional_scale(),
+                }
+            })
+            .collect()
     }
 }

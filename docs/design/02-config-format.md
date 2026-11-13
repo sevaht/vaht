@@ -617,8 +617,11 @@ items = [
 # vaht prints a ready-to-paste `match` for each output: vaht msg outputs
 [[output]]
 match = { connector = "HDMI-A-1" }    # or { make = "...", model = "...", serial = "..." }
-mode = "1920x1080@60"
+mode = "1920x1080@60"                 # or "1920x1080": the fastest refresh
 position = [0, 0]
+scale = 1.0                           # 0.25 to 8
+transform = "normal"                  # 90, 180, 270, flipped, flipped-90, ...
+primary = true
 vrr = "fullscreen"                    # off | on | fullscreen (default)
 
 [[output]]
@@ -646,12 +649,26 @@ profile_applied = "~/bin/on-profile"           # JSON on stdin, VAHT_PROFILE in 
 primary_output_changed = "~/bin/on-primary"
 ```
 
+- **Built so far:** `[[output]]`, applied at start and on every reload:
+  the first entry matching an output (every field of its `match` agrees)
+  is the one it follows. An output no entry matches keeps its preferred
+  mode and scale 1; outputs without a `position` go to the right of those
+  with one, in the order found. Without an entry saying `primary`, the
+  primary output is Fluxbox's head 1: the leftmost, then topmost. If
+  every output would be off, the first stays on. Windows on an output
+  turned off move to the primary one. The nested backend's one output
+  is the host window: it cannot be turned off, and its size is its mode.
+  `vrr` is read; only the DRM backend will act on it. Not yet: profiles
+  and hooks.
 - **How the two sections combine.** `[[output]]` entries are the baseline.
   When `when_connected` selects a profile, that profile overrides the baseline
   for the outputs it lists. With no profiles, the baseline is everything.
 - **What `vaht import` does.**
   - It converts fluxland's `session.output.*` into `[[output]]` entries, using
-    connector names, because those are all fluxland records.
+    connector names, because those are all fluxland records
+    (`adaptiveSync` becomes `vrr` `on` or `off`). `toolbar.onoutput`
+    becomes `[taskbar] output`, and so does `toolbar.onhead` past 1 when
+    the positions in `init` say which output that head is.
   - It converts av-output-switcher's `profiles.json` into `[[profile]]`
     entries. Its `pactl_sink_option_regexes` are written out as a commented
     example hook script, not as config.
@@ -931,14 +948,16 @@ dialogs use too.
 | `{"request":"run","command":"workspace 2"}` | `command`: as a binding writes it (§4, one action); `window`: an id, the focused window by default | `{"reply":"done"}` |
 | `{"request":"windows"}` | | `{"reply":"windows","windows":[{"id":1,"title":"…","app_id":"kitty","workspace":1,"is_focused":true,"is_minimized":false,"is_shaded":false}]}`, topmost first; `workspace` is `null` for a window on every workspace |
 | `{"request":"workspaces"}` | | `{"reply":"workspaces","workspaces":[{"number":1,"name":"…","is_current":true}]}` |
+| `{"request":"outputs"}` | | `{"reply":"outputs","outputs":[{"connector":"HDMI-A-1","make":"…","model":"…","serial":"…","is_enabled":true,"is_primary":true,"mode":{"width":1920,"height":1080,"refresh_millihertz":60000},"position":[0,0],"scale":1.0}]}`, on and off, in the order found; `mode` is `null` for an output off |
 
 - **Errors are replies:** `{"reply":"error","message":"…"}` for a request
   that is not understood, names an unknown field, or cannot be carried out.
 - **Nothing is held for a client:** a line longer than 64 KiB, or replies
   left unread past 1 MiB, drop the connection.
 - **`vaht msg`** asks from the command line: `vaht msg run workspace 2`,
-  `vaht msg windows`, `vaht msg workspaces`, `vaht msg version`; `--json`
-  prints the reply as sent.
+  `vaht msg windows`, `vaht msg workspaces`, `vaht msg outputs` (each
+  output with the `match` lines to paste into `outputs.toml`),
+  `vaht msg version`; `--json` prints the reply as sent.
 - **`[ipc] allow_commands`** (on by default; from Fluxbox's
   `allowRemoteActions`): off, only vaht's own dialogs may run commands,
   known by the process at the other end of the socket. Asking for windows

@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 use std::process::ExitCode;
 
-use vaht_ipc::{Client, Reply, Request};
+use vaht_ipc::{Client, OutputInfo, Reply, Request};
 
 use crate::terminal;
 
@@ -78,6 +78,11 @@ fn readable(reply: &Reply) -> String {
                 let _ = writeln!(text, "{mark} {}\t{}", workspace.number, workspace.name);
             }
         }
+        Reply::Outputs { outputs } => {
+            for output in outputs {
+                output_lines(&mut text, output);
+            }
+        }
         Reply::Error { message } => {
             let _ = writeln!(text, "error: {message}");
         }
@@ -85,9 +90,54 @@ fn readable(reply: &Reply) -> String {
     text
 }
 
+/// Appends `output`'s lines to `text`: a line about it, then each `match`
+/// that finds it, ready to paste into `outputs.toml`.
+fn output_lines(text: &mut String, output: &OutputInfo) {
+    let mark = if !output.is_enabled {
+        '-'
+    } else if output.is_primary {
+        '*'
+    } else {
+        ' '
+    };
+    let state = output.mode.map_or_else(
+        || "off".to_owned(),
+        |mode| {
+            format!(
+                "{}x{}@{}\t{},{}\tscale {}",
+                mode.width,
+                mode.height,
+                f64::from(mode.refresh_millihertz) / 1000.0,
+                output.position[0],
+                output.position[1],
+                output.scale
+            )
+        },
+    );
+    let display = format!("{} {}", output.make, output.model);
+    let _ = writeln!(
+        text,
+        "{}",
+        format!("{mark} {}\t{state}\t{}", output.connector, display.trim()).trim_end()
+    );
+    let _ = writeln!(text, "    match = {{ connector = {:?} }}", output.connector);
+    let display: Vec<String> = [
+        ("make", &output.make),
+        ("model", &output.model),
+        ("serial", &output.serial),
+    ]
+    .iter()
+    .filter(|(_, value)| !value.is_empty())
+    .map(|(key, value)| format!("{key} = {value:?}"))
+    .collect();
+    if !display.is_empty() {
+        let _ = writeln!(text, "    match = {{ {} }}", display.join(", "));
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use vaht_ipc::{WindowInfo, WorkspaceInfo};
+    use vaht_ipc::{ModeInfo, WindowInfo, WorkspaceInfo};
 
     use super::*;
 
@@ -124,5 +174,47 @@ mod tests {
             ],
         };
         assert_eq!(readable(&reply), "  1\tone\n* 2\ttwo\n");
+    }
+
+    #[test]
+    fn outputs_print_with_matches_to_paste() {
+        let reply = Reply::Outputs {
+            outputs: vec![
+                OutputInfo {
+                    connector: "HDMI-A-1".to_owned(),
+                    make: "Acer".to_owned(),
+                    model: "XB271HU".to_owned(),
+                    serial: String::new(),
+                    is_enabled: true,
+                    is_primary: true,
+                    mode: Some(ModeInfo {
+                        width: 1920,
+                        height: 1080,
+                        refresh_millihertz: 60_000,
+                    }),
+                    position: [0, 0],
+                    scale: 1.0,
+                },
+                OutputInfo {
+                    connector: "eDP-1".to_owned(),
+                    make: String::new(),
+                    model: String::new(),
+                    serial: String::new(),
+                    is_enabled: false,
+                    is_primary: false,
+                    mode: None,
+                    position: [0, 0],
+                    scale: 1.0,
+                },
+            ],
+        };
+        assert_eq!(
+            readable(&reply),
+            "* HDMI-A-1\t1920x1080@60\t0,0\tscale 1\tAcer XB271HU\n    \
+             match = { connector = \"HDMI-A-1\" }\n    \
+             match = { make = \"Acer\", model = \"XB271HU\" }\n\
+             - eDP-1\toff\n    \
+             match = { connector = \"eDP-1\" }\n"
+        );
     }
 }

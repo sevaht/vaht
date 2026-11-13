@@ -132,6 +132,9 @@ pub enum MessageRequest {
     Windows,
     /// Lists the workspaces, the shown one marked `*`.
     Workspaces,
+    /// Lists the outputs, the primary one marked `*` and those off `-`,
+    /// each with matches to paste into `outputs.toml`.
+    Outputs,
 }
 
 impl MessageRequest {
@@ -146,6 +149,7 @@ impl MessageRequest {
             },
             Self::Windows => vaht_ipc::Request::Windows {},
             Self::Workspaces => vaht_ipc::Request::Workspaces {},
+            Self::Outputs => vaht_ipc::Request::Outputs {},
         }
     }
 }

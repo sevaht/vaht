@@ -8,13 +8,14 @@
 //! as configuration (K3).
 //!
 //! Today the directory holds `bindings.toml`, `settings.toml`,
-//! `rules.toml` and `menus.toml`; the other files of 02 §2 join them with
-//! the features they configure.
+//! `rules.toml`, `menus.toml` and `outputs.toml`; the other files of 02 §2
+//! join them with the features they configure.
 
 mod bindings;
 mod command;
 mod matcher;
 mod menus;
+mod outputs;
 mod overrides;
 mod rules;
 mod settings;
@@ -35,6 +36,9 @@ pub(crate) use self::command::{
 };
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};
+pub(crate) use self::outputs::{
+    OutputEntry, OutputIdentity, OutputMode, OutputScale, OutputSettings, OutputTransform,
+};
 pub(crate) use self::overrides::SettingOverrides;
 pub(crate) use self::rules::{FocusStealing, Rules};
 pub(crate) use self::settings::{
@@ -87,13 +91,15 @@ pub struct Config {
     pub(crate) rules: Rules,
     /// The menus (`menus.toml`).
     pub(crate) menus: Menus,
+    /// How each output is set up (`outputs.toml`).
+    pub(crate) outputs: OutputSettings,
     /// How everything vaht draws looks: the theme `settings.toml` names.
     pub(crate) theme: Theme,
 }
 
 impl Config {
     /// Every configuration file vaht reads.
-    pub const FILES: [ConfigFile; 4] = [
+    pub const FILES: [ConfigFile; 5] = [
         ConfigFile {
             name: "bindings.toml",
             defaults: include_str!("config/defaults/bindings.toml"),
@@ -110,6 +116,10 @@ impl Config {
             name: "menus.toml",
             defaults: include_str!("config/defaults/menus.toml"),
         },
+        ConfigFile {
+            name: "outputs.toml",
+            defaults: include_str!("config/defaults/outputs.toml"),
+        },
     ];
 
     /// Reads and validates the configuration in `directory`; a missing file,
@@ -120,7 +130,7 @@ impl Config {
     /// Returns the first problem found: a file that cannot be read, or one
     /// that is not valid, with the line and column of the problem.
     pub fn load(directory: &Path) -> Result<Self, ConfigError> {
-        let [bindings, settings, rules, menus] = Self::FILES;
+        let [bindings, settings, rules, menus, outputs] = Self::FILES;
         let settings: Settings = settings.read(directory)?;
         let theme = match &settings.theme {
             Some(name) => ThemeFile::find(directory, name)?.read()?,
@@ -131,6 +141,7 @@ impl Config {
             settings,
             rules: rules.read(directory)?,
             menus: menus.read(directory)?,
+            outputs: outputs.read(directory)?,
             theme,
         };
         config.check_custom_menus()?;
@@ -177,13 +188,14 @@ impl Config {
     /// Panics if a built-in file is invalid; a unit test makes sure none is.
     #[must_use]
     pub fn built_in() -> Self {
-        let [bindings, _, _, menus] = Self::FILES;
+        let [bindings, _, _, menus, _] = Self::FILES;
         Self {
             bindings: toml::from_str(bindings.defaults)
                 .expect("the built-in bindings are valid (tested)"),
             settings: Settings::default(),
             rules: Rules::default(),
             menus: toml::from_str(menus.defaults).expect("the built-in menus are valid (tested)"),
+            outputs: OutputSettings::default(),
             theme: Theme::built_in(),
         }
     }

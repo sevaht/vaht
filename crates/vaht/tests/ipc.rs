@@ -33,6 +33,7 @@ fn windows(vaht: &HeadlessVaht) -> Vec<WindowInfo> {
         other @ (Reply::Version { .. }
         | Reply::Done {}
         | Reply::Workspaces { .. }
+        | Reply::Outputs { .. }
         | Reply::Error { .. }) => panic!("not a window list: {other:?}"),
     }
 }

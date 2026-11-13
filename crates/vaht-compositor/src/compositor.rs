@@ -249,7 +249,8 @@ impl Compositor {
             Config::built_in()
         });
 
-        let outputs = backend.outputs();
+        let mut outputs = backend.outputs();
+        outputs.configure(&config.outputs, &mut backend);
         let window_manager = WindowManager::new(
             &config.settings,
             Self::bare_output_areas(&outputs),
@@ -404,6 +405,12 @@ impl Compositor {
         }
         if config.theme != self.config.theme {
             self.window_manager.restyle(config.theme.metrics());
+            if let Some(taskbar) = &mut self.taskbar {
+                taskbar.invalidate();
+            }
+        }
+        if config.outputs != self.config.outputs {
+            self.outputs.configure(&config.outputs, &mut self.backend);
             if let Some(taskbar) = &mut self.taskbar {
                 taskbar.invalidate();
             }

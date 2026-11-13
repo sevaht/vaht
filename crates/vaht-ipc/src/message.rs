@@ -33,10 +33,12 @@ pub enum Request {
     Windows {},
     /// The workspaces, in order.
     Workspaces {},
+    /// The outputs, on and off, in the order vaht found them.
+    Outputs {},
 }
 
 /// What vaht answers a request with.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "reply", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Reply {
     /// vaht's version, for [`Request::Version`].
@@ -55,6 +57,11 @@ pub enum Reply {
     Workspaces {
         /// Each workspace, in order.
         workspaces: Vec<WorkspaceInfo>,
+    },
+    /// The outputs, for [`Request::Outputs`].
+    Outputs {
+        /// Each output, in the order vaht found them.
+        outputs: Vec<OutputInfo>,
     },
     /// The request could not be carried out, or was not understood.
     Error {
@@ -93,6 +100,42 @@ pub struct WorkspaceInfo {
     pub name: String,
     /// Whether it is the one shown.
     pub is_current: bool,
+}
+
+/// One output, as IPC describes it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutputInfo {
+    /// Its connector's name, such as `HDMI-A-1`.
+    pub connector: String,
+    /// The display's manufacturer, as its EDID gives it.
+    pub make: String,
+    /// The display's model.
+    pub model: String,
+    /// The display's serial number; empty when it gives none.
+    pub serial: String,
+    /// Whether it is on.
+    pub is_enabled: bool,
+    /// Whether it is the primary output.
+    pub is_primary: bool,
+    /// Its mode, when it is on.
+    pub mode: Option<ModeInfo>,
+    /// Where its top left corner is in the layout, in logical pixels.
+    pub position: [i32; 2],
+    /// How much larger everything is drawn on it.
+    pub scale: f64,
+}
+
+/// An output's mode, as IPC describes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModeInfo {
+    /// Its width, in pixels.
+    pub width: i32,
+    /// Its height, in pixels.
+    pub height: i32,
+    /// Its refresh rate, in millihertz.
+    pub refresh_millihertz: i32,
 }
 
 #[cfg(test)]

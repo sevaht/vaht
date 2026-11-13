@@ -3,7 +3,9 @@
 //! from one to the next.
 
 use std::path::Path;
+use std::process::Command;
 
+use vaht_ipc::{OutputInfo, Reply};
 use vaht_test_support::{
     BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, TestClient, TestLayer, WINDOW_COLOR, keys,
     solid_png,
@@ -32,6 +34,12 @@ fn two_outputs() -> (HeadlessVaht, TestClient) {
 /// Starts vaht on [`OUTPUTS`] with a solid wallpaper and `settings`, with
 /// a client.
 fn with_settings(settings: &str) -> (HeadlessVaht, TestClient) {
+    with_files(settings, "")
+}
+
+/// Starts vaht on [`OUTPUTS`] with a solid wallpaper, `settings` and
+/// `outputs` (`outputs.toml`), with a client.
+fn with_files(settings: &str, outputs: &str) -> (HeadlessVaht, TestClient) {
     let picture = solid_png(16, SKY);
     let settings = format!("[wallpaper]\nimage = \"sky.png\"\nfit = \"tile\"\n{settings}");
     let vaht = HeadlessVaht::start_with_outputs(
@@ -39,11 +47,38 @@ fn with_settings(settings: &str) -> (HeadlessVaht, TestClient) {
         OUTPUTS,
         &[
             ("settings.toml", settings.as_bytes()),
+            ("outputs.toml", outputs.as_bytes()),
             ("sky.png", &picture),
         ],
     );
     let client = TestClient::connect(vaht.socket());
     (vaht, client)
+}
+
+/// Returns the outputs `vaht msg outputs` lists.
+fn listed_outputs(vaht: &HeadlessVaht) -> Vec<OutputInfo> {
+    let output = Command::new(EXECUTABLE)
+        .args(["msg", "--json", "outputs"])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .output()
+        .expect("vaht msg runs");
+    match serde_json::from_slice(&output.stdout).expect("one JSON reply") {
+        Reply::Outputs { outputs } => outputs,
+        other @ (Reply::Version { .. }
+        | Reply::Done {}
+        | Reply::Windows { .. }
+        | Reply::Workspaces { .. }
+        | Reply::Error { .. }) => panic!("not an output list: {other:?}"),
+    }
+}
+
+/// Rewrites `vaht`'s `outputs.toml` with `outputs` and waits until it
+/// reloads.
+fn rewrite_outputs(vaht: &HeadlessVaht, outputs: &str) {
+    let reloads = vaht.logged_count("configuration reloaded");
+    std::fs::write(vaht.config_directory().join("outputs.toml"), outputs)
+        .expect("outputs.toml is rewritten");
+    vaht.wait_for_logged("configuration reloaded", reloads + 1);
 }
 
 #[test]
@@ -154,4 +189,61 @@ fn a_layer_surface_opens_on_the_output_the_pointer_is_on() {
     client.open_backdrop(TestLayer::Background, BACKDROP);
     assert_eq!(client.screenshot_of("HEADLESS-1").rgb(5, 5), SKY);
     assert_eq!(client.screenshot_of("HEADLESS-2").rgb(5, 5), BACKDROP);
+}
+
+#[test]
+fn outputs_go_where_outputs_toml_puts_them() {
+    let (vaht, mut client) = with_files(
+        "",
+        "[[output]]\nmatch = { connector = \"HEADLESS-2\" }\nposition = [0, 0]\n\
+         mode = \"1024x768\"\nprimary = true\n",
+    );
+    let listed = listed_outputs(&vaht);
+    let summary: Vec<_> = listed
+        .iter()
+        .map(|output| {
+            (
+                output.connector.as_str(),
+                output.position,
+                output.is_primary,
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("HEADLESS-1", [1024, 0], false),
+            ("HEADLESS-2", [0, 0], true)
+        ]
+    );
+    let second = client.screenshot_of("HEADLESS-2");
+    assert_eq!((second.width(), second.height()), (1024, 768));
+    // The taskbar shows on the primary output by default.
+    assert_ne!(
+        second.rgb(5, second.height() - 2),
+        SKY,
+        "the taskbar is here"
+    );
+    let first = client.screenshot_of("HEADLESS-1");
+    assert_eq!(first.rgb(5, first.height() - 2), SKY, "no taskbar here");
+}
+
+#[test]
+fn turning_an_output_off_brings_its_windows_to_the_primary_one() {
+    let (vaht, mut client) = with_files("", "");
+    client.move_pointer_to(FIRST_WIDTH + 100, 100);
+    client.open_windows(1);
+    rewrite_outputs(
+        &vaht,
+        "[[output]]\nmatch = { connector = \"HEADLESS-2\" }\nenabled = false\n",
+    );
+    let listed = listed_outputs(&vaht);
+    assert!(!listed[1].is_enabled, "{listed:?}");
+    assert!(
+        client
+            .screenshot_of("HEADLESS-1")
+            .bounds_of(WINDOW_COLOR)
+            .is_some(),
+        "the window came to the first output"
+    );
 }

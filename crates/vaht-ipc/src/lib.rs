@@ -16,7 +16,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 pub use client::{Client, ClientError};
-pub use message::{Reply, Request, WindowInfo, WorkspaceInfo};
+pub use message::{ModeInfo, OutputInfo, Reply, Request, WindowInfo, WorkspaceInfo};
 
 /// The environment variable that names vaht's IPC socket, set for every
 /// program vaht starts.

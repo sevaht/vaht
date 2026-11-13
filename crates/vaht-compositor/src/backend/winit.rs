@@ -16,8 +16,9 @@ use smithay::utils::{Physical, Size, Transform};
 
 use super::{BackendError, RenderError};
 use crate::Compositor;
+use crate::config::OutputMode;
 use crate::event_source::EventSource;
-use crate::outputs::Outputs;
+use crate::outputs::{OutputControl, Outputs};
 use crate::resources::ResourceLedger;
 use crate::scene::{self, Scene};
 
@@ -189,6 +190,37 @@ impl WinitBackend {
         Mode {
             size,
             refresh: Self::REFRESH_MILLIHERTZ,
+        }
+    }
+}
+
+impl OutputControl for WinitBackend {
+    fn set_enabled(&mut self, output: &Output, is_enabled: bool) {
+        if !is_enabled {
+            tracing::warn!(
+                output = output.name(),
+                "the host window is the only output, so it stays on"
+            );
+        }
+    }
+
+    fn set_transform(&mut self, output: &Output, transform: Transform) {
+        if transform != Transform::Normal {
+            tracing::info!(
+                output = output.name(),
+                ?transform,
+                "the host window is not turned; turn the host's output instead"
+            );
+        }
+    }
+
+    fn set_mode(&mut self, output: &Output, mode: Option<OutputMode>) {
+        if let Some(mode) = mode {
+            tracing::info!(
+                output = output.name(),
+                %mode,
+                "the host window's size is its mode; resize the window instead"
+            );
         }
     }
 }

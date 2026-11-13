@@ -12,15 +12,17 @@ mod winit;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Format, Fourcc};
 use smithay::backend::renderer::{ExportMem, ImportMemWl, Texture as _};
+use smithay::output::Output;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
-use smithay::utils::Rectangle;
+use smithay::utils::{Rectangle, Transform};
 
 pub(crate) use self::headless::HeadlessBackend;
 pub(crate) use self::winit::WinitBackend;
 use crate::Compositor;
-use crate::outputs::Outputs;
+use crate::config::OutputMode;
+use crate::outputs::{OutputControl, Outputs};
 use crate::resources::ResourceLedger;
 use crate::scene::Scene;
 
@@ -164,6 +166,29 @@ impl Backend {
         let bytes = renderer.map_texture(&mapping).ok()?;
         let (width, height) = (u32::try_from(size.w).ok()?, u32::try_from(size.h).ok()?);
         vaht_ui::Icon::from_argb8888(width, height, bytes)
+    }
+}
+
+impl OutputControl for Backend {
+    fn set_enabled(&mut self, output: &Output, is_enabled: bool) {
+        match self {
+            Self::Winit(backend) => backend.set_enabled(output, is_enabled),
+            Self::Headless(backend) => backend.set_enabled(output, is_enabled),
+        }
+    }
+
+    fn set_transform(&mut self, output: &Output, transform: Transform) {
+        match self {
+            Self::Winit(backend) => backend.set_transform(output, transform),
+            Self::Headless(backend) => backend.set_transform(output, transform),
+        }
+    }
+
+    fn set_mode(&mut self, output: &Output, mode: Option<OutputMode>) {
+        match self {
+            Self::Winit(backend) => backend.set_mode(output, mode),
+            Self::Headless(backend) => backend.set_mode(output, mode),
+        }
     }
 }
 

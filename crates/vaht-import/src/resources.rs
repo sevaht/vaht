@@ -89,6 +89,18 @@ impl Resources {
         self.get(name).map(|resource| resource.value.as_str())
     }
 
+    /// Returns the names of the resources starting with `prefix`, each
+    /// once, in file order.
+    pub(crate) fn names_with_prefix(&self, prefix: &str) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for resource in &self.entries {
+            if resource.name.starts_with(prefix) && !names.contains(&resource.name) {
+                names.push(resource.name.clone());
+            }
+        }
+        names
+    }
+
     /// Returns the resources the conversion never asked for.
     pub(crate) fn unused(&self) -> impl Iterator<Item = &Resource> {
         self.entries

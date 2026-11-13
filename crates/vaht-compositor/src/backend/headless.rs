@@ -16,12 +16,14 @@ use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::pixman::{FormatCode, Image};
 use smithay::reexports::wayland_server::DisplayHandle;
+use smithay::reexports::wayland_server::backend::GlobalId;
 use smithay::utils::{Physical, Size, Transform};
 
 use super::{BackendError, RenderError};
 use crate::Compositor;
+use crate::config::OutputMode;
 use crate::event_source::Timer;
-use crate::outputs::Outputs;
+use crate::outputs::{OutputControl, Outputs};
 use crate::resources::ResourceLedger;
 use crate::scene::{self, Scene};
 
@@ -39,16 +41,22 @@ pub(crate) struct HeadlessBackend {
     ledger: ResourceLedger,
     /// The next frame, when one is scheduled or was just drawn.
     frame_timer: Option<Timer<Compositor>>,
+    /// Where the outputs' globals are advertised.
+    display: DisplayHandle,
 }
 
 /// One in-memory output.
 struct Screen {
     /// The output clients see.
     output: Output,
+    /// Its size unless `outputs.toml` sets a mode.
+    preferred: Size<i32, Physical>,
     /// The image its frames are drawn into.
     target: Image<'static, 'static>,
     /// Knows what changed since its earlier frames, to redraw only that.
     damage_tracker: OutputDamageTracker,
+    /// Its global while it is on: clients see it, and it is drawn.
+    global: Option<GlobalId>,
 }
 
 impl HeadlessBackend {
@@ -109,6 +117,7 @@ impl HeadlessBackend {
             loop_handle: handle.clone(),
             ledger: ledger.clone(),
             frame_timer: None,
+            display: display.clone(),
         })
     }
 
@@ -185,10 +194,60 @@ impl HeadlessBackend {
     pub(crate) fn render(&mut self, scene: &Scene<'_>) -> Result<(), RenderError> {
         let mut result = Ok(());
         for screen in std::iter::once(&mut self.primary).chain(&mut self.others) {
-            let drawn = screen.render(&mut self.renderer, scene);
-            result = result.and(drawn);
+            if screen.global.is_some() {
+                let drawn = screen.render(&mut self.renderer, scene);
+                result = result.and(drawn);
+            }
         }
         result
+    }
+
+    /// Returns every output.
+    fn screens_mut(&mut self) -> impl Iterator<Item = &mut Screen> {
+        std::iter::once(&mut self.primary).chain(&mut self.others)
+    }
+
+    /// Returns the output `output` is.
+    fn screen_mut(&mut self, output: &Output) -> Option<&mut Screen> {
+        self.screens_mut().find(|screen| screen.output == *output)
+    }
+}
+
+impl OutputControl for HeadlessBackend {
+    fn set_enabled(&mut self, output: &Output, is_enabled: bool) {
+        let display = self.display.clone();
+        if let Some(screen) = self.screen_mut(output) {
+            match (is_enabled, screen.global.take()) {
+                (true, None) => {
+                    screen.global = Some(output.create_global::<Compositor>(&display));
+                }
+                (false, Some(global)) => display.remove_global::<Compositor>(global),
+                (true, Some(global)) => screen.global = Some(global),
+                (false, None) => {}
+            }
+        }
+    }
+
+    fn set_transform(&mut self, output: &Output, transform: Transform) {
+        output.change_current_state(None, Some(transform), None, None);
+    }
+
+    fn set_mode(&mut self, output: &Output, mode: Option<OutputMode>) {
+        if let Some(screen) = self.screen_mut(output) {
+            let size = mode.map_or(screen.preferred, |mode| {
+                Size::from((mode.width, mode.height))
+            });
+            let refresh = mode
+                .and_then(|mode| mode.refresh_millihertz)
+                .unwrap_or(Self::REFRESH_MILLIHERTZ);
+            if let Err(error) = screen.resize(size, refresh) {
+                tracing::warn!(
+                    error = &error as &dyn std::error::Error,
+                    output = output.name(),
+                    "the output keeps its mode"
+                );
+            }
+        }
     }
 }
 
@@ -204,14 +263,7 @@ impl Screen {
         size: Size<i32, Physical>,
         display: &DisplayHandle,
     ) -> Result<Self, BackendError> {
-        let dimension = |value: i32| usize::try_from(value).unwrap_or_default();
-        let target = Image::new(
-            FormatCode::A8R8G8B8,
-            dimension(size.w),
-            dimension(size.h),
-            false,
-        )
-        .map_err(BackendError::FrameImage)?;
+        let target = Self::image(size)?;
         let output = Output::new(
             format!("HEADLESS-{number}"),
             PhysicalProperties {
@@ -222,8 +274,7 @@ impl Screen {
                 serial_number: String::new(),
             },
         );
-        // The global lives as long as the display; nothing removes it.
-        let _global = output.create_global::<Compositor>(display);
+        let global = output.create_global::<Compositor>(display);
         let mode = Mode {
             size,
             refresh: HeadlessBackend::REFRESH_MILLIHERTZ,
@@ -233,9 +284,45 @@ impl Screen {
         let damage_tracker = OutputDamageTracker::from_output(&output);
         Ok(Self {
             output,
+            preferred: size,
             target,
             damage_tracker,
+            global: Some(global),
         })
+    }
+
+    /// Returns an image of `size` to draw into.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if it cannot be created.
+    fn image(size: Size<i32, Physical>) -> Result<Image<'static, 'static>, BackendError> {
+        let dimension = |value: i32| usize::try_from(value).unwrap_or_default();
+        Image::new(
+            FormatCode::A8R8G8B8,
+            dimension(size.w),
+            dimension(size.h),
+            false,
+        )
+        .map_err(BackendError::FrameImage)
+    }
+
+    /// Makes the output `size` pixels at `refresh` millihertz, with an
+    /// image to match, unless it is already.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the new image cannot be created.
+    fn resize(&mut self, size: Size<i32, Physical>, refresh: i32) -> Result<(), BackendError> {
+        let mode = Mode { size, refresh };
+        if self.output.current_mode() == Some(mode) {
+            return Ok(());
+        }
+        self.target = Self::image(size)?;
+        self.output.add_mode(mode);
+        self.output
+            .change_current_state(Some(mode), None, None, None);
+        Ok(())
     }
 
     /// Draws what `scene` shows on this output into its image.
