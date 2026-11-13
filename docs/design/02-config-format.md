@@ -446,6 +446,13 @@ focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
     `refuse_maximize`, `refuse_fullscreen`.
 - Rules apply in file order, and later matching rules override earlier ones
   key by key.
+- **Built so far:** `workspace`, `sticky`, `minimized`, `placement`
+  (`maximized`, `maximized horizontal|vertical`, `fullscreen`, `tile <x> <y>
+  <width> <height>`), `position = { anchor, offset }` and `size` (the frame's
+  size, as fluxland's `[Dimensions]` was). They apply when the window first
+  gets its place. The other keys are refused until their features exist.
+  `vaht import fluxbox` converts `apps` (workspaces counted from 0 there)
+  and reports the rest.
 
 ---
 
@@ -711,11 +718,11 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
     `PseudoTransparent`, `FocusProtection`, `RunDialog`) are understood as
     extensions of it.
 
-- **Built so far:** `init` to `settings.toml` and `keys` to `bindings.toml`.
+- **Built so far:** `init` to `settings.toml`, `keys` to `bindings.toml`
+  and `apps` to `rules.toml`.
   Every setting, binding or pattern vaht lacks is reported as "not in vaht
-  yet", so importing again as features arrive picks them up. `apps`, the
-  menus, the style and `startup` are reported until rules, menus and themes
-  exist. Commands are translated by `FluxboxCommand`. A sequence loses the
+  yet", so importing again as features arrive picks them up. The menus,
+  the style and `startup` are reported until menus and themes exist. Commands are translated by `FluxboxCommand`. A sequence loses the
   parts vaht drops on purpose (`ActivateTab`), but a part vaht lacks for
   now leaves the whole binding out.
 - It never overwrites an existing file without `--force`, and never touches

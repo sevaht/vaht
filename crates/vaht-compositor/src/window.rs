@@ -265,10 +265,14 @@ impl Window {
         self.frame.release_button(point)
     }
 
-    /// Puts the window where it first goes: its frame's corner at `corner`.
-    pub(crate) fn place_initially(&mut self, corner: Point<i32, Logical>, metrics: Metrics) {
-        let outer = Rectangle::new(corner, self.outer_area(metrics).size);
-        self.location = FrameGeometry::content_within(outer, metrics).loc;
+    /// Puts the window where it first goes: its frame at `outer`. If that
+    /// is not its size, the client is asked for the content size that fits.
+    pub(crate) fn place_initially(&mut self, outer: Area, metrics: Metrics) {
+        let content = FrameGeometry::content_within(outer, metrics);
+        self.location = content.loc;
+        if content.size != self.content_area().size {
+            self.toplevel.request_size(content.size);
+        }
         self.awaits_placement = false;
     }
 

@@ -158,7 +158,8 @@ impl TestClient {
             pool: SlotPool::new(pool_size, &shm).expect("a shared-memory pool"),
             shm,
             windows: Vec::new(),
-            frames_shown: 0,
+            first_draws: 0,
+            drawn: Vec::new(),
             close_requests: 0,
             capture_size: None,
             capture_result: None,
@@ -191,13 +192,17 @@ impl TestClient {
                 WindowDecorations::RequestServer,
                 &handle,
             );
-            window.set_title(format!("test window {number}"));
+            window.set_title(format!("test window {}", number + 1));
             window.set_app_id("vaht.test");
             window.commit();
             self.state.windows.push(window);
         }
-        let expected = self.state.frames_shown + count;
-        self.dispatch_until(|state| state.frames_shown >= expected);
+        // Each window draws when it is first configured. A window on a hidden
+        // workspace gets no frame callbacks, so waiting for those would
+        // wait forever; once vaht has the commits, screenshots show them.
+        let expected = self.state.first_draws + count;
+        self.dispatch_until(|state| state.first_draws >= expected);
+        self.roundtrip();
     }
 
     /// Closes every window and waits until vaht has processed it.
@@ -473,8 +478,10 @@ struct ClientState {
     pool: SlotPool,
     /// The open windows.
     windows: Vec<Window>,
-    /// How many frame callbacks arrived: each one is a window shown.
-    frames_shown: usize,
+    /// How many windows have drawn for the first time.
+    first_draws: usize,
+    /// The surfaces of the windows that have drawn.
+    drawn: Vec<wl_surface::WlSurface>,
     /// How many times vaht asked to close a window.
     close_requests: usize,
     /// The buffer size the current capture session asked for.
@@ -606,9 +613,7 @@ impl CompositorHandler for ClientState {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {
-        self.frames_shown += 1;
-    }
+    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
 
     fn surface_enter(
         &mut self,
@@ -655,6 +660,10 @@ impl WindowHandler for ClientState {
         _: u32,
     ) {
         // Take the size vaht asks for, as real clients do; with none, pick.
+        if !self.drawn.contains(window.wl_surface()) {
+            self.drawn.push(window.wl_surface().clone());
+            self.first_draws += 1;
+        }
         let (width, height) = configure.new_size;
         let size = (
             width.map_or(WINDOW_SIZE.0, std::num::NonZeroU32::get),

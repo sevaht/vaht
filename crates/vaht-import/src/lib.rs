@@ -7,10 +7,11 @@
 //! and checks the result as `vaht check` would. The source is never changed.
 //! Every line that is not converted is in the [`Report`], with why.
 //!
-//! Converted today: `init` to `settings.toml`, `keys` to `bindings.toml`.
-//! `apps`, `menu`, the style and `startup` are reported until vaht has
-//! rules, menus and themes.
+//! Converted today: `init` to `settings.toml`, `keys` to `bindings.toml`,
+//! `apps` to `rules.toml`. `menu`, the style and `startup` are reported until
+//! vaht has menus and themes.
 
+mod apps;
 mod command;
 mod keys;
 mod report;
@@ -22,6 +23,7 @@ use std::path::{Path, PathBuf};
 
 pub use report::{Note, Reason, Report};
 
+use crate::apps::AppsFile;
 use crate::keys::KeysFile;
 use crate::resources::Resources;
 use crate::settings::InitFile;
@@ -35,6 +37,8 @@ pub struct FluxboxSetup {
     init: Resources,
     /// The `keys` file: where, and what it says.
     keys: Option<(PathBuf, String)>,
+    /// The `apps` file: where, and what it says.
+    apps: Option<(PathBuf, String)>,
     /// The other files vaht cannot convert yet, if they exist.
     unconverted: Vec<(PathBuf, &'static str)>,
 }
@@ -60,11 +64,8 @@ impl FluxboxSetup {
             )
         };
         let keys_path = file("session.keyFile", "keys");
+        let apps_path = file("session.appsFile", "apps");
         let unconverted = [
-            (
-                file("session.appsFile", "apps"),
-                "per-window rules: vaht has no rules.toml yet",
-            ),
             (
                 file("session.menuFile", "menu"),
                 "menus: vaht has no menus yet",
@@ -85,22 +86,22 @@ impl FluxboxSetup {
         .into_iter()
         .filter(|(path, _)| path.exists())
         .collect();
-        let keys = match std::fs::read_to_string(&keys_path) {
-            Ok(text) => Some((keys_path, text)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => {
-                return Err(ImportError::Read {
-                    path: keys_path,
-                    error,
-                });
-            }
-        };
         Ok(Self {
             directory: directory.to_path_buf(),
             init,
-            keys,
+            keys: Self::read_optional(keys_path)?,
+            apps: Self::read_optional(apps_path)?,
             unconverted,
         })
+    }
+
+    /// Reads the file at `path`, if it exists.
+    fn read_optional(path: PathBuf) -> Result<Option<(PathBuf, String)>, ImportError> {
+        match std::fs::read_to_string(&path) {
+            Ok(text) => Ok(Some((path, text))),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(ImportError::Read { path, error }),
+        }
     }
 
     /// Converts the setup to vaht's files.
@@ -125,6 +126,13 @@ impl FluxboxSetup {
             files.push(OutputFile {
                 name: "bindings.toml",
                 text: header(path) + &bindings.to_string(),
+            });
+        }
+        if let Some((path, text)) = &self.apps {
+            let rules = AppsFile::new(path, text).convert(&mut report);
+            files.push(OutputFile {
+                name: "rules.toml",
+                text: header(path) + &rules.to_string(),
             });
         }
         for (path, why) in &self.unconverted {

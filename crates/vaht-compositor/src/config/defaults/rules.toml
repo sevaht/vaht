@@ -1,0 +1,16 @@
+# vaht's built-in rules: none. ~/.config/vaht/rules.toml holds yours.
+#
+# Each [[rule]] has a match (a window matcher, as in bindings) and what to
+# do with the windows it matches when they open. Later rules override
+# earlier ones key by key.
+#
+# [[rule]]
+# match = { app_id = "steam" }
+# workspace = 2                          # from 1
+# sticky = true
+# minimized = false
+# placement = "maximized"                # or "maximized horizontal",
+#                                        # "maximized vertical", "fullscreen",
+#                                        # "tile 0 0 500 1000"
+# position = { anchor = "center", offset = [0, 0] }
+# size = [800, 600]                      # the frame's size, in pixels

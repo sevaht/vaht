@@ -51,7 +51,10 @@ pub(crate) struct InitFile {
 impl InitFile {
     /// Converts `resources`.
     pub(crate) fn new(resources: Resources) -> Self {
-        let [_, settings] = Config::FILES;
+        let settings = Config::FILES
+            .iter()
+            .find(|file| file.name == "settings.toml")
+            .expect("settings.toml is one of vaht's files");
         Self {
             resources,
             document: DocumentMut::new(),

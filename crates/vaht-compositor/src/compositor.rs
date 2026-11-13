@@ -28,7 +28,7 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
-use smithay::utils::Serial;
+use smithay::utils::{Rectangle, Serial};
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
 use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::shell::xdg::ToplevelSurface;
@@ -50,7 +50,7 @@ use crate::scene::Scene;
 use crate::signals::{ProcessSignals, SignalRequest};
 use crate::window::{Frame, NewWindow, OutputArea, Toplevel, Window, WindowId};
 use crate::windows::Windows;
-use crate::workspaces::Workspaces;
+use crate::workspaces::{Workspace, Workspaces};
 
 /// The running compositor.
 pub struct Compositor {
@@ -469,17 +469,42 @@ impl Compositor {
             occupied,
             pointer,
         };
+        let output = self.output_area();
         let placement = self.config.settings.placement;
-        if let Some(window) = self.windows.get_mut(id) {
-            let size = window.outer_area(metrics).size;
-            let corner = placement.strategy.place(
-                size,
-                &room,
-                placement.row_direction,
-                placement.column_direction,
-            );
-            window.place_initially(corner, metrics);
+        let Some(window) = self.windows.get_mut(id) else {
+            return;
+        };
+        let rule = self.config.rules.for_window(window, current);
+        let size = rule.size().unwrap_or(window.outer_area(metrics).size);
+        let corner = rule.position.map_or_else(
+            || {
+                placement.strategy.place(
+                    size,
+                    &room,
+                    placement.row_direction,
+                    placement.column_direction,
+                )
+            },
+            |position| position.corner(room.usable, size),
+        );
+        let outer = Rectangle::new(corner, size);
+        window.place_initially(outer, metrics);
+        if let Some(workspace) = rule.workspace.map(Workspace::numbered)
+            && workspace.is_within(&self.workspaces)
+        {
+            window.move_to_workspace(workspace);
         }
+        if let Some(is_sticky) = rule.sticky {
+            window.set_sticky(is_sticky);
+        }
+        if let Some(is_minimized) = rule.minimized {
+            window.set_minimized(is_minimized);
+        }
+        if let Some(placement) = rule.placement {
+            window.place(placement.placement(outer), output, metrics);
+        }
+        // A rule may have sent the new window out of sight.
+        self.focus_most_recent();
     }
 
     /// Stops managing the window whose root surface is `surface`.
