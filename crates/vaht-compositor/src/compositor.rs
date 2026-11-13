@@ -110,6 +110,9 @@ pub struct Compositor {
     pub(crate) backdrop: Backdrop,
     /// The outline of an outline resize.
     pub(crate) outline: Outline,
+    /// The program of the tray item last clicked, and when: it may bring
+    /// its windows forward for `activation_grace_ms`.
+    pub(crate) tray_grant: Option<(u32, Instant)>,
     /// The tooltip for what the pointer rests on.
     pub(crate) tooltip: Tooltip,
     /// Shapes and draws text; shared by every panel.
@@ -276,6 +279,7 @@ impl Compositor {
             backdrop: Backdrop::new(&config.settings.wallpaper, config_source.directory()),
             outline: Outline::default(),
             tooltip: Tooltip::default(),
+            tray_grant: None,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             icons: vaht_ui::IconStore::from_environment(),
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
@@ -1415,6 +1419,7 @@ impl Compositor {
             AfterClick::AskTrayItem(item, action) => {
                 if let Some(taskbar) = &self.taskbar {
                     taskbar.act_on_tray(item, action, location);
+                    self.tray_grant = taskbar.tray_item_pid(item).map(|pid| (pid, Instant::now()));
                 }
             }
             AfterClick::RunBinding { press, drag } => {

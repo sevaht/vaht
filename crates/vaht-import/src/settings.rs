@@ -477,8 +477,9 @@ impl InitFile {
         }
     }
 
-    /// The tray's pins, from `systray.pinLeft` and `systray.pinRight`:
-    /// item names, split at commas and spaces as Fluxbox splits them.
+    /// The tray's pins, from `systray.pinLeft` and `systray.pinRight`
+    /// (item names, split at commas and spaces as Fluxbox splits them), and
+    /// fluxland's `systray.activationGrace`.
     fn convert_tray_pins(&mut self) {
         for (side, key) in [("pinLeft", "pin_left"), ("pinRight", "pin_right")] {
             let Some(names) = self.resources.value(&format!("{SCREEN}systray.{side}")) else {
@@ -490,6 +491,12 @@ impl InitFile {
                 .filter(|name| !name.is_empty())
                 .collect();
             self.set(&["taskbar", "tray", key], Value::Array(pins));
+        }
+        if let Some(grace) = self.number(&format!("{SCREEN}systray.activationGrace")) {
+            self.set(
+                &["taskbar", "tray", "activation_grace_ms"],
+                Value::from(grace.max(0)),
+            );
         }
     }
 

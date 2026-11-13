@@ -85,6 +85,9 @@ pub(crate) struct TrayItem {
     /// The unique name of its connection, which its announcements come
     /// from.
     pub(crate) owner: String,
+    /// Its program's process, if the bus said: clicking the item lets that
+    /// program bring its windows forward for a moment.
+    pub(crate) pid: Option<u32>,
     /// The application's name for it, which `pin_left` and `pin_right`
     /// name it by.
     pub(crate) id: String,
@@ -156,6 +159,7 @@ impl TrayItem {
                 .unwrap_or(false),
             address,
             owner,
+            pid: None,
         }
     }
 }

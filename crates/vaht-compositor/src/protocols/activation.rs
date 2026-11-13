@@ -5,8 +5,10 @@
 //! within [`ACTIVATION_PATIENCE`]: the window is restored, its workspace
 //! shown, and it is raised and focused. Any other request is refused and
 //! logged, so a program in the background cannot take focus by itself,
-//! unless a rule says the window may (`focus_stealing = "allow"`); one
-//! saying `"deny"` refuses even a good token.
+//! unless a rule says the window may (`focus_stealing = "allow"`), or the
+//! user clicked the program's tray item a moment ago
+//! (`activation_grace_ms`); a rule saying `"deny"` refuses even a good
+//! token.
 
 use std::time::Duration;
 
@@ -53,7 +55,19 @@ impl XdgActivationHandler for Compositor {
             .window_manager
             .window(window)
             .map_or(FocusStealing::Default, Window::focus_stealing);
-        if policy.honors(is_asked_for) {
+        let grace = self.config.settings.taskbar.tray.activation_grace();
+        let is_granted = self.tray_grant.is_some_and(|(pid, at)| {
+            at.elapsed() <= grace
+                && self
+                    .display_handle
+                    .get_client(surface.id())
+                    .ok()
+                    .and_then(|client| client.get_credentials(&self.display_handle).ok())
+                    .is_some_and(|credentials| {
+                        u32::try_from(credentials.pid).is_ok_and(|client| client == pid)
+                    })
+        });
+        if policy.honors(is_asked_for || is_granted) {
             tracing::debug!(window = %window, "activation honored");
             self.window_manager.activate(window);
         } else {

@@ -205,7 +205,11 @@ rest by name, so a setting never silently does nothing:
   second half), `auto_hide` and `auto_hide_delay_ms` (hidden until the
   pointer touches the edge, hidden again that long after it leaves; an
   auto-hiding taskbar reserves nothing, and its clock rests while hidden),
-  `reserve_space`, `[taskbar.tooltips]` `enabled` and `delay_ms` (from
+  `reserve_space`, `[taskbar.tray] activation_grace_ms` (from fluxland's
+  `systray.activationGrace`: for that long after a click on a tray item,
+  its program may bring its windows forward without a token, as its menu
+  often cannot pass one; known by the process the bus reports),
+  `[taskbar.tooltips]` `enabled` and `delay_ms` (from
   `tooltipDelay`;
   resting the pointer on an entry whose title does not fit shows the whole
   title, and on a tray item its tooltip, in the theme's `tooltip`),

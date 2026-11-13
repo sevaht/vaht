@@ -95,6 +95,17 @@ impl TrayAction {
     }
 }
 
+/// What reading an item gave.
+#[derive(Debug)]
+pub(crate) struct ItemRead {
+    /// Its connection's unique name.
+    owner: String,
+    /// Its program's process, if the bus says.
+    pid: Option<u32>,
+    /// Its properties.
+    properties: HashMap<String, OwnedVariant>,
+}
+
 /// What the tray learns, on vaht's loop.
 #[derive(Debug)]
 pub(crate) enum TrayEvent {
@@ -118,9 +129,8 @@ pub(crate) enum TrayEvent {
     Fetched {
         /// The item.
         address: ItemAddress,
-        /// Its connection's unique name, and its properties; or why they
-        /// could not be read.
-        properties: Result<(String, HashMap<String, OwnedVariant>), String>,
+        /// What was read of it, or why it could not be.
+        properties: Result<ItemRead, String>,
     },
     /// A call to an item, or to the watcher, failed.
     CallFailed(String),
@@ -249,6 +259,14 @@ impl<State: 'static> Tray<State> {
         items
     }
 
+    /// Returns the process of the item `key`, if the bus said.
+    pub(crate) fn pid_of(&self, key: TrayItemKey) -> Option<u32> {
+        self.items
+            .iter()
+            .find(|item| item.key == key)
+            .and_then(|item| item.pid)
+    }
+
     /// Asks the item `key` for `action`, the pointer at global `at`.
     pub(crate) fn act(&self, key: TrayItemKey, action: TrayAction, at: Point<i32, Logical>) {
         let (Some(item), Some(connection)) = (
@@ -339,9 +357,13 @@ impl<State: 'static> Tray<State> {
     fn take_properties(
         &mut self,
         address: ItemAddress,
-        properties: Result<(String, HashMap<String, OwnedVariant>), String>,
+        properties: Result<ItemRead, String>,
     ) -> bool {
-        let (owner, properties) = match properties {
+        let ItemRead {
+            owner,
+            pid,
+            properties,
+        } = match properties {
             Ok(read) => read,
             Err(error) => {
                 tracing::debug!(%error, item = %address.to_listed(), "a tray item could not be read");
@@ -356,7 +378,8 @@ impl<State: 'static> Tray<State> {
             },
             |at| self.items[at].key,
         );
-        let item = TrayItem::from_properties(key, address, owner, &properties);
+        let mut item = TrayItem::from_properties(key, address, owner, &properties);
+        item.pid = pid;
         match existing {
             Some(at) if self.items[at] == item => false,
             Some(at) => {
@@ -552,19 +575,20 @@ impl<State: 'static> Tray<State> {
     }
 
     /// Reads the properties of the item at `address`, with the unique name
-    /// of its connection.
-    async fn read(
-        connection: &Connection,
-        address: &ItemAddress,
-    ) -> zbus::Result<(String, HashMap<String, OwnedVariant>)> {
+    /// of its connection and its process, if the bus says.
+    async fn read(connection: &Connection, address: &ItemAddress) -> zbus::Result<ItemRead> {
+        let bus = DBusProxy::new(connection).await?;
         let owner = if address.bus.starts_with(':') {
             address.bus.clone()
         } else {
-            DBusProxy::new(connection)
-                .await?
-                .get_name_owner(address.bus.as_str().try_into()?)
+            bus.get_name_owner(address.bus.as_str().try_into()?)
                 .await?
                 .to_string()
+        };
+        // Not every bus can say; the item works without it.
+        let pid = match owner.as_str().try_into() {
+            Ok(name) => bus.get_connection_unix_process_id(name).await.ok(),
+            Err(_) => None,
         };
         let properties = PropertiesProxy::builder(connection)
             .destination(owner.as_str())
@@ -574,7 +598,11 @@ impl<State: 'static> Tray<State> {
             .await?
             .get_all(ITEM_INTERFACE.try_into()?)
             .await?;
-        Ok((owner, properties))
+        Ok(ItemRead {
+            owner,
+            pid,
+            properties,
+        })
     }
 
     /// Takes the items of the connection `name` off the list of the watcher
@@ -834,6 +862,11 @@ mod tests {
         let item = tray.ordered(&[], &[])[0];
         assert_eq!(item.id, "test-item");
         assert!(matches!(&item.icon, ItemIcon::Named { name, .. } if name == "test-icon"));
+        assert_eq!(
+            tray.pid_of(item.key),
+            Some(std::process::id()),
+            "the bus says which program the item is, for activation grace"
+        );
 
         world.retitle_item("Paused");
         world.dispatch_until(|probe| World::titles(probe) == ["Paused"]);
@@ -895,7 +928,11 @@ mod tests {
             ]);
             tray.take_properties(
                 ItemAddress::listed(&format!(":1.{id}")),
-                Ok((format!(":1.{id}"), properties)),
+                Ok(ItemRead {
+                    owner: format!(":1.{id}"),
+                    pid: None,
+                    properties,
+                }),
             );
         }
         let order: Vec<String> = tray

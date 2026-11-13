@@ -125,13 +125,35 @@ impl<'de> serde::Deserialize<'de> for WidthPercent {
 }
 
 /// The tray: which items go first and last.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct TraySettings {
     /// Items first, in this order, named by their id in any case.
     pub(crate) pin_left: Vec<String>,
     /// Items last, in this order.
     pub(crate) pin_right: Vec<String>,
+    /// How long after a click on an item its program may bring its
+    /// windows forward without a token from the focused program, as the
+    /// item's own menu often cannot pass one; 0 for never.
+    pub(crate) activation_grace_ms: u64,
+}
+
+impl Default for TraySettings {
+    fn default() -> Self {
+        Self {
+            pin_left: Vec::new(),
+            pin_right: Vec::new(),
+            activation_grace_ms: 500,
+        }
+    }
+}
+
+impl TraySettings {
+    /// Returns how long after a click on an item its program may bring its
+    /// windows forward.
+    pub(crate) const fn activation_grace(&self) -> Duration {
+        Duration::from_millis(self.activation_grace_ms)
+    }
 }
 
 /// Where along its edge a taskbar narrower than the edge sits.

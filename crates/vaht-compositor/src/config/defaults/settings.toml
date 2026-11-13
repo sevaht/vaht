@@ -79,6 +79,9 @@ icons = true
 # in this order, and those named in pin_right last.
 pin_left = []
 pin_right = []
+# How long after a click on an item its program may bring its windows
+# forward by itself, as its menu often cannot pass a token; 0 for never.
+activation_grace_ms = 500
 
 [taskbar.tooltips]
 # Whether resting the pointer on an entry whose title does not fit, or on a

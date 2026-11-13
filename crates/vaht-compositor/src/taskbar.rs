@@ -252,6 +252,11 @@ impl Taskbar {
         self.panel.hit_at(self.local(point.to_i32_floor()))
     }
 
+    /// Returns the process of the tray item `key`, if known.
+    pub(crate) fn tray_item_pid(&self, key: TrayItemKey) -> Option<u32> {
+        self.tray.as_ref()?.pid_of(key)
+    }
+
     /// Returns the tooltip for global `point`: a window list entry's title
     /// if it does not fit, as `theme` and `typesetter` lay it out, or a
     /// tray item's text; none elsewhere.
