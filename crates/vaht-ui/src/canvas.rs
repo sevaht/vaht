@@ -12,10 +12,10 @@ use crate::color::Color;
 use crate::geometry::Rect;
 use crate::icon::WidgetIcon;
 use crate::layout::{Content, Layout, Placed};
-use crate::text::Typesetter;
+use crate::text::{TextStyle, Typesetter};
 use crate::texture::{Bevel, Fill, GradientDirection, Texture};
 use crate::theme::{Theme, WidgetState};
-use crate::widget::Glyph;
+use crate::widget::{Glyph, TextField};
 
 /// The opacity of a bevel's light and dark edges: enough to read as relief
 /// on any fill without hiding it.
@@ -69,8 +69,30 @@ impl<'pixmap> Canvas<'pixmap> {
             match &placed.content {
                 Content::Text(text) => typesetter.draw(self.pixmap, text, &style.text, inner),
                 Content::Glyph(glyph) => self.draw_glyph(*glyph, style.glyph_color, inner),
+                Content::Field(field) => self.draw_field(field, &style.text, inner, typesetter),
                 Content::Background => {}
             }
+        }
+    }
+
+    /// Draws `field` in `area` (see [`Typesetter::draw_field`]) and its
+    /// cursor: a line in the text's color, a pixel in from the area's top
+    /// and bottom.
+    fn draw_field(
+        &mut self,
+        field: &TextField,
+        style: &TextStyle,
+        area: Rect,
+        typesetter: &mut Typesetter,
+    ) {
+        let cursor = typesetter.draw_field(self.pixmap, field, style, area);
+        let x = area.x + i32::try_from(cursor).expect("panel widths fit in i32");
+        let line = Rect::new(x, area.y + 1, 1, area.height.saturating_sub(2));
+        if let Some(line) = line.to_skia() {
+            let mut paint = Paint::default();
+            paint.set_color(style.color.to_skia());
+            self.pixmap
+                .fill_rect(line, &paint, Transform::identity(), None);
         }
     }
 

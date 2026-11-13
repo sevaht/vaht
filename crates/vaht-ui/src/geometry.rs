@@ -73,6 +73,12 @@ impl Insets {
     pub const fn horizontal(self) -> u32 {
         self.left + self.right
     }
+
+    /// Returns the total vertical space.
+    #[must_use]
+    pub const fn vertical(self) -> u32 {
+        self.top + self.bottom
+    }
 }
 
 /// An axis-aligned rectangle of pixels.

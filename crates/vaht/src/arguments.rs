@@ -39,6 +39,8 @@ impl Arguments {
         RunOptions {
             backend: self.backend.into(),
             config_directory: self.config_directory(),
+            // Found on PATH, if the running program cannot be.
+            executable: std::env::current_exe().unwrap_or_else(|_| PathBuf::from(PROGRAM_NAME)),
         }
     }
 
@@ -72,6 +74,14 @@ pub enum Subcommand {
         #[command(subcommand)]
         source: ImportSource,
     },
+    /// Shows one of vaht's dialogs: a window with a line to type in. vaht
+    /// runs these itself (the `run-dialog` action), but they work from a
+    /// terminal too.
+    Dialog {
+        /// Which dialog.
+        #[command(subcommand)]
+        dialog: DialogKind,
+    },
     /// Asks the running vaht something, or tells it what to do, over its
     /// IPC socket (`$VAHT_SOCKET`, or the one beside `$WAYLAND_DISPLAY`).
     Msg {
@@ -82,6 +92,14 @@ pub enum Subcommand {
         #[command(subcommand)]
         request: MessageRequest,
     },
+}
+
+/// The dialogs `vaht dialog` shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::Subcommand)]
+pub enum DialogKind {
+    /// A command line to run, with Tab completing program and file names
+    /// and Up and Down going through the lines run before.
+    Run,
 }
 
 /// What `vaht msg` asks.

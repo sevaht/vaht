@@ -150,6 +150,9 @@ struct Sources {
     /// Whether the element has no texture of its own, and what is behind
     /// it shows: a menu's items, on the frame.
     shows_parent: bool,
+    /// Whether Fluxbox styles say nothing of the element, so it keeps what
+    /// vaht's built-in theme gives it: a dialog's line.
+    is_built_in: bool,
 }
 
 impl Sources {
@@ -164,6 +167,7 @@ impl Sources {
             justify: None,
             padding: None,
             shows_parent: false,
+            is_built_in: false,
         }
     }
 
@@ -336,6 +340,10 @@ impl Sources {
             ThemeElement::MenuTitle | ThemeElement::MenuFrame | ThemeElement::MenuItem => {
                 Self::of_menu(element, state)
             }
+            ThemeElement::DialogField => Self {
+                is_built_in: true,
+                ..Self::texture(&[])
+            },
             ThemeElement::WindowListEmpty => Self {
                 texture: &[
                     "toolbar.iconbar.empty",
@@ -392,7 +400,8 @@ impl Sources {
             | ThemeElement::TaskbarWorkspace
             | ThemeElement::TaskbarClock
             | ThemeElement::WindowListEntry
-            | ThemeElement::WindowListEmpty => Self {
+            | ThemeElement::WindowListEmpty
+            | ThemeElement::DialogField => Self {
                 font: Some(&["menu.frame.font"]),
                 text_color: Some(&["menu.frame.textColor"]),
                 justify: Some(&["menu.frame.justify"]),
@@ -470,6 +479,10 @@ impl StyleFile {
         for element in elements {
             for state in <WidgetState as strum::IntoEnumIterator>::iter() {
                 let sources = Sources::of(element, state);
+                if sources.is_built_in {
+                    cells.push((element, state, Self::built_in_cell(element)));
+                    continue;
+                }
                 let mut cell = Cell::new();
                 if sources.shows_parent {
                     cell.insert(Property::Texture, Written(Value::from("parent")));
@@ -564,7 +577,8 @@ impl StyleFile {
             | ThemeElement::TaskbarWorkspace
             | ThemeElement::TaskbarClock
             | ThemeElement::WindowListEntry
-            | ThemeElement::WindowListEmpty => None,
+            | ThemeElement::WindowListEmpty
+            | ThemeElement::DialogField => None,
         };
         if let Some(height) = height {
             cell.insert(Property::Height, Written(Value::from(i64::from(height))));
@@ -609,8 +623,28 @@ impl StyleFile {
             | ThemeElement::WindowListEntry
             | ThemeElement::WindowListEmpty
             | ThemeElement::MenuTitle
-            | ThemeElement::MenuItem => {}
+            | ThemeElement::MenuItem
+            | ThemeElement::DialogField => {}
         }
+    }
+
+    /// Returns what vaht's built-in theme says of `element` in its own
+    /// section, for an element Fluxbox styles say nothing of.
+    fn built_in_cell(element: ThemeElement) -> Cell {
+        let theme: DocumentMut = vaht_ui::Theme::BUILT_IN
+            .parse()
+            .expect("the built-in theme is valid TOML (tested in vaht-ui)");
+        let section = element
+            .path()
+            .split('.')
+            .try_fold(theme.as_item(), |item, key| item.get(key));
+        <Property as strum::IntoEnumIterator>::iter()
+            .filter_map(|property| {
+                let mut value = section?.get(property.key())?.as_value()?.clone();
+                value.decor_mut().clear();
+                Some((property, Written(value)))
+            })
+            .collect()
     }
 
     /// Adds the `resource` (`window.roundCorners`, `menu.roundCorners`) to
@@ -1242,6 +1276,20 @@ menu.bullet:\tsquare
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_dialog_looks_as_in_the_built_in_theme() {
+        let (_, theme, _) = convert(STYLE);
+        let theme = Theme::resolve(&ThemeLayers::from_toml(&theme).expect("a valid theme"));
+        let built_in = Theme::built_in();
+        let (got, want) = (
+            theme.style(ThemeElement::DialogField, WidgetState::Focused),
+            built_in.style(ThemeElement::DialogField, WidgetState::Focused),
+        );
+        assert_eq!(got.texture, want.texture);
+        assert_eq!(got.text, want.text);
+        assert_eq!(got.padding, want.padding);
     }
 
     #[test]

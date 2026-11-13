@@ -49,6 +49,36 @@ pub mod keys {
     pub const F4: u32 = 62;
     /// The left Super (Windows, logo) key.
     pub const LEFT_SUPER: u32 = 125;
+    /// Return (Enter).
+    pub const ENTER: u32 = 28;
+    /// The space bar.
+    pub const SPACE: u32 = 57;
+
+    /// Returns the key that types `character` on a US keyboard, and
+    /// whether Shift must be held: a letter, a digit, a space, `-`, `.` or
+    /// `/`.
+    #[must_use]
+    pub fn typing(character: char) -> Option<(u32, bool)> {
+        let key = unshifted(character.to_ascii_lowercase())?;
+        Some((key, character.is_ascii_uppercase()))
+    }
+
+    /// Returns the key that types `character` without Shift.
+    fn unshifted(character: char) -> Option<u32> {
+        const ROWS: [(&str, u32); 4] = [
+            ("1234567890-", 2),
+            ("qwertyuiop", 16),
+            ("asdfghjkl", 30),
+            ("zxcvbnm,./", 44),
+        ];
+        if character == ' ' {
+            return Some(SPACE);
+        }
+        ROWS.iter().find_map(|(row, first)| {
+            let column = row.chars().position(|key| key == character)?;
+            Some(first + u32::try_from(column).ok()?)
+        })
+    }
 }
 
 /// `wl_keyboard.key_state.released`.

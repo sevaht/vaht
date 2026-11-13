@@ -444,6 +444,24 @@ impl TestClient {
         }
     }
 
+    /// Types `text` key by key, each pressed and released.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `text` has a character [`keys::typing`] has no key for,
+    /// or the connection to vaht fails.
+    pub fn type_text(&mut self, text: &str) {
+        for character in text.chars() {
+            let (key, is_shifted) =
+                keys::typing(character).unwrap_or_else(|| panic!("no key types {character:?}"));
+            if is_shifted {
+                self.type_chord(&[keys::LEFT_SHIFT, key]);
+            } else {
+                self.type_chord(&[key]);
+            }
+        }
+    }
+
     /// Lets go of every held modifier.
     ///
     /// # Panics

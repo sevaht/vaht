@@ -26,6 +26,7 @@ mod style;
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub use pattern::RUN_DIALOG_APP_ID;
 pub use report::{Note, Reason, Report};
 
 use crate::apps::AppsFile;

@@ -334,6 +334,7 @@ impl Window {
             self.request_size(content.size);
         }
         self.awaits_placement = false;
+        tracing::debug!(window = %self.id, area = ?outer, "placed first");
     }
 
     /// Places the window so on `output`, its frame sized by `metrics`: moves

@@ -10,6 +10,11 @@ use toml_edit::{InlineTable, Value};
 
 use crate::report::Reason;
 
+/// The application id of vaht's run dialog, which takes the place of
+/// Fluxbox's `fbrun` and fluxland's `fluxland-run` (a test in the vaht
+/// crate keeps it the dialog's).
+pub const RUN_DIALOG_APP_ID: &str = "vaht-run";
+
 /// A client pattern: criteria, each in parentheses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ClientPattern<'text> {
@@ -48,6 +53,8 @@ impl<'text> ClientPattern<'text> {
             .map_or((key, false), |key| (key, true));
         let vaht = match (key.trim().to_ascii_lowercase().as_str(), value) {
             ("workspace", "[current]") => Some(("workspace", Value::from("current"))),
+            // The run window is vaht's run dialog now.
+            ("class", "fbrun" | "fluxland-run") => Some(("app_id", Value::from(RUN_DIALOG_APP_ID))),
             ("class", text) => Some(("app_id", Self::text_pattern(text))),
             ("title", text) => Some(("title", Self::text_pattern(text))),
             ("minimized", "yes") => Some(("minimized", Value::from(true))),

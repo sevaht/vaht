@@ -465,8 +465,9 @@ match = { app_id = "steam" }
 focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
 ```
 
-- The `fluxland-run` centering rule is not needed: `vaht dialog` windows open
-  centered by default.
+- The run dialog's application id is `vaht-run`. `vaht import` turns a rule
+  for `fluxland-run` or `fbrun` into one for it, so my centering rule carries
+  over.
 - **Rule keys:**
   - placement: `workspace`, `output`, `layer`, `position` (with an anchor and
     offset), `size`, `placement` (`maximized`, `fullscreen`, `tile <cell>`);
@@ -628,6 +629,8 @@ exactly what each element gets.
   - taskbar: `taskbar`, `taskbar.workspace`, `taskbar.clock`,
     `taskbar.window-list.entry`, `taskbar.window-list.empty`, `taskbar.tray`;
   - menus: `menu.title`, `menu.frame`, `menu.item`;
+  - dialogs: `dialog.field`, the line a dialog edits (its cursor takes the
+    text color);
   - other: `tooltip`, `snap-picker`, `wireframe`.
 - **States:** `focused`, `unfocused`, `hovered`, `pressed`, `active`,
   `disabled`. A menu item's highlight is its `hovered` state.
@@ -660,8 +663,10 @@ exactly what each element gets.
   configuration directory, then from `/usr/share/vaht/themes/`. The file is
   watched like the others: editing it restyles every open window.
 - Elements: the window's six, and `taskbar`, `taskbar.button`,
-  `taskbar.workspace`, `taskbar.clock`, `taskbar.window-list.entry` and
-  `taskbar.window-list.empty`. States: `focused`, `unfocused`, `pressed`.
+  `taskbar.workspace`, `taskbar.clock`, `taskbar.window-list.entry`,
+  `taskbar.window-list.empty`, `menu.title`, `menu.frame`, `menu.item` and
+  `dialog.field`. States: `focused`, `unfocused`, `pressed`, `hovered`,
+  `disabled`.
 - Properties: `texture` (solid or gradient, with a bevel), `font`,
   `text_color`, `text_effect`, `justify`, `glyph_color`, `padding`,
   `border` and `height`. Window borders take their color and width from
@@ -803,6 +808,11 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
   unique, and `[include]` files are read in place. A submenu with nothing
   vaht can show is left out. Vaht's own window and workspace menus are
   written where the source has none.
+- **The run window converts to the run dialog:** `RunDialog`, and `Exec
+  fbrun` or `Exec fluxland-run`, become `run-dialog`; their options are
+  reported, since the theme's `dialog.field` styles the dialog. Fluxbox
+  styles say nothing of `dialog.field`, so a converted theme takes the
+  built-in one's: black on white, as fbrun draws.
 - **The toolbar converts to `[taskbar]`:** its placement, tools, `maxOver`,
   `strftimeFormat`, `iconbar.mode` (a client pattern) and
   `iconbar.iconWidth`; settings that already ask for what vaht does are

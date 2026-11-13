@@ -1,0 +1,25 @@
+[package]
+name = "vaht-dialog"
+description = "vaht's text dialogs, such as the run dialog: ordinary Wayland windows that act through vaht's IPC."
+keywords = ["wayland", "dialog", "launcher", "compositor"]
+categories = ["gui"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+[dependencies]
+smithay-client-toolkit = { workspace = true, features = ["calloop", "xkbcommon"] }
+thiserror.workspace = true
+vaht-ipc.workspace = true
+vaht-ui.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

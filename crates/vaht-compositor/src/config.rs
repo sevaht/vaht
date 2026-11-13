@@ -131,6 +131,13 @@ impl Config {
         })
     }
 
+    /// Returns how everything vaht draws looks: the theme the settings
+    /// name. vaht's dialogs, which are separate programs, draw with it too.
+    #[must_use]
+    pub const fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
     /// Returns the built-in configuration, which every file's absence gives.
     ///
     /// # Panics

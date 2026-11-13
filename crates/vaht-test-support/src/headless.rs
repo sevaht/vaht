@@ -41,6 +41,9 @@ pub struct HeadlessVaht {
     config: tempfile::TempDir,
     /// Its only XDG data directory; removed with the value.
     _data: tempfile::TempDir,
+    /// Its XDG state directory, where its dialogs keep their history;
+    /// removed with the value.
+    state: tempfile::TempDir,
     /// Where it logs; removed with the value.
     logs: tempfile::TempDir,
     /// The socket clients connect to.
@@ -116,6 +119,7 @@ impl HeadlessVaht {
             .tempdir()
             .expect("a temporary runtime directory");
         let logs = tempfile::tempdir().expect("a temporary log directory");
+        let state = tempfile::tempdir().expect("a temporary state directory");
         let process = Command::new(executable)
             .args([
                 "--backend",
@@ -130,6 +134,7 @@ impl HeadlessVaht {
             .env("VAHT_CONFIG_DIRECTORY", config.path())
             .env("XDG_DATA_HOME", data_directory.path())
             .env("XDG_DATA_DIRS", data_directory.path())
+            .env("XDG_STATE_HOME", state.path())
             // No D-Bus bus of the machine's: one that is not there.
             .env("DBUS_SYSTEM_BUS_ADDRESS", Self::absent_bus(runtime.path()))
             .env("DBUS_SESSION_BUS_ADDRESS", Self::absent_bus(runtime.path()))
@@ -146,6 +151,7 @@ impl HeadlessVaht {
             runtime,
             config,
             _data: data_directory,
+            state,
             logs,
         };
         let line = vaht.wait_for_log(|log| {
@@ -176,6 +182,12 @@ impl HeadlessVaht {
     pub fn ipc_socket(&self) -> PathBuf {
         let display = self.socket.file_name().expect("the socket has a name");
         vaht_ipc::socket_path(self.runtime.path(), display)
+    }
+
+    /// Returns vaht's XDG state directory.
+    #[must_use]
+    pub fn state_directory(&self) -> &Path {
+        self.state.path()
     }
 
     /// Returns vaht's configuration directory, where a test can change the

@@ -16,6 +16,7 @@ use tiny_skia::{Pixmap, PixmapPaint, PremultipliedColorU8, Transform};
 
 use crate::color::Color;
 use crate::geometry::Rect;
+use crate::widget::TextField;
 
 /// A typeface at a size.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -191,6 +192,47 @@ impl Typesetter {
     /// Draws `text` in `style` into `area` of `target`, vertically centered
     /// and clipped to the area.
     pub fn draw(&mut self, target: &mut Pixmap, text: &str, style: &TextStyle, area: Rect) {
+        let line = Line {
+            text,
+            style,
+            area,
+            placement: Placement::Justified,
+        };
+        self.draw_line(target, &line);
+    }
+
+    /// Draws `field`'s text in `style` into `area` of `target`
+    /// left-justified, scrolled so its cursor is in view (the cursor's own
+    /// pixel included), and clipped to the area. Returns where the cursor
+    /// goes, in pixels from the area's left edge.
+    pub fn draw_field(
+        &mut self,
+        target: &mut Pixmap,
+        field: &TextField,
+        style: &TextStyle,
+        area: Rect,
+    ) -> u32 {
+        let cursor = self.text_width(field.before_cursor(), &style.font);
+        let scroll = cursor.saturating_sub(area.width.saturating_sub(1));
+        let line = Line {
+            text: field.text(),
+            style,
+            area,
+            placement: Placement::Scrolled(scroll),
+        };
+        self.draw_line(target, &line);
+        cursor - scroll
+    }
+
+    /// Draws `line` into `target`, vertically centered and clipped to its
+    /// area.
+    fn draw_line(&mut self, target: &mut Pixmap, line: &Line<'_>) {
+        let Line {
+            text,
+            style,
+            area,
+            placement,
+        } = *line;
         if text.is_empty() {
             return;
         }
@@ -211,10 +253,12 @@ impl Typesetter {
         let Some(line_width) = buffer.layout_runs().next().map(|line| line.line_w) else {
             return;
         };
-        let origin = (
-            style.justify.offset(line_width, area.width) + margin_pixels,
-            margin_pixels,
-        );
+        let across = match placement {
+            Placement::Justified => style.justify.offset(line_width, area.width),
+            #[expect(clippy::cast_precision_loss, reason = "text widths are far below 2^24")]
+            Placement::Scrolled(scroll) => -(scroll as f32),
+        };
+        let origin = (across + margin_pixels, margin_pixels);
         let at = |shift_x: f32, shift_y: f32| (origin.0 + shift_x, origin.1 + shift_y);
         match style.effect {
             TextEffect::None => {}
@@ -330,6 +374,28 @@ impl Typesetter {
             },
         );
     }
+}
+
+/// A line of text to draw, and where.
+#[derive(Debug, Clone, Copy)]
+struct Line<'text> {
+    /// The text.
+    text: &'text str,
+    /// How it looks.
+    style: &'text TextStyle,
+    /// Where it goes; it is clipped to this.
+    area: Rect,
+    /// Where it goes across the area.
+    placement: Placement,
+}
+
+/// Where a line of text goes across its area.
+#[derive(Debug, Clone, Copy)]
+enum Placement {
+    /// As its style's justification says.
+    Justified,
+    /// Left-justified, moved this many pixels left: a field's text.
+    Scrolled(u32),
 }
 
 impl fmt::Debug for Typesetter {

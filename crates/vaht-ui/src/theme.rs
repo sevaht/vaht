@@ -57,6 +57,8 @@ pub enum ThemeElement {
     MenuFrame,
     /// A menu's item; its `hovered` state is the highlighted one.
     MenuItem,
+    /// The line of text a dialog edits, such as the run dialog's command.
+    DialogField,
 }
 
 impl ThemeElement {
@@ -79,6 +81,7 @@ impl ThemeElement {
             Self::MenuTitle => "menu.title",
             Self::MenuFrame => "menu.frame",
             Self::MenuItem => "menu.item",
+            Self::DialogField => "dialog.field",
         }
     }
 

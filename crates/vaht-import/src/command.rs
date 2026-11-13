@@ -79,6 +79,9 @@ impl FluxboxCommand<'_> {
         match lowercase.as_str() {
             "macrocmd" => Self::sequence(arguments),
             "repeat" => Self::repeat(arguments),
+            "exec" | "execute" | "execcommand" if Self::runs_a_run_window(arguments) => {
+                Ok(Self::run_dialog(arguments))
+            }
             "nextwindow" => Ok(Self::cycle("next-window", arguments)),
             "prevwindow" => Ok(Self::cycle("previous-window", arguments)),
             _ => Self::action(&lowercase, arguments).map(|action| Translated {
@@ -128,6 +131,7 @@ impl FluxboxCommand<'_> {
             "resizeto" => with("resize-to"),
             "reconfigure" | "reconfig" => plain("reload"),
             "exit" | "quit" => plain("exit"),
+            "rundialog" => plain("run-dialog"),
             "rootmenu" => plain("root-menu"),
             "windowmenu" => plain("window-menu"),
             "workspacemenu" => plain("workspace-menu"),
@@ -147,6 +151,41 @@ impl FluxboxCommand<'_> {
                     .trim_end()
                     .to_owned(),
             )),
+        }
+    }
+
+    /// The programs that show a run window: Fluxbox's and fluxland's.
+    const RUN_PROGRAMS: [&str; 2] = ["fbrun", "fluxland-run"];
+
+    /// Returns whether the command line `arguments` (of an `Exec`) starts
+    /// a run window, which vaht's run dialog replaces.
+    fn runs_a_run_window(arguments: &str) -> bool {
+        arguments
+            .split_whitespace()
+            .next()
+            .is_some_and(|program| Self::RUN_PROGRAMS.contains(&program))
+    }
+
+    /// Translates `Exec fbrun [options]` to the run dialog; its options
+    /// (font, colors, size, place) are the theme's and the rules' to say.
+    fn run_dialog(arguments: &str) -> Translated {
+        let options = arguments
+            .split_once(char::is_whitespace)
+            .map_or("", |(_, options)| options.trim());
+        let losses = if options.is_empty() {
+            Vec::new()
+        } else {
+            vec![(
+                Reason::Dropped,
+                format!(
+                    "the run window's options ({options}): the theme's dialog.field styles \
+                     the run dialog, and rules place it"
+                ),
+            )]
+        };
+        Translated {
+            value: Value::from("run-dialog"),
+            losses,
         }
     }
 
@@ -282,6 +321,10 @@ mod tests {
     )]
     #[case::take_previous("TakeToPrevWorkspace", r#""take-to-workspace previous""#)]
     #[case::fluxland_snap("SnapStep left", r#""snap-step left""#)]
+    #[case::run_dialog("RunDialog", r#""run-dialog""#)]
+    #[case::fbrun("Exec fbrun", r#""run-dialog""#)]
+    #[case::fluxland_run("ExecCommand fluxland-run -f 'Sans 10'", r#""run-dialog""#)]
+    #[case::not_a_run_window("Exec fbrunner", r#""exec fbrunner""#)]
     fn commands_translate(#[case] fluxbox: &str, #[case] vaht: &str) {
         assert_eq!(translate(fluxbox), vaht);
     }
@@ -293,6 +336,15 @@ mod tests {
     fn commands_not_translated_say_why(#[case] fluxbox: &str, #[case] reason: Reason) {
         let untranslated = FluxboxCommand(fluxbox).to_vaht().expect_err(fluxbox);
         assert_eq!(untranslated.reason, reason);
+    }
+
+    #[test]
+    fn a_run_windows_options_are_noted() {
+        let translated = FluxboxCommand("Exec fbrun -font sans")
+            .to_vaht()
+            .expect("translated");
+        assert_eq!(translated.losses.len(), 1);
+        assert!(translated.losses[0].1.contains("-font sans"));
     }
 
     #[test]

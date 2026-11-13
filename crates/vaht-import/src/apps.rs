@@ -297,7 +297,7 @@ mod tests {
         let document = AppsFile::new(Path::new("apps"), APPS).convert(&mut report);
         assert_eq!(
             document.to_string(),
-            "[[rule]]\nmatch = { app_id = \"fluxland-run\" }\nposition = { anchor = \"center\" }\n\n\
+            "[[rule]]\nmatch = { app_id = \"vaht-run\" }\nposition = { anchor = \"center\" }\n\n\
              [[rule]]\nmatch = { app_id = \"steam\" }\nworkspace = 2\n"
         );
         let notes: Vec<_> = report

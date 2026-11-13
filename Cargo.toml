@@ -40,7 +40,8 @@ serde_json = "1"
 # Pinned to a reviewed master revision (Smithay's releases lag far behind);
 # bump deliberately, one bump per commit (docs/design/04 §5).
 smithay = { version = "0.7.0", git = "https://github.com/Smithay/smithay", rev = "ae6921bbbf464ae90122f0c184e95e89093a4257", default-features = false, features = ["backend_winit", "desktop", "renderer_gl", "renderer_pixman", "wayland_frontend"] }
-# Test clients only; no default features, so no event loop or keymap code.
+# Test clients and the dialogs. No default features here: the dialogs ask
+# for the event loop and keymap code they need, test clients need neither.
 smithay-client-toolkit = { version = "0.21", default-features = false }
 strum = { version = "0.28", features = ["derive"] }
 tempfile = "3"
@@ -58,6 +59,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # (the default) keeps tokio out; vaht polls its futures on the event loop.
 zbus = "6.2"
 vaht-compositor = { path = "crates/vaht-compositor" }
+vaht-dialog = { path = "crates/vaht-dialog" }
 vaht-import = { path = "crates/vaht-import" }
 vaht-ipc = { path = "crates/vaht-ipc" }
 vaht-ui = { path = "crates/vaht-ui" }

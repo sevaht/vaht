@@ -39,4 +39,4 @@ pub use theme::{Theme, ThemeElement, WidgetState};
 /// The pixels panels and corner arcs are painted into.
 pub use tiny_skia::Pixmap;
 #[doc(inline)]
-pub use widget::{Glyph, SizePolicy, Widget};
+pub use widget::{Glyph, SizePolicy, TextField, Widget};

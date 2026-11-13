@@ -8,12 +8,13 @@
 
 pub mod arguments;
 pub mod check;
+pub mod dialog;
 pub mod import;
 pub mod logging;
 pub mod message;
 pub mod terminal;
 
-pub use arguments::{Arguments, ImportSource, MessageRequest, Subcommand};
+pub use arguments::{Arguments, DialogKind, ImportSource, MessageRequest, Subcommand};
 pub use logging::Logging;
 
 /// Runs the command line's request, with diagnostic output already installed.

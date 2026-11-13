@@ -235,7 +235,11 @@ impl Compositor {
             },
             config.theme.metrics(),
         );
-        let mut launcher = Launcher::new(listener.socket_name().to_os_string(), &ledger);
+        let mut launcher = Launcher::new(
+            listener.socket_name().to_os_string(),
+            options.executable,
+            &ledger,
+        );
         let ipc = Self::open_ipc(handle, &listener, &ledger);
         if let Some(server) = &ipc {
             launcher.set_environment(
@@ -881,6 +885,9 @@ impl Compositor {
             Action::StartMoving => self.start_drag(None, context),
             Action::StartResizing(from) => self.start_drag(Some(*from), context),
             Action::Reload => self.reload_configuration(),
+            Action::RunDialog => self
+                .launcher
+                .show_dialog("run", self.config_source.directory()),
             Action::Exit => self.stop(),
             Action::SetEnvironment { name, value } => {
                 self.launcher.set_environment(name.clone(), value.clone());
@@ -1362,6 +1369,8 @@ pub struct RunOptions {
     pub backend: BackendChoice,
     /// Where the configuration files are (normally `~/.config/vaht`).
     pub config_directory: PathBuf,
+    /// vaht's own program, which shows its dialogs (`vaht dialog run`).
+    pub executable: PathBuf,
 }
 
 /// Why vaht could not start or keep running.

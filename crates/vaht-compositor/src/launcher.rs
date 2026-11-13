@@ -1,7 +1,8 @@
 //! Starting programs, and reaping them when they exit (03 §2).
 //!
-//! [`Launcher`] is the only place vaht starts processes. Each program runs
-//! as `sh -c '<command line>'`:
+//! [`Launcher`] is the only place vaht starts processes. Each command line
+//! runs as `sh -c '<command line>'`, and vaht's dialogs as `vaht dialog
+//! <name>`, each:
 //! - in a process group of its own, so a signal meant for vaht's group
 //!   does not reach it;
 //! - with no signals blocked, and SIGPIPE back at its default action. vaht
@@ -20,6 +21,7 @@ use std::ffi::{CString, OsStr, OsString};
 use std::fs::File;
 use std::os::fd::AsRawFd as _;
 use std::os::unix::ffi::OsStrExt as _;
+use std::path::{Path, PathBuf};
 
 use nix::spawn::{PosixSpawnAttr, PosixSpawnFileActions, PosixSpawnFlags, posix_spawn};
 use nix::sys::signal::{SigSet, Signal};
@@ -34,8 +36,11 @@ pub(crate) struct Launcher {
     /// The programs started that have not been reaped yet.
     running: Vec<(Pid, Tracked)>,
     /// Variables set for every program, on top of vaht's own environment:
-    /// `WAYLAND_DISPLAY`, and whatever `set-environment` set.
+    /// `WAYLAND_DISPLAY`, `VAHT_SOCKET`, and whatever `set-environment`
+    /// set.
     environment: BTreeMap<OsString, OsString>,
+    /// vaht's own program, which shows its dialogs.
+    executable: PathBuf,
     /// Counts running programs.
     ledger: ResourceLedger,
 }
@@ -44,29 +49,35 @@ impl Launcher {
     /// The shell that runs command lines.
     const SHELL: &str = "/bin/sh";
 
-    /// Creates a launcher whose programs connect to `socket_name`.
-    pub(crate) fn new(socket_name: OsString, ledger: &ResourceLedger) -> Self {
+    /// Creates a launcher whose programs connect to `socket_name`, and
+    /// whose dialogs are shown by `executable`.
+    pub(crate) fn new(socket_name: OsString, executable: PathBuf, ledger: &ResourceLedger) -> Self {
         Self {
             running: Vec::new(),
             environment: BTreeMap::from([(OsString::from("WAYLAND_DISPLAY"), socket_name)]),
+            executable,
             ledger: ledger.clone(),
         }
     }
 
     /// Starts `command_line` with the shell.
     pub(crate) fn run(&mut self, command_line: &str) {
-        match self.spawn(command_line) {
-            Ok(pid) => {
-                tracing::debug!(%pid, command_line, "program started");
-                self.running
-                    .push((pid, self.ledger.track(ResourceKind::Program)));
-            }
-            Err(error) => tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                command_line,
-                "could not start a program"
-            ),
-        }
+        let arguments = ["sh", "-c", command_line].map(OsStr::new);
+        self.start(Path::new(Self::SHELL), &arguments, command_line);
+    }
+
+    /// Shows vaht's dialog `name` (`vaht dialog <name>`), styled by the
+    /// configuration in `config_directory`.
+    pub(crate) fn show_dialog(&mut self, name: &str, config_directory: &Path) {
+        let executable = self.executable.clone();
+        let arguments = [
+            OsStr::new("vaht"),
+            OsStr::new("--config-directory"),
+            config_directory.as_os_str(),
+            OsStr::new("dialog"),
+            OsStr::new(name),
+        ];
+        self.start(&executable, &arguments, &format!("the {name} dialog"));
     }
 
     /// Sets `name` to `value` for every program started from now on.
@@ -91,13 +102,31 @@ impl Launcher {
             });
     }
 
-    /// Starts `sh -c command_line` as described in the module documentation.
-    fn spawn(&self, command_line: &str) -> Result<Pid, SpawnError> {
-        let arguments = [
-            CString::new("sh").map_err(SpawnError::Nul)?,
-            CString::new("-c").map_err(SpawnError::Nul)?,
-            CString::new(command_line).map_err(SpawnError::Nul)?,
-        ];
+    /// Starts `program` with `arguments` (its own name first), keeping it
+    /// until it is reaped; `what` names it in the log.
+    fn start(&mut self, program: &Path, arguments: &[&OsStr], what: &str) {
+        match self.spawn(program, arguments) {
+            Ok(pid) => {
+                tracing::debug!(%pid, what, "program started");
+                self.running
+                    .push((pid, self.ledger.track(ResourceKind::Program)));
+            }
+            Err(error) => tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                what,
+                "could not start a program"
+            ),
+        }
+    }
+
+    /// Starts `program` with `arguments` as described in the module
+    /// documentation.
+    fn spawn(&self, program: &Path, arguments: &[&OsStr]) -> Result<Pid, SpawnError> {
+        let arguments = arguments
+            .iter()
+            .map(|argument| CString::new(argument.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(SpawnError::Nul)?;
         let mut attributes = PosixSpawnAttr::init().map_err(SpawnError::Prepare)?;
         attributes
             .set_flags(
@@ -131,7 +160,7 @@ impl Launcher {
                 .map_err(SpawnError::Prepare)?;
         }
         posix_spawn(
-            Self::SHELL,
+            program,
             &file_actions,
             &attributes,
             &arguments,
@@ -161,8 +190,8 @@ impl Launcher {
 /// Why a program could not be started.
 #[derive(Debug, thiserror::Error)]
 enum SpawnError {
-    /// The command line contains a NUL character.
-    #[error("the command line contains a NUL character")]
+    /// An argument contains a NUL character.
+    #[error("an argument contains a NUL character")]
     Nul(#[source] std::ffi::NulError),
     /// The spawn attributes could not be set up.
     #[error("could not prepare to start the program")]
@@ -170,7 +199,7 @@ enum SpawnError {
     /// `/dev/null` could not be opened for the program's input and output.
     #[error("could not open /dev/null")]
     OpenNull(#[source] std::io::Error),
-    /// The shell could not be started.
-    #[error("could not start {}", Launcher::SHELL)]
+    /// The program could not be started.
+    #[error("could not start the program")]
     Spawn(#[source] nix::Error),
 }

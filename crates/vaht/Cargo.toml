@@ -23,6 +23,7 @@ tracing-appender.workspace = true
 tracing-journald.workspace = true
 tracing-subscriber.workspace = true
 vaht-compositor.workspace = true
+vaht-dialog.workspace = true
 vaht-import.workspace = true
 vaht-ipc.workspace = true
 vaht-ui.workspace = true
