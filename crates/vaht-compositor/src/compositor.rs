@@ -218,7 +218,7 @@ impl Compositor {
 
         let whole = backend.output_geometry();
         let window_manager = WindowManager::new(
-            config.settings.workspaces.names(),
+            &config.settings,
             OutputArea {
                 whole,
                 usable: whole,

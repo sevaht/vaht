@@ -25,7 +25,7 @@ use super::command::Command;
 use super::unique_map;
 use crate::scene::{PointerTarget, WindowTarget};
 use crate::taskbar::TaskbarHit;
-use crate::window_manager::FramePart;
+use crate::window_manager::{FramePart, GripSide};
 
 /// Every binding.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -290,6 +290,18 @@ impl MouseContext {
                 part: FramePart::Border(_),
                 ..
             })) => &[Self::Border, Self::Window],
+            Some(PointerTarget::Window(WindowTarget::Frame {
+                part: FramePart::Handle,
+                ..
+            })) => &[Self::Handle, Self::Border, Self::Window],
+            Some(PointerTarget::Window(WindowTarget::Frame {
+                part: FramePart::Grip(GripSide::Left),
+                ..
+            })) => &[Self::GripLeft, Self::Window],
+            Some(PointerTarget::Window(WindowTarget::Frame {
+                part: FramePart::Grip(GripSide::Right),
+                ..
+            })) => &[Self::GripRight, Self::Window],
             Some(PointerTarget::Window(WindowTarget::Surface { .. })) => &[Self::Window],
             Some(PointerTarget::Taskbar(Some(TaskbarHit::Entry(_)))) => {
                 &[Self::WindowListEntry, Self::Taskbar]

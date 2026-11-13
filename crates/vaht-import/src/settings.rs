@@ -38,6 +38,55 @@ const DROPPED: [(&str, &str); 14] = [
     ),
 ];
 
+/// The parts of a frame Fluxbox's `defaultDeco` keeps, which vaht can
+/// draw: a preset name or a mask of `DECORM_*` bits
+/// (`WindowState::getDecoMaskFromString`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Decoration {
+    /// Whether frames have a titlebar.
+    has_titlebar: bool,
+    /// Whether frames have a handle.
+    has_handle: bool,
+}
+
+impl Decoration {
+    /// Fluxbox's `DECORM_TITLEBAR` bit.
+    const TITLEBAR_BIT: i64 = 1 << 0;
+    /// Fluxbox's `DECORM_HANDLE` bit.
+    const HANDLE_BIT: i64 = 1 << 1;
+
+    /// Reads a preset (`NORMAL`, `TINY`…) or a mask: decimal, `0x` hex or
+    /// `0` octal, as `strtol` reads it.
+    fn parse(text: &str) -> Option<Self> {
+        let preset = |has_titlebar, has_handle| {
+            Some(Self {
+                has_titlebar,
+                has_handle,
+            })
+        };
+        match text.to_ascii_uppercase().as_str() {
+            "NORMAL" | "FULL" => preset(true, true),
+            "TINY" | "TOOL" => preset(true, false),
+            "NONE" | "BORDER" | "TAB" => preset(false, false),
+            _ => {
+                let (digits, radix) = if let Some(hex) =
+                    text.strip_prefix("0x").or_else(|| text.strip_prefix("0X"))
+                {
+                    (hex, 16)
+                } else if text.len() > 1
+                    && let Some(octal) = text.strip_prefix('0')
+                {
+                    (octal, 8)
+                } else {
+                    (text, 10)
+                };
+                let mask = i64::from_str_radix(digits, radix).ok()?;
+                preset(mask & Self::TITLEBAR_BIT != 0, mask & Self::HANDLE_BIT != 0)
+            }
+        }
+    }
+}
+
 /// An `init` file being converted.
 #[derive(Debug)]
 pub(crate) struct InitFile {
@@ -186,6 +235,34 @@ impl InitFile {
             }
             self.set(&["windows", "frame", key], Value::Array(buttons));
         }
+        self.convert_decoration(report);
+    }
+
+    /// `defaultDeco`: whether frames have a handle. Frames without a
+    /// titlebar are not in vaht yet.
+    fn convert_decoration(&mut self, report: &mut Report) {
+        let Some(resource) = self.resources.get(&format!("{SCREEN}defaultDeco")).cloned() else {
+            return;
+        };
+        let Some(decoration) = Decoration::parse(&resource.value) else {
+            self.note(
+                report,
+                resource.line,
+                format!("the decoration {}: no preset or mask", resource.value),
+            );
+            return;
+        };
+        if !decoration.has_titlebar {
+            self.note(
+                report,
+                resource.line,
+                format!("windows without a titlebar ({})", resource.value),
+            );
+        }
+        self.set(
+            &["windows", "frame", "handle"],
+            Value::from(decoration.has_handle),
+        );
     }
 
     /// The `[workspaces]` section: Fluxbox's count, with its names (a
@@ -472,6 +549,28 @@ session.screen0.toolbar.widthPercent:\t80
             ],
             "a width other than the default is not in vaht yet"
         );
+    }
+
+    #[test]
+    fn the_decoration_says_whether_frames_have_a_handle() {
+        let convert = |value: &str| {
+            let init = format!("session.screen0.defaultDeco:\t{value}\n");
+            let mut report = Report::default();
+            let document =
+                InitFile::new(Resources::parse(Path::new("init"), &init)).convert(&mut report);
+            (document.to_string(), report.notes().len())
+        };
+        assert_eq!(
+            convert("0x3fd"),
+            (String::new(), 0),
+            "everything but the handle: vaht's default"
+        );
+        let shown = "[windows.frame]\nhandle = true\n".to_owned();
+        assert_eq!(convert("NORMAL"), (shown.clone(), 0));
+        assert_eq!(convert("1023"), (shown, 0), "all ten bits, in decimal");
+        assert_eq!(convert("TINY"), (String::new(), 0));
+        assert_eq!(convert("NONE"), (String::new(), 1), "no titlebar: reported");
+        assert_eq!(convert("sideways"), (String::new(), 1), "not a decoration");
     }
 
     #[test]

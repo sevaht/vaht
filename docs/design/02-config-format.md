@@ -179,7 +179,11 @@ rest by name, so a setting never silently does nothing:
   place alike.
 - `[windows]`: `edge_snap_distance`, `double_click_ms`, and `[windows.frame]`
   with `titlebar_left` and `titlebar_right` (buttons `shade`, `stick`,
-  `minimize`, `maximize`, `close`).
+  `minimize`, `maximize`, `close`) and `handle` (the strip along the
+  bottom with a grip at each end, 20 pixels wide as Fluxbox's; dragging
+  it resizes the bottom edge, and a grip its corner, unless the `handle`
+  and `grip-*` mouse contexts bind something). `vaht import` reads it from
+  `defaultDeco`'s preset or mask.
 - `[workspaces]`: `names`, at least one.
 - `[session]`: `autostart`.
 - `theme`: the name of a theme in `themes/` (§10); without it, the built-in

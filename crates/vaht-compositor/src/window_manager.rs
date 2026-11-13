@@ -29,13 +29,14 @@ pub(crate) use self::placement_strategy::{ColumnDirection, PlacementStrategy, Ro
 pub use self::window::WindowId;
 pub(crate) use self::window::{
     Area, Axes, CommittedState, Direction, EdgeSnap, Ending, Frame, FrameGeometry, FramePart,
-    HorizontalEdge, OutputArea, Placement, PlacementKind, RequestedState, ResizeEdges, SizeLimits,
-    SnapStep, TileCell, TitlebarButton, TitlebarLayout, VerticalEdge, Window, WindowDrag,
+    GripSide, HorizontalEdge, OutputArea, Placement, PlacementKind, RequestedState, ResizeEdges,
+    SizeLimits, SnapStep, TileCell, TitlebarButton, TitlebarLayout, VerticalEdge, Window,
+    WindowDrag,
 };
 use self::windows::Windows;
 use self::workspaces::Workspaces;
 pub(crate) use self::workspaces::{Workspace, WorkspaceTarget};
-use crate::config::{Config, Settings, WindowManagerAction, WindowMatcher};
+use crate::config::{Config, FrameSettings, Settings, WindowManagerAction, WindowMatcher};
 use crate::resources::ResourceLedger;
 
 /// What a client asks for its window.
@@ -80,6 +81,11 @@ pub(crate) struct WindowManager {
     /// Where windows can be placed.
     output: OutputArea,
     /// The theme's frame sizes.
+    theme_metrics: Metrics,
+    /// What frames show, from the settings.
+    frame: FrameSettings,
+    /// The frame sizes windows are laid out by: the theme's, as `frame`
+    /// takes them.
     metrics: Metrics,
     /// Windows asked to end, until the compositor takes them.
     endings: Vec<(WindowId, Ending)>,
@@ -88,18 +94,21 @@ pub(crate) struct WindowManager {
 }
 
 impl WindowManager {
-    /// Creates a window manager with no windows, its workspaces named
-    /// `workspace_names`, placing windows on `output` with frames sized by
-    /// `metrics`.
-    pub(crate) fn new(workspace_names: &[String], output: OutputArea, metrics: Metrics) -> Self {
+    /// Creates a window manager with no windows, its workspaces and frames
+    /// as `settings` say, placing windows on `output` with frames sized by
+    /// the theme's `metrics`.
+    pub(crate) fn new(settings: &Settings, output: OutputArea, metrics: Metrics) -> Self {
+        let frame = settings.windows.frame.clone();
         Self {
             windows: Windows::default(),
-            workspaces: Workspaces::named(workspace_names),
+            workspaces: Workspaces::named(settings.workspaces.names()),
             focus: Focus::default(),
             snap_minimized: None,
             held_titlebar: None,
             output,
-            metrics,
+            theme_metrics: metrics,
+            metrics: frame.frame_metrics(metrics),
+            frame,
             endings: Vec::new(),
             is_redraw_needed: false,
         }
@@ -130,7 +139,8 @@ impl WindowManager {
         self.windows.len()
     }
 
-    /// Returns the theme's frame sizes.
+    /// Returns the frame sizes windows are laid out by: the theme's, less
+    /// what the settings leave out of frames.
     pub(crate) const fn metrics(&self) -> Metrics {
         self.metrics
     }
@@ -486,7 +496,7 @@ impl WindowManager {
     }
 
     /// Brings what follows the settings up to date with them: the
-    /// workspaces' names and number, and the titlebars' buttons.
+    /// workspaces' names and number, and what frames show.
     pub(crate) fn apply_settings(&mut self, settings: &Settings) {
         if let Some(last) = self.workspaces.rename(settings.workspaces.names()) {
             for window in self.windows.iter_mut() {
@@ -498,6 +508,10 @@ impl WindowManager {
         let buttons = settings.windows.frame.titlebar_layout();
         for window in self.windows.iter_mut() {
             window.set_titlebar_buttons(&buttons);
+        }
+        if settings.windows.frame != self.frame {
+            self.frame = settings.windows.frame.clone();
+            self.restyle(self.theme_metrics);
         }
         self.focus_most_recent();
         self.is_redraw_needed = true;
@@ -517,7 +531,8 @@ impl WindowManager {
     /// paints every frame again: the theme changed. A floating window's
     /// content stays where it is; the others are placed again.
     pub(crate) fn restyle(&mut self, metrics: Metrics) {
-        self.metrics = metrics;
+        self.theme_metrics = metrics;
+        self.metrics = self.frame.frame_metrics(metrics);
         for window in self.windows.iter_mut() {
             window.invalidate_frame();
         }
@@ -817,7 +832,7 @@ mod tests {
     use super::*;
     use crate::config::{Action, Rules};
 
-    /// A titlebar 20 pixels tall and borders 1 pixel wide.
+    /// A titlebar 20 pixels tall, lines 1 pixel wide and a handle 1 tall.
     const METRICS: Metrics = Metrics {
         titlebar_height: 20,
         border_width: 1,
@@ -850,15 +865,18 @@ mod tests {
     }
 
     impl Desk {
-        /// An empty desk with the built-in configuration.
+        /// An empty desk with the built-in configuration, but frames that
+        /// show the handle, so every part of a frame is laid out.
         fn new() -> Self {
-            Self::with_config(Config::built_in())
+            let mut config = Config::built_in();
+            config.settings.windows.frame.handle = true;
+            Self::with_config(config)
         }
 
         /// An empty desk with `config`.
         fn with_config(config: Config) -> Self {
             Self {
-                manager: WindowManager::new(config.settings.workspaces.names(), output(0), METRICS),
+                manager: WindowManager::new(&config.settings, output(0), METRICS),
                 config,
                 ledger: ResourceLedger::new(),
                 committed: HashMap::new(),
@@ -939,7 +957,7 @@ mod tests {
 
         /// Returns the area `window` covers, frame included.
         fn outer(&self, window: WindowId) -> Area {
-            self.window(window).outer_area(METRICS)
+            self.window(window).outer_area(self.manager.metrics())
         }
 
         /// Returns the windows shown, from top to bottom.
@@ -1096,10 +1114,35 @@ mod tests {
         assert_eq!(desk.window(floating).content_area(), content);
         assert_eq!(
             desk.window(floating).outer_area(taller).size.h,
-            content.size.h + 40 + 3,
-            "the frame grew around it"
+            content.size.h + 40 + 3 + 1 + 1,
+            "the frame grew around it: titlebar, three lines, the handle and its line"
         );
         assert_eq!(desk.window(maximized).outer_area(taller), output(0).usable);
+    }
+
+    #[test]
+    fn hiding_the_handle_shrinks_floating_frames_and_refits_maximized_windows() {
+        let mut desk = Desk::new();
+        let floating = desk.open();
+        let content = desk.window(floating).content_area();
+        let maximized = desk.open();
+        desk.run(&action("maximize"));
+        let mut settings = desk.config.settings.clone();
+        settings.windows.frame.handle = false;
+        desk.manager.apply_settings(&settings);
+        desk.settle();
+        assert_eq!(desk.window(floating).content_area(), content);
+        assert_eq!(
+            desk.outer(floating).size.h,
+            content.size.h + 20 + 3,
+            "titlebar and three lines, no handle"
+        );
+        assert_eq!(desk.outer(maximized), output(0).usable);
+        assert_eq!(
+            desk.window(maximized).content_area().size.h,
+            1080 - 20 - 3,
+            "the content takes the handle's room"
+        );
     }
 
     #[test]
@@ -1469,7 +1512,7 @@ mod tests {
                         axes: Axes::Both, ..
                     }
                     | Placement::Tiled { .. } => {
-                        let outer = window.outer_area(METRICS);
+                        let outer = window.outer_area(manager.metrics());
                         assert!(
                             usable.contains_rect(outer),
                             "{outer:?} lies within the usable {usable:?}"

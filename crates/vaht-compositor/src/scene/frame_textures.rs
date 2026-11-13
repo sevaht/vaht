@@ -1,7 +1,7 @@
-//! Every window's frame, as the renderer takes it: the titlebar's pixels
-//! ([`PanelTexture`]), and one colored buffer per border line.
+//! Every window's frame, as the renderer takes it: the titlebar's and the
+//! handle's pixels ([`PanelTexture`]), and one colored buffer per line.
 //!
-//! The window manager paints each titlebar ([`Frame`]); [`FrameTextures`]
+//! The window manager paints each titlebar and handle ([`Frame`]); [`FrameTextures`]
 //! copies new pixels into buffers the renderer can draw and turns frames
 //! into render elements. A window's buffers go when the window does: each
 //! update forgets the windows that are gone.
@@ -70,9 +70,10 @@ impl FrameTextures {
 struct FrameTexture {
     /// The titlebar's pixels.
     titlebar: PanelTexture,
-    /// One colored buffer per border line, in [`FrameGeometry::borders`]'s
-    /// order.
-    borders: [SolidColorBuffer; 5],
+    /// The handle's pixels.
+    handle: PanelTexture,
+    /// One colored buffer per line, in [`FrameGeometry::borders`]' order.
+    borders: [SolidColorBuffer; FrameGeometry::LINES],
     /// Counts the buffers while they exist.
     _tracked: Tracked,
 }
@@ -82,15 +83,17 @@ impl FrameTexture {
     fn new(ledger: &ResourceLedger) -> Self {
         Self {
             titlebar: PanelTexture::new(),
+            handle: PanelTexture::new(),
             borders: std::array::from_fn(|_| SolidColorBuffer::default()),
             _tracked: ledger.track(ResourceKind::FrameTexture),
         }
     }
 
-    /// Copies `frame`'s titlebar pixels if they are newer than the last
-    /// copy, and sizes and colors the borders for `geometry`.
+    /// Copies `frame`'s titlebar and handle pixels if they are newer than
+    /// the last copy, and sizes and colors the lines for `geometry`.
     fn update(&mut self, frame: &Frame, geometry: &FrameGeometry, theme: &Theme) {
         self.titlebar.upload(frame.titlebar());
+        self.handle.upload(frame.handle());
         let color = Self::border_color(theme, frame.state());
         for (buffer, rectangle) in self.borders.iter_mut().zip(geometry.borders) {
             buffer.update(rectangle.size, color);
@@ -109,11 +112,7 @@ impl FrameTexture {
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
-        let mut elements: Vec<SceneElement<R>> = self
-            .titlebar
-            .render_element(renderer, geometry.titlebar.loc, scale)
-            .into_iter()
-            .collect();
+        let mut elements: Vec<SceneElement<R>> = Vec::new();
         for (buffer, rectangle) in self.borders.iter().zip(geometry.borders) {
             if !rectangle.is_empty() {
                 elements.push(SceneElement::Solid(SolidColorRenderElement::from_buffer(
@@ -124,6 +123,17 @@ impl FrameTexture {
                     Kind::Unspecified,
                 )));
             }
+        }
+        // Below the lines: the grips' lines are drawn over the handle.
+        elements.extend(
+            self.titlebar
+                .render_element(renderer, geometry.titlebar.loc, scale),
+        );
+        if !geometry.handle.is_empty() {
+            elements.extend(
+                self.handle
+                    .render_element(renderer, geometry.handle.loc, scale),
+            );
         }
         elements
     }

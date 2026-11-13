@@ -316,12 +316,13 @@ impl Input {
             };
         }
         match press.target {
-            Some(PointerTarget::Window(WindowTarget::Frame {
-                window,
-                part: FramePart::Border(edges),
-            })) => AfterClick::ResizeBorder(*window, *edges),
+            Some(PointerTarget::Window(WindowTarget::Frame { window, part })) => part
+                .resize_edges()
+                .map_or(AfterClick::PassToClient, |edges| {
+                    AfterClick::ResizeBorder(*window, edges)
+                }),
             Some(
-                PointerTarget::Window(WindowTarget::Frame { .. } | WindowTarget::Surface { .. })
+                PointerTarget::Window(WindowTarget::Surface { .. })
                 | PointerTarget::Taskbar(_)
                 | PointerTarget::Layer { .. },
             )

@@ -8,18 +8,12 @@
 use std::path::Path;
 
 use vaht_test_support::{
-    BUTTON_LEFT, BUTTON_RIGHT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR,
-    WINDOW_SIZE,
+    BUILT_IN_METRICS, BUTTON_LEFT, BUTTON_RIGHT, Bounds, HeadlessVaht, Screenshot, TestClient,
+    WINDOW_COLOR, WINDOW_SIZE,
 };
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
-
-/// The built-in theme's titlebar height, in pixels.
-const TITLEBAR_HEIGHT: u32 = 20;
-
-/// The built-in theme's border width, in pixels.
-const BORDER_WIDTH: u32 = 1;
 
 /// The built-in theme's border color (`grey60`).
 const BORDER_COLOR: [u8; 3] = [153, 153, 153];
@@ -38,10 +32,15 @@ impl OneWindow {
     /// Starts vaht and opens a window. Cascade placement keeps it off the
     /// output's edges, so drags have room on every side.
     fn open() -> Self {
-        let vaht = HeadlessVaht::start_with_config(
-            Path::new(EXECUTABLE),
-            &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
-        );
+        Self::open_with_settings("")
+    }
+
+    /// Starts vaht with `settings` added to its own and opens a window, as
+    /// [`Self::open`] does.
+    fn open_with_settings(settings: &str) -> Self {
+        let settings = format!("{settings}\n[placement]\nstrategy = \"cascade\"\n");
+        let vaht =
+            HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("settings.toml", &settings)]);
         let mut client = TestClient::connect(vaht.socket());
         client.open_windows(1);
         let content = client
@@ -60,9 +59,11 @@ impl OneWindow {
     const fn titlebar(&self) -> Bounds {
         Bounds {
             left: self.content.left,
-            top: self.content.top - BORDER_WIDTH - TITLEBAR_HEIGHT,
+            top: self.content.top
+                - BUILT_IN_METRICS.border_width
+                - BUILT_IN_METRICS.titlebar_height,
             right: self.content.right,
-            bottom: self.content.top - BORDER_WIDTH - 1,
+            bottom: self.content.top - BUILT_IN_METRICS.border_width - 1,
         }
     }
 
@@ -70,7 +71,7 @@ impl OneWindow {
     const fn close_button(&self) -> Bounds {
         let titlebar = self.titlebar();
         Bounds {
-            left: titlebar.right + 1 - TITLEBAR_HEIGHT,
+            left: titlebar.right + 1 - BUILT_IN_METRICS.titlebar_height,
             ..titlebar
         }
     }
@@ -295,4 +296,123 @@ fn dragging_an_edge_past_the_opposite_one_stops_at_the_smallest_size() {
         resized.right, resized.left,
         "one pixel wide: the smallest a window can be"
     );
+}
+
+#[test]
+fn the_handle_runs_under_the_content_with_a_grip_at_each_end() {
+    const LINE: [u8; 3] = [0, 0, 255];
+    const HANDLE: [u8; 3] = [255, 0, 0];
+    const GRIP: [u8; 3] = [0, 255, 0];
+    /// Fluxbox's grip width, which vaht keeps.
+    const GRIP_WIDTH: u32 = 20;
+    let theme = "\
+[window.border]
+border = { width = 1, color = \"#0000ff\" }
+[window.handle]
+height = 4
+texture = { solid = \"#ff0000\" }
+[window.grip]
+texture = { solid = \"#00ff00\" }
+";
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[
+            (
+                "settings.toml",
+                "theme = \"test\"\n[windows.frame]\nhandle = true\n[placement]\nstrategy = \"cascade\"\n",
+            ),
+            ("themes/test.toml", theme),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let screenshot = client.screenshot();
+    let content = screenshot.bounds_of(WINDOW_COLOR).expect("shown");
+    let middle = OneWindow::middle(content).0;
+    assert_eq!(
+        screenshot.rgb(middle, content.bottom + 1),
+        LINE,
+        "a line under the content"
+    );
+    let row = content.bottom + 3;
+    let expected = [
+        (content.left - 1, LINE),
+        (content.left, GRIP),
+        (content.left + GRIP_WIDTH - 1, GRIP),
+        (content.left + GRIP_WIDTH, LINE),
+        (content.left + GRIP_WIDTH + 1, HANDLE),
+        (middle, HANDLE),
+        (content.right - GRIP_WIDTH - 1, HANDLE),
+        (content.right - GRIP_WIDTH, LINE),
+        (content.right - GRIP_WIDTH + 1, GRIP),
+        (content.right, GRIP),
+        (content.right + 1, LINE),
+    ];
+    for (x, color) in expected {
+        assert_eq!(screenshot.rgb(x, row), color, "at x = {x}");
+    }
+    assert_eq!(
+        screenshot.rgb(middle, content.bottom + 6),
+        LINE,
+        "and a last line"
+    );
+}
+
+/// Settings that show the handle, which the built-in ones leave out.
+const SHOWN_HANDLE: &str = "[windows.frame]\nhandle = true\n";
+
+/// A grip: at one end of the handle.
+#[derive(Debug, Clone, Copy)]
+enum Grip {
+    /// At the left end.
+    Left,
+    /// At the right end.
+    Right,
+}
+
+/// Drags `grip` of a window `across` and `down`, and checks that the
+/// window resized from that bottom corner.
+fn check_grip_drag(grip: Grip, across: i32, down: i32) {
+    let mut window = OneWindow::open_with_settings(SHOWN_HANDLE);
+    let content = window.content;
+    // The handle's row, a few pixels inside the grip.
+    let handle_row = content.bottom + 2;
+    let start = match grip {
+        Grip::Left => (content.left + 5, handle_row),
+        Grip::Right => (content.right - 5, handle_row),
+    };
+    let moved = |coordinate: u32, by: i32| {
+        coordinate
+            .checked_add_signed(by)
+            .expect("the drag stays on the output")
+    };
+    window.client.drag(
+        start,
+        (moved(start.0, across), moved(start.1, down)),
+        BUTTON_LEFT,
+    );
+    let bottom = moved(content.bottom, down);
+    let expected = match grip {
+        Grip::Left => Bounds {
+            left: moved(content.left, across),
+            bottom,
+            ..content
+        },
+        Grip::Right => Bounds {
+            right: moved(content.right, across),
+            bottom,
+            ..content
+        },
+    };
+    assert_eq!(window.find_content(), expected, "{grip:?}");
+}
+
+#[test]
+fn dragging_the_right_grip_resizes_from_the_bottom_right_corner() {
+    check_grip_drag(Grip::Right, 40, 30);
+}
+
+#[test]
+fn dragging_the_left_grip_resizes_from_the_bottom_left_corner() {
+    check_grip_drag(Grip::Left, -25, 20);
 }

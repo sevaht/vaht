@@ -8,20 +8,12 @@
 use std::path::Path;
 
 use vaht_test_support::{
-    BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR, WINDOW_SIZE, keys,
+    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR,
+    WINDOW_SIZE, keys,
 };
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
-
-/// The built-in theme's titlebar height, in pixels.
-const TITLEBAR_HEIGHT: u32 = 20;
-
-/// The built-in theme's border width, in pixels.
-const BORDER_WIDTH: u32 = 1;
-
-/// The built-in taskbar's height, in pixels; it runs along the bottom.
-const TASKBAR_HEIGHT: u32 = 20;
 
 /// How far each new window is placed from the one before, in pixels.
 const CASCADE_STEP: u32 = 32;
@@ -66,21 +58,11 @@ impl Desktop {
     }
 }
 
-/// Returns the content of a window whose frame fills `outer`.
-const fn content_within(outer: Bounds) -> Bounds {
-    Bounds {
-        left: outer.left + BORDER_WIDTH,
-        top: outer.top + 2 * BORDER_WIDTH + TITLEBAR_HEIGHT,
-        right: outer.right - BORDER_WIDTH,
-        bottom: outer.bottom - BORDER_WIDTH,
-    }
-}
-
 /// Returns the part of `screenshot`'s output windows maximize and tile in:
 /// all of it but the taskbar.
 const fn usable_output(screenshot: &Screenshot) -> Bounds {
     Bounds {
-        bottom: screenshot.height() - 1 - TASKBAR_HEIGHT,
+        bottom: screenshot.height() - 1 - BUILT_IN_METRICS.taskbar_height,
         ..whole_output(screenshot)
     }
 }
@@ -104,7 +86,7 @@ fn snap_step_up_maximizes_and_down_restores() {
     let maximized = desktop.screenshot();
     assert_eq!(
         maximized.bounds_of(WINDOW_COLOR),
-        Some(content_within(usable_output(&maximized))),
+        Some(BUILT_IN_METRICS.content_within(usable_output(&maximized))),
         "the frame fills the output, but for the taskbar"
     );
 
@@ -126,7 +108,7 @@ fn snap_step_left_fills_the_left_half_and_right_undoes_it() {
     };
     assert_eq!(
         snapped.bounds_of(WINDOW_COLOR),
-        Some(content_within(left_half))
+        Some(BUILT_IN_METRICS.content_within(left_half))
     );
 
     desktop.type_chord(&[keys::LEFT_SUPER, keys::RIGHT]);
@@ -169,13 +151,15 @@ fn the_maximize_button_maximizes() {
     let content = desktop.content().expect("the window is shown");
     // The buttons are squares at the titlebar's right end: maximize is the
     // second from the right.
-    let titlebar_middle = content.top - BORDER_WIDTH - TITLEBAR_HEIGHT / 2;
-    let maximize = content.right + 1 - TITLEBAR_HEIGHT - TITLEBAR_HEIGHT / 2;
+    let titlebar_middle =
+        content.top - BUILT_IN_METRICS.border_width - BUILT_IN_METRICS.titlebar_height / 2;
+    let maximize =
+        content.right + 1 - BUILT_IN_METRICS.titlebar_height - BUILT_IN_METRICS.titlebar_height / 2;
     desktop.client.click(maximize, titlebar_middle, BUTTON_LEFT);
     let maximized = desktop.screenshot();
     assert_eq!(
         maximized.bounds_of(WINDOW_COLOR),
-        Some(content_within(usable_output(&maximized)))
+        Some(BUILT_IN_METRICS.content_within(usable_output(&maximized)))
     );
 }
 
@@ -203,7 +187,7 @@ fn alt_tab_walks_windows_by_recent_focus_and_restarts_after_alt_is_let_go() {
         let top = union.top + CASCADE_STEP * window;
         (
             union.left + CASCADE_STEP * window + WINDOW_SIZE.0 / 4,
-            top - BORDER_WIDTH - TITLEBAR_HEIGHT / 2,
+            top - BUILT_IN_METRICS.border_width - BUILT_IN_METRICS.titlebar_height / 2,
         )
     };
     // Whether window `lower` (counting from 0) is above window `lower + 1`.

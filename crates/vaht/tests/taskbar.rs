@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-use vaht_test_support::{BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR};
+use vaht_test_support::{
+    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR,
+};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
@@ -141,8 +143,8 @@ fn without_a_taskbar_windows_maximize_over_the_whole_output() {
     let content = maximized.bounds_of(WINDOW_COLOR).expect("shown");
     assert_eq!(
         content.bottom,
-        maximized.height() - 2,
-        "only the border below it"
+        maximized.height() - 1 - BUILT_IN_METRICS.below_content(),
+        "only the frame's bottom below it"
     );
 }
 

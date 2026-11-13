@@ -5,20 +5,12 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vaht_test_support::{
-    BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR, WINDOW_SIZE,
+    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR,
+    WINDOW_SIZE,
 };
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
-
-/// The built-in theme's titlebar height, in pixels.
-const TITLEBAR_HEIGHT: u32 = 20;
-
-/// The built-in theme's border width, in pixels.
-const BORDER_WIDTH: u32 = 1;
-
-/// The built-in taskbar's height, in pixels; it runs along the bottom.
-const TASKBAR_HEIGHT: u32 = 20;
 
 /// How long to wait for a program vaht started to leave its mark.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -54,7 +46,10 @@ fn windows_along(screenshot: &Screenshot, y: u32) -> Vec<(u32, u32)> {
 
 /// Returns the middle of the titlebar above `content`, at `x`.
 const fn titlebar_at(content: Bounds, x: u32) -> (u32, u32) {
-    (x, content.top - BORDER_WIDTH - TITLEBAR_HEIGHT / 2)
+    (
+        x,
+        content.top - BUILT_IN_METRICS.border_width - BUILT_IN_METRICS.titlebar_height / 2,
+    )
 }
 
 #[test]
@@ -67,15 +62,21 @@ fn row_placement_puts_windows_side_by_side_from_the_corner() {
         .expect("windows are shown");
     assert_eq!(
         (content.left, content.top),
-        (BORDER_WIDTH, 2 * BORDER_WIDTH + TITLEBAR_HEIGHT),
+        (
+            BUILT_IN_METRICS.border_width,
+            2 * BUILT_IN_METRICS.border_width + BUILT_IN_METRICS.titlebar_height
+        ),
         "the first window's frame is in the corner"
     );
-    let frame_width = WINDOW_SIZE.0 + 2 * BORDER_WIDTH;
+    let frame_width = WINDOW_SIZE.0 + 2 * BUILT_IN_METRICS.border_width;
     assert_eq!(
         windows_along(&screenshot, content.top),
         [
-            (BORDER_WIDTH, WINDOW_SIZE.0),
-            (frame_width + BORDER_WIDTH, frame_width + WINDOW_SIZE.0),
+            (BUILT_IN_METRICS.border_width, WINDOW_SIZE.0),
+            (
+                frame_width + BUILT_IN_METRICS.border_width,
+                frame_width + WINDOW_SIZE.0
+            ),
         ],
         "the second window's frame starts where the first's ends"
     );
@@ -89,16 +90,19 @@ fn the_titlebar_has_the_buttons_settings_name() {
     );
     client.open_windows(1);
     let content = client.screenshot().bounds_of(WINDOW_COLOR).expect("shown");
-    let (x, y) = titlebar_at(content, content.left + TITLEBAR_HEIGHT / 2);
+    let (x, y) = titlebar_at(content, content.left + BUILT_IN_METRICS.titlebar_height / 2);
     client.click(x, y, BUTTON_LEFT);
     let maximized = client.screenshot();
     assert_eq!(
         maximized.bounds_of(WINDOW_COLOR),
         Some(Bounds {
-            left: BORDER_WIDTH,
-            top: 2 * BORDER_WIDTH + TITLEBAR_HEIGHT,
-            right: maximized.width() - 1 - BORDER_WIDTH,
-            bottom: maximized.height() - 1 - TASKBAR_HEIGHT - BORDER_WIDTH,
+            left: BUILT_IN_METRICS.border_width,
+            top: 2 * BUILT_IN_METRICS.border_width + BUILT_IN_METRICS.titlebar_height,
+            right: maximized.width() - 1 - BUILT_IN_METRICS.border_width,
+            bottom: maximized.height()
+                - 1
+                - BUILT_IN_METRICS.taskbar_height
+                - BUILT_IN_METRICS.below_content(),
         }),
         "the left square is the maximize button"
     );
@@ -154,11 +158,11 @@ fn a_window_moved_near_the_output_edge_snaps_to_it() {
     let grip = titlebar_at(content, content.left + 30);
     // Drag the frame's left edge to 6 pixels from the output's: within the
     // default 10 pixels, so it lands on the edge.
-    let frame_left = content.left - BORDER_WIDTH;
+    let frame_left = content.left - BUILT_IN_METRICS.border_width;
     client.drag(grip, (grip.0 - frame_left + 6, grip.1), BUTTON_LEFT);
     let moved = client.screenshot().bounds_of(WINDOW_COLOR).expect("shown");
     assert_eq!(
-        moved.left, BORDER_WIDTH,
+        moved.left, BUILT_IN_METRICS.border_width,
         "the frame's left edge is the output's"
     );
 }

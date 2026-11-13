@@ -11,6 +11,7 @@ mod taskbar;
 use std::time::Duration;
 
 use smithay::utils::{Logical, Point, Size};
+use vaht_ui::theme::Metrics;
 
 pub(crate) use self::taskbar::{TaskbarEdge, TaskbarSettings, TaskbarWidget};
 use crate::window_manager::{
@@ -144,9 +145,25 @@ pub(crate) struct FrameSettings {
     pub(crate) titlebar_left: Vec<TitlebarButton>,
     /// The buttons right of the title, left to right.
     pub(crate) titlebar_right: Vec<TitlebarButton>,
+    /// Whether frames have a handle along the bottom, with grips, as tall
+    /// as the theme's `window.handle` height.
+    pub(crate) handle: bool,
 }
 
 impl FrameSettings {
+    /// Returns the theme's frame sizes as frames with these settings take
+    /// them: without a handle unless they show one.
+    pub(crate) const fn frame_metrics(&self, theme: Metrics) -> Metrics {
+        if self.handle {
+            theme
+        } else {
+            Metrics {
+                handle_height: 0,
+                ..theme
+            }
+        }
+    }
+
     /// Returns the titlebar's button layout.
     pub(crate) fn titlebar_layout(&self) -> TitlebarLayout {
         TitlebarLayout {
@@ -165,6 +182,7 @@ impl Default for FrameSettings {
                 TitlebarButton::Maximize,
                 TitlebarButton::Close,
             ],
+            handle: false,
         }
     }
 }

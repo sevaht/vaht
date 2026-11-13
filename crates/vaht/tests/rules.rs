@@ -5,19 +5,12 @@
 
 use std::path::Path;
 
-use vaht_test_support::{HeadlessVaht, TestClient, WINDOW_COLOR, WINDOW_SIZE, keys};
+use vaht_test_support::{
+    BUILT_IN_METRICS, HeadlessVaht, TestClient, WINDOW_COLOR, WINDOW_SIZE, keys,
+};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
-
-/// The built-in theme's titlebar height, in pixels.
-const TITLEBAR_HEIGHT: u32 = 20;
-
-/// The built-in taskbar's height, in pixels; it runs along the bottom.
-const TASKBAR_HEIGHT: u32 = 20;
-
-/// The built-in theme's border width, in pixels.
-const BORDER_WIDTH: u32 = 1;
 
 /// Starts vaht with `rules` as its `rules.toml`, and a client.
 fn start(rules: &str) -> (HeadlessVaht, TestClient) {
@@ -33,15 +26,17 @@ fn a_position_rule_centers_the_frame() {
     client.open_windows(1);
     let screenshot = client.screenshot();
     let content = screenshot.bounds_of(WINDOW_COLOR).expect("shown");
-    let frame_width = WINDOW_SIZE.0 + 2 * BORDER_WIDTH;
-    let frame_height = WINDOW_SIZE.1 + TITLEBAR_HEIGHT + 3 * BORDER_WIDTH;
-    let frame_left = content.left - BORDER_WIDTH;
-    let frame_top = content.top - 2 * BORDER_WIDTH - TITLEBAR_HEIGHT;
+    let frame_width = WINDOW_SIZE.0 + 2 * BUILT_IN_METRICS.border_width;
+    let frame_height =
+        WINDOW_SIZE.1 + BUILT_IN_METRICS.above_content() + BUILT_IN_METRICS.below_content();
+    let frame_left = content.left - BUILT_IN_METRICS.border_width;
+    let frame_top =
+        content.top - 2 * BUILT_IN_METRICS.border_width - BUILT_IN_METRICS.titlebar_height;
     assert_eq!(
         (frame_left, frame_top),
         (
             (screenshot.width() - frame_width) / 2,
-            (screenshot.height() - TASKBAR_HEIGHT - frame_height) / 2
+            (screenshot.height() - BUILT_IN_METRICS.taskbar_height - frame_height) / 2
         ),
         "centered in what the taskbar leaves"
     );
@@ -49,8 +44,11 @@ fn a_position_rule_centers_the_frame() {
 
 #[test]
 fn a_size_rule_sizes_the_frame() {
-    let (_vaht, mut client) =
-        start("[[rule]]\nmatch = { title = \"test window 1\" }\nsize = [402, 323]\n");
+    let frame_width = 400 + 2 * BUILT_IN_METRICS.border_width;
+    let frame_height = 300 + BUILT_IN_METRICS.above_content() + BUILT_IN_METRICS.below_content();
+    let (_vaht, mut client) = start(&format!(
+        "[[rule]]\nmatch = {{ title = \"test window 1\" }}\nsize = [{frame_width}, {frame_height}]\n"
+    ));
     client.open_windows(1);
     let content = client.screenshot().bounds_of(WINDOW_COLOR).expect("shown");
     assert_eq!(
@@ -59,7 +57,7 @@ fn a_size_rule_sizes_the_frame() {
             content.bottom - content.top + 1
         ),
         (400, 300),
-        "the content is the frame less its borders and titlebar"
+        "the content is the frame less its lines, titlebar and handle"
     );
 }
 

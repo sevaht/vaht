@@ -27,7 +27,9 @@ use vaht_ui::{Theme, Typesetter};
 
 pub(crate) use client::{CommittedState, Ending, PlacementKind, RequestedState};
 pub(crate) use edge_snap::EdgeSnap;
-pub(crate) use frame::{Frame, FrameGeometry, FramePart, TitlebarButton, TitlebarLayout};
+pub(crate) use frame::{
+    Frame, FrameGeometry, FramePart, FrameShape, GripSide, TitlebarButton, TitlebarLayout,
+};
 pub(crate) use placement::{Area, Axes, Direction, OutputArea, Placement, SnapStep, TileCell};
 pub(crate) use resize::{HorizontalEdge, ResizeAnchor, ResizeEdges, SizeLimits, VerticalEdge};
 
@@ -230,11 +232,12 @@ impl Window {
     /// Returns where each part of the frame goes with the theme's `metrics`;
     /// a shaded window's frame closes up beneath its titlebar.
     pub(crate) fn frame_geometry(&self, metrics: Metrics) -> FrameGeometry {
-        let mut content = self.content_area();
-        if !self.shows_content() {
-            content.size.h = 0;
-        }
-        FrameGeometry::around(content, metrics)
+        let shape = if self.shows_content() {
+            FrameShape::Open
+        } else {
+            FrameShape::Shaded
+        };
+        FrameGeometry::around(self.content_area(), metrics, shape)
     }
 
     /// Returns where the client's surface is drawn: the content location,

@@ -12,6 +12,7 @@
 
 mod client;
 mod headless;
+mod metrics;
 mod screenshot;
 
 pub use client::{
@@ -19,4 +20,5 @@ pub use client::{
     keys,
 };
 pub use headless::{ExitReport, HeadlessVaht};
+pub use metrics::{BUILT_IN_METRICS, ThemeMetrics};
 pub use screenshot::{Bounds, Screenshot};

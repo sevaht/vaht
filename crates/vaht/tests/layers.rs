@@ -5,23 +5,18 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vaht_test_support::{
-    BUTTON_LEFT, HeadlessVaht, KeyboardFocus, TestClient, TestLayer, WINDOW_COLOR, keys,
+    BUILT_IN_METRICS, BUTTON_LEFT, HeadlessVaht, KeyboardFocus, TestClient, TestLayer,
+    WINDOW_COLOR, keys,
 };
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
-
-/// The built-in theme's border width, in pixels.
-const BORDER_WIDTH: u32 = 1;
 
 /// A panel's color.
 const PANEL_COLOR: [u8; 3] = [0xc0, 0x30, 0x30];
 
 /// A wallpaper's color.
 const WALLPAPER_COLOR: [u8; 3] = [0x30, 0xa0, 0x40];
-
-/// The built-in taskbar's height, in pixels; it runs along the bottom.
-const TASKBAR_HEIGHT: u32 = 20;
 
 /// A panel's height, in pixels.
 const PANEL_HEIGHT: u32 = 30;
@@ -56,7 +51,7 @@ fn a_maximized_window_leaves_an_exclusive_panel_visible() {
         .expect("the window is shown");
     assert_eq!(
         content.bottom,
-        panel.top - 1 - BORDER_WIDTH,
+        panel.top - 1 - BUILT_IN_METRICS.below_content(),
         "the window's frame ends where the panel begins"
     );
 }
@@ -68,16 +63,22 @@ fn a_wallpaper_is_below_windows_and_an_overlay_above_them() {
     client.open_windows(1);
     client.type_chord(&[keys::LEFT_SUPER, keys::UP]);
     let maximized = client.screenshot();
-    let bottom = maximized.height() - 1 - TASKBAR_HEIGHT;
+    let bottom = maximized.height() - 1 - BUILT_IN_METRICS.taskbar_height;
     assert_eq!(
-        maximized.rgb(maximized.width() / 2, bottom - BORDER_WIDTH - 1),
+        maximized.rgb(
+            maximized.width() / 2,
+            bottom - BUILT_IN_METRICS.below_content()
+        ),
         WINDOW_COLOR,
         "the window covers the wallpaper"
     );
     client.open_bar(TestLayer::Overlay, PANEL_HEIGHT, false, PANEL_COLOR);
     let covered = client.screenshot();
     assert_eq!(
-        covered.rgb(covered.width() / 2, bottom - BORDER_WIDTH - 1),
+        covered.rgb(
+            covered.width() / 2,
+            bottom - BUILT_IN_METRICS.below_content()
+        ),
         PANEL_COLOR,
         "the overlay covers the window, which it does not push aside"
     );

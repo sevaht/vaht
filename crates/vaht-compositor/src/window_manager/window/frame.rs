@@ -1,9 +1,13 @@
-//! What vaht draws around a window: a titlebar and border lines.
+//! What vaht draws around a window: a titlebar, a handle and border lines.
 //!
-//! The titlebar is a [`Panel`]; vaht-ui lays it out, paints it and hit-tests
-//! it, and this module only says what it shows (01 §4.3). The borders are
-//! plain colored rectangles, which cost no pixel buffers. The frame is never
-//! one big buffer around the window, which would cost megabytes per window.
+//! From the top, as Fluxbox draws it: a border line, the titlebar, a line,
+//! the content, a line, the handle (a strip with a grip at each end, when
+//! the theme gives it a height), and a last line; lines run down both
+//! sides. The titlebar and the handle are [`Panel`]s; vaht-ui lays them
+//! out, paints them and hit-tests them, and this module only says what they
+//! show (01 §4.3). The lines are plain colored rectangles, which cost no
+//! pixel buffers. The frame is never one big buffer around the window,
+//! which would cost megabytes per window.
 //! Nothing here knows a renderer: the scene turns the pixels and the
 //! geometry into render elements.
 //!
@@ -18,7 +22,7 @@ use vaht_ui::{
 };
 
 use super::placement::Axes;
-use super::resize::ResizeEdges;
+use super::resize::{HorizontalEdge, ResizeEdges, VerticalEdge};
 use crate::config::WindowManagerAction;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 
@@ -87,6 +91,47 @@ pub(crate) enum FramePart {
     Titlebar(vaht_ui::Point),
     /// A border line, and the edges dragging it there resizes.
     Border(ResizeEdges),
+    /// The handle between its grips, or the line above it.
+    Handle,
+    /// A grip at one end of the handle, or the line above it.
+    Grip(GripSide),
+}
+
+impl FramePart {
+    /// Returns the edges dragging the part resizes, unless a binding says
+    /// otherwise: a border's own, the bottom for the handle, and a bottom
+    /// corner for a grip. The titlebar resizes nothing.
+    pub(crate) fn resize_edges(self) -> Option<ResizeEdges> {
+        let bottom = |horizontal| ResizeEdges {
+            horizontal,
+            vertical: VerticalEdge::Bottom,
+        };
+        match self {
+            Self::Titlebar(_) => None,
+            Self::Border(edges) => Some(edges),
+            Self::Handle => Some(bottom(HorizontalEdge::None)),
+            Self::Grip(GripSide::Left) => Some(bottom(HorizontalEdge::Left)),
+            Self::Grip(GripSide::Right) => Some(bottom(HorizontalEdge::Right)),
+        }
+    }
+}
+
+/// Which end of the handle a grip is at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum GripSide {
+    /// The left end.
+    Left,
+    /// The right end.
+    Right,
+}
+
+/// Whether a frame shows its window's content, or only the titlebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameShape {
+    /// Everything: the content, and the handle below it.
+    Open,
+    /// Rolled up: the frame closes beneath the titlebar.
+    Shaded,
 }
 
 /// Where each part of a frame goes, in global coordinates.
@@ -96,43 +141,98 @@ pub(crate) struct FrameGeometry {
     pub(crate) outer: Rectangle<i32, Logical>,
     /// The titlebar, exactly as wide as the content.
     pub(crate) titlebar: Rectangle<i32, Logical>,
-    /// Top, separator (between titlebar and content), bottom, left, right.
-    pub(crate) borders: [Rectangle<i32, Logical>; 5],
+    /// The handle with its grips, as wide as the content; empty when the
+    /// frame has none.
+    pub(crate) handle: Rectangle<i32, Logical>,
+    /// How wide each grip is: none when the handle is too narrow for them,
+    /// and is all handle.
+    pub(crate) grip_width: Option<u32>,
+    /// The lines, in [`Self::LINES`]' order; a line the frame lacks is empty.
+    pub(crate) borders: [Rectangle<i32, Logical>; 8],
 }
 
 impl FrameGeometry {
-    /// Returns the frame around `content` with the theme's `metrics`.
-    pub(crate) fn around(content: Rectangle<i32, Logical>, metrics: Metrics) -> Self {
+    /// The lines of a frame, in the order of [`Self::borders`]: top, under
+    /// the titlebar, over the handle, bottom, left, right, then between
+    /// each grip and the handle.
+    pub(crate) const LINES: usize = 8;
+
+    /// How wide a grip is, in pixels: Fluxbox's (`FbWinFrame`), so frames
+    /// look as they did.
+    const GRIP_WIDTH: u32 = 20;
+
+    /// Returns the frame around `content` with the theme's `metrics`, in
+    /// `shape`: a shaded frame has no content and no handle.
+    pub(crate) fn around(
+        content: Rectangle<i32, Logical>,
+        metrics: Metrics,
+        shape: FrameShape,
+    ) -> Self {
         let border = to_i32(metrics.border_width);
         let titlebar_height = to_i32(metrics.titlebar_height);
-        let (x, y) = (content.loc.x, content.loc.y);
-        let (width, height) = (content.size.w, content.size.h);
+        let (handle_height, height) = match shape {
+            FrameShape::Open => (to_i32(metrics.handle_height), content.size.h),
+            FrameShape::Shaded => (0, 0),
+        };
+        // The handle brings its own line above it.
+        let handle_span = if handle_height > 0 {
+            handle_height + border
+        } else {
+            0
+        };
+        let (x, y, width) = (content.loc.x, content.loc.y, content.size.w);
         let outer_left = x - border;
         let outer_top = y - 2 * border - titlebar_height;
         let outer_width = width + 2 * border;
-        let outer_height = height + titlebar_height + 3 * border;
+        let outer_height = height + titlebar_height + handle_span + 3 * border;
+        let handle_top = y + height + border;
         let rectangle = |x, y, width, height| Rectangle::new((x, y).into(), (width, height).into());
+        let handle = rectangle(x, handle_top, width, handle_height);
+        let grip_width = Self::grip_width(handle, metrics.border_width);
+        let grip_lines = grip_width.map_or([Rectangle::default(); 2], |grip| {
+            let grip = to_i32(grip);
+            [
+                rectangle(x + grip, handle_top, border, handle_height),
+                rectangle(x + width - grip - border, handle_top, border, handle_height),
+            ]
+        });
         Self {
             outer: rectangle(outer_left, outer_top, outer_width, outer_height),
             titlebar: rectangle(x, y - border - titlebar_height, width, titlebar_height),
+            handle,
+            grip_width,
             borders: [
                 rectangle(outer_left, outer_top, outer_width, border),
                 rectangle(outer_left, y - border, outer_width, border),
-                rectangle(outer_left, y + height, outer_width, border),
+                rectangle(
+                    x,
+                    y + height,
+                    width,
+                    if handle_height > 0 { border } else { 0 },
+                ),
+                rectangle(outer_left, y + height + handle_span, outer_width, border),
                 rectangle(outer_left, outer_top, border, outer_height),
                 rectangle(x + width, outer_top, border, outer_height),
+                grip_lines[0],
+                grip_lines[1],
             ],
         }
     }
 
-    /// Returns the content area a frame covering `outer` surrounds, the
-    /// inverse of [`Self::around`]; at least one pixel each way.
+    /// Returns the content area an open frame covering `outer` surrounds,
+    /// the inverse of [`Self::around`]; at least one pixel each way.
     pub(crate) fn content_within(
         outer: Rectangle<i32, Logical>,
         metrics: Metrics,
     ) -> Rectangle<i32, Logical> {
         let border = to_i32(metrics.border_width);
         let titlebar_height = to_i32(metrics.titlebar_height);
+        let handle_height = to_i32(metrics.handle_height);
+        let handle_span = if handle_height > 0 {
+            handle_height + border
+        } else {
+            0
+        };
         Rectangle::new(
             (
                 outer.loc.x + border,
@@ -141,7 +241,7 @@ impl FrameGeometry {
                 .into(),
             (
                 (outer.size.w - 2 * border).max(1),
-                (outer.size.h - titlebar_height - 3 * border).max(1),
+                (outer.size.h - titlebar_height - handle_span - 3 * border).max(1),
             )
                 .into(),
         )
@@ -154,11 +254,50 @@ impl FrameGeometry {
             let inside = pixel - self.titlebar.loc;
             return Some(FramePart::Titlebar(vaht_ui::Point::new(inside.x, inside.y)));
         }
+        if let Some(part) = self.handle_part_at(pixel) {
+            return Some(part);
+        }
         let corner = self.titlebar.size.h;
         self.borders
             .iter()
             .any(|border| border.contains(pixel))
             .then(|| FramePart::Border(ResizeEdges::for_border_point(self.outer, pixel, corner)))
+    }
+
+    /// Returns the handle's part at `pixel`, the line above it included:
+    /// a grip, with the line beside it, or the handle.
+    fn handle_part_at(&self, pixel: Point<i32, Logical>) -> Option<FramePart> {
+        if self.handle.is_empty() {
+            return None;
+        }
+        let line_above = self.borders[2];
+        let row = Rectangle::new(
+            line_above.loc,
+            (self.handle.size.w, self.handle.size.h + line_above.size.h).into(),
+        );
+        if !row.contains(pixel) {
+            return None;
+        }
+        let Some(grip_width) = self.grip_width else {
+            return Some(FramePart::Handle);
+        };
+        let grip_span = to_i32(grip_width) + line_above.size.h;
+        let across = pixel.x - row.loc.x;
+        Some(if across < grip_span {
+            FramePart::Grip(GripSide::Left)
+        } else if across >= row.size.w - grip_span {
+            FramePart::Grip(GripSide::Right)
+        } else {
+            FramePart::Handle
+        })
+    }
+
+    /// Returns how wide `handle`'s grips are, with lines `border` wide
+    /// beside them: none when they and their lines would not leave room for
+    /// any handle between them, as Fluxbox draws it.
+    fn grip_width(handle: Rectangle<i32, Logical>, border: u32) -> Option<u32> {
+        let needed = 2 * (Self::GRIP_WIDTH + border);
+        (!handle.is_empty() && to_u32(handle.size.w) > needed).then_some(Self::GRIP_WIDTH)
     }
 }
 
@@ -171,6 +310,8 @@ impl FrameGeometry {
 pub(crate) struct Frame {
     /// The titlebar's content, layout and pixels.
     titlebar: Panel<Titlebar>,
+    /// The handle's content, layout and pixels.
+    handle: Panel<HandleBar>,
     /// Counts the frame while it exists.
     _tracked: Tracked,
 }
@@ -188,6 +329,13 @@ impl Frame {
                 },
                 vaht_ui::Size::default(),
             ),
+            handle: Panel::new(
+                HandleBar {
+                    is_focused: false,
+                    grips: None,
+                },
+                vaht_ui::Size::default(),
+            ),
             _tracked: ledger.track(ResourceKind::Frame),
         }
     }
@@ -195,6 +343,11 @@ impl Frame {
     /// Returns the titlebar panel: its pixels, and how new they are.
     pub(crate) const fn titlebar(&self) -> &Panel<Titlebar> {
         &self.titlebar
+    }
+
+    /// Returns the handle panel: its pixels, and how new they are.
+    pub(crate) const fn handle(&self) -> &Panel<HandleBar> {
+        &self.handle
     }
 
     /// Returns how the frame looks: focused or not.
@@ -248,15 +401,19 @@ impl Frame {
         if self.titlebar.content().is_focused != is_focused {
             self.titlebar
                 .update(|content| content.is_focused = is_focused);
+            self.handle
+                .update(|content| content.is_focused = is_focused);
         }
     }
 
     /// Marks the frame for painting again, as when the theme changed.
     pub(crate) fn invalidate(&mut self) {
         self.titlebar.invalidate();
+        self.handle.invalidate();
     }
 
-    /// Paints the titlebar to fit `geometry`, if anything changed.
+    /// Paints the titlebar and the handle to fit `geometry`, if anything
+    /// changed.
     pub(crate) fn paint(
         &mut self,
         geometry: &FrameGeometry,
@@ -267,6 +424,17 @@ impl Frame {
         self.titlebar
             .resize(vaht_ui::Size::new(to_u32(size.w), to_u32(size.h)));
         self.titlebar.paint(theme, typesetter);
+        let grips = geometry.grip_width.map(|width| GripLayout {
+            width,
+            line_width: to_u32(geometry.borders[2].size.h),
+        });
+        if self.handle.content().grips != grips {
+            self.handle.update(|content| content.grips = grips);
+        }
+        let size = geometry.handle.size;
+        self.handle
+            .resize(vaht_ui::Size::new(to_u32(size.w), to_u32(size.h)));
+        self.handle.paint(theme, typesetter);
     }
 }
 
@@ -312,6 +480,55 @@ impl PanelContent for Titlebar {
     }
 }
 
+/// A handle's content: a strip with a grip at each end.
+#[derive(Debug)]
+pub(crate) struct HandleBar {
+    /// Whether the window has keyboard focus.
+    is_focused: bool,
+    /// Where the grips go; none when the handle is too narrow for them.
+    grips: Option<GripLayout>,
+}
+
+/// How a handle's grips are laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GripLayout {
+    /// How wide each grip is.
+    width: u32,
+    /// How wide the line between each grip and the handle is; the frame
+    /// draws it there.
+    line_width: u32,
+}
+
+impl PanelContent for HandleBar {
+    type Hit = ();
+
+    fn build(&self) -> Widget<()> {
+        let children = self.grips.map_or_else(Vec::new, |grips| {
+            let grip =
+                || Widget::fill(ThemeElement::Grip).with_size(SizePolicy::Fixed(grips.width));
+            let line = || {
+                Widget::fill(ThemeElement::Handle).with_size(SizePolicy::Fixed(grips.line_width))
+            };
+            vec![
+                grip(),
+                line(),
+                Widget::fill(ThemeElement::Handle),
+                line(),
+                grip(),
+            ]
+        });
+        Widget::row(ThemeElement::Handle, children)
+    }
+
+    fn state(&self) -> WidgetState {
+        if self.is_focused {
+            WidgetState::Focused
+        } else {
+            WidgetState::Unfocused
+        }
+    }
+}
+
 /// Converts a pixel extent to a signed coordinate.
 fn to_i32(extent: u32) -> i32 {
     i32::try_from(extent).expect("frame sizes are far below i32::MAX")
@@ -326,7 +543,7 @@ fn to_u32(extent: i32) -> u32 {
 mod tests {
     use super::*;
 
-    /// A titlebar 20 pixels tall and borders 1 pixel wide.
+    /// A titlebar 20 pixels tall, lines 1 pixel wide and a handle 1 tall.
     const METRICS: Metrics = Metrics {
         titlebar_height: 20,
         border_width: 1,
@@ -336,13 +553,17 @@ mod tests {
 
     /// The frame around a 100 by 50 window whose content is at (10, 40).
     fn frame() -> FrameGeometry {
-        FrameGeometry::around(Rectangle::new((10, 40).into(), (100, 50).into()), METRICS)
+        FrameGeometry::around(
+            Rectangle::new((10, 40).into(), (100, 50).into()),
+            METRICS,
+            FrameShape::Open,
+        )
     }
 
     #[test]
     fn content_within_undoes_around() {
         let content = Rectangle::new((40, 60).into(), (300, 200).into());
-        let outer = FrameGeometry::around(content, METRICS).outer;
+        let outer = FrameGeometry::around(content, METRICS, FrameShape::Open).outer;
         assert_eq!(FrameGeometry::content_within(outer, METRICS), content);
     }
 
@@ -359,12 +580,66 @@ mod tests {
     }
 
     #[test]
-    fn the_borders_enclose_titlebar_and_content() {
-        let [top, _, bottom, left, right] = frame().borders;
+    fn the_borders_enclose_titlebar_content_and_handle() {
+        let [top, _, over_handle, bottom, left, right, ..] = frame().borders;
         assert_eq!(top.loc, (9, 18).into());
-        assert_eq!(bottom.loc, (9, 90).into());
-        assert_eq!(left.size.h, 73, "1 + 20 + 1 + 50 + 1");
+        assert_eq!(
+            over_handle,
+            Rectangle::new((10, 90).into(), (100, 1).into())
+        );
+        assert_eq!(
+            frame().handle,
+            Rectangle::new((10, 91).into(), (100, 1).into())
+        );
+        assert_eq!(bottom.loc, (9, 92).into());
+        assert_eq!(left.size.h, 75, "1 + 20 + 1 + 50 + 1 + 1 + 1");
         assert_eq!(right.loc.x, 110);
+    }
+
+    #[test]
+    fn lines_part_the_grips_from_the_handle() {
+        let [.., left_line, right_line] = frame().borders;
+        assert_eq!(left_line, Rectangle::new((30, 91).into(), (1, 1).into()));
+        assert_eq!(right_line, Rectangle::new((89, 91).into(), (1, 1).into()));
+    }
+
+    #[test]
+    fn a_handle_too_narrow_for_grips_is_all_handle() {
+        let narrow = FrameGeometry::around(
+            Rectangle::new((10, 40).into(), (42, 50).into()),
+            METRICS,
+            FrameShape::Open,
+        );
+        assert_eq!(narrow.grip_width, None);
+        assert!(narrow.borders[6].is_empty() && narrow.borders[7].is_empty());
+        assert_eq!(narrow.part_at((12.0, 91.0).into()), Some(FramePart::Handle));
+    }
+
+    #[test]
+    fn a_shaded_frame_closes_beneath_its_titlebar_without_a_handle() {
+        let shaded = FrameGeometry::around(
+            Rectangle::new((10, 40).into(), (100, 50).into()),
+            METRICS,
+            FrameShape::Shaded,
+        );
+        assert!(shaded.handle.is_empty());
+        assert_eq!(shaded.outer.size.h, 23, "1 + 20 + 1 + 1");
+    }
+
+    #[test]
+    fn without_a_handle_height_the_frame_has_none() {
+        let metrics = Metrics {
+            handle_height: 0,
+            ..METRICS
+        };
+        let content = Rectangle::new((10, 40).into(), (100, 50).into());
+        let geometry = FrameGeometry::around(content, metrics, FrameShape::Open);
+        assert!(geometry.handle.is_empty());
+        assert_eq!(geometry.outer.size.h, 73, "1 + 20 + 1 + 50 + 1");
+        assert_eq!(
+            FrameGeometry::content_within(geometry.outer, metrics),
+            content
+        );
     }
 
     #[test]
@@ -377,14 +652,48 @@ mod tests {
         assert_eq!(
             frame.part_at((9.0, 60.0).into()),
             Some(FramePart::Border(ResizeEdges {
-                horizontal: super::super::HorizontalEdge::Left,
-                vertical: super::super::VerticalEdge::None,
+                horizontal: HorizontalEdge::Left,
+                vertical: VerticalEdge::None,
             }))
         );
         assert_eq!(
             frame.part_at((50.0, 60.0).into()),
             None,
             "the content is not frame"
+        );
+        assert_eq!(frame.part_at((50.0, 91.0).into()), Some(FramePart::Handle));
+        assert_eq!(
+            frame.part_at((12.0, 91.0).into()),
+            Some(FramePart::Grip(GripSide::Left))
+        );
+        assert_eq!(
+            frame.part_at((100.0, 90.0).into()),
+            Some(FramePart::Grip(GripSide::Right)),
+            "the line above a grip is the grip's"
+        );
+    }
+
+    #[test]
+    fn dragging_the_handle_or_a_grip_resizes_the_bottom() {
+        let bottom = |horizontal| ResizeEdges {
+            horizontal,
+            vertical: VerticalEdge::Bottom,
+        };
+        assert_eq!(
+            FramePart::Handle.resize_edges(),
+            Some(bottom(HorizontalEdge::None))
+        );
+        assert_eq!(
+            FramePart::Grip(GripSide::Left).resize_edges(),
+            Some(bottom(HorizontalEdge::Left))
+        );
+        assert_eq!(
+            FramePart::Grip(GripSide::Right).resize_edges(),
+            Some(bottom(HorizontalEdge::Right))
+        );
+        assert_eq!(
+            FramePart::Titlebar(vaht_ui::Point::new(0, 0)).resize_edges(),
+            None
         );
     }
 

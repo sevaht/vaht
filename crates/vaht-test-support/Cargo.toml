@@ -18,5 +18,8 @@ smithay-client-toolkit.workspace = true
 tempfile.workspace = true
 tiny-skia.workspace = true
 
+[dev-dependencies]
+vaht-ui.workspace = true
+
 [lints]
 workspace = true
