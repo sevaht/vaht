@@ -8,8 +8,9 @@
 //! property, a state or a deeper path. Every unknown name is an error that
 //! says where it is, and names vaht plans but lacks say so.
 //!
-//! Rounded corners (`corner_radius`, `corners`) shape a window's frame, so
-//! only `[window.border]`, the frame's outline, takes them yet.
+//! Rounded corners (`corner_radius`, `corners`) shape a window's frame or a
+//! menu, so only `[window.border]` and `[menu.frame]`, their outlines, take
+//! them.
 
 use std::fmt;
 
@@ -28,22 +29,15 @@ const PLANNED_PROPERTIES: [&str; 3] = ["alpha", "submenu_indicator", "interlaced
 /// The properties only the element that may be rounded takes.
 const CORNER_PROPERTIES: [&str; 2] = ["corner_radius", "corners"];
 
-/// The element whose corners may be rounded: the frame's outline.
-const ROUNDED_ELEMENT: ThemeElement = ThemeElement::Border;
+/// The elements whose corners may be rounded: a window frame's outline and
+/// a menu's.
+const ROUNDED_ELEMENTS: [ThemeElement; 2] = [ThemeElement::Border, ThemeElement::MenuFrame];
 
 /// States of 02 §10.1 that vaht does not have yet.
-const PLANNED_STATES: [&str; 3] = ["hovered", "active", "disabled"];
+const PLANNED_STATES: [&str; 1] = ["active"];
 
 /// Elements of 02 §10.1 that vaht does not have yet.
-const PLANNED_ELEMENTS: [&str; 7] = [
-    "taskbar.tray",
-    "menu.title",
-    "menu.frame",
-    "menu.item",
-    "tooltip",
-    "snap-picker",
-    "wireframe",
-];
+const PLANNED_ELEMENTS: [&str; 4] = ["taskbar.tray", "tooltip", "snap-picker", "wireframe"];
 
 impl ThemeLayers {
     /// Reads a theme file's text.
@@ -247,12 +241,15 @@ impl StylePatch {
         map: &mut A,
         element: Option<ThemeElement>,
     ) -> Result<bool, A::Error> {
-        if CORNER_PROPERTIES.contains(&key) && element != Some(ROUNDED_ELEMENT) {
+        if CORNER_PROPERTIES.contains(&key)
+            && !element.is_some_and(|element| ROUNDED_ELEMENTS.contains(&element))
+        {
             return Err(refuse(
                 map,
                 format!(
-                    "`{key}` goes in [{}] alone: only frames are rounded yet",
-                    ROUNDED_ELEMENT.path()
+                    "`{key}` goes in [{}] or [{}] alone: only frames and menus are rounded",
+                    ROUNDED_ELEMENTS[0].path(),
+                    ROUNDED_ELEMENTS[1].path()
                 ),
             ));
         }
@@ -327,16 +324,42 @@ impl<'de> serde::Deserialize<'de> for Color {
 #[serde(transparent)]
 struct ColorText(Color);
 
-/// A texture, checked while it is read so a mistake is located at it.
-#[derive(serde::Deserialize)]
-#[serde(try_from = "TextureFile")]
+/// A texture, checked while it is read so a mistake is located at it:
+/// `"parent"`, or a table ([`TextureFile`]).
 struct TextureValue(Texture);
 
-impl TryFrom<TextureFile> for TextureValue {
-    type Error = &'static str;
+impl<'de> serde::Deserialize<'de> for TextureValue {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// Reads either form.
+        struct TextureVisitor;
 
-    fn try_from(file: TextureFile) -> Result<Self, Self::Error> {
-        file.texture().map(Self)
+        impl<'de> Visitor<'de> for TextureVisitor {
+            type Value = TextureValue;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(
+                    "\"parent\", { solid = color } or { gradient = direction, from = color, \
+                     to = color }",
+                )
+            }
+
+            fn visit_str<E: de::Error>(self, text: &str) -> Result<TextureValue, E> {
+                if text == "parent" {
+                    Ok(TextureValue(Texture::parent()))
+                } else {
+                    Err(E::invalid_value(de::Unexpected::Str(text), &self))
+                }
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<TextureValue, A::Error> {
+                let file = <TextureFile as serde::Deserialize>::deserialize(
+                    de::value::MapAccessDeserializer::new(map),
+                )?;
+                file.texture().map(TextureValue).map_err(de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_any(TextureVisitor)
     }
 }
 
@@ -664,7 +687,7 @@ mod tests {
     #[case::planned_property("[window.label]\nalpha = 4\n", "not available in vaht yet", 2)]
     #[case::corners_off_the_frame(
         "[window.label]\ncorner_radius = 4\n",
-        "goes in [window.border] alone",
+        "goes in [window.border] or [menu.frame] alone",
         2
     )]
     #[case::corners_for_every_element(
@@ -678,7 +701,7 @@ mod tests {
         2
     )]
     #[case::planned_state(
-        "[state.hovered]\ntext_color = \"red\"\n",
+        "[state.active]\ntext_color = \"red\"\n",
         "not available in vaht yet",
         1
     )]

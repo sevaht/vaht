@@ -839,6 +839,12 @@ mod tests {
         handle_height: 1,
         taskbar_height: 20,
         frame_corners: vaht_ui::CornerRadii::SQUARE,
+        menu: vaht_ui::theme::MenuMetrics {
+            title_height: 20,
+            item_height: 20,
+            border_width: 1,
+            corners: vaht_ui::CornerRadii::SQUARE,
+        },
     };
 
     /// A 1920 × 1080 output, `panel` pixels of it at the bottom taken by a

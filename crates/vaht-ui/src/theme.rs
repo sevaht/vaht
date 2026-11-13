@@ -51,6 +51,12 @@ pub enum ThemeElement {
     WindowListEntry,
     /// The window list when it lists no window.
     WindowListEmpty,
+    /// A menu's title.
+    MenuTitle,
+    /// A menu's body, behind its items, and its outline.
+    MenuFrame,
+    /// A menu's item; its `hovered` state is the highlighted one.
+    MenuItem,
 }
 
 impl ThemeElement {
@@ -70,6 +76,9 @@ impl ThemeElement {
             Self::TaskbarClock => "taskbar.clock",
             Self::WindowListEntry => "taskbar.window-list.entry",
             Self::WindowListEmpty => "taskbar.window-list.empty",
+            Self::MenuTitle => "menu.title",
+            Self::MenuFrame => "menu.frame",
+            Self::MenuItem => "menu.item",
         }
     }
 
@@ -89,6 +98,11 @@ pub enum WidgetState {
     Unfocused,
     /// Held down by the pointer.
     Pressed,
+    /// Under the pointer, or chosen with the keyboard: a menu's highlighted
+    /// item.
+    Hovered,
+    /// Not usable now: a menu item that does nothing.
+    Disabled,
 }
 
 impl WidgetState {
@@ -99,6 +113,8 @@ impl WidgetState {
             Self::Focused => "focused",
             Self::Unfocused => "unfocused",
             Self::Pressed => "pressed",
+            Self::Hovered => "hovered",
+            Self::Disabled => "disabled",
         }
     }
 
@@ -251,6 +267,21 @@ pub struct Metrics {
     pub taskbar_height: u32,
     /// How round a window frame's corners are.
     pub frame_corners: CornerRadii,
+    /// How menus are laid out.
+    pub menu: MenuMetrics,
+}
+
+/// Sizes menus are laid out by, from the theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MenuMetrics {
+    /// The height of a menu's title.
+    pub title_height: u32,
+    /// The height of each item.
+    pub item_height: u32,
+    /// The width of the outline around a menu, and under its title.
+    pub border_width: u32,
+    /// How round a menu's corners are.
+    pub corners: CornerRadii,
 }
 
 /// A theme as written: four layers of patches, not yet resolved.
@@ -340,6 +371,12 @@ impl Theme {
             handle_height: focused(ThemeElement::Handle).height.unwrap_or(0),
             taskbar_height: bar(ThemeElement::Taskbar),
             frame_corners: focused(ThemeElement::Border).corner_radii(),
+            menu: MenuMetrics {
+                title_height: bar(ThemeElement::MenuTitle),
+                item_height: bar(ThemeElement::MenuItem),
+                border_width: focused(ThemeElement::MenuFrame).border.width,
+                corners: focused(ThemeElement::MenuFrame).corner_radii(),
+            },
         }
     }
 }
@@ -453,6 +490,12 @@ mod tests {
                 handle_height: 1,
                 taskbar_height: 20,
                 frame_corners: CornerRadii::SQUARE,
+                menu: MenuMetrics {
+                    title_height: 20,
+                    item_height: 20,
+                    border_width: 1,
+                    corners: CornerRadii::of(8, <crate::Corner as strum::IntoEnumIterator>::iter()),
+                },
             }
         );
     }

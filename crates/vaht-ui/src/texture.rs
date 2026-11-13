@@ -1,7 +1,8 @@
 //! What a widget's background looks like: a fill and a bevel.
 //!
 //! These are Fluxbox's textures without the X11 baggage: a solid color or a
-//! two-color gradient, optionally bevelled to look raised or sunken.
+//! two-color gradient, optionally bevelled to look raised or sunken, or
+//! nothing at all, so what is behind shows (Fluxbox's `ParentRelative`).
 
 use crate::color::Color;
 
@@ -37,6 +38,15 @@ impl Texture {
         }
     }
 
+    /// Returns no texture: what is behind the widget shows.
+    #[must_use]
+    pub const fn parent() -> Self {
+        Self {
+            fill: Fill::Parent,
+            bevel: Bevel::Flat,
+        }
+    }
+
     /// Returns the texture with `bevel`.
     #[must_use]
     pub const fn with_bevel(mut self, bevel: Bevel) -> Self {
@@ -59,6 +69,8 @@ pub enum Fill {
         /// The ending color.
         to: Color,
     },
+    /// Nothing: what is behind shows.
+    Parent,
 }
 
 /// Which way a gradient runs.

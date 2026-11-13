@@ -147,6 +147,9 @@ struct Sources {
     /// implies by its own drawing rather than says: top, right, bottom,
     /// left.
     padding: Option<[u32; 4]>,
+    /// Whether the element has no texture of its own, and what is behind
+    /// it shows: a menu's items, on the frame.
+    shows_parent: bool,
 }
 
 impl Sources {
@@ -160,6 +163,7 @@ impl Sources {
             glyph_color: None,
             justify: None,
             padding: None,
+            shows_parent: false,
         }
     }
 
@@ -170,10 +174,22 @@ impl Sources {
         reason = "one table of every element's resources"
     )]
     fn of(element: ThemeElement, state: WidgetState) -> Self {
-        use WidgetState::{Focused, Pressed, Unfocused};
+        use WidgetState::{Disabled, Focused, Hovered, Pressed, Unfocused};
+        if matches!(
+            element,
+            ThemeElement::MenuTitle | ThemeElement::MenuFrame | ThemeElement::MenuItem
+        ) {
+            return Self::of_menu(element, state);
+        }
+        // Only menus have these states in Fluxbox; elsewhere the focused one
+        // stands in.
+        let state = match state {
+            Hovered | Disabled => Focused,
+            Focused | Unfocused | Pressed => state,
+        };
         let window = |focus: &'static [&'static str], unfocus: &'static [&'static str]| match state
         {
-            Focused | Pressed => focus,
+            Focused | Pressed | Hovered | Disabled => focus,
             Unfocused => unfocus,
         };
         match element {
@@ -211,13 +227,13 @@ impl Sources {
             },
             ThemeElement::Button => Self {
                 texture: match state {
-                    Focused => &["window.button.focus"],
+                    Focused | Hovered | Disabled => &["window.button.focus"],
                     Unfocused => &["window.button.unfocus"],
                     Pressed => &["window.button.pressed"],
                 },
                 parent: Some(ThemeElement::Titlebar),
                 glyph_color: Some(match state {
-                    Focused => &["window.button.focus.picColor"],
+                    Focused | Hovered | Disabled => &["window.button.focus.picColor"],
                     Unfocused => &["window.button.unfocus.picColor"],
                     Pressed => &[
                         "window.button.pressed.picColor",
@@ -238,7 +254,9 @@ impl Sources {
             ThemeElement::TaskbarButton => Self {
                 texture: match state {
                     Pressed => &["toolbar.button.pressed"],
-                    Focused | Unfocused => &["toolbar.button", "toolbar.clock"],
+                    Focused | Unfocused | Hovered | Disabled => {
+                        &["toolbar.button", "toolbar.clock"]
+                    }
                 },
                 parent: Some(ThemeElement::Taskbar),
                 glyph_color: Some(&[
@@ -274,12 +292,14 @@ impl Sources {
             },
             ThemeElement::WindowListEntry => Self {
                 texture: match state {
-                    Focused | Pressed => &["toolbar.iconbar.focused", "toolbar.windowLabel"],
+                    Focused | Pressed | Hovered | Disabled => {
+                        &["toolbar.iconbar.focused", "toolbar.windowLabel"]
+                    }
                     Unfocused => &["toolbar.iconbar.unfocused", "toolbar.windowLabel"],
                 },
                 parent: Some(ThemeElement::Taskbar),
                 font: Some(match state {
-                    Focused | Pressed => &[
+                    Focused | Pressed | Hovered | Disabled => &[
                         "toolbar.iconbar.focused.font",
                         "window.font",
                         "toolbar.font",
@@ -291,13 +311,13 @@ impl Sources {
                     ],
                 }),
                 text_color: Some(match state {
-                    Focused | Pressed => {
+                    Focused | Pressed | Hovered | Disabled => {
                         &["toolbar.iconbar.focused.textColor", "toolbar.textColor"]
                     }
                     Unfocused => &["toolbar.iconbar.unfocused.textColor", "toolbar.textColor"],
                 }),
                 justify: Some(match state {
-                    Focused | Pressed => &[
+                    Focused | Pressed | Hovered | Disabled => &[
                         "toolbar.iconbar.focused.justify",
                         "toolbar.iconbar.justify",
                         "window.justify",
@@ -313,6 +333,9 @@ impl Sources {
                 padding: Some([0, 5, 0, 5]),
                 ..Self::texture(&[])
             },
+            ThemeElement::MenuTitle | ThemeElement::MenuFrame | ThemeElement::MenuItem => {
+                Self::of_menu(element, state)
+            }
             ThemeElement::WindowListEmpty => Self {
                 texture: &[
                     "toolbar.iconbar.empty",
@@ -325,12 +348,64 @@ impl Sources {
             },
         }
     }
+
+    /// Returns the resources behind a menu `element` in `state`, as
+    /// fluxland's `load_menu` reads them: `menu.hilite` for the hovered
+    /// item, `menu.frame.disableColor` for a disabled one, and the frame
+    /// showing behind the others.
+    fn of_menu(element: ThemeElement, state: WidgetState) -> Self {
+        let is_hovered = state == WidgetState::Hovered;
+        match element {
+            ThemeElement::MenuTitle => Self {
+                font: Some(&["menu.title.font"]),
+                text_color: Some(&["menu.title.textColor"]),
+                justify: Some(&["menu.title.justify"]),
+                ..Self::texture(&["menu.title"])
+            },
+            ThemeElement::MenuItem if is_hovered => Self {
+                font: Some(&["menu.hilite.font", "menu.frame.font"]),
+                text_color: Some(&["menu.hilite.textColor"]),
+                justify: Some(&["menu.hilite.justify", "menu.frame.justify"]),
+                parent: Some(ThemeElement::MenuFrame),
+                ..Self::texture(&["menu.hilite"])
+            },
+            ThemeElement::MenuItem => Self {
+                font: Some(&["menu.frame.font"]),
+                text_color: Some(if state == WidgetState::Disabled {
+                    &["menu.frame.disableColor"]
+                } else {
+                    &["menu.frame.textColor"]
+                }),
+                justify: Some(&["menu.frame.justify"]),
+                shows_parent: true,
+                ..Self::texture(&[])
+            },
+            ThemeElement::MenuFrame
+            | ThemeElement::Titlebar
+            | ThemeElement::Label
+            | ThemeElement::Button
+            | ThemeElement::Handle
+            | ThemeElement::Grip
+            | ThemeElement::Border
+            | ThemeElement::Taskbar
+            | ThemeElement::TaskbarButton
+            | ThemeElement::TaskbarWorkspace
+            | ThemeElement::TaskbarClock
+            | ThemeElement::WindowListEntry
+            | ThemeElement::WindowListEmpty => Self {
+                font: Some(&["menu.frame.font"]),
+                text_color: Some(&["menu.frame.textColor"]),
+                justify: Some(&["menu.frame.justify"]),
+                ..Self::texture(&["menu.frame"])
+            },
+        }
+    }
 }
 
 /// The style's lines that vaht leaves out on purpose or cannot use yet, by
 /// how their names start, with why.
 const UNUSED_REASONS: [(&str, Reason, &str); 7] = [
-    ("menu", Reason::NotYetInVaht, "menus: vaht has no menus yet"),
+    ("menu", Reason::NotYetInVaht, "not in vaht's menus yet"),
     (
         "systray",
         Reason::NotYetInVaht,
@@ -396,6 +471,9 @@ impl StyleFile {
             for state in <WidgetState as strum::IntoEnumIterator>::iter() {
                 let sources = Sources::of(element, state);
                 let mut cell = Cell::new();
+                if sources.shows_parent {
+                    cell.insert(Property::Texture, Written(Value::from("parent")));
+                }
                 if !sources.texture.is_empty() {
                     // Without its own, a pressed taskbar button is the
                     // button with its bevel the other way, as in Fluxbox.
@@ -463,7 +541,22 @@ impl StyleFile {
             ThemeElement::Taskbar => self
                 .number(&["toolbar.height"])
                 .filter(|height| *height > 0),
-            ThemeElement::Label
+            ThemeElement::MenuTitle => self
+                .number(&["menu.titleHeight"])
+                .filter(|height| *height > 0),
+            ThemeElement::MenuItem => {
+                let height = self
+                    .number(&["menu.itemHeight"])
+                    .filter(|height| *height > 0);
+                // Fluxbox keeps an item-high square each side of the text:
+                // the bullet's on the right, a pixel more on the left.
+                let side = height.unwrap_or(vaht_ui::Theme::DEFAULT_BAR_HEIGHT);
+                let padding: Array = [0, side, 0, side + 1].into_iter().map(i64::from).collect();
+                cell.insert(Property::Padding, Written(Value::Array(padding)));
+                height
+            }
+            ThemeElement::MenuFrame
+            | ThemeElement::Label
             | ThemeElement::Button
             | ThemeElement::Grip
             | ThemeElement::Border
@@ -488,6 +581,7 @@ impl StyleFile {
             (ThemeElement::Taskbar, _) => {
                 Some((&["toolbar.borderWidth"], &["toolbar.borderColor"]))
             }
+            (ThemeElement::MenuFrame, _) => Some((&["menu.borderWidth"], &["menu.borderColor"])),
             _ => None,
         };
         if let Some((widths, colors)) = border {
@@ -500,15 +594,30 @@ impl StyleFile {
             border.insert("color", Value::from(color));
             cell.insert(Property::Border, Written(Value::InlineTable(border)));
         }
-        if element == ThemeElement::Border {
-            self.add_round_corners(cell);
+        match element {
+            ThemeElement::Border => self.add_round_corners(cell, "window.roundCorners"),
+            ThemeElement::MenuFrame => self.add_round_corners(cell, "menu.roundCorners"),
+            ThemeElement::Titlebar
+            | ThemeElement::Label
+            | ThemeElement::Button
+            | ThemeElement::Handle
+            | ThemeElement::Grip
+            | ThemeElement::Taskbar
+            | ThemeElement::TaskbarButton
+            | ThemeElement::TaskbarWorkspace
+            | ThemeElement::TaskbarClock
+            | ThemeElement::WindowListEntry
+            | ThemeElement::WindowListEmpty
+            | ThemeElement::MenuTitle
+            | ThemeElement::MenuItem => {}
         }
     }
 
-    /// Adds `window.roundCorners` to the frame outline's `cell`: Fluxbox's
-    /// cut, as a radius, and the corners it names when not all four.
-    fn add_round_corners(&mut self, cell: &mut Cell) {
-        let Some(names) = self.database.get("window.roundCorners") else {
+    /// Adds the `resource` (`window.roundCorners`, `menu.roundCorners`) to
+    /// an outline's `cell`: Fluxbox's cut, as a radius, and the corners it
+    /// names when not all four.
+    fn add_round_corners(&mut self, cell: &mut Cell, resource: &str) {
+        let Some(names) = self.database.get(resource) else {
             return;
         };
         // Fluxbox finds each corner's name anywhere in the value, in any
@@ -1076,6 +1185,7 @@ window.label.focus:\t\t\tgradient vertical
 window.label.unfocus:\t\tgradient vertical
 window.handle.focus:\t\traised gradient vertical
 menu.frame.color:\tblack
+menu.bullet:\tsquare
 ";
 
     /// Converts `style`, returning what each element gets, the theme
@@ -1202,7 +1312,10 @@ menu.frame.color:\tblack
             notes.contains("toolbar.workspace: a pixmap texture"),
             "{notes}"
         );
-        assert!(notes.contains("menu.frame.color: menus"), "{notes}");
+        assert!(
+            notes.contains("menu.bullet: not in vaht's menus yet"),
+            "{notes}"
+        );
     }
 
     #[rstest]

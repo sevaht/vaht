@@ -176,6 +176,8 @@ pub enum Glyph {
     Stick,
     /// A triangle pointing left: the previous one.
     ArrowLeft,
-    /// A triangle pointing right: the next one.
+    /// A triangle pointing right: the next one, or a submenu.
     ArrowRight,
+    /// A filled square: a chosen menu item.
+    Check,
 }

@@ -656,6 +656,12 @@ mod tests {
         handle_height: 1,
         taskbar_height: 20,
         frame_corners: CornerRadii::SQUARE,
+        menu: vaht_ui::theme::MenuMetrics {
+            title_height: 20,
+            item_height: 20,
+            border_width: 1,
+            corners: CornerRadii::SQUARE,
+        },
     };
 
     /// The frame around a 100 by 50 window whose content is at (10, 40).

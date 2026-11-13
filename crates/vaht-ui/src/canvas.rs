@@ -95,6 +95,7 @@ impl<'pixmap> Canvas<'pixmap> {
             return;
         };
         let shader = match texture.fill {
+            Fill::Parent => return,
             Fill::Solid(color) => Shader::SolidColor(color.to_skia()),
             Fill::Gradient {
                 direction,
@@ -166,13 +167,23 @@ impl<'pixmap> Canvas<'pixmap> {
         }
     }
 
-    /// Returns the filled triangle of an arrow `glyph` in the square of
-    /// `side` at `left`, `top`: half as wide as tall, pointing its way.
-    /// `None` for a glyph that is no arrow.
-    fn arrow(glyph: Glyph, left: f32, top: f32, side: f32) -> Option<tiny_skia::Path> {
+    /// Returns the filled shape of `glyph` in the square of `side` at
+    /// `left`, `top`: an arrow's triangle, half as wide as tall, pointing its
+    /// way, or a check's square, half as wide as the square, as Fluxbox marks
+    /// a chosen menu item. `None` for a glyph that is stroked.
+    fn filled(glyph: Glyph, left: f32, top: f32, side: f32) -> Option<tiny_skia::Path> {
         let (tip, base) = match glyph {
             Glyph::ArrowLeft => (left + side / 4.0, left + side * 3.0 / 4.0),
             Glyph::ArrowRight => (left + side * 3.0 / 4.0, left + side / 4.0),
+            Glyph::Check => {
+                let quarter = side / 4.0;
+                return Some(PathBuilder::from_rect(SkiaRect::from_xywh(
+                    left + quarter,
+                    top + quarter,
+                    side / 2.0,
+                    side / 2.0,
+                )?));
+            }
             Glyph::Close | Glyph::Maximize | Glyph::Minimize | Glyph::Shade | Glyph::Stick => {
                 return None;
             }
@@ -201,7 +212,7 @@ impl<'pixmap> Canvas<'pixmap> {
             side as f32,
         );
         let (right, bottom) = (left + side, top + side);
-        if let Some(arrow) = Self::arrow(glyph, left, top, side) {
+        if let Some(arrow) = Self::filled(glyph, left, top, side) {
             let mut paint = Paint::default();
             paint.set_color(color.to_skia());
             paint.anti_alias = true;
@@ -246,7 +257,7 @@ impl<'pixmap> Canvas<'pixmap> {
                         .expect("a square of positive side"),
                 );
             }
-            Glyph::ArrowLeft | Glyph::ArrowRight => {}
+            Glyph::ArrowLeft | Glyph::ArrowRight | Glyph::Check => {}
         }
         if let Some(path) = path.finish() {
             let mut paint = Paint::default();

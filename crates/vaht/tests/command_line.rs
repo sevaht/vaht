@@ -179,7 +179,7 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     std::fs::create_dir_all(setup.path().join("styles/Night Sky")).expect("made");
     std::fs::write(
         setup.path().join("styles/Night Sky/theme.cfg"),
-        "*.color: SteelBlue\nwindow.title.height: 24\nmenu.frame.color: black\n",
+        "*.color: SteelBlue\nwindow.title.height: 24\nslit.color: black\n",
     )
     .expect("written");
     std::fs::write(
@@ -217,7 +217,10 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
         std::fs::read_to_string(target.path().join("themes/Night-Sky.toml")).expect("written");
     assert!(theme.contains("SteelBlue"), "{theme}");
     assert!(theme.contains("height = 24"), "{theme}");
-    assert!(printed.contains("menu.frame.color: menus"), "{printed}");
+    assert!(
+        printed.contains("slit.color: the slit is gone"),
+        "{printed}"
+    );
     assert!(
         std::fs::read_dir(setup.path()).expect("readable").count() == 3,
         "the source is untouched"
