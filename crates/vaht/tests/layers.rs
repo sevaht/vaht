@@ -4,7 +4,9 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use vaht_test_support::{BUTTON_LEFT, HeadlessVaht, TestClient, TestLayer, WINDOW_COLOR, keys};
+use vaht_test_support::{
+    BUTTON_LEFT, HeadlessVaht, KeyboardFocus, TestClient, TestLayer, WINDOW_COLOR, keys,
+};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
@@ -103,4 +105,28 @@ fn desktop_bindings_work_over_a_wallpaper() {
         assert!(Instant::now() < deadline, "the desktop binding never ran");
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+#[test]
+fn a_panel_clicked_for_the_keyboard_keeps_it_when_it_redraws() {
+    let (_vaht, mut client) = start(&[]);
+    client.open_windows(1);
+    assert_eq!(client.keyboard_focus(), KeyboardFocus::Window(0));
+    client.open_keyboard_bar(TestLayer::Top, PANEL_HEIGHT, PANEL_COLOR);
+    let screenshot = client.screenshot();
+    let panel = screenshot
+        .bounds_of(PANEL_COLOR)
+        .expect("the panel is shown");
+    client.click(screenshot.width() / 2, panel.top + 2, BUTTON_LEFT);
+    assert_eq!(
+        client.keyboard_focus(),
+        KeyboardFocus::Layer(0),
+        "a click gives it the keyboard"
+    );
+    client.commit_layers();
+    assert_eq!(
+        client.keyboard_focus(),
+        KeyboardFocus::Layer(0),
+        "and redrawing keeps it"
+    );
 }

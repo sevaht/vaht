@@ -1149,6 +1149,23 @@ mod tests {
     }
 
     #[test]
+    fn a_window_placed_while_being_moved_stays_where_it_was_placed() {
+        let mut desk = Desk::new();
+        let window = desk.open();
+        assert!(
+            desk.manager
+                .begin_drag(window, WindowDrag::Move, (50.0, 10.0).into())
+        );
+        desk.run(&action("maximize"));
+        desk.manager.follow_drag(window, (200, 150).into(), 0);
+        assert_eq!(
+            desk.outer(window),
+            output(0).usable,
+            "the drag no longer moves it"
+        );
+    }
+
+    #[test]
     fn resizing_from_the_top_left_keeps_the_bottom_right_corner_still() {
         let mut desk = Desk::new();
         let window = desk.open();

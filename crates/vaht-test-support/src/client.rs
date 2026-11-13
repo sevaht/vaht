@@ -13,7 +13,7 @@ use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Fra
 use smithay_client_toolkit::dispatch2::Dispatch2;
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::client::globals::{GlobalList, registry_queue_init};
-use smithay_client_toolkit::reexports::client::protocol::{wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
+use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue, QueueHandle};
@@ -27,7 +27,8 @@ use smithay_client_toolkit::reexports::protocols_wlr::virtual_pointer::v1::clien
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::shell::WaylandSurface as _;
 use smithay_client_toolkit::shell::wlr_layer::{
-    Anchor, Layer, LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure,
+    Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
+    LayerSurfaceConfigure,
 };
 use smithay_client_toolkit::shell::xdg::XdgShell;
 use smithay_client_toolkit::shell::xdg::window::{Window, WindowConfigure, WindowDecorations, WindowHandler};
@@ -126,6 +127,17 @@ const ALT_MODIFIER_MASK: u32 = 1 << 3;
 /// Bytes per pixel of an ARGB8888 buffer.
 const BYTES_PER_PIXEL: u32 = 4;
 
+/// What has the client's keyboard focus, as vaht last told it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyboardFocus {
+    /// None of its surfaces.
+    Nothing,
+    /// Its window opened at this position, from 0.
+    Window(usize),
+    /// Its layer surface opened at this position, from 0.
+    Layer(usize),
+}
+
 /// A client connected to vaht.
 #[derive(Debug)]
 pub struct TestClient {
@@ -139,6 +151,8 @@ pub struct TestClient {
     keyboard: ZwpVirtualKeyboardV1,
     /// The empty file sent as the keyboard's keymap; kept open until sent.
     _no_keymap: File,
+    /// The seat's keyboard, which hears where keyboard focus is.
+    _seat_keyboard: wl_keyboard::WlKeyboard,
     /// The milliseconds clock stamped on pointer events.
     time: u32,
 }
@@ -171,6 +185,7 @@ impl TestClient {
         // keymap, so no keymap needs writing. The protocol still wants a file.
         let no_keymap = File::open("/dev/null").expect("/dev/null opens");
         keyboard.keymap(NO_KEYMAP_FORMAT, no_keymap.as_fd(), 0);
+        let seat_keyboard = seat.get_keyboard(&handle, KeyboardEvents);
         let mut state = ClientState {
             registry: RegistryState::new(&globals),
             outputs: OutputState::new(&globals, &handle),
@@ -194,6 +209,7 @@ impl TestClient {
             close_requests: 0,
             capture_size: None,
             capture_result: None,
+            keyboard_focus: None,
         };
         // Learn the outputs before anything needs them.
         queue
@@ -205,6 +221,7 @@ impl TestClient {
             pointer,
             keyboard,
             _no_keymap: no_keymap,
+            _seat_keyboard: seat_keyboard,
             time: 0,
         }
     }
@@ -287,6 +304,60 @@ impl TestClient {
             }
         });
         self.state.layers.push(surface);
+    }
+
+    /// Opens a bar like [`Self::open_bar`], not exclusive, that takes the
+    /// keyboard when clicked, as a panel with a search field does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if vaht has no layer shell or the connection fails.
+    pub fn open_keyboard_bar(&mut self, layer: TestLayer, thickness: u32, color: [u8; 3]) {
+        let surface = self.open_layer(layer, color, |bar| {
+            bar.set_anchor(Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
+            bar.set_size(0, thickness);
+            bar.set_keyboard_interactivity(KeyboardInteractivity::OnDemand);
+        });
+        self.state.layers.push(surface);
+    }
+
+    /// Commits every layer surface again, unchanged, as a panel redrawing
+    /// its clock does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn commit_layers(&mut self) {
+        for layer in &self.state.layers {
+            layer.commit();
+        }
+        self.roundtrip();
+    }
+
+    /// Returns what has the client's keyboard focus, once vaht has handled
+    /// everything sent so far.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn keyboard_focus(&mut self) -> KeyboardFocus {
+        self.roundtrip();
+        let Some(focused) = &self.state.keyboard_focus else {
+            return KeyboardFocus::Nothing;
+        };
+        if let Some(position) = self
+            .state
+            .windows
+            .iter()
+            .position(|window| window.wl_surface() == focused)
+        {
+            return KeyboardFocus::Window(position);
+        }
+        self.state
+            .layers
+            .iter()
+            .position(|layer| layer.wl_surface() == focused)
+            .map_or(KeyboardFocus::Nothing, KeyboardFocus::Layer)
     }
 
     /// Opens a layer surface covering the whole output in `layer`, filled
@@ -606,6 +677,8 @@ struct ClientState {
     capture_size: Option<(u32, u32)>,
     /// How the current capture ended.
     capture_result: Option<Result<(), String>>,
+    /// The surface with keyboard focus, as vaht last told.
+    keyboard_focus: Option<wl_surface::WlSurface>,
 }
 
 impl ClientState {
@@ -675,6 +748,31 @@ ignore_events!(
     ExtImageCaptureSourceV1,
     ExtImageCopyCaptureManagerV1,
 );
+
+/// User data of the seat's keyboard: records where keyboard focus is.
+#[derive(Debug, Clone, Copy)]
+struct KeyboardEvents;
+
+impl Dispatch2<wl_keyboard::WlKeyboard, ClientState> for KeyboardEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &wl_keyboard::WlKeyboard,
+        event: wl_keyboard::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "only where focus is matters to a test, not the keys"
+        )]
+        match event {
+            wl_keyboard::Event::Enter { surface, .. } => state.keyboard_focus = Some(surface),
+            wl_keyboard::Event::Leave { .. } => state.keyboard_focus = None,
+            _ => {}
+        }
+    }
+}
 
 /// User data of a capture session: records the buffer size it asks for.
 #[derive(Debug, Clone, Copy)]
