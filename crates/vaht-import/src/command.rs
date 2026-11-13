@@ -128,6 +128,13 @@ impl FluxboxCommand<'_> {
             "resizeto" => with("resize-to"),
             "reconfigure" | "reconfig" => plain("reload"),
             "exit" | "quit" => plain("exit"),
+            "rootmenu" => plain("root-menu"),
+            "windowmenu" => plain("window-menu"),
+            "workspacemenu" => plain("workspace-menu"),
+            "hidemenus" => plain("hide-menus"),
+            // A pattern choosing which windows ClientMenu lists is lost:
+            // vaht's window-list menu lists every window.
+            "clientmenu" if arguments.is_empty() => plain("window-list-menu"),
             "setenv" | "export" => Ok(format!(
                 "set-environment {}",
                 arguments.replacen('=', " ", 1)
@@ -281,8 +288,8 @@ mod tests {
 
     #[rstest]
     #[case::tabs("StartTabbing", Reason::Dropped)]
-    #[case::menu_for_now("RootMenu", Reason::NotYetInVaht)]
-    #[case::macro_with_a_missing_part("MacroCmd {Raise} {WindowMenu}", Reason::NotYetInVaht)]
+    #[case::menu_from_a_file("CustomMenu ~/.fluxbox/custom", Reason::NotYetInVaht)]
+    #[case::macro_with_a_missing_part("MacroCmd {Raise} {CustomMenu x}", Reason::NotYetInVaht)]
     fn commands_not_translated_say_why(#[case] fluxbox: &str, #[case] reason: Reason) {
         let untranslated = FluxboxCommand(fluxbox).to_vaht().expect_err(fluxbox);
         assert_eq!(untranslated.reason, reason);

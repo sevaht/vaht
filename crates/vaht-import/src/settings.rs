@@ -122,6 +122,9 @@ impl InitFile {
         self.convert_windows(report);
         self.convert_workspaces();
         self.convert_taskbar(report);
+        if let Some(delay) = self.number(&format!("{SCREEN}menuDelay")) {
+            self.set(&["menus", "submenu_delay_ms"], Value::from(delay));
+        }
         self.report_unused(report);
         self.document
     }

@@ -8,13 +8,15 @@
 //! Every line that is not converted is in the [`Report`], with why.
 //!
 //! Converted today: `init` to `settings.toml`, `keys` to `bindings.toml`,
-//! `apps` to `rules.toml`, and the style `init` names to
-//! `themes/<name>.toml`, which `settings.toml` then chooses. `menu` and
-//! `startup` are reported until vaht has menus.
+//! `apps` to `rules.toml`, `menu` and `windowmenu` to `menus.toml`, and the
+//! style `init` names to `themes/<name>.toml`, which `settings.toml` then
+//! chooses. `startup` is reported: its commands belong in
+//! `session.autostart`.
 
 mod apps;
 mod command;
 mod keys;
+mod menu;
 mod pattern;
 mod report;
 mod resources;
@@ -28,6 +30,7 @@ pub use report::{Note, Reason, Report};
 
 use crate::apps::AppsFile;
 use crate::keys::KeysFile;
+use crate::menu::MenuFiles;
 use crate::resources::Resources;
 use crate::settings::InitFile;
 use crate::style::StyleFile;
@@ -45,6 +48,10 @@ pub struct FluxboxSetup {
     apps: Option<(PathBuf, String)>,
     /// The style `init` names: where, and what it says.
     style: Option<(PathBuf, String)>,
+    /// The root menu: where, and what it says.
+    menu: Option<(PathBuf, String)>,
+    /// The window menu: where, and what it says.
+    window_menu: Option<(PathBuf, String)>,
     /// The other files vaht cannot convert yet, if they exist.
     unconverted: Vec<(PathBuf, &'static str)>,
 }
@@ -82,20 +89,12 @@ impl FluxboxSetup {
         };
         let keys_path = file("session.keyFile", "keys");
         let apps_path = file("session.appsFile", "apps");
-        let unconverted = [
-            (
-                file("session.menuFile", "menu"),
-                "menus: vaht has no menus yet",
-            ),
-            (
-                file("session.screen0.windowMenu", "windowmenu"),
-                "the window menu: vaht has no menus yet",
-            ),
-            (
-                directory.join("startup"),
-                "the startup script: add it to session.autostart if vaht should run it",
-            ),
-        ]
+        let menu_path = file("session.menuFile", "menu");
+        let window_menu_path = file("session.screen0.windowMenu", "windowmenu");
+        let unconverted = [(
+            directory.join("startup"),
+            "the startup script: add it to session.autostart if vaht should run it",
+        )]
         .into_iter()
         .filter(|(path, _)| path.exists())
         .collect();
@@ -105,6 +104,8 @@ impl FluxboxSetup {
             keys: Self::read_optional(keys_path)?,
             apps: Self::read_optional(apps_path)?,
             style: style_path.map(Self::read_optional).transpose()?.flatten(),
+            menu: Self::read_optional(menu_path)?,
+            window_menu: Self::read_optional(window_menu_path)?,
             unconverted,
         })
     }
@@ -152,6 +153,17 @@ impl FluxboxSetup {
             files.push(OutputFile {
                 name: "bindings.toml".to_owned(),
                 text: header(path) + &bindings.to_string(),
+            });
+        }
+        if let Some((path, text)) = &self.menu {
+            let mut menus = MenuFiles::new();
+            menus.convert_root(path, text, &mut report);
+            if let Some((path, text)) = &self.window_menu {
+                menus.convert_window(path, text, &mut report);
+            }
+            files.push(OutputFile {
+                name: "menus.toml".to_owned(),
+                text: header(path) + &menus.document().to_string(),
             });
         }
         if let Some((path, text)) = &self.apps {
@@ -335,6 +347,11 @@ mod tests {
             "Mod4 T :Exec kitty\nOnDesktop Mouse3 :RootMenu\n",
         )
         .expect("written");
+        std::fs::write(
+            source.path().join("menu"),
+            "[begin] (vaht)\n[exec] (kitty) {kitty}\n[submenu] (More)\n[exit] (Exit)\n[end]\n[end]\n",
+        )
+        .expect("written");
         let conversion = FluxboxSetup::read(source.path())
             .expect("readable")
             .convert();
@@ -355,12 +372,13 @@ mod tests {
             bindings.contains("\"Super+T\" = \"exec kitty\""),
             "{bindings}"
         );
-        let notes: Vec<_> = conversion
-            .report()
-            .notes()
-            .iter()
-            .map(|note| note.line)
-            .collect();
-        assert_eq!(notes, [2], "the root menu line: {}", conversion.report());
+        assert!(bindings.contains("Right = \"root-menu\""), "{bindings}");
+        let menus = std::fs::read_to_string(target.path().join("menus.toml")).expect("written");
+        assert!(menus.contains("submenu = \"more\""), "{menus}");
+        assert!(
+            conversion.report().notes().is_empty(),
+            "{}",
+            conversion.report()
+        );
     }
 }

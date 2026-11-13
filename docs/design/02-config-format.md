@@ -792,11 +792,17 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
   or a directory with `theme.cfg`) to `themes/<name>.toml`, which the
   converted `settings.toml` chooses.
   Every setting, binding or pattern vaht lacks is reported as "not in vaht
-  yet", so importing again as features arrive picks them up. The menus and
-  `startup` are reported until menus exist. Commands are translated by
+  yet", so importing again as features arrive picks them up. `startup` is
+  reported, to be added to `session.autostart` by hand. Commands are translated by
   `FluxboxCommand`. A sequence loses the parts vaht drops on purpose
   (`ActivateTab`), but a part vaht lacks for now leaves the whole binding
   out.
+- **The menus convert to `menus.toml`:** `session.menuFile` becomes
+  `[menu.root]` and `session.screen0.windowMenu` becomes `[menu.window]`; each
+  `[submenu]` becomes its own `[menu.<name>]`, named from its label and kept
+  unique, and `[include]` files are read in place. A submenu with nothing
+  vaht can show is left out. Vaht's own window and workspace menus are
+  written where the source has none.
 - **The toolbar converts to `[taskbar]`:** its placement, tools, `maxOver`,
   `strftimeFormat`, `iconbar.mode` (a client pattern) and
   `iconbar.iconWidth`; settings that already ask for what vaht does are
