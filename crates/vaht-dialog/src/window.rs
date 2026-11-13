@@ -86,6 +86,7 @@ pub fn show(dialog: Box<dyn LineDialog>, theme: Theme) -> Result<(), DialogError
         keyboard: None,
         modifiers: Modifiers::default(),
         panel: Panel::new(FieldContent(dialog.field()), size),
+        title: dialog.title().to_owned(),
         dialog,
         theme,
         typesetter,
@@ -174,6 +175,8 @@ struct DialogWindow {
     panel: Panel<FieldContent>,
     /// The dialog.
     dialog: Box<dyn LineDialog>,
+    /// The window's title, as last set.
+    title: String,
     /// How the line looks.
     theme: Theme,
     /// Draws text.
@@ -203,6 +206,10 @@ impl DialogWindow {
         };
         match self.dialog.press(key) {
             Ok(Outcome::Open) => {
+                if self.title != self.dialog.title() {
+                    self.dialog.title().clone_into(&mut self.title);
+                    self.window.set_title(self.title.clone());
+                }
                 let field = self.dialog.field();
                 self.panel.update_if(|content| {
                     let changed = content.0 != field;

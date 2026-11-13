@@ -6,57 +6,13 @@ mod history;
 
 use std::path::PathBuf;
 
-use vaht_ipc::{Client, Reply, Request};
 use vaht_ui::TextField;
 
 use self::completion::{Completer, common_prefix};
 use self::history::RunHistory;
+use crate::commander::{Commander, IpcCommander};
 use crate::line::LineEditor;
 use crate::{EditKey, LineDialog, Outcome};
-
-/// Starts a command line.
-pub trait Launch {
-    /// Starts `command_line` as vaht's `exec` does.
-    ///
-    /// # Errors
-    ///
-    /// Returns why it could not be started.
-    fn launch(&mut self, command_line: &str) -> Result<(), String>;
-}
-
-/// Starts command lines by asking vaht, over IPC, to `exec` them: they
-/// start from vaht, with its environment, and vaht reaps them.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct IpcLauncher;
-
-impl Launch for IpcLauncher {
-    fn launch(&mut self, command_line: &str) -> Result<(), String> {
-        let request = Request::Run {
-            command: format!("exec {command_line}"),
-            window: None,
-        };
-        let reply = Client::connect_from_environment()
-            .and_then(|mut client| client.request(&request))
-            .map_err(|error| {
-                // The causes, as `{:#}` would show them.
-                let mut message = error.to_string();
-                let mut source = std::error::Error::source(&error);
-                while let Some(cause) = source {
-                    message.push_str(": ");
-                    message.push_str(&cause.to_string());
-                    source = cause.source();
-                }
-                message
-            })?;
-        match reply {
-            Reply::Done {} => Ok(()),
-            Reply::Error { message } => Err(message),
-            other @ (Reply::Version { .. } | Reply::Windows { .. } | Reply::Workspaces { .. }) => {
-                Err(format!("vaht answered something else: {other:?}"))
-            }
-        }
-    }
-}
 
 /// The names Tab goes through, one per press, once the word is as long
 /// as they all agree.
@@ -93,8 +49,8 @@ pub struct RunDialog {
     cycle: Option<Cycle>,
     /// Where names to complete come from.
     completer: Completer,
-    /// Starts what is run.
-    launcher: Box<dyn Launch>,
+    /// Runs what is typed, as an `exec` command.
+    commander: Box<dyn Commander>,
 }
 
 impl RunDialog {
@@ -114,7 +70,7 @@ impl RunDialog {
             history,
             history_path,
             Completer::from_environment(),
-            Box::new(IpcLauncher),
+            Box::new(IpcCommander),
         )
     }
 
@@ -123,7 +79,7 @@ impl RunDialog {
         history: RunHistory,
         history_path: Option<PathBuf>,
         completer: Completer,
-        launcher: Box<dyn Launch>,
+        commander: Box<dyn Commander>,
     ) -> Self {
         Self {
             line: LineEditor::default(),
@@ -132,7 +88,7 @@ impl RunDialog {
             browsing: Browsing::default(),
             cycle: None,
             completer,
-            launcher,
+            commander,
         }
     }
 
@@ -148,7 +104,9 @@ impl RunDialog {
                 format!("could not save the history to {}: {error}", path.display())
             })
         });
-        self.launcher.launch(&line)?;
+        self.commander
+            .run(&format!("exec {line}"))
+            .map_err(|error| error.to_string())?;
         saved.map(|()| Outcome::Close)
     }
 
@@ -275,14 +233,15 @@ mod tests {
     use std::rc::Rc;
 
     use super::*;
+    use crate::commander::CommandError;
 
-    /// Records what it is asked to start.
+    /// Records the commands it is asked to run.
     #[derive(Debug, Clone, Default)]
     struct Recorder(Rc<RefCell<Vec<String>>>);
 
-    impl Launch for Recorder {
-        fn launch(&mut self, command_line: &str) -> Result<(), String> {
-            self.0.borrow_mut().push(command_line.to_owned());
+    impl Commander for Recorder {
+        fn run(&mut self, command: &str) -> Result<(), CommandError> {
+            self.0.borrow_mut().push(command.to_owned());
             Ok(())
         }
     }
@@ -326,7 +285,7 @@ mod tests {
         let (mut dialog, recorder) = dialog(&directory, &[]);
         type_text(&mut dialog, "  kitty --hold ");
         assert_eq!(dialog.press(EditKey::Accept), Ok(Outcome::Close));
-        assert_eq!(*recorder.0.borrow(), ["kitty --hold"]);
+        assert_eq!(*recorder.0.borrow(), ["exec kitty --hold"]);
         let saved = RunHistory::load(&directory.path().join("history"));
         assert_eq!(saved.lines(), ["kitty --hold"]);
     }
@@ -392,12 +351,12 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_that_fails_is_reported() {
-        /// Fails every launch.
+    fn a_command_that_cannot_be_run_is_reported() {
+        /// Reaches no vaht.
         struct Failing;
-        impl Launch for Failing {
-            fn launch(&mut self, _: &str) -> Result<(), String> {
-                Err("no vaht".to_owned())
+        impl Commander for Failing {
+            fn run(&mut self, _: &str) -> Result<(), CommandError> {
+                Err(CommandError::Unreachable("no vaht".to_owned()))
             }
         }
         let mut dialog = RunDialog::with_parts(

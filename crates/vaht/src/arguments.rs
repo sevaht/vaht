@@ -100,6 +100,8 @@ pub enum DialogKind {
     /// A command line to run, with Tab completing program and file names
     /// and Up and Down going through the lines run before.
     Run,
+    /// A vaht command to run, written as a binding writes one.
+    Command,
 }
 
 /// What `vaht msg` asks.

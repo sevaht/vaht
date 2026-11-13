@@ -84,3 +84,21 @@ fn escape_closes_the_run_dialog_without_running_anything() {
     let report = vaht.stop();
     report.assert_nothing_left_behind();
 }
+
+#[test]
+fn the_command_dialog_runs_a_vaht_command() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[(
+            "bindings.toml",
+            "[keys]\n\"Super+T\" = \"command-dialog\"\n",
+        )],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.type_chord(&SUPER_T);
+    vaht.wait_for_logged("placed first", 1);
+    client.type_text("workspace 2");
+    client.type_chord(&[keys::ENTER]);
+    vaht.wait_for_logged("workspace shown", 1);
+    vaht.wait_for_logged("window closed", 1);
+}

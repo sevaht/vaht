@@ -7,22 +7,27 @@
 //! environment, and vaht reaps it.
 //!
 //! [`LineDialog`] is what a dialog is: a line, and what keys do to it.
-//! [`RunDialog`] is the one there is. [`show`] puts a dialog in a window
+//! [`RunDialog`] runs a program, [`CommandDialog`] a vaht command; both
+//! ask vaht through a [`Commander`]. [`show`] puts a dialog in a window
 //! drawn with vaht-ui in the theme's `dialog.field` style, and runs it
 //! until it closes.
 
+mod command;
+mod commander;
 mod key;
 mod line;
 mod run;
 mod window;
 
+pub use command::CommandDialog;
+pub use commander::{CommandError, Commander, IpcCommander};
 pub use key::EditKey;
-pub use run::{IpcLauncher, Launch, RunDialog};
+pub use run::RunDialog;
 pub use window::{DialogError, show};
 
 /// A dialog: a line of text, edited by keys.
 pub trait LineDialog {
-    /// Returns the window's title.
+    /// Returns the window's title, which may change after a key.
     fn title(&self) -> &str;
 
     /// Returns the window's application id, which rules match.

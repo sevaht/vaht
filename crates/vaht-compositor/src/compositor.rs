@@ -896,6 +896,9 @@ impl Compositor {
             Action::RunDialog => self
                 .launcher
                 .show_dialog("run", self.config_source.directory()),
+            Action::CommandDialog => self
+                .launcher
+                .show_dialog("command", self.config_source.directory()),
             Action::Exit => self.stop(),
             Action::SetEnvironment { name, value } => {
                 self.launcher.set_environment(name.clone(), value.clone());

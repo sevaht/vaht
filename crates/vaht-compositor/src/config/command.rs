@@ -25,7 +25,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "activate-window-list-entry",
     "apply-profile",
     "arrange",
-    "command-dialog",
     "cycle-primary-output",
     "cycle-profile",
     "focus-direction",
@@ -217,6 +216,8 @@ pub(crate) enum Action {
     Reload,
     /// Shows the run dialog: a command line to type and run.
     RunDialog,
+    /// Shows the command dialog: a vaht command to type and run.
+    CommandDialog,
     /// Stops vaht.
     Exit,
     /// Sets an environment variable for programs vaht starts from now on.
@@ -328,6 +329,7 @@ impl Action {
             "start-resizing" => ResizeFrom::parse(arguments).map(Self::StartResizing),
             "reload" => without_arguments(Self::Reload),
             "run-dialog" => without_arguments(Self::RunDialog),
+            "command-dialog" => without_arguments(Self::CommandDialog),
             "root-menu" => without_arguments(Self::OpenMenu(MenuRequest::Root)),
             "window-menu" => without_arguments(Self::OpenMenu(MenuRequest::Window)),
             "workspace-menu" => without_arguments(Self::OpenMenu(MenuRequest::Workspace)),
@@ -423,6 +425,7 @@ impl fmt::Display for Action {
             Self::StartResizing(from) => write!(formatter, "start-resizing {from}"),
             Self::Reload => formatter.write_str("reload"),
             Self::RunDialog => formatter.write_str("run-dialog"),
+            Self::CommandDialog => formatter.write_str("command-dialog"),
             Self::Exit => formatter.write_str("exit"),
             Self::SetEnvironment { name, value } => {
                 write!(formatter, "set-environment {name} {value}")
@@ -762,7 +765,7 @@ mod tests {
 
     #[rstest]
     #[case::unknown_action("\"explode\"", "unknown action `explode`")]
-    #[case::planned_action("\"command-dialog\"", "not available in vaht yet")]
+    #[case::planned_action("\"set-theme dark\"", "not available in vaht yet")]
     #[case::maximize_both_by_name("\"maximize both\"", "nothing, horizontal or vertical")]
     #[case::one_number("\"move 10\"", "two whole numbers")]
     #[case::cell_outside("\"tile 600 0 500 1000\"", "within 0 to 1000")]

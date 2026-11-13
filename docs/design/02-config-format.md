@@ -819,6 +819,10 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
   unique, and `[include]` files are read in place. A submenu with nothing
   vaht can show is left out. Vaht's own window and workspace menus are
   written where the source has none.
+- **The command dialog converts:** `CommandDialog` and the menu's
+  `[commanddialog]` become `command-dialog`, a line for a vaht command.
+  A command vaht refuses keeps the dialog open, with the reason in its
+  title.
 - **The run window converts to the run dialog:** `RunDialog`, and `Exec
   fbrun` or `Exec fluxland-run`, become `run-dialog`; their options are
   reported, since the theme's `dialog.field` styles the dialog. Fluxbox

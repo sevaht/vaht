@@ -296,6 +296,7 @@ impl MenuFiles {
             "workspaces" => item(&[("generate", Value::from("workspaces"))]),
             "reconfig" => command("reload"),
             "exit" => command("exit"),
+            "commanddialog" => command("command-dialog"),
             "shade" | "stick" | "maximize" => item(&[("toggle", Value::from(line.tag.as_str()))]),
             "iconify" => item(&[("toggle", Value::from("minimize"))]),
             "raise" | "lower" | "close" | "kill" => command(&line.tag),

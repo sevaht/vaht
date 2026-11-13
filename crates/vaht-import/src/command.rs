@@ -54,7 +54,7 @@ pub(crate) struct FluxboxCommand<'text>(pub(crate) &'text str);
 
 impl FluxboxCommand<'_> {
     /// Fluxbox commands vaht deliberately has no counterpart for.
-    const DROPPED: [&str; 12] = [
+    const DROPPED: [&str; 11] = [
         "activatetab",
         "starttabbing",
         "nexttab",
@@ -66,7 +66,6 @@ impl FluxboxCommand<'_> {
         "toggledecor",
         "setdecor",
         "setstyle",
-        "commanddialog",
     ];
 
     /// Returns the vaht command, or why there is none.
@@ -132,6 +131,7 @@ impl FluxboxCommand<'_> {
             "reconfigure" | "reconfig" => plain("reload"),
             "exit" | "quit" => plain("exit"),
             "rundialog" => plain("run-dialog"),
+            "commanddialog" => plain("command-dialog"),
             "rootmenu" => plain("root-menu"),
             "windowmenu" => plain("window-menu"),
             "workspacemenu" => plain("workspace-menu"),
@@ -322,6 +322,7 @@ mod tests {
     #[case::take_previous("TakeToPrevWorkspace", r#""take-to-workspace previous""#)]
     #[case::fluxland_snap("SnapStep left", r#""snap-step left""#)]
     #[case::run_dialog("RunDialog", r#""run-dialog""#)]
+    #[case::command_dialog("CommandDialog", r#""command-dialog""#)]
     #[case::fbrun("Exec fbrun", r#""run-dialog""#)]
     #[case::fluxland_run("ExecCommand fluxland-run -f 'Sans 10'", r#""run-dialog""#)]
     #[case::not_a_run_window("Exec fbrunner", r#""exec fbrunner""#)]

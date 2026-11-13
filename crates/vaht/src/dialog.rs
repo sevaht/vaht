@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use vaht_compositor::Config;
-use vaht_dialog::{LineDialog, RunDialog};
+use vaht_dialog::{CommandDialog, LineDialog, RunDialog};
 use vaht_ui::Theme;
 
 use crate::DialogKind;
@@ -26,6 +26,7 @@ pub fn show(kind: DialogKind, config_directory: &Path) -> ExitCode {
     };
     let dialog: Box<dyn LineDialog> = match kind {
         DialogKind::Run => Box::new(RunDialog::new()),
+        DialogKind::Command => Box::new(CommandDialog::new()),
     };
     match vaht_dialog::show(dialog, theme) {
         Ok(()) => ExitCode::SUCCESS,
