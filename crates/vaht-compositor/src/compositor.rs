@@ -47,7 +47,7 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
+use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _, Weak};
 use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
 use smithay::wayland::selection::data_device::set_data_device_focus;
@@ -110,8 +110,9 @@ pub struct Compositor {
     /// vaht's own keymap, restored after a virtual keyboard used its own.
     physical_keymap: KeymapFile,
     /// The surface keyboard focus was last given to: the seat's focus as
-    /// vaht set it.
-    keyboard_focus: Option<WlSurface>,
+    /// vaht set it. Held weakly, so it never keeps a gone client's surface,
+    /// and the buffers it holds, alive.
+    keyboard_focus: Option<Weak<WlSurface>>,
     /// Key and button state between events: repeats, double clicks.
     input: Input,
     /// Whether a client released a surface or a capture session since the
@@ -174,8 +175,10 @@ impl Compositor {
                 .dispatch_clients(&mut compositor)
                 .map_err(RunError::DispatchClients)?;
             compositor.popups.cleanup();
-            compositor.release_dead_client_resources();
+            // Settled first, so nothing vaht holds for a gone client stays
+            // referenced while its resources are released.
             compositor.settle();
+            compositor.release_dead_client_resources();
             if let Err(error) = display.flush_clients() {
                 tracing::warn!(
                     error = &error as &dyn std::error::Error,
@@ -656,10 +659,16 @@ impl Compositor {
             .and_then(|window| self.toplevels.get(window))
             .map(|toplevel| toplevel.wl_surface().clone());
         let surface = self.layers.keyboard().cloned().or(window_surface);
-        if surface == self.keyboard_focus {
+        // A focused surface that is gone reads as `Some(None)`, unlike any
+        // surface or none, so its client's focus is always cleared.
+        let given = self
+            .keyboard_focus
+            .as_ref()
+            .map(|given| given.upgrade().ok());
+        if given == surface.clone().map(Some) {
             return;
         }
-        self.keyboard_focus.clone_from(&surface);
+        self.keyboard_focus = surface.as_ref().map(WlSurface::downgrade);
         // Smithay clears the focus of a destroyed surface without telling
         // SeatHandler::focus_changed, so the clipboard focus is set here too:
         // otherwise it keeps the last focused client's state alive after
