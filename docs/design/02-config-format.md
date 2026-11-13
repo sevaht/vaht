@@ -356,6 +356,27 @@ My `keys`, converted (repetitive lines shortened):
 "Right"       = "window-menu"
 ```
 
+**How bindings behave (as built).**
+- `bindings.toml` replaces the built-in bindings as a whole, as Fluxbox's
+  `keys` file does. `vaht check --print-defaults` prints the built-in file to
+  start from.
+- A bound key press, and its release, never reach the focused window.
+- A bound button press never reaches the window either: vaht holds the
+  pointer until the button is released. A `Drag+` binding runs once the
+  pointer has moved 3 pixels.
+- `Double+` takes the place of the plain binding on the second press within
+  250 ms. With no `Double+` binding, the plain one runs on both presses.
+- `repeat` runs its command on the press, then again after the keyboard's
+  repeat delay at its own rate, until any key is pressed or that key is
+  released. Mouse bindings cannot repeat.
+- Built into the frame, not bindings: titlebar buttons (pressed without
+  modifiers), and resizing by dragging a border when the border has no
+  binding for that button.
+- Actions of §4 that vaht does not have yet are rejected by name ("not
+  available in vaht yet"), as are key chains, key modes and the structured
+  forms other than `repeat`. A file that uses them fails `vaht check`
+  instead of half-working.
+
 Dropped in conversion, and reported by `vaht import`:
 - `Mod4 Tab`, `Mod4 Shift Tab`, `Mod4 1`–`9`, `OnTitlebar Control Mouse1 :StartTabbing` (tabs removed);
 - the `ActivateTab` part of the titlebar click.
@@ -640,11 +661,22 @@ corner_radius = 5
 ## 11. `vaht import`
 
 ```
-vaht import fluxland [--from ~/.config/fluxland] [--to ~/.config/vaht] [--force]
-vaht import fluxbox  [--from ~/.fluxbox]         [--to ~/.config/vaht] [--force]
+vaht import fluxbox  [--from ~/.fluxbox] [--to ~/.config/vaht] [--force]
 vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/themes/<name>.toml
 vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profiles.json]
 ```
+
+- **There is one importer, for the Fluxbox format (decided).** fluxland was
+  never released, so it gets no import path of its own. My fluxland setup is
+  converted with `vaht import fluxbox --from ~/.config/fluxland`:
+  - its files are in the Fluxbox format;
+  - the importer follows the file paths in `init` (`session.keyFile`,
+    `session.appsFile`, `session.menuFile`, `session.styleFile`, and so on),
+    so the fluxland directory layout needs nothing special;
+  - the few keys and actions my fork added to that format (`SnapStep`,
+    `snapLayoutPicker`, `systray.*`, `session.output.*`, `session.xwayland.*`,
+    `PseudoTransparent`, `FocusProtection`, `RunDialog`) are understood as
+    extensions of it.
 
 - It never overwrites an existing file without `--force`, and never touches
   the source.

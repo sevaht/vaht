@@ -17,7 +17,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// once the clients are.
 const CLIENT_RESOURCES: [&str; 4] = ["client", "window", "frame", "capture-session"];
 
-/// A `vaht --backend headless` process with private directories.
+/// A `vaht --backend headless` process with private directories: its
+/// socket, its configuration and its log never meet the developer's own.
 ///
 /// Dropping it kills vaht, so a failing test never leaves one running.
 #[derive(Debug)]
@@ -26,6 +27,8 @@ pub struct HeadlessVaht {
     process: Child,
     /// Its `XDG_RUNTIME_DIR`, where its socket is; removed with the value.
     runtime: tempfile::TempDir,
+    /// Its configuration directory; removed with the value.
+    config: tempfile::TempDir,
     /// Where it logs; removed with the value.
     logs: tempfile::TempDir,
     /// The socket clients connect to.
@@ -37,14 +40,30 @@ impl HeadlessVaht {
     /// [`Self::wait_for_disconnections`] waits for.
     const LOG_FILTER: &str = "debug,vaht_compositor::compositor=trace";
 
-    /// Starts `executable` (the `vaht` binary) headless and waits until it
-    /// accepts clients.
+    /// Starts `executable` (the `vaht` binary) headless with the built-in
+    /// configuration, and waits until it accepts clients.
     ///
     /// # Panics
     ///
     /// Panics if vaht cannot start or does not accept clients in time.
     #[must_use]
     pub fn start(executable: &Path) -> Self {
+        Self::start_with_config(executable, &[])
+    }
+
+    /// Starts `executable` headless with configuration `files`, each a file
+    /// name and its contents, and waits until it accepts clients.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the files cannot be written, or vaht cannot start or does
+    /// not accept clients in time.
+    #[must_use]
+    pub fn start_with_config(executable: &Path, files: &[(&str, &str)]) -> Self {
+        let config = tempfile::tempdir().expect("a temporary configuration directory");
+        for (name, contents) in files {
+            std::fs::write(config.path().join(name), contents).expect("the file is written");
+        }
         // Socket paths are limited to about 108 bytes, so the runtime
         // directory must be short: the system's temporary directory is.
         let runtime = tempfile::Builder::new()
@@ -63,6 +82,7 @@ impl HeadlessVaht {
             ])
             .env("XDG_RUNTIME_DIR", runtime.path())
             .env("VAHT_LOG_DIRECTORY", logs.path())
+            .env("VAHT_CONFIG_DIRECTORY", config.path())
             .env_remove("VAHT_LOG")
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("DISPLAY")
@@ -74,6 +94,7 @@ impl HeadlessVaht {
             process,
             socket: PathBuf::new(),
             runtime,
+            config,
             logs,
         };
         let line = vaht.wait_for_log(|log| {
@@ -93,6 +114,28 @@ impl HeadlessVaht {
     #[must_use]
     pub fn socket(&self) -> &Path {
         &self.socket
+    }
+
+    /// Returns vaht's configuration directory, where a test can change the
+    /// files while vaht runs.
+    #[must_use]
+    pub fn config_directory(&self) -> &Path {
+        self.config.path()
+    }
+
+    /// Waits until vaht's log contains `text` at least `count` times.
+    ///
+    /// # Panics
+    ///
+    /// Panics if that does not happen in time.
+    pub fn wait_for_logged(&self, text: &str, count: usize) {
+        self.wait_for_log(|log| (log.matches(text).count() >= count).then_some(()));
+    }
+
+    /// Returns how many times vaht's log so far contains `text`.
+    #[must_use]
+    pub fn logged_count(&self, text: &str) -> usize {
+        self.read_log().matches(text).count()
     }
 
     /// Waits until vaht has logged `count` client disconnections and drawn
@@ -125,6 +168,32 @@ impl HeadlessVaht {
         kill(Pid::from_raw(pid), Signal::SIGTERM).expect("vaht can be signalled");
         let status = self.process.wait().expect("vaht can be waited for");
         assert!(status.success(), "vaht did not stop cleanly: {status}");
+        ExitReport {
+            log: self.read_log(),
+        }
+    }
+
+    /// Waits for vaht to exit by itself (the `exit` action) and returns its
+    /// log.
+    ///
+    /// # Panics
+    ///
+    /// Panics if vaht does not exit cleanly in time.
+    #[must_use]
+    pub fn wait_for_exit(mut self) -> ExitReport {
+        let deadline = Instant::now() + PATIENCE;
+        let status = loop {
+            if let Some(status) = self.process.try_wait().expect("vaht can be waited for") {
+                break status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "vaht did not exit:\n{}",
+                self.read_log()
+            );
+            std::thread::sleep(POLL_INTERVAL);
+        };
+        assert!(status.success(), "vaht did not exit cleanly: {status}");
         ExitReport {
             log: self.read_log(),
         }
@@ -187,6 +256,12 @@ impl ExitReport {
                 rest.split_whitespace().next()?.parse().ok()
             })
             .unwrap_or_else(|| panic!("the exit report has no {kind} count:\n{}", self.log))
+    }
+
+    /// Returns how many times the log contains `text`.
+    #[must_use]
+    pub fn log_count(&self, text: &str) -> usize {
+        self.log.matches(text).count()
     }
 
     /// Returns the open descriptor count vaht logged at `moment` ("at start"

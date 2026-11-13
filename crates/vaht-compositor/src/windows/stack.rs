@@ -41,6 +41,15 @@ impl Stack {
         self.bottom_to_top.len() != before
     }
 
+    /// Moves `id` below every other window; returns whether it was stacked.
+    pub(crate) fn lower(&mut self, id: WindowId) -> bool {
+        let lowered = self.remove(id);
+        if lowered {
+            self.bottom_to_top.insert(0, id);
+        }
+        lowered
+    }
+
     /// Moves `id` above every other window; returns whether it was stacked.
     pub(crate) fn raise(&mut self, id: WindowId) -> bool {
         let raised = self.remove(id);
@@ -80,6 +89,17 @@ mod tests {
         let mut stack = three_windows();
         assert!(stack.raise(WindowId::new(1)));
         assert_eq!(top_down(&stack), [1, 3, 2]);
+    }
+
+    #[test]
+    fn lowering_moves_a_window_to_the_bottom_and_keeps_the_rest_in_order() {
+        let mut stack = three_windows();
+        assert!(stack.lower(WindowId::new(3)));
+        assert_eq!(top_down(&stack), [2, 1, 3]);
+        assert!(
+            !stack.lower(WindowId::new(9)),
+            "an unknown window is not stacked"
+        );
     }
 
     #[test]

@@ -28,10 +28,11 @@ are added when work on them starts.
 ## Testing
 
 `crates/vaht-test-support` runs the real binary with `--backend headless`
-(Smithay's software renderer, frames in memory) and private runtime and log
-directories. Its `TestClient` is an ordinary Wayland client: it opens
-solid-colored windows, moves and clicks a virtual pointer
-(`zwlr_virtual_pointer_v1`), and takes screenshots through
+(Smithay's software renderer, frames in memory) and private runtime,
+configuration and log directories. Its `TestClient` is an ordinary Wayland
+client: it opens solid-colored windows, moves and clicks a virtual pointer
+(`zwlr_virtual_pointer_v1`), types on a virtual keyboard
+(`zwp_virtual_keyboard_v1`), and takes screenshots through
 `ext-image-copy-capture`, the protocol `grim` uses. Nothing reaches the
 developer's session, so tests can drag and click freely.
 
@@ -40,6 +41,9 @@ developer's session, so tests can drag and click freely.
   clients or capture sessions, and as many open descriptors as at startup.
   They found two real leaks: clipboard focus keeping a gone client alive, and
   Smithay's capture session list, which grows unless pruned.
+- `crates/vaht/tests/bindings.rs`: key and mouse bindings, with their own
+  `bindings.toml`; the bound programs write files the tests read. They found
+  that programs inherited vaht's blocked signals.
 - `crates/vaht/tests/ui.rs`: UI tests. Positions come from the screenshot
   (the window's fill color), clicks go through the virtual pointer, and
   results are checked in pixels.
@@ -56,9 +60,18 @@ directory.
 - Only `Launcher` spawns processes (03 §2).
 - Every event-loop registration is an `EventSource` guard (03 §2); clippy
   forbids calling `insert_source` anywhere else.
-- `TerminationSignals::block()` runs at the top of `main`, before any thread
+- `ProcessSignals::block()` runs at the top of `main`, before any thread
   starts. A thread started earlier would leave SIGTERM unblocked and die with
-  it, skipping the clean stop.
+  it, skipping the clean stop, or swallow a SIGCHLD and leave a zombie.
+- Programs are started only by `Launcher`, with `posix_spawn`, never with
+  `std::process::Command`: the child must get an empty signal mask, and
+  `Command` passes on vaht's blocked one (03 §2).
+- Commands are parsed once, into `Command` values (01 §8), and run only by
+  `Compositor::execute`. `Action::parse` reads both the string and the table
+  form, so they cannot disagree.
+- `start-moving` and `start-resizing` from a drag binding run inside a
+  pointer grab, where a new grab cannot be set: they turn the held grab into
+  a move or resize through `ExecutionContext::grab` instead.
 - The Wayland `Display` lives beside the `Compositor`, not inside it, so
   clients are dispatched without `unsafe` (R-X3).
 - After clients release surfaces or capture sessions,

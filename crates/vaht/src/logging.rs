@@ -35,7 +35,7 @@ use tracing_subscriber::util::{SubscriberInitExt as _, TryInitError};
 use tracing_subscriber::{EnvFilter, Registry, filter, reload};
 
 /// The program's name, as journald and the state directory know it.
-const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
+pub(crate) const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 
 /// The logging options every command accepts.
 #[derive(Debug, Clone, Default, clap::Args)]

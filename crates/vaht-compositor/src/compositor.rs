@@ -15,9 +15,11 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::io;
+use std::num::NonZeroU32;
 use std::os::fd::AsFd as _;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use smithay::desktop::{PopupKind, PopupManager};
 use smithay::input::keyboard::{KeymapFile, XkbConfig};
@@ -36,10 +38,13 @@ use vaht_ui::{Theme, Typesetter};
 use crate::backend::{Backend, BackendChoice, BackendError};
 use crate::capture::ScreenCapture;
 use crate::client::ClientState;
-use crate::event_source::EventSource;
+use crate::config::{Config, ConfigWatch};
+use crate::event_source::{EventSource, Timer};
+use crate::input::InputState;
+use crate::launcher::Launcher;
 use crate::protocols::ProtocolStates;
 use crate::resources::{ProcessUsage, ResourceLedger};
-use crate::termination::TerminationSignals;
+use crate::signals::{ProcessSignals, SignalRequest};
 use crate::window::{FrameGeometry, Toplevel, WindowId};
 use crate::windows::Windows;
 
@@ -72,6 +77,23 @@ pub struct Compositor {
     pub(crate) client_cleanup_pending: bool,
     /// The window whose titlebar the pointer is holding down, if any.
     pub(crate) held_titlebar: Option<WindowId>,
+    /// The configuration in effect.
+    pub(crate) config: Config,
+    /// Where the configuration files are.
+    config_directory: PathBuf,
+    /// Watches the configuration directory, while it exists.
+    config_watch: Option<ConfigWatch>,
+    /// Whether the directory was removed or renamed, so the watch sees
+    /// nothing any more and must be renewed.
+    config_watch_is_stale: bool,
+    /// Reloads the configuration once a burst of file changes settles.
+    reload_timer: Option<Timer<Self>>,
+    /// Starts programs and reaps them.
+    pub(crate) launcher: Launcher,
+    /// Key and button state between events: repeats, double clicks.
+    pub(crate) input: InputState,
+    /// Registers timers and other sources with the event loop.
+    pub(crate) loop_handle: LoopHandle<'static, Self>,
     /// The window with keyboard focus.
     focused: Option<WindowId>,
     /// When vaht started; frame times are measured from it.
@@ -81,16 +103,23 @@ pub struct Compositor {
     /// The name of the socket clients connect to (`WAYLAND_DISPLAY`).
     socket_name: OsString,
     /// The listening socket, the display's wake-up descriptor, and the
-    /// termination signals.
+    /// signals vaht handles.
     _event_sources: [EventSource<Self>; 3],
 }
 
 impl Compositor {
-    /// How long a held key waits before repeating, in milliseconds.
-    const KEY_REPEAT_DELAY_MILLISECONDS: i32 = 200;
+    /// How long a held key waits before repeating; repeating key bindings
+    /// use it too.
+    pub(crate) const KEY_REPEAT_DELAY: Duration = Duration::from_millis(200);
 
-    /// How often a held key repeats, per second.
-    const KEY_REPEAT_RATE: i32 = 25;
+    /// How often a held key repeats, per second; repeating key bindings
+    /// use it too, unless they set their own rate.
+    pub(crate) const KEY_REPEAT_RATE: NonZeroU32 =
+        NonZeroU32::new(25).expect("the key repeat rate is not zero");
+
+    /// How long the configuration files must be left alone after a change
+    /// before they are read: an editor's save is several changes.
+    const RELOAD_DELAY: Duration = Duration::from_millis(200);
 
     /// How far each new window is offset from the previous one.
     const CASCADE_STEP: i32 = 32;
@@ -98,17 +127,17 @@ impl Compositor {
     /// How many steps the cascade takes before starting over at the corner.
     const CASCADE_LENGTH: usize = 10;
 
-    /// Runs vaht until it is asked to stop, by its host window closing or by
-    /// one of the `termination` signals.
+    /// Runs vaht until it is asked to stop: by its host window closing, by
+    /// a termination signal among `signals`, or by the `exit` action.
     ///
     /// # Errors
     ///
     /// Returns an error if vaht cannot start, or if waiting for events fails.
-    pub fn run(options: RunOptions, termination: TerminationSignals) -> Result<(), RunError> {
+    pub fn run(options: RunOptions, signals: ProcessSignals) -> Result<(), RunError> {
         let mut event_loop: EventLoop<'static, Self> =
             EventLoop::try_new().map_err(RunError::EventLoop)?;
         let mut display: Display<Self> = Display::new().map_err(RunError::Display)?;
-        let mut compositor = Self::new(&event_loop.handle(), &display, options, termination)?;
+        let mut compositor = Self::new(&event_loop.handle(), &display, options, signals)?;
         tracing::info!(
             socket = %compositor.socket_name.to_string_lossy(),
             "accepting clients; start them with WAYLAND_DISPLAY set to the socket"
@@ -141,7 +170,7 @@ impl Compositor {
         handle: &LoopHandle<'static, Self>,
         display: &Display<Self>,
         options: RunOptions,
-        termination: TerminationSignals,
+        signals: ProcessSignals,
     ) -> Result<Self, RunError> {
         let display_handle = display.handle();
         let ledger = ResourceLedger::new();
@@ -173,17 +202,30 @@ impl Compositor {
         .map_err(|error| RunError::RegisterSource(error.error))?;
         // A termination request stops vaht cleanly: clients are told, and
         // the exit resource report is written.
-        let termination = EventSource::insert(
+        let signals = EventSource::insert(
             handle,
             &ledger,
-            termination.into_source(),
-            |event, (), compositor| {
-                tracing::info!(signal = ?event.signal(), "asked to stop");
-                compositor.stop();
+            signals.into_source(),
+            |event, (), compositor| match SignalRequest::of(event.signal()) {
+                Some(SignalRequest::Stop) => {
+                    tracing::info!(signal = ?event.signal(), "asked to stop");
+                    compositor.stop();
+                }
+                Some(SignalRequest::Reload) => compositor.reload_configuration(),
+                Some(SignalRequest::ReapPrograms) => compositor.launcher.reap(),
+                None => {}
             },
         )
         .map_err(|error| RunError::RegisterSource(error.error))?;
+        let config = Config::load(&options.config_directory).unwrap_or_else(|error| {
+            tracing::error!(
+                error = &error as &dyn std::error::Error,
+                "the configuration is not valid; using the built-in one until it is fixed"
+            );
+            Config::built_in()
+        });
 
+        let launcher = Launcher::new(socket_name.clone(), &ledger);
         Ok(Self {
             display_handle,
             ledger,
@@ -196,14 +238,88 @@ impl Compositor {
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             held_titlebar: None,
+            config,
+            config_watch: None,
+            config_watch_is_stale: false,
+            config_directory: options.config_directory,
+            reload_timer: None,
+            launcher,
+            input: InputState::default(),
+            loop_handle: handle.clone(),
             client_cleanup_pending: false,
             physical_keymap,
             focused: None,
             start_time: Instant::now(),
             is_running: true,
             socket_name,
-            _event_sources: [listening, display_wakeup, termination],
+            _event_sources: [listening, display_wakeup, signals],
         })
+        .map(|mut compositor| {
+            compositor.watch_configuration();
+            compositor
+        })
+    }
+
+    /// Reads the configuration again and applies it if it is valid;
+    /// otherwise the current one stays, and the problem is logged.
+    pub(crate) fn reload_configuration(&mut self) {
+        self.watch_configuration();
+        match Config::load(&self.config_directory) {
+            Ok(config) => {
+                self.config = config;
+                tracing::info!(directory = %self.config_directory.display(), "configuration reloaded");
+            }
+            Err(error) => tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "configuration rejected; the previous one stays in effect"
+            ),
+        }
+    }
+
+    /// Notes that a configuration file changed, or with `directory_gone`
+    /// that the directory itself went away, and reloads once things settle.
+    pub(crate) fn configuration_changed(&mut self, directory_gone: bool) {
+        self.config_watch_is_stale |= directory_gone;
+        match Timer::once(
+            &self.loop_handle,
+            &self.ledger,
+            Self::RELOAD_DELAY,
+            Self::reload_configuration,
+        ) {
+            // Replacing a pending timer cancels it: the burst goes on.
+            Ok(timer) => self.reload_timer = Some(timer),
+            Err(error) => tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "could not schedule a configuration reload"
+            ),
+        }
+    }
+
+    /// Watches the configuration directory, unless it already is or the
+    /// directory does not exist; a reload tries again.
+    fn watch_configuration(&mut self) {
+        if self.config_watch.is_some() && !self.config_watch_is_stale {
+            return;
+        }
+        match ConfigWatch::start(&self.loop_handle, &self.ledger, &self.config_directory) {
+            Ok(watch) => {
+                self.config_watch = Some(watch);
+                self.config_watch_is_stale = false;
+                tracing::debug!(directory = %self.config_directory.display(), "watching the configuration");
+            }
+            Err(error) => {
+                tracing::debug!(
+                    error = &error as &dyn std::error::Error,
+                    directory = %self.config_directory.display(),
+                    "not watching the configuration; it reloads on SIGHUP or the reload action"
+                );
+            }
+        }
+    }
+
+    /// Returns the window with keyboard focus.
+    pub(crate) const fn focused(&self) -> Option<WindowId> {
+        self.focused
     }
 
     /// Lets go of everything still referencing what clients released, if
@@ -290,6 +406,13 @@ impl Compositor {
             );
         }
         self.schedule_render();
+    }
+
+    /// Moves the window with `id` below all others.
+    pub(crate) fn lower_window(&mut self, id: WindowId) {
+        if self.windows.lower(id) {
+            self.schedule_render();
+        }
     }
 
     /// Moves the window with `id` above all others.
@@ -398,8 +521,8 @@ impl Compositor {
         let mut seat = state.new_wl_seat(display, "seat0");
         seat.add_keyboard(
             XkbConfig::default(),
-            Self::KEY_REPEAT_DELAY_MILLISECONDS,
-            Self::KEY_REPEAT_RATE,
+            i32::try_from(Self::KEY_REPEAT_DELAY.as_millis()).expect("the delay is short"),
+            i32::try_from(Self::KEY_REPEAT_RATE.get()).expect("the rate is small"),
         )
         .map_err(RunError::Keyboard)?;
         seat.add_pointer();
@@ -419,10 +542,12 @@ impl fmt::Debug for Compositor {
 }
 
 /// How vaht should run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunOptions {
     /// Which backend to run on.
     pub backend: BackendChoice,
+    /// Where the configuration files are (normally `~/.config/vaht`).
+    pub config_directory: PathBuf,
 }
 
 /// Logs the process's open descriptors and memory, `moment` saying when.

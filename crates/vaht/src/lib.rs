@@ -7,9 +7,10 @@
 //! it is reachable from tests and from the generated documentation.
 
 pub mod arguments;
+pub mod check;
 pub mod logging;
 
-pub use arguments::Arguments;
+pub use arguments::{Arguments, Subcommand};
 pub use logging::Logging;
 
 /// Runs the command line's request, with diagnostic output already installed.
@@ -20,7 +21,7 @@ pub use logging::Logging;
 pub fn run(
     arguments: &Arguments,
     logging: &Logging,
-    termination: vaht_compositor::TerminationSignals,
+    signals: vaht_compositor::ProcessSignals,
 ) -> anyhow::Result<()> {
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
@@ -29,6 +30,6 @@ pub fn run(
         "vaht starting"
     );
     tracing::debug!(?arguments, "command line");
-    vaht_compositor::Compositor::run(arguments.run_options(), termination)?;
+    vaht_compositor::Compositor::run(arguments.run_options(), signals)?;
     Ok(())
 }

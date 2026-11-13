@@ -130,6 +130,42 @@ impl<State: 'static> Timer<State> {
     }
 }
 
+/// A timeout that fires again and again until dropped: once after a first
+/// delay, then at a steady interval. A held key's repeat is one.
+#[derive(Debug)]
+pub struct RepeatingTimer<State: 'static> {
+    /// The registered timer.
+    _source: EventSource<State>,
+}
+
+impl<State: 'static> RepeatingTimer<State> {
+    /// Calls `callback` `delay` from now, then every `interval`, until the
+    /// timer is dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the timer could not be registered.
+    pub fn start(
+        handle: &LoopHandle<'static, State>,
+        ledger: &ResourceLedger,
+        delay: Duration,
+        interval: Duration,
+        mut callback: impl FnMut(&mut State) + 'static,
+    ) -> Result<Self, calloop::Error> {
+        let source = EventSource::insert(
+            handle,
+            ledger,
+            LoopTimer::from_duration(delay),
+            move |_deadline, (), state| {
+                callback(state);
+                TimeoutAction::ToDuration(interval)
+            },
+        )
+        .map_err(|error| error.error)?;
+        Ok(Self { _source: source })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use calloop::EventLoop;
@@ -224,5 +260,35 @@ mod tests {
             .dispatch(TIMER_WAIT, &mut events)
             .expect("dispatch");
         assert_eq!(events, Events::new(), "a cancelled timer never fires");
+    }
+
+    #[test]
+    fn a_repeating_timer_fires_until_dropped() {
+        let mut event_loop: EventLoop<'static, Events> =
+            EventLoop::try_new().expect("an event loop");
+        let ledger = ResourceLedger::new();
+        let timer = RepeatingTimer::start(
+            &event_loop.handle(),
+            &ledger,
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+            |events: &mut Events| {
+                events.push("fired");
+            },
+        )
+        .expect("the timer registers");
+        let mut events = Events::new();
+        while events.len() < 3 {
+            event_loop
+                .dispatch(TIMER_WAIT, &mut events)
+                .expect("dispatch");
+        }
+        drop(timer);
+        assert_eq!(ledger.count(ResourceKind::EventSource).live, 0);
+        let fired = events.len();
+        event_loop
+            .dispatch(TIMER_WAIT, &mut events)
+            .expect("dispatch");
+        assert_eq!(events.len(), fired, "a dropped timer stops firing");
     }
 }

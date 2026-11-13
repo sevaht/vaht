@@ -3,8 +3,13 @@
 A stacking Wayland compositor descended from Fluxbox, written in Rust on
 [Smithay](https://github.com/Smithay/smithay).
 
-vaht is in design. Nothing runs yet. The design documents are in
-[`docs/design/`](docs/design/).
+vaht is early in development. It runs nested in a window of another
+compositor (or headless, for tests), but not yet on its own on real
+hardware. The design documents are in [`docs/design/`](docs/design/), and
+[`DESIGN.md`](DESIGN.md) is the guide to them.
+
+`vaht check` validates the configuration in `~/.config/vaht`, and
+`vaht check --print-defaults` prints the built-in files.
 
 ## Development
 

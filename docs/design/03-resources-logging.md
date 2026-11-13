@@ -34,7 +34,13 @@ rule can catch.
      so children never inherit the compositor's descriptors.
    - The `Launcher` is the only place that spawns. It passes an explicit
      environment and standard streams and nothing else. A test asserts that a
-     child's `/proc/<pid>/fd` holds only 0, 1 and 2.
+     child's `/proc/<pid>/fd` holds only 0, 1 and 2 (and the descriptor `ls`
+     opens to list them).
+   - It spawns with `posix_spawn`, which clears the signal mask and resets
+     SIGPIPE in the child. vaht blocks the signals it reads as events, and
+     the standard library's `Command` does not unblock them for the child;
+     the same test found programs started from vaht unable to receive
+     SIGTERM.
 4. **Every event-source registration is an RAII guard.**
    - **`EventSource`** holds the loop handle and token, and removes the source
      in `Drop`.
@@ -44,8 +50,10 @@ rule can catch.
    - The raw `insert_source` is called only inside `EventSource::new`, which a
      clippy `disallowed_methods` entry enforces.
 5. **Processes are reaped by event, never by `waitpid(-1)`.**
-   - Each child gets a pidfd registered as a calloop source; it is reaped when
-     it exits and logged with its exit status.
+   - SIGCHLD is read through the same signalfd as SIGTERM. On each one, the
+     `Launcher` checks every child it started with `waitpid(pid, WNOHANG)`,
+     reaps those that exited and logs their status. Children are counted
+     (`program` in the resource report) until reaped.
    - Profile hooks and dialogs have a configurable timeout, after which they
      are killed and logged.
    - There are no double forks: fluxland needed them only because of the

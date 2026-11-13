@@ -48,6 +48,26 @@ pub const BUTTON_LEFT: u32 = 0x110;
 /// The Linux input code of the right mouse button (`BTN_RIGHT`).
 pub const BUTTON_RIGHT: u32 = 0x111;
 
+/// Linux input codes of a few keys (`KEY_*`), read with vaht's keymap.
+pub mod keys {
+    /// Escape.
+    pub const ESCAPE: u32 = 1;
+    /// The T key.
+    pub const LETTER_T: u32 = 20;
+    /// The left Alt key.
+    pub const LEFT_ALT: u32 = 56;
+    /// F4.
+    pub const F4: u32 = 62;
+    /// The left Super (Windows, logo) key.
+    pub const LEFT_SUPER: u32 = 125;
+}
+
+/// `wl_keyboard.key_state.released`.
+const KEY_RELEASED: u32 = 0;
+
+/// `wl_keyboard.key_state.pressed`.
+const KEY_PRESSED: u32 = 1;
+
 /// `wl_keyboard.keymap_format.no_keymap`: the keyboard uses the seat's keymap.
 const NO_KEYMAP_FORMAT: u32 = 0;
 
@@ -240,6 +260,44 @@ impl TestClient {
         self.roundtrip();
     }
 
+    /// Presses `key` (a Linux input code from [`keys`]) and holds it until
+    /// [`Self::release_key`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn press_key(&mut self, key: u32) {
+        let time = self.tick();
+        self.keyboard.key(time, key, KEY_PRESSED);
+        self.roundtrip();
+    }
+
+    /// Releases `key`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn release_key(&mut self, key: u32) {
+        let time = self.tick();
+        self.keyboard.key(time, key, KEY_RELEASED);
+        self.roundtrip();
+    }
+
+    /// Presses `chord`'s keys in order, then releases them in reverse, as a
+    /// person types `Super+T`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn type_chord(&mut self, chord: &[u32]) {
+        for &key in chord {
+            self.press_key(key);
+        }
+        for &key in chord.iter().rev() {
+            self.release_key(key);
+        }
+    }
+
     /// Lets go of every held modifier.
     ///
     /// # Panics
@@ -315,7 +373,7 @@ impl TestClient {
         self.roundtrip();
     }
 
-    /// Returns the next pointer event time, a millisecond after the last.
+    /// Returns the next input event time, a millisecond after the last.
     const fn tick(&mut self) -> u32 {
         self.time += 1;
         self.time

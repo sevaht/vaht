@@ -5,18 +5,27 @@ use std::process::ExitCode;
 
 use clap::Parser as _;
 
-use vaht::Arguments;
+use vaht::{Arguments, Subcommand};
 
 /// Runs the application and converts its outcome to an exit code.
 fn main() -> ExitCode {
     let arguments = Arguments::parse();
+    // The tools run without the compositor's logging, which would rotate
+    // its log file.
+    match arguments.command {
+        Some(Subcommand::Check {
+            print_defaults: true,
+        }) => return vaht::check::print_defaults(),
+        Some(Subcommand::Check {
+            print_defaults: false,
+        }) => return vaht::check::check(&arguments.config_directory()),
+        None => {}
+    }
     // Before any thread starts: logging starts the first one.
-    let termination = match vaht_compositor::TerminationSignals::block() {
-        Ok(termination) => termination,
+    let signals = match vaht_compositor::ProcessSignals::block() {
+        Ok(signals) => signals,
         Err(error) => {
-            report_without_logging(
-                &anyhow::Error::new(error).context("could not block termination signals"),
-            );
+            report_without_logging(&anyhow::Error::new(error).context("could not block signals"));
             return ExitCode::FAILURE;
         }
     };
@@ -28,7 +37,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match vaht::run(&arguments, &logging, termination) {
+    match vaht::run(&arguments, &logging, signals) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!("{error:#}");

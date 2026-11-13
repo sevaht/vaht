@@ -16,6 +16,8 @@ allow-renamed-params-for = [
     "..",
     "core::fmt::Display",
     "core::fmt::Debug",
+    # serde names visitor parameters `v`, `seq` and `map`; vaht names them.
+    "serde::de::Visitor",
     # Smithay's parameter `type_` works around a keyword; vaht names it.
     "smithay::wayland::selection::data_device::WaylandDndGrabHandler",
     # Smithay calls the compositor state `data`; vaht says what it is.

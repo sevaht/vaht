@@ -1,0 +1,28 @@
+# vaht's built-in bindings, used when ~/.config/vaht/bindings.toml does not
+# exist. A bindings.toml replaces all of them, so copy what you want to keep:
+#     vaht check --print-defaults
+#
+# Keys: modifiers (Super, Ctrl, Alt, Shift) joined by "+", then an xkb key
+# name, such as "Super+T" or "XF86AudioMute".
+#
+# Mouse: [mouse.<context>], where the context is desktop, titlebar, window
+# (anywhere on a window, normally with a modifier), border, taskbar,
+# window-list-entry, handle, grip-left or grip-right. A press on a frame part
+# looks in that part's context first, then in window. Buttons are Left,
+# Middle, Right, Back, Forward, ScrollUp and ScrollDown; "Double+" binds a
+# double click, "Drag+" a drag that starts with that button.
+#
+# Commands: an action ("exec kitty"), an array of commands run in order,
+# or { repeat = "...", rate = 20 } for a key that repeats while held.
+
+[keys]
+"Alt+F4" = "close"
+
+[mouse.window]
+"Alt+Left" = ["raise", "focus", "start-moving"]
+"Alt+Right" = ["raise", "focus", "start-resizing nearest-corner"]
+"Alt+Middle" = "lower"
+
+[mouse.titlebar]
+"Drag+Left" = "start-moving"
+"Middle" = "lower"

@@ -84,3 +84,54 @@ fn with_no_log_file_or_journal_messages_go_to_standard_error() {
     );
     assert!(errors.contains(NO_BACKEND_MESSAGE), "stderr was: {errors}");
 }
+
+/// Runs `vaht check` (with `extra` arguments) on a configuration directory
+/// holding `bindings`, if any.
+fn check(bindings: Option<&str>, extra: &[&str]) -> Output {
+    let config = tempfile::tempdir().expect("a temporary directory");
+    if let Some(bindings) = bindings {
+        std::fs::write(config.path().join("bindings.toml"), bindings).expect("written");
+    }
+    let logs = log_directory();
+    let mut arguments = vec!["check", "--config-directory"];
+    let directory = config.path().to_str().expect("temporary paths are UTF-8");
+    arguments.push(directory);
+    arguments.extend_from_slice(extra);
+    let output = run_executable(&arguments, logs.path());
+    assert!(
+        std::fs::read_dir(logs.path())
+            .expect("the log directory exists")
+            .next()
+            .is_none(),
+        "vaht check must not touch the compositor's log"
+    );
+    output
+}
+
+#[test]
+fn check_accepts_a_valid_configuration() {
+    let output = check(Some("[keys]\n\"Super+T\" = \"exec kitty\"\n"), &[]);
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("is valid"));
+}
+
+#[test]
+fn check_names_the_file_line_and_column_of_a_problem() {
+    let output = check(
+        Some("[keys]\n\"Super+T\" = \"exec kitty\"\n\"Super+Q\" = \"quit\"\n"),
+        &[],
+    );
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("bindings.toml:3:"), "{error}");
+    assert!(error.contains("unknown action `quit`"), "{error}");
+}
+
+#[test]
+fn check_prints_the_built_in_files() {
+    let output = check(None, &["--print-defaults"]);
+    assert!(output.status.success());
+    let printed = String::from_utf8_lossy(&output.stdout);
+    assert!(printed.contains("# ===== bindings.toml ====="), "{printed}");
+    assert!(printed.contains("\"Alt+F4\" = \"close\""), "{printed}");
+}

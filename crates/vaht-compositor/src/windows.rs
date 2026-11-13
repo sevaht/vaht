@@ -147,6 +147,11 @@ impl Windows {
         self.by_id.remove(&id)
     }
 
+    /// Moves the window with `id` below all others; returns whether it exists.
+    pub(crate) fn lower(&mut self, id: WindowId) -> bool {
+        self.stack.lower(id)
+    }
+
     /// Moves the window with `id` above all others; returns whether it exists.
     pub(crate) fn raise(&mut self, id: WindowId) -> bool {
         self.stack.raise(id)

@@ -1,0 +1,119 @@
+//! Noticing that a configuration file changed, without polling (02 §2).
+//!
+//! One inotify watch on the configuration directory is registered with the
+//! event loop. The directory is watched rather than its files, because
+//! editors save by writing a new file and renaming it over the old one,
+//! which a watch on the old file would never see.
+
+use std::ffi::OsStr;
+use std::path::Path;
+
+use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
+use smithay::reexports::calloop::generic::Generic;
+use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
+
+use crate::Compositor;
+use crate::event_source::EventSource;
+use crate::resources::ResourceLedger;
+
+/// A watch on the configuration directory; dropping it stops watching.
+#[derive(Debug)]
+pub(crate) struct ConfigWatch {
+    /// The inotify descriptor, registered with the event loop.
+    _source: EventSource<Compositor>,
+}
+
+impl ConfigWatch {
+    /// What happens to a file that may change the configuration: written,
+    /// renamed into or out of the directory, created or deleted.
+    const EVENTS: AddWatchFlags = AddWatchFlags::IN_CLOSE_WRITE
+        .union(AddWatchFlags::IN_MOVED_TO)
+        .union(AddWatchFlags::IN_MOVED_FROM)
+        .union(AddWatchFlags::IN_CREATE)
+        .union(AddWatchFlags::IN_DELETE)
+        .union(AddWatchFlags::IN_DELETE_SELF)
+        .union(AddWatchFlags::IN_MOVE_SELF);
+
+    /// Starts watching `directory`; the compositor hears of every change to
+    /// a configuration file in it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the directory cannot be watched, for example
+    /// because it does not exist.
+    pub(crate) fn start(
+        handle: &LoopHandle<'static, Compositor>,
+        ledger: &ResourceLedger,
+        directory: &Path,
+    ) -> Result<Self, WatchError> {
+        let inotify = Inotify::init(InitFlags::IN_NONBLOCK | InitFlags::IN_CLOEXEC)
+            .map_err(WatchError::Create)?;
+        inotify
+            .add_watch(directory, Self::EVENTS)
+            .map_err(WatchError::Watch)?;
+        let source = EventSource::insert(
+            handle,
+            ledger,
+            Generic::new(inotify, Interest::READ, Mode::Level),
+            |_, inotify, compositor| {
+                let events = match inotify.read_events() {
+                    Ok(events) => events,
+                    Err(nix::errno::Errno::EAGAIN) => return Ok(PostAction::Continue),
+                    Err(error) => {
+                        tracing::warn!(%error, "could not read configuration changes");
+                        return Ok(PostAction::Continue);
+                    }
+                };
+                let directory_gone = events.iter().any(|event| {
+                    event
+                        .mask
+                        .intersects(AddWatchFlags::IN_DELETE_SELF | AddWatchFlags::IN_MOVE_SELF)
+                });
+                let file_changed = events
+                    .iter()
+                    .any(|event| event.name.as_deref().is_some_and(is_configuration_file));
+                if directory_gone || file_changed {
+                    compositor.configuration_changed(directory_gone);
+                }
+                Ok(PostAction::Continue)
+            },
+        )
+        .map_err(|error| WatchError::Register(error.error))?;
+        Ok(Self { _source: source })
+    }
+}
+
+/// Returns whether `name` is a configuration file's name, as opposed to an
+/// editor's temporary or backup file.
+fn is_configuration_file(name: &OsStr) -> bool {
+    Path::new(name)
+        .extension()
+        .is_some_and(|extension| extension == "toml")
+}
+
+/// Why the configuration directory cannot be watched.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum WatchError {
+    /// No inotify instance could be created.
+    #[error("could not create an inotify instance")]
+    Create(#[source] nix::Error),
+    /// The directory could not be watched.
+    #[error("could not watch the directory")]
+    Watch(#[source] nix::Error),
+    /// The watch could not be registered with the event loop.
+    #[error("could not register the watch with the event loop")]
+    Register(#[source] calloop::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_toml_files_count() {
+        assert!(is_configuration_file(OsStr::new("bindings.toml")));
+        assert!(!is_configuration_file(OsStr::new("bindings.toml~")));
+        assert!(!is_configuration_file(OsStr::new(".bindings.toml.swp")));
+        assert!(!is_configuration_file(OsStr::new("4913")));
+    }
+}
