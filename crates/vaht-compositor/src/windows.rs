@@ -15,7 +15,7 @@ use smithay::utils::{Logical, Point};
 
 use self::stack::Stack;
 use crate::resources::ResourceLedger;
-use crate::window::{FramePart, Toplevel, Window, WindowId};
+use crate::window::{FramePart, NewWindow, Window, WindowId};
 use crate::workspaces::Workspace;
 
 /// What of a window is under a point.
@@ -103,19 +103,11 @@ impl Windows {
         self.by_id.values_mut()
     }
 
-    /// Adds a window on top of the others, on `workspace`, its content at
-    /// `location`.
-    pub(crate) fn insert(
-        &mut self,
-        toplevel: Toplevel,
-        location: Point<i32, Logical>,
-        workspace: Workspace,
-        ledger: &ResourceLedger,
-    ) -> WindowId {
+    /// Adds the window `new` on top of the others, and returns its id.
+    pub(crate) fn insert(&mut self, new: NewWindow, ledger: &ResourceLedger) -> WindowId {
         self.next_id += 1;
         let id = WindowId::new(self.next_id);
-        self.by_id
-            .insert(id, Window::new(id, toplevel, location, workspace, ledger));
+        self.by_id.insert(id, Window::new(id, new, ledger));
         self.stack.push(id);
         id
     }

@@ -3,7 +3,7 @@
 //! and checked by screenshots.
 //!
 //! Every test uses the built-in `bindings.toml`, so it also checks that the
-//! defaults bind what they say.
+//! defaults bind what they say; only the placement is set, to cascade.
 
 use std::path::Path;
 
@@ -32,10 +32,13 @@ struct Desktop {
 }
 
 impl Desktop {
-    /// Starts vaht with its built-in configuration and opens `count`
-    /// windows.
+    /// Starts vaht with its built-in bindings and opens `count` windows,
+    /// cascaded so that they overlap and their stacking shows.
     fn with_windows(count: usize) -> Self {
-        let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+        let vaht = HeadlessVaht::start_with_config(
+            Path::new(EXECUTABLE),
+            &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+        );
         let mut client = TestClient::connect(vaht.socket());
         client.open_windows(count);
         Self {

@@ -105,6 +105,9 @@ A method that needs no Smithay call does not belong in them.
   of the current workspace (not minimized), without frames when
   fullscreen and without content when shaded. Nothing else walks the
   stack to find what is under the pointer.
+- A new window is placed on its client's first commit with a size
+  (`Compositor::place_new_window`), not when it is created: the
+  placement strategies need its size. Until then it counts for nothing.
 - A window's area follows from its `Placement`: code that maximizes, tiles
   or fullscreens a window builds a new `Placement` and calls
   `Window::place`, never moves or sizes it directly.

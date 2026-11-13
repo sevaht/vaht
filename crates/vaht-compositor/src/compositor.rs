@@ -28,7 +28,7 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, Mode, PostAction};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
-use smithay::utils::{Logical, Point, Rectangle, Serial};
+use smithay::utils::Serial;
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
 use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::shell::xdg::ToplevelSurface;
@@ -43,11 +43,12 @@ use crate::event_source::{EventSource, Timer};
 use crate::focus::Focus;
 use crate::input::InputState;
 use crate::launcher::Launcher;
+use crate::placement_strategy::Room;
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceLedger};
 use crate::scene::Scene;
 use crate::signals::{ProcessSignals, SignalRequest};
-use crate::window::{FrameGeometry, OutputArea, Toplevel, Window, WindowId};
+use crate::window::{Frame, NewWindow, OutputArea, Toplevel, Window, WindowId};
 use crate::windows::Windows;
 use crate::workspaces::Workspaces;
 
@@ -128,12 +129,6 @@ impl Compositor {
     /// How long the configuration files must be left alone after a change
     /// before they are read: an editor's save is several changes.
     const RELOAD_DELAY: Duration = Duration::from_millis(200);
-
-    /// How far each new window is offset from the previous one.
-    const CASCADE_STEP: i32 = 32;
-
-    /// How many steps the cascade takes before starting over at the corner.
-    const CASCADE_LENGTH: usize = 10;
 
     /// Runs vaht until it is asked to stop: by its host window closing, by
     /// a termination signal among `signals`, or by the `exit` action.
@@ -234,6 +229,7 @@ impl Compositor {
         });
 
         let launcher = Launcher::new(socket_name.clone(), &ledger);
+        let workspaces = Workspaces::named(config.settings.workspaces.names());
         Ok(Self {
             display_handle,
             ledger,
@@ -258,7 +254,7 @@ impl Compositor {
             physical_keymap,
             focus: Focus::default(),
             snap_minimized: None,
-            workspaces: Workspaces::default(),
+            workspaces,
             start_time: Instant::now(),
             is_running: true,
             socket_name,
@@ -266,6 +262,9 @@ impl Compositor {
         })
         .map(|mut compositor| {
             compositor.watch_configuration();
+            for command_line in compositor.config.settings.session.autostart.clone() {
+                compositor.launcher.run(&command_line);
+            }
             compositor
         })
     }
@@ -277,6 +276,7 @@ impl Compositor {
         match Config::load(&self.config_directory) {
             Ok(config) => {
                 self.config = config;
+                self.apply_settings();
                 tracing::info!(directory = %self.config_directory.display(), "configuration reloaded");
             }
             Err(error) => tracing::warn!(
@@ -284,6 +284,25 @@ impl Compositor {
                 "configuration rejected; the previous one stays in effect"
             ),
         }
+    }
+
+    /// Brings what follows the settings up to date with them: the
+    /// workspaces' names and number, and the titlebars' buttons.
+    fn apply_settings(&mut self) {
+        let settings = &self.config.settings;
+        if let Some(last) = self.workspaces.rename(settings.workspaces.names()) {
+            for window in self.windows.iter_mut() {
+                if window.workspace() > last {
+                    window.move_to_workspace(last);
+                }
+            }
+        }
+        let buttons = settings.windows.frame.titlebar_layout();
+        for window in self.windows.iter_mut() {
+            window.frame_mut().set_buttons(&buttons);
+        }
+        self.focus_most_recent();
+        self.schedule_render();
     }
 
     /// Notes that a configuration file changed, or with `directory_gone`
@@ -411,17 +430,56 @@ impl Compositor {
         }
     }
 
-    /// Starts managing a new application window, on top and focused.
+    /// Starts managing a new application window, on top, and focused if
+    /// the settings say new windows take focus. It is placed once its
+    /// client gives it a size.
     pub(crate) fn add_window(&mut self, surface: ToplevelSurface) {
-        let location = self.cascade_location();
-        let id = self.windows.insert(
-            Toplevel::from_xdg(surface),
-            location,
-            self.workspaces.current(),
-            &self.ledger,
-        );
+        let buttons = self.config.settings.windows.frame.titlebar_layout();
+        let new = NewWindow {
+            toplevel: Toplevel::from_xdg(surface),
+            frame: Frame::new(buttons, &self.ledger),
+            workspace: self.workspaces.current(),
+        };
+        let id = self.windows.insert(new, &self.ledger);
         tracing::debug!(window = %id, "window opened");
-        self.focus_window(Some(id), smithay::utils::SERIAL_COUNTER.next_serial());
+        if self.config.settings.focus.focus_new_windows {
+            self.focus_window(Some(id), smithay::utils::SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    /// Gives the window `id` its first place, by the placement settings,
+    /// among the windows already shown.
+    fn place_new_window(&mut self, id: WindowId) {
+        let metrics = self.theme.metrics();
+        let current = self.workspaces.current();
+        let occupied = self
+            .windows
+            .shown_top_down(current)
+            .filter(|window| window.id() != id && window.is_placed())
+            .map(|window| window.outer_area(metrics))
+            .collect();
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup")
+            .current_location()
+            .to_i32_round();
+        let room = Room {
+            usable: self.output_area().usable,
+            occupied,
+            pointer,
+        };
+        let placement = self.config.settings.placement;
+        if let Some(window) = self.windows.get_mut(id) {
+            let size = window.outer_area(metrics).size;
+            let corner = placement.strategy.place(
+                size,
+                &room,
+                placement.row_direction,
+                placement.column_direction,
+            );
+            window.place_initially(corner, metrics);
+        }
     }
 
     /// Stops managing the window whose root surface is `surface`.
@@ -531,6 +589,10 @@ impl Compositor {
                 if &root == surface {
                     window.toplevel().configure_if_unconfigured();
                     window.sync_with_client();
+                    if window.is_ready_for_placement() {
+                        let id = window.id();
+                        self.place_new_window(id);
+                    }
                 }
             }
         }
@@ -556,18 +618,6 @@ impl Compositor {
                 "could not accept a client"
             );
         }
-    }
-
-    /// Returns where the next window's content goes: each window further
-    /// down and right than the last, starting over every few windows, with
-    /// room above for its frame.
-    fn cascade_location(&self) -> Point<i32, Logical> {
-        let step = i32::try_from(self.windows.len() % Self::CASCADE_LENGTH)
-            .expect("the cascade is far shorter than i32::MAX steps");
-        let offset = Self::CASCADE_STEP * (step + 1);
-        let frame_top =
-            FrameGeometry::around(Rectangle::default(), self.theme.metrics()).borders[0].loc;
-        self.backend.output_geometry().loc + Point::from((offset, offset)) - frame_top
     }
 
     /// Creates the seat with its keyboard and pointer.

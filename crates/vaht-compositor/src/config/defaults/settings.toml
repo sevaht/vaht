@@ -1,0 +1,37 @@
+# vaht's built-in settings: what applies to each key that
+# ~/.config/vaht/settings.toml leaves out. Every key is optional.
+
+[focus]
+# click: a window takes focus when clicked. sloppy: when the pointer
+# enters it, keeping it while the pointer is on the desktop.
+model = "click"
+raise_on_click = true
+# With sloppy focus: raise the window the pointer rests on, after a delay.
+auto_raise = false
+auto_raise_delay_ms = 250
+focus_new_windows = true
+
+[placement]
+# row, column, row-min-overlap, column-min-overlap, cascade, under-pointer
+# or center.
+strategy = "row"
+row_direction = "left-to-right"     # or right-to-left
+column_direction = "top-to-bottom"  # or bottom-to-top
+
+[windows]
+# How close a moved window's edge must come to the output's or another
+# window's edge to snap to it, in pixels; 0 turns snapping off.
+edge_snap_distance = 10
+double_click_ms = 250
+
+[windows.frame]
+# Buttons: shade, stick, minimize, maximize, close.
+titlebar_left = []
+titlebar_right = ["minimize", "maximize", "close"]
+
+[workspaces]
+names = ["Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4"]
+
+[session]
+# Command lines run once when vaht starts, as exec runs them.
+autostart = []

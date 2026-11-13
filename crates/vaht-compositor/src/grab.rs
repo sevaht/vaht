@@ -23,7 +23,7 @@ use smithay::utils::{Logical, Point, Serial};
 use crate::Compositor;
 use crate::config::Command;
 use crate::execute::{ExecutionContext, Press};
-use crate::window::{WindowDrag, WindowId};
+use crate::window::{EdgeSnap, WindowDrag, WindowId};
 
 /// How far the pointer moves, in pixels, before a held press is a drag.
 const DRAG_DISTANCE: f64 = 3.0;
@@ -131,6 +131,23 @@ impl Compositor {
         true
     }
 
+    /// Returns the edges a move of `window` snaps to: the usable area's,
+    /// and the other shown windows'.
+    fn edge_snap_for(&self, window: WindowId) -> EdgeSnap {
+        let metrics = self.theme.metrics();
+        let others = self
+            .scene()
+            .windows()
+            .filter(|other| other.id() != window)
+            .map(|other| other.outer_area(metrics))
+            .collect();
+        EdgeSnap::new(
+            self.config.settings.windows.edge_snap_distance,
+            self.output_area().usable,
+            others,
+        )
+    }
+
     /// Gives the pointer to `grab`.
     fn set_grab(&mut self, grab: WindowGrab) {
         let serial = grab.serial;
@@ -176,11 +193,13 @@ impl PointerGrab<Compositor> for WindowGrab {
         handle.motion(compositor, None, event);
         let delta = event.location - self.start.location;
         self.begin_drag_if_moved(compositor, delta);
-        if let (GrabKind::Drag(drag), Some(window)) = (self.kind, self.window)
-            && let Some(target) = compositor.windows.get_mut(window)
-        {
-            target.follow_drag(drag, delta.to_i32_round());
-            compositor.schedule_render();
+        if let (GrabKind::Drag(drag), Some(window)) = (self.kind, self.window) {
+            let snap = compositor.edge_snap_for(window);
+            let metrics = compositor.theme.metrics();
+            if let Some(target) = compositor.windows.get_mut(window) {
+                target.follow_drag(drag, delta.to_i32_round(), &snap, metrics);
+                compositor.schedule_render();
+            }
         }
     }
 

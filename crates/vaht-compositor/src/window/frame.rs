@@ -41,10 +41,13 @@ pub(crate) enum TitlebarHit {
 }
 
 /// A titlebar button.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum TitlebarButton {
     /// Rolls the window up into its titlebar, or down again.
     Shade,
+    /// Shows the window on every workspace, or only its own.
+    Stick,
     /// Minimizes the window.
     Minimize,
     /// Maximizes the window, or restores it.
@@ -58,6 +61,7 @@ impl TitlebarButton {
     pub(crate) const fn action(self) -> Action {
         match self {
             Self::Shade => Action::Shade,
+            Self::Stick => Action::Stick,
             Self::Minimize => Action::Minimize,
             Self::Maximize => Action::Maximize(Axes::Both),
             Self::Close => Action::Close,
@@ -68,11 +72,21 @@ impl TitlebarButton {
     const fn glyph(self) -> Glyph {
         match self {
             Self::Shade => Glyph::Shade,
+            Self::Stick => Glyph::Stick,
             Self::Minimize => Glyph::Minimize,
             Self::Maximize => Glyph::Maximize,
             Self::Close => Glyph::Close,
         }
     }
+}
+
+/// The buttons on either side of a titlebar's title.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct TitlebarLayout {
+    /// Left of the title, left to right.
+    pub(crate) left: Vec<TitlebarButton>,
+    /// Right of the title, left to right.
+    pub(crate) right: Vec<TitlebarButton>,
 }
 
 /// Which part of a frame is under a point.
@@ -173,22 +187,15 @@ pub(crate) struct Frame {
 }
 
 impl Frame {
-    /// The titlebar's buttons, left to right, as my fluxland setup has
-    /// them; `settings.toml` will choose them.
-    const BUTTONS: [TitlebarButton; 4] = [
-        TitlebarButton::Shade,
-        TitlebarButton::Minimize,
-        TitlebarButton::Maximize,
-        TitlebarButton::Close,
-    ];
-
-    /// Creates the frame of an unfocused, untitled window with no content yet.
-    pub(crate) fn new(ledger: &ResourceLedger) -> Self {
+    /// Creates the frame of an unfocused, untitled window with no content
+    /// yet, its titlebar's buttons laid out as `buttons`.
+    pub(crate) fn new(buttons: TitlebarLayout, ledger: &ResourceLedger) -> Self {
         Self {
             titlebar: Panel::new(
                 Titlebar {
                     title: String::new(),
                     is_focused: false,
+                    buttons,
                 },
                 vaht_ui::Size::default(),
             ),
@@ -232,6 +239,14 @@ impl Frame {
                 .update(|content| title.clone_into(&mut content.title));
         }
         changed
+    }
+
+    /// Lays the titlebar's buttons out as `buttons`.
+    pub(crate) fn set_buttons(&mut self, buttons: &TitlebarLayout) {
+        if &self.titlebar.content().buttons != buttons {
+            self.titlebar
+                .update(|content| content.buttons.clone_from(buttons));
+        }
     }
 
     /// Shows the window as focused or not; returns whether that changed.
@@ -342,21 +357,29 @@ pub(crate) struct Titlebar {
     title: String,
     /// Whether the window has keyboard focus.
     is_focused: bool,
+    /// The buttons either side of the title.
+    buttons: TitlebarLayout,
 }
 
 impl PanelContent for Titlebar {
     type Hit = TitlebarHit;
 
     fn build(&self) -> Widget<TitlebarHit> {
-        let mut children = vec![
-            Widget::text(ThemeElement::Label, self.title.clone())
-                .with_size(SizePolicy::Fill { weight: 1 })
-                .with_hit(TitlebarHit::Label),
-        ];
-        children.extend(Frame::BUTTONS.iter().map(|button| {
+        let button = |button: &TitlebarButton| {
             Widget::glyph(ThemeElement::Button, button.glyph())
                 .with_button(TitlebarHit::Button(*button))
-        }));
+        };
+        let label = Widget::text(ThemeElement::Label, self.title.clone())
+            .with_size(SizePolicy::Fill { weight: 1 })
+            .with_hit(TitlebarHit::Label);
+        let children = self
+            .buttons
+            .left
+            .iter()
+            .map(button)
+            .chain([label])
+            .chain(self.buttons.right.iter().map(button))
+            .collect();
         Widget::row(ThemeElement::Titlebar, children)
     }
 
@@ -458,6 +481,15 @@ mod tests {
         let titlebar = Titlebar {
             title: "a window".to_owned(),
             is_focused: true,
+            buttons: TitlebarLayout {
+                left: vec![TitlebarButton::Stick],
+                right: vec![
+                    TitlebarButton::Shade,
+                    TitlebarButton::Minimize,
+                    TitlebarButton::Maximize,
+                    TitlebarButton::Close,
+                ],
+            },
         };
         let root = titlebar.build();
         let vaht_ui::widget::WidgetKind::Row(children) = root.kind else {
@@ -467,6 +499,7 @@ mod tests {
         assert_eq!(
             hits,
             [
+                Some(TitlebarHit::Button(TitlebarButton::Stick)),
                 Some(TitlebarHit::Label),
                 Some(TitlebarHit::Button(TitlebarButton::Shade)),
                 Some(TitlebarHit::Button(TitlebarButton::Minimize)),

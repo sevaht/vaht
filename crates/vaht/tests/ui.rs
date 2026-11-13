@@ -35,9 +35,13 @@ struct OneWindow {
 }
 
 impl OneWindow {
-    /// Starts vaht and opens a window.
+    /// Starts vaht and opens a window. Cascade placement keeps it off the
+    /// output's edges, so drags have room on every side.
     fn open() -> Self {
-        let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+        let vaht = HeadlessVaht::start_with_config(
+            Path::new(EXECUTABLE),
+            &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+        );
         let mut client = TestClient::connect(vaht.socket());
         client.open_windows(1);
         let content = client

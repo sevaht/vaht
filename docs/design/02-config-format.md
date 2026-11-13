@@ -166,7 +166,27 @@ allow_commands = true           # allowRemoteActions
 autostart = ["~/.config/vaht/autostart"]
 ```
 
-### 3.2 Settings dropped in conversion
+### 3.2 What is built
+
+`settings.toml` accepts the sections whose features exist, and refuses the
+rest by name, so a setting never silently does nothing:
+
+- `[focus]`: `model` (`click` or `sloppy`; `strict-sloppy` is not built),
+  `raise_on_click`, `auto_raise`, `auto_raise_delay_ms`, `focus_new_windows`.
+- `[placement]`: every strategy and both directions; `column-min-overlap`
+  was added for Fluxbox's `ColMinOverlapPlacement`. The smart strategies
+  try only corners flush against edges, so `row` and `row-min-overlap`
+  place alike.
+- `[windows]`: `edge_snap_distance`, `double_click_ms`, and `[windows.frame]`
+  with `titlebar_left` and `titlebar_right` (buttons `shade`, `stick`,
+  `minimize`, `maximize`, `close`).
+- `[workspaces]`: `names`, at least one.
+- `[session]`: `autostart`.
+
+A window is placed when its client first commits a size, so the smart
+strategies know how large it is.
+
+### 3.3 Settings dropped in conversion
 
 | fluxland key | Why |
 |---|---|

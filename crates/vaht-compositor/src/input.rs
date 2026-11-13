@@ -24,8 +24,10 @@ use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
 use smithay::wayland::virtual_keyboard::VirtualKeyboardKeyEvent;
 
 use crate::Compositor;
-use crate::config::{Bindings, Command, KeyChord, Modifiers, MouseButton, MouseContext};
-use crate::event_source::RepeatingTimer;
+use crate::config::{
+    Bindings, Command, FocusModel, KeyChord, Modifiers, MouseButton, MouseContext,
+};
+use crate::event_source::{RepeatingTimer, Timer};
 use crate::execute::{ExecutionContext, Press};
 
 use crate::window::{FramePart, WindowDrag, WindowId};
@@ -249,17 +251,23 @@ impl Compositor {
 
     /// Moves the pointer to `location`, telling the surface under it.
     fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
+        let target = self.scene().target_at(location);
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        if let Some(window) = target.as_ref().map(WindowTarget::window)
+            && !pointer.is_grabbed()
+        {
+            self.pointer_entered(window);
+        }
         // Over a frame, no client has the pointer: the frame is vaht's.
-        let under = match self.scene().target_at(location) {
+        let under = match target {
             Some(WindowTarget::Surface {
                 surface, origin, ..
             }) => Some((surface, origin)),
             Some(WindowTarget::Frame { .. }) | None => None,
         };
-        let pointer = self
-            .seat
-            .get_pointer()
-            .expect("the seat gets a pointer at startup");
         pointer.motion(
             self,
             under,
@@ -270,6 +278,36 @@ impl Compositor {
             },
         );
         pointer.frame(self);
+    }
+
+    /// With sloppy focus, focuses `window`, which the pointer is over, and
+    /// with auto-raise raises it once the pointer has rested there a while.
+    fn pointer_entered(&mut self, window: WindowId) {
+        let focus = self.config.settings.focus;
+        if focus.model != FocusModel::Sloppy || self.focused() == Some(window) {
+            return;
+        }
+        self.focus_window(Some(window), SERIAL_COUNTER.next_serial());
+        self.input.auto_raise = None;
+        if focus.auto_raise {
+            let raise = Timer::once(
+                &self.loop_handle,
+                &self.ledger,
+                focus.auto_raise_delay(),
+                move |compositor: &mut Self| {
+                    if compositor.focused() == Some(window) {
+                        compositor.raise_window(window);
+                    }
+                },
+            );
+            match raise {
+                Ok(timer) => self.input.auto_raise = Some(timer),
+                Err(error) => tracing::warn!(
+                    error = &error as &dyn std::error::Error,
+                    "could not schedule raising a window"
+                ),
+            }
+        }
     }
 
     /// Presses or releases a pointer button.
@@ -307,7 +345,9 @@ impl Compositor {
         self.focus.finish_cycle();
         let target = self.scene().target_at(location);
         let clicked = target.as_ref().map(WindowTarget::window);
-        if let Some(id) = clicked {
+        if let Some(id) = clicked
+            && self.config.settings.focus.raise_on_click
+        {
             self.raise_window(id);
         }
         self.focus_window(clicked, serial);
@@ -321,7 +361,8 @@ impl Compositor {
         {
             return;
         }
-        let is_double = self.input.is_double_click(button, clicked);
+        let interval = self.config.settings.windows.double_click_interval();
+        let is_double = self.input.is_double_click(button, clicked, interval);
         let bound = MouseButton::from_code(button).and_then(|mouse_button| {
             let bindings = self.config.bindings.button(
                 MouseContext::search_order(target.as_ref()),
@@ -479,12 +520,11 @@ pub(crate) struct InputState {
     key_repeat: Option<KeyRepeat>,
     /// The last button press, to recognize a double click.
     last_click: Option<Click>,
+    /// Raises the window the pointer rests on, with auto-raise.
+    auto_raise: Option<Timer<Compositor>>,
 }
 
 impl InputState {
-    /// The longest time between the presses of a double click.
-    const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
-
     /// Decides whose a key event is: the client's, or vaht's, with the
     /// command a bound press runs. `chord` is the press
     /// with its modifiers, if the key has a keysym. A bound press's release
@@ -528,14 +568,19 @@ impl InputState {
     }
 
     /// Records a press of `button` on `window` (or the desktop); returns
-    /// whether it completes a double click. A third quick press starts a
-    /// new one.
-    fn is_double_click(&mut self, button: u32, window: Option<WindowId>) -> bool {
+    /// whether it completes a double click, within `interval` of the press
+    /// before. A third quick press starts a new one.
+    fn is_double_click(
+        &mut self,
+        button: u32,
+        window: Option<WindowId>,
+        interval: Duration,
+    ) -> bool {
         let now = Instant::now();
         let is_double = self.last_click.as_ref().is_some_and(|click| {
             click.button == button
                 && click.window == window
-                && now.duration_since(click.at) <= Self::DOUBLE_CLICK_INTERVAL
+                && now.duration_since(click.at) <= interval
         });
         self.last_click = (!is_double).then_some(Click {
             button,

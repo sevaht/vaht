@@ -7,12 +7,13 @@
 //! `vaht check --print-defaults` prints: defaults are written down once,
 //! as configuration (K3).
 //!
-//! Today the directory holds `bindings.toml`; the other files of 02 §2 join
-//! it with the features they configure.
+//! Today the directory holds `bindings.toml` and `settings.toml`; the other
+//! files of 02 §2 join them with the features they configure.
 
 mod bindings;
 mod command;
 mod matcher;
+mod settings;
 mod unique_map;
 mod watch;
 
@@ -23,6 +24,7 @@ use std::path::{Path, PathBuf};
 pub(crate) use self::bindings::{Bindings, KeyChord, Modifiers, MouseButton, MouseContext};
 pub(crate) use self::command::{Action, Command, ResizeFrom};
 pub(crate) use self::matcher::WindowMatcher;
+pub(crate) use self::settings::{FocusModel, Settings};
 pub(crate) use self::watch::ConfigWatch;
 
 /// One configuration file and vaht's built-in version of it.
@@ -62,14 +64,22 @@ impl ConfigFile {
 pub struct Config {
     /// Key and mouse bindings (`bindings.toml`).
     pub(crate) bindings: Bindings,
+    /// How vaht behaves (`settings.toml`).
+    pub(crate) settings: Settings,
 }
 
 impl Config {
     /// Every configuration file vaht reads.
-    pub const FILES: [ConfigFile; 1] = [ConfigFile {
-        name: "bindings.toml",
-        defaults: include_str!("config/defaults/bindings.toml"),
-    }];
+    pub const FILES: [ConfigFile; 2] = [
+        ConfigFile {
+            name: "bindings.toml",
+            defaults: include_str!("config/defaults/bindings.toml"),
+        },
+        ConfigFile {
+            name: "settings.toml",
+            defaults: include_str!("config/defaults/settings.toml"),
+        },
+    ];
 
     /// Reads and validates the configuration in `directory`; a missing file,
     /// or a missing directory, means that file's built-in version.
@@ -79,9 +89,10 @@ impl Config {
     /// Returns the first problem found: a file that cannot be read, or one
     /// that is not valid, with the line and column of the problem.
     pub fn load(directory: &Path) -> Result<Self, ConfigError> {
-        let [bindings] = Self::FILES;
+        let [bindings, settings] = Self::FILES;
         Ok(Self {
             bindings: bindings.read(directory)?,
+            settings: settings.read(directory)?,
         })
     }
 
@@ -92,10 +103,11 @@ impl Config {
     /// Panics if a built-in file is invalid; a unit test makes sure none is.
     #[must_use]
     pub fn built_in() -> Self {
-        let [bindings] = Self::FILES;
+        let [bindings, _] = Self::FILES;
         Self {
             bindings: toml::from_str(bindings.defaults)
                 .expect("the built-in bindings are valid (tested)"),
+            settings: Settings::default(),
         }
     }
 }

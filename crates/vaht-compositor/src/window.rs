@@ -4,6 +4,7 @@
 //! everything else refers to it by its [`WindowId`], so a closed window can
 //! never be reached through a stale reference (01 §1).
 
+mod edge_snap;
 mod frame;
 mod placement;
 mod resize;
@@ -15,7 +16,8 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Size};
 use vaht_ui::theme::Metrics;
 
-pub(crate) use frame::{Frame, FrameGeometry, FramePart, TitlebarButton};
+pub(crate) use edge_snap::EdgeSnap;
+pub(crate) use frame::{Frame, FrameGeometry, FramePart, TitlebarButton, TitlebarLayout};
 pub(crate) use placement::{Area, Axes, Direction, OutputArea, Placement, SnapStep, TileCell};
 pub(crate) use resize::{HorizontalEdge, ResizeAnchor, ResizeEdges, VerticalEdge};
 pub(crate) use toplevel::Toplevel;
@@ -59,6 +61,17 @@ pub(crate) enum WindowDrag {
     },
 }
 
+/// A window about to be managed: its parts, before it has an id.
+#[derive(Debug)]
+pub(crate) struct NewWindow {
+    /// The client's side.
+    pub(crate) toplevel: Toplevel,
+    /// The frame vaht draws around it.
+    pub(crate) frame: Frame,
+    /// The workspace it opens on.
+    pub(crate) workspace: Workspace,
+}
+
 /// What the user has done to a window besides placing it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) struct WindowState {
@@ -92,30 +105,32 @@ pub(crate) struct Window {
     state: WindowState,
     /// The workspace it is on; ignored while it is sticky.
     workspace: Workspace,
+    /// Whether it still waits for its first place, which needs its size.
+    awaits_placement: bool,
     /// Counts the window while it exists.
     _tracked: Tracked,
 }
 
 impl Window {
-    /// Creates a window for `toplevel` on `workspace`, with its content at
-    /// `location`.
-    pub(crate) fn new(
-        id: WindowId,
-        toplevel: Toplevel,
-        location: Point<i32, Logical>,
-        workspace: Workspace,
-        ledger: &ResourceLedger,
-    ) -> Self {
+    /// Creates the window `new`, identified by `id`. It waits for its
+    /// first place until the client has given it a size.
+    pub(crate) fn new(id: WindowId, new: NewWindow, ledger: &ResourceLedger) -> Self {
+        let NewWindow {
+            toplevel,
+            frame,
+            workspace,
+        } = new;
         Self {
             id,
             toplevel,
-            location,
-            frame: Frame::new(ledger),
+            location: Point::default(),
+            frame,
             move_origin: None,
             resize: None,
             placement: Placement::Floating,
             state: WindowState::default(),
             workspace,
+            awaits_placement: true,
             _tracked: ledger.track(ResourceKind::Window),
         }
     }
@@ -148,6 +163,17 @@ impl Window {
     /// Returns the workspace it is on (all of them, while sticky).
     pub(crate) const fn workspace(&self) -> Workspace {
         self.workspace
+    }
+
+    /// Returns whether the window has had its first place.
+    pub(crate) const fn is_placed(&self) -> bool {
+        !self.awaits_placement
+    }
+
+    /// Returns whether the window still waits for its first place and has
+    /// a size to choose it by.
+    pub(crate) fn is_ready_for_placement(&self) -> bool {
+        self.awaits_placement && !self.toplevel.geometry().size.is_empty()
     }
 
     /// Returns whether the window is shown while `current` is.
@@ -237,6 +263,13 @@ impl Window {
     ) -> Option<TitlebarButton> {
         let point = self.titlebar_point(location, metrics);
         self.frame.release_button(point)
+    }
+
+    /// Puts the window where it first goes: its frame's corner at `corner`.
+    pub(crate) fn place_initially(&mut self, corner: Point<i32, Logical>, metrics: Metrics) {
+        let outer = Rectangle::new(corner, self.outer_area(metrics).size);
+        self.location = FrameGeometry::content_within(outer, metrics).loc;
+        self.awaits_placement = false;
     }
 
     /// Places the window so on `output`, its frame sized by `metrics`: moves
@@ -355,12 +388,23 @@ impl Window {
     }
 
     /// Applies `drag` after the pointer moved `delta` since it began: moves
-    /// the window, or asks the client for the size the resize has reached.
-    pub(crate) fn follow_drag(&mut self, drag: WindowDrag, delta: Point<i32, Logical>) {
+    /// the window, its edges snapping as `snap` says, or asks the client for
+    /// the size the resize has reached.
+    pub(crate) fn follow_drag(
+        &mut self,
+        drag: WindowDrag,
+        delta: Point<i32, Logical>,
+        snap: &EdgeSnap,
+        metrics: Metrics,
+    ) {
         match drag {
             WindowDrag::Move => {
                 if let Some(origin) = self.move_origin {
-                    self.location = origin + delta;
+                    let outer = self.outer_area(metrics);
+                    let moved = origin + delta;
+                    let moved_outer =
+                        Rectangle::new(outer.loc + (moved - self.location), outer.size);
+                    self.location = moved + (snap.snap(moved_outer) - moved_outer.loc);
                 }
             }
             WindowDrag::Resize { .. } => {

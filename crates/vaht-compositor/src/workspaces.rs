@@ -79,13 +79,15 @@ pub(crate) struct Workspaces {
 }
 
 impl Workspaces {
-    /// How many workspaces there are by default.
-    pub(crate) const DEFAULT_COUNT: NonZeroUsize = NonZeroUsize::new(4).expect("four is not zero");
-
-    /// Creates `count` workspaces with default names, showing the first.
-    pub(crate) fn new(count: NonZeroUsize) -> Self {
+    /// Creates workspaces named `names`, showing the first.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `names` is empty: settings never allow that.
+    pub(crate) fn named(names: &[String]) -> Self {
+        assert!(!names.is_empty(), "there is always a workspace");
         Self {
-            names: (1..=count.get()).map(Self::default_name).collect(),
+            names: names.to_vec(),
             current: Workspace::default(),
             previous: Workspace::default(),
         }
@@ -129,6 +131,19 @@ impl Workspaces {
         changes
     }
 
+    /// Renames the workspaces `names`, adding or removing workspaces at the
+    /// end to match. Returns the last workspace if any were removed: their
+    /// windows belong on it now.
+    pub(crate) fn rename(&mut self, names: &[String]) -> Option<Workspace> {
+        assert!(!names.is_empty(), "there is always a workspace");
+        let removes = names.len() < self.count();
+        names.clone_into(&mut self.names);
+        let last = self.last();
+        self.current = self.current.min(last);
+        self.previous = self.previous.min(last);
+        removes.then_some(last)
+    }
+
     /// Adds a workspace at the end, and returns it.
     pub(crate) fn add(&mut self) -> Workspace {
         self.names.push(Self::default_name(self.count() + 1));
@@ -159,21 +174,23 @@ impl Workspaces {
     }
 }
 
-impl Default for Workspaces {
-    fn default() -> Self {
-        Self::new(Self::DEFAULT_COUNT)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
 
     use super::*;
 
+    /// Four workspaces.
+    fn four() -> Workspaces {
+        let names: Vec<String> = (1..=4)
+            .map(|number| format!("Workspace {number}"))
+            .collect();
+        Workspaces::named(&names)
+    }
+
     /// Four workspaces, showing the one with 1-based `number`.
     fn showing(number: usize) -> Workspaces {
-        let mut workspaces = Workspaces::default();
+        let mut workspaces = four();
         workspaces.show(Workspace(number - 1));
         workspaces
     }
@@ -211,8 +228,26 @@ mod tests {
         let mut workspaces = showing(4);
         assert_eq!(workspaces.remove_last(), Some(Workspace(3)));
         assert_eq!(workspaces.current(), Workspace(2));
-        let mut single = Workspaces::new(NonZeroUsize::MIN);
+        let mut single = Workspaces::named(&["Only".to_owned()]);
         assert_eq!(single.remove_last(), None, "the only workspace stays");
+    }
+
+    #[test]
+    fn renaming_to_fewer_names_removes_workspaces_from_the_end() {
+        let mut workspaces = showing(4);
+        assert_eq!(
+            workspaces.rename(&["a".to_owned(), "b".to_owned()]),
+            Some(Workspace(1))
+        );
+        assert_eq!(
+            workspaces.current(),
+            Workspace(1),
+            "the shown one went, so the last shows"
+        );
+        assert_eq!(
+            workspaces.rename(&["a".to_owned(), "b".to_owned(), "c".to_owned()]),
+            None
+        );
     }
 
     #[rstest]
