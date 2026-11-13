@@ -58,7 +58,12 @@ The coding standards' modeling rules apply throughout (General M1–M16,
 RUST.md §4). Behavior lives with the data it governs: `Window` moves and
 resizes itself (`WindowDrag`), `Frame` presses its buttons, `InputState`
 decides whose a key is, `MouseContext` knows where a press looks for
-bindings, `Scene` composes what an output shows, `ConfigFile` reads itself.
+bindings, `Scene` composes what an output shows and hit-tests it,
+`ConfigFile` reads itself. `Placement` is a value: maximizing, fullscreen
+and the snap ladder are pure functions from one placement to the next, and
+`Window::place` applies the result. `Workspaces` and `Focus` (focus history
+and Alt+Tab cycling) are entities that decide; the compositor carries out
+their decisions with the seat.
 
 **One deliberate exception to R-M2 (one `impl` block per type):**
 `Compositor` is Smithay's state type, and Smithay's seat, grab and protocol
@@ -96,6 +101,13 @@ A method that needs no Smithay call does not belong in them.
   `Compositor::release_dead_client_resources` prunes Smithay's capture session
   list and the renderers' caches, and schedules a frame: a gone client's last
   buffers are let go when that frame is drawn.
+- Drawing and hit-testing go through `Scene`, which shows only the windows
+  of the current workspace (not minimized), without frames when
+  fullscreen and without content when shaded. Nothing else walks the
+  stack to find what is under the pointer.
+- A window's area follows from its `Placement`: code that maximizes, tiles
+  or fullscreens a window builds a new `Placement` and calls
+  `Window::place`, never moves or sizes it directly.
 - Clipboard focus is set together with keyboard focus in
   `Compositor::focus_window`: Smithay clears the focus of a destroyed
   surface silently, and the clipboard would otherwise keep a disconnected

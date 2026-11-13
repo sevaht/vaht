@@ -16,6 +16,7 @@ publish.workspace = true
 calloop.workspace = true
 nix.workspace = true
 procfs.workspace = true
+regex.workspace = true
 serde.workspace = true
 smithay.workspace = true
 strum.workspace = true

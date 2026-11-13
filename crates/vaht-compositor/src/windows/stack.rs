@@ -10,11 +10,6 @@ pub(crate) struct Stack {
 }
 
 impl Stack {
-    /// Returns the topmost window.
-    pub(crate) fn top(&self) -> Option<WindowId> {
-        self.bottom_to_top.last().copied()
-    }
-
     /// Returns the windows from top to bottom, the order hit-testing uses.
     pub(crate) fn top_down(&self) -> impl Iterator<Item = WindowId> + '_ {
         self.bottom_to_top.iter().rev().copied()
@@ -81,7 +76,6 @@ mod tests {
     fn new_windows_go_on_top() {
         let stack = three_windows();
         assert_eq!(top_down(&stack), [3, 2, 1]);
-        assert_eq!(stack.top(), Some(WindowId::new(3)));
     }
 
     #[test]

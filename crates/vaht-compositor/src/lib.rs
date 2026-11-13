@@ -17,6 +17,7 @@ mod compositor;
 mod config;
 pub mod event_source;
 mod execute;
+mod focus;
 mod grab;
 mod input;
 mod launcher;
@@ -27,6 +28,7 @@ mod shared_memory;
 mod signals;
 mod window;
 mod windows;
+mod workspaces;
 
 pub use backend::{BackendChoice, BackendError, RenderError};
 pub use compositor::{Compositor, RunError, RunOptions};

@@ -40,14 +40,16 @@ use crate::capture::ScreenCapture;
 use crate::client::ClientState;
 use crate::config::{Config, ConfigWatch};
 use crate::event_source::{EventSource, Timer};
+use crate::focus::Focus;
 use crate::input::InputState;
 use crate::launcher::Launcher;
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceLedger};
 use crate::scene::Scene;
 use crate::signals::{ProcessSignals, SignalRequest};
-use crate::window::{FrameGeometry, Toplevel, WindowId};
+use crate::window::{FrameGeometry, OutputArea, Toplevel, Window, WindowId};
 use crate::windows::Windows;
+use crate::workspaces::Workspaces;
 
 /// The running compositor.
 pub struct Compositor {
@@ -95,8 +97,13 @@ pub struct Compositor {
     pub(crate) input: InputState,
     /// Registers timers and other sources with the event loop.
     pub(crate) loop_handle: LoopHandle<'static, Self>,
-    /// The window with keyboard focus.
-    focused: Option<WindowId>,
+    /// Which window has keyboard focus, and which had it before.
+    pub(crate) focus: Focus,
+    /// The window a snap step down just minimized: a step up restores it
+    /// while the modifiers that went down for it are held.
+    pub(crate) snap_minimized: Option<WindowId>,
+    /// The workspaces, and which one is shown.
+    pub(crate) workspaces: Workspaces,
     /// When vaht started; frame times are measured from it.
     pub(crate) start_time: Instant,
     /// False once vaht has been asked to stop.
@@ -249,7 +256,9 @@ impl Compositor {
             loop_handle: handle.clone(),
             client_cleanup_pending: false,
             physical_keymap,
-            focused: None,
+            focus: Focus::default(),
+            snap_minimized: None,
+            workspaces: Workspaces::default(),
             start_time: Instant::now(),
             is_running: true,
             socket_name,
@@ -320,7 +329,26 @@ impl Compositor {
 
     /// Returns the window with keyboard focus.
     pub(crate) const fn focused(&self) -> Option<WindowId> {
-        self.focused
+        self.focus.focused()
+    }
+
+    /// Returns what the output shows now.
+    pub(crate) fn scene(&self) -> Scene<'_> {
+        Scene::new(
+            &self.windows,
+            self.theme.metrics(),
+            self.workspaces.current(),
+        )
+    }
+
+    /// Returns the parts of the output windows can be placed in.
+    pub(crate) fn output_area(&self) -> OutputArea {
+        let whole = self.backend.output_geometry();
+        // The taskbar will take its part of `usable`.
+        OutputArea {
+            whole,
+            usable: whole,
+        }
     }
 
     /// Lets go of everything still referencing what clients released, if
@@ -354,12 +382,17 @@ impl Compositor {
     /// Draws a frame, then tells the windows in it that they were shown.
     pub(crate) fn render(&mut self) {
         self.prepare_panels();
-        let metrics = self.theme.metrics();
-        if let Err(error) = self.backend.render(&Scene::new(&self.windows, metrics)) {
+        let scene = Scene::new(
+            &self.windows,
+            self.theme.metrics(),
+            self.workspaces.current(),
+        );
+        if let Err(error) = self.backend.render(&scene) {
             tracing::warn!(error = &error as &dyn std::error::Error, "frame skipped");
         }
+        // Hidden windows get no frame callbacks, so they stop drawing.
         let time = self.start_time.elapsed();
-        for window in self.windows.iter() {
+        for window in scene.windows() {
             window.toplevel().send_frame(self.backend.output(), time);
         }
         tracing::trace!("frame drawn");
@@ -381,9 +414,12 @@ impl Compositor {
     /// Starts managing a new application window, on top and focused.
     pub(crate) fn add_window(&mut self, surface: ToplevelSurface) {
         let location = self.cascade_location();
-        let id = self
-            .windows
-            .insert(Toplevel::from_xdg(surface), location, &self.ledger);
+        let id = self.windows.insert(
+            Toplevel::from_xdg(surface),
+            location,
+            self.workspaces.current(),
+            &self.ledger,
+        );
         tracing::debug!(window = %id, "window opened");
         self.focus_window(Some(id), smithay::utils::SERIAL_COUNTER.next_serial());
     }
@@ -399,12 +435,10 @@ impl Compositor {
             app_id = ?window.as_ref().and_then(|window| window.toplevel().app_id()),
             "window closed"
         );
-        if self.focused == Some(id) {
-            self.focused = None;
-            self.focus_window(
-                self.windows.top(),
-                smithay::utils::SERIAL_COUNTER.next_serial(),
-            );
+        let was_focused = self.focused() == Some(id);
+        self.focus.forget(id);
+        if was_focused {
+            self.focus_most_recent();
         }
         self.schedule_render();
     }
@@ -423,12 +457,34 @@ impl Compositor {
         }
     }
 
+    /// Gives focus to the window that had it most recently among those
+    /// shown, if the focused one is not shown: it was minimized, closed,
+    /// or left on another workspace.
+    pub(crate) fn focus_most_recent(&mut self) {
+        let current = self.workspaces.current();
+        let is_shown = |id| {
+            self.windows
+                .get(id)
+                .is_some_and(|window| window.is_shown_on(current))
+        };
+        if self.focused().is_some_and(is_shown) {
+            return;
+        }
+        let shown = self
+            .windows
+            .shown_top_down(current)
+            .map(Window::id)
+            .collect::<Vec<_>>();
+        let most_recent = self.focus.by_recency(shown).first().copied();
+        self.focus_window(most_recent, smithay::utils::SERIAL_COUNTER.next_serial());
+    }
+
     /// Gives keyboard focus to the window with `id`, or to nothing.
     pub(crate) fn focus_window(&mut self, id: Option<WindowId>, serial: Serial) {
-        if self.focused != id {
-            if let Some(previous) = self
-                .focused
-                .and_then(|previous| self.windows.get_mut(previous))
+        let previous_focus = self.focused();
+        if previous_focus != id {
+            if let Some(previous) =
+                previous_focus.and_then(|previous| self.windows.get_mut(previous))
             {
                 previous.toplevel().set_activated(false);
                 previous.frame_mut().set_focused(false);
@@ -438,8 +494,8 @@ impl Compositor {
                 window.frame_mut().set_focused(true);
                 tracing::debug!(window = %window.id(), title = ?window.toplevel().title(), "focused");
             }
-            self.focused = id;
         }
+        self.focus.set(id);
         let surface = id
             .and_then(|id| self.windows.get(id))
             .map(|window| window.toplevel().wl_surface().clone());
@@ -537,7 +593,7 @@ impl fmt::Debug for Compositor {
             .debug_struct("Compositor")
             .field("socket_name", &self.socket_name)
             .field("windows", &self.windows.len())
-            .field("focused", &self.focused)
+            .field("focused", &self.focused())
             .finish_non_exhaustive()
     }
 }

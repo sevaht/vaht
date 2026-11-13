@@ -71,7 +71,7 @@ impl Compositor {
         start: GrabStartData<Self>,
         serial: Serial,
     ) {
-        if !self.begin_drag(window, drag) {
+        if !self.begin_drag(window, drag, start.location) {
             return;
         }
         self.set_grab(WindowGrab {
@@ -100,24 +100,33 @@ impl Compositor {
         });
     }
 
-    /// Makes the held press `grab` on `window` into `drag`.
+    /// Makes the held press `grab` on `window`, which began with the pointer
+    /// at `pointer`, into `drag`.
     pub(crate) fn turn_grab_into(
         &mut self,
         window: WindowId,
         grab: &mut GrabKind,
         drag: WindowDrag,
+        pointer: Point<f64, Logical>,
     ) {
-        if *grab == GrabKind::Hold && self.begin_drag(window, drag) {
+        if *grab == GrabKind::Hold && self.begin_drag(window, drag, pointer) {
             *grab = GrabKind::Drag(drag);
         }
     }
 
-    /// Starts `drag` on `window`; returns whether the window exists.
-    fn begin_drag(&mut self, window: WindowId, drag: WindowDrag) -> bool {
+    /// Starts `drag` on `window` with the pointer at `pointer`; returns
+    /// whether the window exists.
+    fn begin_drag(
+        &mut self,
+        window: WindowId,
+        drag: WindowDrag,
+        pointer: Point<f64, Logical>,
+    ) -> bool {
+        let metrics = self.theme.metrics();
         let Some(target) = self.windows.get_mut(window) else {
             return false;
         };
-        target.begin_drag(drag);
+        target.begin_drag(drag, pointer, metrics);
         tracing::debug!(window = %window, ?drag, "drag started");
         true
     }

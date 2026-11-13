@@ -131,7 +131,11 @@ impl Compositor {
         let size = mode.size;
         let result = self
             .capture
-            .render(&Scene::new(&self.windows, metrics), size, scale)
+            .render(
+                &Scene::new(&self.windows, metrics, self.workspaces.current()),
+                size,
+                scale,
+            )
             .and_then(|pixels| {
                 let (width, height) = (
                     usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?,

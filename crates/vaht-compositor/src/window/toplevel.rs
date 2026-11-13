@@ -21,6 +21,7 @@ use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
 
+use super::placement::{Axes, Placement};
 use super::resize::SizeLimits;
 
 /// The client's side of a window.
@@ -125,6 +126,47 @@ impl Toplevel {
     pub(crate) fn request_size(&self, size: Size<i32, Logical>) {
         self.xdg()
             .with_pending_state(|state| state.size = Some(size));
+        self.send_configure_if_ready();
+    }
+
+    /// Tells the client how it is placed, so it can drop its shadows and
+    /// rounded corners where it touches an edge, and asks it for `size`.
+    pub(crate) fn configure_placement(&self, placement: &Placement, size: Size<i32, Logical>) {
+        let (maximized, fullscreen, tiled) = match placement {
+            Placement::Floating => (false, false, [false; 4]),
+            Placement::Maximized { axes, .. } => {
+                let horizontal = matches!(axes, Axes::Horizontal | Axes::Both);
+                let vertical = matches!(axes, Axes::Vertical | Axes::Both);
+                (
+                    *axes == Axes::Both,
+                    false,
+                    [horizontal, horizontal, vertical, vertical],
+                )
+            }
+            Placement::Tiled { .. } => (false, false, [true; 4]),
+            Placement::Fullscreen { .. } => (false, true, [false; 4]),
+        };
+        let tiled_states = [
+            xdg_toplevel::State::TiledLeft,
+            xdg_toplevel::State::TiledRight,
+            xdg_toplevel::State::TiledTop,
+            xdg_toplevel::State::TiledBottom,
+        ];
+        self.xdg().with_pending_state(|state| {
+            let mut set = |flag: xdg_toplevel::State, is_on: bool| {
+                if is_on {
+                    state.states.set(flag);
+                } else {
+                    state.states.unset(flag);
+                }
+            };
+            set(xdg_toplevel::State::Maximized, maximized);
+            set(xdg_toplevel::State::Fullscreen, fullscreen);
+            for (flag, is_on) in tiled_states.into_iter().zip(tiled) {
+                set(flag, is_on);
+            }
+            state.size = Some(size);
+        });
         self.send_configure_if_ready();
     }
 

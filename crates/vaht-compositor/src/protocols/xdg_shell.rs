@@ -5,6 +5,7 @@ use smithay::input::Seat;
 use smithay::input::pointer::GrabStartData;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::Resource as _;
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::utils::Serial;
 use smithay::wayland::shell::xdg::{
@@ -12,7 +13,9 @@ use smithay::wayland::shell::xdg::{
 };
 
 use crate::Compositor;
-use crate::window::{HorizontalEdge, ResizeEdges, VerticalEdge, Window, WindowDrag, WindowId};
+use crate::window::{
+    Area, Axes, HorizontalEdge, Placement, ResizeEdges, VerticalEdge, WindowDrag, WindowId,
+};
 
 impl XdgShellHandler for Compositor {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -55,14 +58,48 @@ impl XdgShellHandler for Compositor {
     // grabs in general.
     fn grab(&mut self, _surface: PopupSurface, _seat: WlSeat, _serial: Serial) {}
 
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        self.request_placement(
+            &surface,
+            |placement| !placement.is_fully_maximized(),
+            |placement, current| placement.with_maximized_toggled(Axes::Both, current),
+        );
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        self.request_placement(
+            &surface,
+            Placement::is_fully_maximized,
+            |placement, current| placement.with_maximized_toggled(Axes::Both, current),
+        );
+    }
+
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {
+        self.request_placement(
+            &surface,
+            |placement| !placement.is_fullscreen(),
+            Placement::with_fullscreen_toggled,
+        );
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        self.request_placement(
+            &surface,
+            Placement::is_fullscreen,
+            Placement::with_fullscreen_toggled,
+        );
+    }
+
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        let window = self.windows.id_of(surface.wl_surface());
+        self.set_minimized(window, true);
+    }
+
     fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
         let Some((window, start)) = self.client_drag(&surface, &seat, serial) else {
             return;
         };
-        let Some(initial_location) = self.windows.get(window).map(Window::location) else {
-            return;
-        };
-        self.start_window_grab(window, WindowDrag::Move { initial_location }, start, serial);
+        self.start_window_grab(window, WindowDrag::Move, start, serial);
     }
 
     fn resize_request(
@@ -122,6 +159,25 @@ impl Compositor {
             return None;
         }
         Some((self.windows.id_of(surface.wl_surface())?, start))
+    }
+
+    /// Places the window of `surface` as `change` says, if `applies` to its
+    /// placement; the client always hears back, as xdg-shell requires.
+    fn request_placement(
+        &mut self,
+        surface: &ToplevelSurface,
+        applies: impl FnOnce(&Placement) -> bool,
+        change: impl FnOnce(Placement, Area) -> Placement,
+    ) {
+        let window = self.windows.id_of(surface.wl_surface());
+        let changes = window
+            .and_then(|id| self.windows.get(id))
+            .is_some_and(|target| applies(target.placement()));
+        if changes {
+            self.change_placement(window, change);
+        } else if surface.is_initial_configure_sent() {
+            surface.send_pending_configure();
+        }
     }
 
     /// Keeps a popup within its window's output, flipping or sliding it as its

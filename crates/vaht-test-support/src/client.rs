@@ -52,6 +52,26 @@ pub const BUTTON_RIGHT: u32 = 0x111;
 pub mod keys {
     /// Escape.
     pub const ESCAPE: u32 = 1;
+    /// Tab.
+    pub const TAB: u32 = 15;
+    /// The left Control key.
+    pub const LEFT_CONTROL: u32 = 29;
+    /// The left Shift key.
+    pub const LEFT_SHIFT: u32 = 42;
+    /// F1.
+    pub const F1: u32 = 59;
+    /// F2.
+    pub const F2: u32 = 60;
+    /// F11.
+    pub const F11: u32 = 87;
+    /// The up arrow.
+    pub const UP: u32 = 103;
+    /// The left arrow.
+    pub const LEFT: u32 = 105;
+    /// The right arrow.
+    pub const RIGHT: u32 = 106;
+    /// The down arrow.
+    pub const DOWN: u32 = 108;
     /// The T key.
     pub const LETTER_T: u32 = 20;
     /// The left Alt key.

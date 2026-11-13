@@ -12,6 +12,7 @@
 
 mod bindings;
 mod command;
+mod matcher;
 mod unique_map;
 mod watch;
 
@@ -21,6 +22,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) use self::bindings::{Bindings, KeyChord, Modifiers, MouseButton, MouseContext};
 pub(crate) use self::command::{Action, Command, ResizeFrom};
+pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::watch::ConfigWatch;
 
 /// One configuration file and vaht's built-in version of it.

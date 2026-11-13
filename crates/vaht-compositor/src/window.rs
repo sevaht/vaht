@@ -5,6 +5,7 @@
 //! never be reached through a stale reference (01 §1).
 
 mod frame;
+mod placement;
 mod resize;
 mod toplevel;
 
@@ -15,10 +16,12 @@ use smithay::utils::{Logical, Point, Rectangle, Size};
 use vaht_ui::theme::Metrics;
 
 pub(crate) use frame::{Frame, FrameGeometry, FramePart, TitlebarButton};
+pub(crate) use placement::{Area, Axes, Direction, OutputArea, Placement, SnapStep, TileCell};
 pub(crate) use resize::{HorizontalEdge, ResizeAnchor, ResizeEdges, VerticalEdge};
 pub(crate) use toplevel::Toplevel;
 
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
+use crate::workspaces::Workspace;
 
 /// Identifies a window for as long as vaht runs; never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -47,16 +50,24 @@ impl fmt::Display for WindowId {
 /// What dragging a window with the pointer does to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowDrag {
-    /// Moves it; the content started at `initial_location`.
-    Move {
-        /// Where the content's top-left corner was when the drag began.
-        initial_location: Point<i32, Logical>,
-    },
+    /// Moves it.
+    Move,
     /// Resizes it by dragging `edges`.
     Resize {
         /// The edges that follow the pointer.
         edges: ResizeEdges,
     },
+}
+
+/// What the user has done to a window besides placing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) struct WindowState {
+    /// Hidden until restored.
+    pub(crate) is_minimized: bool,
+    /// Shown on every workspace.
+    pub(crate) is_sticky: bool,
+    /// Rolled up into its titlebar.
+    pub(crate) is_shaded: bool,
 }
 
 /// A managed window.
@@ -70,19 +81,29 @@ pub(crate) struct Window {
     location: Point<i32, Logical>,
     /// What vaht draws around it.
     frame: Frame,
+    /// Where the content's corner was when the move in progress began.
+    move_origin: Option<Point<i32, Logical>>,
     /// The resize in progress, which positions the window as the client
     /// applies new sizes.
     resize: Option<ResizeAnchor>,
+    /// Where it is and why.
+    placement: Placement,
+    /// Minimized, sticky, shaded.
+    state: WindowState,
+    /// The workspace it is on; ignored while it is sticky.
+    workspace: Workspace,
     /// Counts the window while it exists.
     _tracked: Tracked,
 }
 
 impl Window {
-    /// Creates a window for `toplevel` with its content at `location`.
+    /// Creates a window for `toplevel` on `workspace`, with its content at
+    /// `location`.
     pub(crate) fn new(
         id: WindowId,
         toplevel: Toplevel,
         location: Point<i32, Logical>,
+        workspace: Workspace,
         ledger: &ResourceLedger,
     ) -> Self {
         Self {
@@ -90,7 +111,11 @@ impl Window {
             toplevel,
             location,
             frame: Frame::new(ledger),
+            move_origin: None,
             resize: None,
+            placement: Placement::Floating,
+            state: WindowState::default(),
+            workspace,
             _tracked: ledger.track(ResourceKind::Window),
         }
     }
@@ -110,14 +135,58 @@ impl Window {
         self.location
     }
 
+    /// Returns where the window is and why.
+    pub(crate) const fn placement(&self) -> &Placement {
+        &self.placement
+    }
+
+    /// Returns whether it is minimized, sticky or shaded.
+    pub(crate) const fn state(&self) -> WindowState {
+        self.state
+    }
+
+    /// Returns the workspace it is on (all of them, while sticky).
+    pub(crate) const fn workspace(&self) -> Workspace {
+        self.workspace
+    }
+
+    /// Returns whether the window is shown while `current` is.
+    pub(crate) fn is_shown_on(&self, current: Workspace) -> bool {
+        !self.state.is_minimized && (self.state.is_sticky || self.workspace == current)
+    }
+
+    /// Returns whether vaht draws a frame around it: not while fullscreen.
+    pub(crate) const fn has_frame(&self) -> bool {
+        !self.placement.is_fullscreen()
+    }
+
+    /// Returns whether its content is shown: not while shaded.
+    pub(crate) const fn shows_content(&self) -> bool {
+        !self.state.is_shaded
+    }
+
     /// Returns the area the window's content covers, in global coordinates.
     pub(crate) fn content_area(&self) -> Rectangle<i32, Logical> {
         Rectangle::new(self.location, self.toplevel.geometry().size)
     }
 
-    /// Returns where each part of the frame goes with the theme's `metrics`.
+    /// Returns the area the window covers on screen, frame included.
+    pub(crate) fn outer_area(&self, metrics: Metrics) -> Area {
+        if self.has_frame() {
+            self.frame_geometry(metrics).outer
+        } else {
+            self.content_area()
+        }
+    }
+
+    /// Returns where each part of the frame goes with the theme's `metrics`;
+    /// a shaded window's frame closes up beneath its titlebar.
     pub(crate) fn frame_geometry(&self, metrics: Metrics) -> FrameGeometry {
-        FrameGeometry::around(self.content_area(), metrics)
+        let mut content = self.content_area();
+        if !self.shows_content() {
+            content.size.h = 0;
+        }
+        FrameGeometry::around(content, metrics)
     }
 
     /// Returns the frame.
@@ -170,15 +239,118 @@ impl Window {
         self.frame.release_button(point)
     }
 
-    /// Starts `drag`.
-    pub(crate) fn begin_drag(&mut self, drag: WindowDrag) {
-        if let WindowDrag::Resize { edges } = drag {
-            self.resize = Some(ResizeAnchor {
-                edges,
-                initial: self.content_area(),
-                is_finishing: false,
-            });
-            self.toplevel.set_resizing(true);
+    /// Places the window so on `output`, its frame sized by `metrics`: moves
+    /// it, asks the client for the size, and tells the client its state.
+    pub(crate) fn place(&mut self, placement: Placement, output: OutputArea, metrics: Metrics) {
+        let current = self.outer_area(metrics);
+        let outer = match placement {
+            Placement::Floating => self.placement.restore_area(current),
+            Placement::Maximized { .. }
+            | Placement::Tiled { .. }
+            | Placement::Fullscreen { .. } => placement.area(current, output.usable, output.whole),
+        };
+        let content = if placement.is_fullscreen() {
+            outer
+        } else {
+            FrameGeometry::content_within(outer, metrics)
+        };
+        tracing::debug!(window = %self.id, ?placement, "placed");
+        self.placement = placement;
+        self.resize = None;
+        self.location = content.loc;
+        self.toplevel
+            .configure_placement(&self.placement, content.size);
+    }
+
+    /// Makes the window float where it is, so it can be moved or resized by
+    /// hand. For a move with the pointer at `pointer`, a window that was
+    /// maximized or tiled goes back to its floating size, the pointer at
+    /// the same place across it.
+    pub(crate) fn float(&mut self, pointer: Option<Point<f64, Logical>>, metrics: Metrics) {
+        if self.placement == Placement::Floating {
+            return;
+        }
+        let current = self.outer_area(metrics);
+        let outer = match pointer {
+            Some(pointer) => {
+                let restore = self.placement.restore_area(current);
+                let across = (pointer.x - f64::from(current.loc.x)) / f64::from(current.size.w);
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "an offset within a window's width fits in i32"
+                )]
+                let offset = (across * f64::from(restore.size.w)).round() as i32;
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "pointer coordinates fit in i32"
+                )]
+                let left = pointer.x.round() as i32 - offset;
+                Rectangle::new((left, current.loc.y).into(), restore.size)
+            }
+            None => current,
+        };
+        let content = FrameGeometry::content_within(outer, metrics);
+        self.placement = Placement::Floating;
+        self.location = content.loc;
+        self.toplevel
+            .configure_placement(&self.placement, content.size);
+    }
+
+    /// Minimizes the window, or restores it.
+    pub(crate) const fn set_minimized(&mut self, is_minimized: bool) {
+        self.state.is_minimized = is_minimized;
+    }
+
+    /// Shows the window on every workspace, or only its own.
+    pub(crate) const fn set_sticky(&mut self, is_sticky: bool) {
+        self.state.is_sticky = is_sticky;
+    }
+
+    /// Rolls the window up into its titlebar, or down again.
+    pub(crate) const fn set_shaded(&mut self, is_shaded: bool) {
+        self.state.is_shaded = is_shaded;
+    }
+
+    /// Puts the window on `workspace`.
+    pub(crate) const fn move_to_workspace(&mut self, workspace: Workspace) {
+        self.workspace = workspace;
+    }
+
+    /// Moves the window by `delta`, as a floating window.
+    pub(crate) fn move_by(&mut self, delta: Point<i32, Logical>, metrics: Metrics) {
+        self.float(None, metrics);
+        self.location += delta;
+    }
+
+    /// Asks the client to make the content `size`, as a floating window.
+    pub(crate) fn resize_to(&mut self, size: Size<i32, Logical>, metrics: Metrics) {
+        self.float(None, metrics);
+        self.toplevel.request_size(size);
+    }
+
+    /// Starts `drag` with the pointer at `pointer`. A maximized or tiled
+    /// window floats first: for a move, at its floating size under the
+    /// pointer.
+    pub(crate) fn begin_drag(
+        &mut self,
+        drag: WindowDrag,
+        pointer: Point<f64, Logical>,
+        metrics: Metrics,
+    ) {
+        match drag {
+            WindowDrag::Move => {
+                self.float(Some(pointer), metrics);
+                self.move_origin = Some(self.location);
+            }
+            WindowDrag::Resize { edges } => {
+                self.float(None, metrics);
+                self.resize = Some(ResizeAnchor {
+                    edges,
+                    initial: self.content_area(),
+                    is_finishing: false,
+                });
+                self.toplevel.set_resizing(true);
+            }
         }
     }
 
@@ -186,7 +358,11 @@ impl Window {
     /// the window, or asks the client for the size the resize has reached.
     pub(crate) fn follow_drag(&mut self, drag: WindowDrag, delta: Point<i32, Logical>) {
         match drag {
-            WindowDrag::Move { initial_location } => self.location = initial_location + delta,
+            WindowDrag::Move => {
+                if let Some(origin) = self.move_origin {
+                    self.location = origin + delta;
+                }
+            }
             WindowDrag::Resize { .. } => {
                 if let Some(anchor) = self.resize {
                     let limits = self.toplevel.size_limits();
@@ -200,9 +376,13 @@ impl Window {
 
     /// Ends `drag`; a resize's last size from the client is still anchored.
     pub(crate) fn end_drag(&mut self, drag: WindowDrag) {
-        if let (WindowDrag::Resize { .. }, Some(anchor)) = (drag, &mut self.resize) {
-            anchor.is_finishing = true;
-            self.toplevel.set_resizing(false);
+        match (drag, &mut self.resize) {
+            (WindowDrag::Move, _) => self.move_origin = None,
+            (WindowDrag::Resize { .. }, Some(anchor)) => {
+                anchor.is_finishing = true;
+                self.toplevel.set_resizing(false);
+            }
+            (WindowDrag::Resize { .. }, None) => {}
         }
     }
 

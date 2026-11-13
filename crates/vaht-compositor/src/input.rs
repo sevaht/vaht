@@ -100,6 +100,9 @@ impl Compositor {
         keyboard.with_xkb_state(self, |mut context| {
             context.set_modifier_mask(depressed, latched, locked, group);
         });
+        if depressed == 0 {
+            self.modifiers_released();
+        }
     }
 
     /// Makes `keymap` the seat's keymap, or vaht's own for `None`, if it is
@@ -158,10 +161,21 @@ impl Compositor {
         modifiers: &ModifiersState,
         keysym: &KeysymHandle<'_>,
     ) -> FilterResult<Option<Command>> {
+        let held = Modifiers::held(modifiers);
+        if state == KeyState::Released && held == Modifiers::default() {
+            self.modifiers_released();
+        }
         let chord = keysym
             .raw_latin_sym_or_raw_current_sym()
-            .map(|key| KeyChord::new(Modifiers::held(modifiers), key));
+            .map(|key| KeyChord::new(held, key));
         self.input.key(keycode, state, chord, &self.config.bindings)
+    }
+
+    /// Ends what lasts while modifiers are held, now that none is: window
+    /// cycling, and undoing a snap step's minimize.
+    fn modifiers_released(&mut self) {
+        self.focus.finish_cycle();
+        self.snap_minimized = None;
     }
 
     /// Runs a bound key's `command` for the focused window, and starts
@@ -236,7 +250,7 @@ impl Compositor {
     /// Moves the pointer to `location`, telling the surface under it.
     fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
         // Over a frame, no client has the pointer: the frame is vaht's.
-        let under = match self.windows.target_at(location, self.theme.metrics()) {
+        let under = match self.scene().target_at(location) {
             Some(WindowTarget::Surface {
                 surface, origin, ..
             }) => Some((surface, origin)),
@@ -290,7 +304,8 @@ impl Compositor {
     /// press is bound to. A titlebar button pressed without modifiers is
     /// held down until released; an unbound press on a border resizes.
     fn press_button(&mut self, button: u32, location: Point<f64, Logical>, serial: Serial) {
-        let target = self.windows.target_at(location, self.theme.metrics());
+        self.focus.finish_cycle();
+        let target = self.scene().target_at(location);
         let clicked = target.as_ref().map(WindowTarget::window);
         if let Some(id) = clicked {
             self.raise_window(id);
@@ -435,9 +450,7 @@ impl Compositor {
             Some(steps) if steps > 0.0 => MouseButton::ScrollDown,
             Some(_) | None => return false,
         };
-        let target = self
-            .windows
-            .target_at(pointer.current_location(), self.theme.metrics());
+        let target = self.scene().target_at(pointer.current_location());
         let command = self
             .config
             .bindings

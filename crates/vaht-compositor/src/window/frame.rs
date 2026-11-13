@@ -29,6 +29,7 @@ use super::resize::ResizeEdges;
 use crate::config::Action;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 use crate::scene::SceneElement;
+use crate::window::Axes;
 
 /// What clicking a titlebar can report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,6 +43,12 @@ pub(crate) enum TitlebarHit {
 /// A titlebar button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum TitlebarButton {
+    /// Rolls the window up into its titlebar, or down again.
+    Shade,
+    /// Minimizes the window.
+    Minimize,
+    /// Maximizes the window, or restores it.
+    Maximize,
     /// Closes the window.
     Close,
 }
@@ -50,6 +57,9 @@ impl TitlebarButton {
     /// Returns what clicking the button does.
     pub(crate) const fn action(self) -> Action {
         match self {
+            Self::Shade => Action::Shade,
+            Self::Minimize => Action::Minimize,
+            Self::Maximize => Action::Maximize(Axes::Both),
             Self::Close => Action::Close,
         }
     }
@@ -57,6 +67,9 @@ impl TitlebarButton {
     /// Returns the button's picture.
     const fn glyph(self) -> Glyph {
         match self {
+            Self::Shade => Glyph::Shade,
+            Self::Minimize => Glyph::Minimize,
+            Self::Maximize => Glyph::Maximize,
             Self::Close => Glyph::Close,
         }
     }
@@ -107,6 +120,28 @@ impl FrameGeometry {
         }
     }
 
+    /// Returns the content area a frame covering `outer` surrounds, the
+    /// inverse of [`Self::around`]; at least one pixel each way.
+    pub(crate) fn content_within(
+        outer: Rectangle<i32, Logical>,
+        metrics: Metrics,
+    ) -> Rectangle<i32, Logical> {
+        let border = to_i32(metrics.border_width);
+        let titlebar_height = to_i32(metrics.titlebar_height);
+        Rectangle::new(
+            (
+                outer.loc.x + border,
+                outer.loc.y + 2 * border + titlebar_height,
+            )
+                .into(),
+            (
+                (outer.size.w - 2 * border).max(1),
+                (outer.size.h - titlebar_height - 3 * border).max(1),
+            )
+                .into(),
+        )
+    }
+
     /// Returns the part of the frame at `point`, if any.
     pub(crate) fn part_at(&self, point: Point<f64, Logical>) -> Option<FramePart> {
         let pixel = point.to_i32_floor();
@@ -138,8 +173,14 @@ pub(crate) struct Frame {
 }
 
 impl Frame {
-    /// The titlebar's buttons, left to right.
-    const BUTTONS: [TitlebarButton; 1] = [TitlebarButton::Close];
+    /// The titlebar's buttons, left to right, as my fluxland setup has
+    /// them; `settings.toml` will choose them.
+    const BUTTONS: [TitlebarButton; 4] = [
+        TitlebarButton::Shade,
+        TitlebarButton::Minimize,
+        TitlebarButton::Maximize,
+        TitlebarButton::Close,
+    ];
 
     /// Creates the frame of an unfocused, untitled window with no content yet.
     pub(crate) fn new(ledger: &ResourceLedger) -> Self {
@@ -364,6 +405,13 @@ mod tests {
     }
 
     #[test]
+    fn content_within_undoes_around() {
+        let content = Rectangle::new((40, 60).into(), (300, 200).into());
+        let outer = FrameGeometry::around(content, METRICS).outer;
+        assert_eq!(FrameGeometry::content_within(outer, METRICS), content);
+    }
+
+    #[test]
     fn the_titlebar_sits_on_the_content_with_a_border_between() {
         assert_eq!(
             frame().titlebar,
@@ -420,7 +468,10 @@ mod tests {
             hits,
             [
                 Some(TitlebarHit::Label),
-                Some(TitlebarHit::Button(TitlebarButton::Close))
+                Some(TitlebarHit::Button(TitlebarButton::Shade)),
+                Some(TitlebarHit::Button(TitlebarButton::Minimize)),
+                Some(TitlebarHit::Button(TitlebarButton::Maximize)),
+                Some(TitlebarHit::Button(TitlebarButton::Close)),
             ]
         );
     }

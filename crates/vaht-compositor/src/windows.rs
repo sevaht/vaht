@@ -12,11 +12,11 @@ use std::collections::HashMap;
 
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point};
-use vaht_ui::theme::Metrics;
 
 use self::stack::Stack;
 use crate::resources::ResourceLedger;
 use crate::window::{FramePart, Toplevel, Window, WindowId};
+use crate::workspaces::Workspace;
 
 /// What of a window is under a point.
 #[derive(Debug, Clone, PartialEq)]
@@ -78,20 +78,19 @@ impl Windows {
         self.by_id.len()
     }
 
-    /// Returns the topmost window.
-    pub(crate) fn top(&self) -> Option<WindowId> {
-        self.stack.top()
-    }
-
-    /// Returns the windows from top to bottom, the order composition and
-    /// hit-testing use.
+    /// Returns the windows from top to bottom.
     pub(crate) fn top_down(&self) -> impl Iterator<Item = &Window> + '_ {
         self.stack.top_down().filter_map(|id| self.by_id.get(&id))
     }
 
-    /// Returns every window, in no particular order.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &Window> + '_ {
-        self.by_id.values()
+    /// Returns the windows shown while `workspace` is, from top to bottom:
+    /// the order composition and hit-testing use.
+    pub(crate) fn shown_top_down(
+        &self,
+        workspace: Workspace,
+    ) -> impl Iterator<Item = &Window> + '_ {
+        self.top_down()
+            .filter(move |window| window.is_shown_on(workspace))
     }
 
     /// Returns the window with `id`, to change it.
@@ -104,39 +103,19 @@ impl Windows {
         self.by_id.values_mut()
     }
 
-    /// Returns what is under `point` (global coordinates): the topmost
-    /// window's client surface or frame there, with frames sized by
-    /// `metrics`.
-    pub(crate) fn target_at(
-        &self,
-        point: Point<f64, Logical>,
-        metrics: Metrics,
-    ) -> Option<WindowTarget> {
-        self.stack.top_down().find_map(|id| {
-            let window = self.by_id.get(&id)?;
-            if let Some((surface, origin)) = window.surface_under(point) {
-                return Some(WindowTarget::Surface {
-                    window: id,
-                    surface,
-                    origin,
-                });
-            }
-            let part = window.frame_geometry(metrics).part_at(point)?;
-            Some(WindowTarget::Frame { window: id, part })
-        })
-    }
-
-    /// Adds a window on top of the others, its content at `location`.
+    /// Adds a window on top of the others, on `workspace`, its content at
+    /// `location`.
     pub(crate) fn insert(
         &mut self,
         toplevel: Toplevel,
         location: Point<i32, Logical>,
+        workspace: Workspace,
         ledger: &ResourceLedger,
     ) -> WindowId {
         self.next_id += 1;
         let id = WindowId::new(self.next_id);
         self.by_id
-            .insert(id, Window::new(id, toplevel, location, ledger));
+            .insert(id, Window::new(id, toplevel, location, workspace, ledger));
         self.stack.push(id);
         id
     }

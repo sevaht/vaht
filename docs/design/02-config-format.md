@@ -260,6 +260,9 @@ list:
 - All keys must match, so a matcher with several keys means "and".
 - The `{N}` count from Fluxbox patterns is dropped; nothing in my setup uses
   it.
+- Built so far: `app_id`, `title`, `workspace`, `minimized`, `sticky` and
+  `not`. The X11 keys, `layer`, `output` and `hidden_from_window_list` come
+  with the features they describe.
 
 ---
 
@@ -374,8 +377,18 @@ My `keys`, converted (repetitive lines shortened):
   binding for that button.
 - Actions of §4 that vaht does not have yet are rejected by name ("not
   available in vaht yet"), as are key chains, key modes and the structured
-  forms other than `repeat`. A file that uses them fails `vaht check`
-  instead of half-working.
+  forms other than `repeat` and `action`. A file that uses them fails
+  `vaht check` instead of half-working.
+- `tile` takes a cell in thousandths of the usable area:
+  `tile <x> <y> <width> <height>`, the left half being `tile 0 0 500 1000`.
+- `next-window` and `previous-window` walk windows in the order they last
+  had focus. The walk lasts while modifiers are held, and when they are
+  let go the window reached becomes the most recent. Minimized windows
+  count only if the matcher says `minimized = true` or `"any"`, and
+  reaching one restores it. A window on another workspace shows that
+  workspace.
+- `snap-step` follows my fluxland ladder. A step down that minimizes can be
+  undone by a step up while the modifiers are still held.
 
 Dropped in conversion, and reported by `vaht import`:
 - `Mod4 Tab`, `Mod4 Shift Tab`, `Mod4 1`–`9`, `OnTitlebar Control Mouse1 :StartTabbing` (tabs removed);

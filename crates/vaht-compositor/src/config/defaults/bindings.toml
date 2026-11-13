@@ -13,10 +13,35 @@
 # double click, "Drag+" a drag that starts with that button.
 #
 # Commands: an action ("exec kitty"), an array of commands run in order,
-# or { repeat = "...", rate = 20 } for a key that repeats while held.
+# { repeat = "...", rate = 20 } for a key that repeats while held, or
+# { action = "next-window", windows = { ... } } for an action about the
+# windows a matcher picks.
 
 [keys]
+"Alt+Tab" = { action = "next-window", windows = { workspace = "current" } }
+"Alt+Shift+Tab" = { action = "previous-window", windows = { workspace = "current" } }
 "Alt+F4" = "close"
+"Alt+F9" = "minimize"
+"Alt+F10" = "maximize"
+"Alt+F11" = "fullscreen"
+"Super+Left" = "snap-step left"
+"Super+Right" = "snap-step right"
+"Super+Up" = "snap-step up"
+"Super+Down" = "snap-step down"
+"Ctrl+Alt+Left" = "workspace previous"
+"Ctrl+Alt+Right" = "workspace next"
+"Ctrl+F1" = "workspace 1"
+"Ctrl+F2" = "workspace 2"
+"Ctrl+F3" = "workspace 3"
+"Ctrl+F4" = "workspace 4"
+"Super+F1" = "send-to-workspace 1"
+"Super+F2" = "send-to-workspace 2"
+"Super+F3" = "send-to-workspace 3"
+"Super+F4" = "send-to-workspace 4"
+
+[mouse.desktop]
+"ScrollUp" = "workspace previous"
+"ScrollDown" = "workspace next"
 
 [mouse.window]
 "Alt+Left" = ["raise", "focus", "start-moving"]
@@ -24,5 +49,6 @@
 "Alt+Middle" = "lower"
 
 [mouse.titlebar]
+"Double+Left" = "maximize"
 "Drag+Left" = "start-moving"
 "Middle" = "lower"
