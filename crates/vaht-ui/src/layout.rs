@@ -50,9 +50,14 @@ impl<Hit: Copy> Layout<Hit> {
         area: Rect,
         fit_width: &mut dyn FnMut(&str, ThemeElement) -> u32,
     ) -> Self {
-        let mut placed = Vec::new();
-        place(root, area, fit_width, &mut placed);
-        Self { placed }
+        let mut placer = Placer {
+            fit_width,
+            placed: Vec::new(),
+        };
+        placer.place(root, area);
+        Self {
+            placed: placer.placed,
+        }
     }
 
     /// Returns every widget in drawing order.
@@ -110,113 +115,111 @@ impl Axis {
     }
 }
 
-/// Places `widget` in `area`, appending it and its descendants to `placed`.
-fn place<Hit: Copy>(
-    widget: &Widget<Hit>,
-    area: Rect,
-    fit_width: &mut dyn FnMut(&str, ThemeElement) -> u32,
-    placed: &mut Vec<Placed<Hit>>,
-) {
-    let content = match &widget.kind {
-        WidgetKind::Text(text) => Content::Text(text.clone()),
-        WidgetKind::Glyph(glyph) => Content::Glyph(*glyph),
-        WidgetKind::Fill | WidgetKind::Row(_) | WidgetKind::Column(_) => Content::Background,
-    };
-    placed.push(Placed {
-        rect: area,
-        element: widget.element,
-        content,
-        hit: widget.hit,
-        is_button: widget.is_button,
-    });
-    let (axis, children) = match &widget.kind {
-        WidgetKind::Row(children) => (Axis::Horizontal, children),
-        WidgetKind::Column(children) => (Axis::Vertical, children),
-        WidgetKind::Text(_) | WidgetKind::Glyph(_) | WidgetKind::Fill => return,
-    };
-    let lengths = distribute(axis, area, children, fit_width);
-    let mut start = 0;
-    for (child, length) in children.iter().zip(lengths) {
-        place(child, axis.slice(area, start, length), fit_width, placed);
-        start += length;
-    }
+/// Places a widget tree: each widget's area, parents before children.
+struct Placer<'fit, Hit> {
+    /// Returns the room a text widget of an element needs, padding
+    /// included.
+    fit_width: &'fit mut dyn FnMut(&str, ThemeElement) -> u32,
+    /// Every widget placed so far.
+    placed: Vec<Placed<Hit>>,
 }
 
-/// Divides `area`'s main axis among `children`: fixed, fitted and square
-/// children first, in order, then what remains among the fills by weight.
-/// When there is not enough room, later children get less.
-fn distribute<Hit>(
-    axis: Axis,
-    area: Rect,
-    children: &[Widget<Hit>],
-    fit_width: &mut dyn FnMut(&str, ThemeElement) -> u32,
-) -> Vec<u32> {
-    let available = axis.length(area);
-    let mut remaining = available;
-    let mut lengths: Vec<u32> = children
-        .iter()
-        .map(|child| {
-            let wanted = match child.size {
-                SizePolicy::Fixed(length) => length,
-                SizePolicy::Square => axis.thickness(area),
-                SizePolicy::Fit => natural_length(child, axis, fit_width),
-                SizePolicy::Fill { .. } => 0,
-            };
-            let granted = wanted.min(remaining);
-            remaining -= granted;
-            granted
-        })
-        .collect();
-    let total_weight: u32 = children
-        .iter()
-        .map(|child| match child.size {
-            SizePolicy::Fill { weight } => weight,
-            SizePolicy::Fixed(_) | SizePolicy::Fit | SizePolicy::Square => 0,
-        })
-        .sum();
-    if total_weight > 0 {
-        let free = remaining;
-        let mut given = 0;
-        let mut weight_so_far = 0;
-        for (child, length) in children.iter().zip(&mut lengths) {
-            if let SizePolicy::Fill { weight } = child.size {
-                // Shares end at cumulative boundaries, so rounding never loses
-                // a pixel: the fills together get exactly what was free.
-                weight_so_far += weight;
-                let end = u32::try_from(
-                    u64::from(free) * u64::from(weight_so_far) / u64::from(total_weight),
-                )
-                .expect("a share of a u32 fits in a u32");
-                *length = end - given;
-                given = end;
-            }
+impl<Hit: Copy> Placer<'_, Hit> {
+    /// Places `widget` in `area`, then its descendants.
+    fn place(&mut self, widget: &Widget<Hit>, area: Rect) {
+        let content = match &widget.kind {
+            WidgetKind::Text(text) => Content::Text(text.clone()),
+            WidgetKind::Glyph(glyph) => Content::Glyph(*glyph),
+            WidgetKind::Fill | WidgetKind::Row(_) | WidgetKind::Column(_) => Content::Background,
+        };
+        self.placed.push(Placed {
+            rect: area,
+            element: widget.element,
+            content,
+            hit: widget.hit,
+            is_button: widget.is_button,
+        });
+        let (axis, children) = match &widget.kind {
+            WidgetKind::Row(children) => (Axis::Horizontal, children),
+            WidgetKind::Column(children) => (Axis::Vertical, children),
+            WidgetKind::Text(_) | WidgetKind::Glyph(_) | WidgetKind::Fill => return,
+        };
+        let lengths = self.distribute(axis, area, children);
+        let mut start = 0;
+        for (child, length) in children.iter().zip(lengths) {
+            self.place(child, axis.slice(area, start, length));
+            start += length;
         }
     }
-    lengths
-}
 
-/// Returns how much room `widget` needs along `axis` when fitted.
-fn natural_length<Hit>(
-    widget: &Widget<Hit>,
-    axis: Axis,
-    fit_width: &mut dyn FnMut(&str, ThemeElement) -> u32,
-) -> u32 {
-    match &widget.kind {
-        WidgetKind::Text(text) => match axis {
-            Axis::Horizontal => fit_width(text, widget.element),
-            // A text line's height is its container's; columns of text give
-            // each line a fixed size instead.
-            Axis::Vertical => 0,
-        },
-        WidgetKind::Row(children) | WidgetKind::Column(children) => children
+    /// Divides `area`'s main axis among `children`: fixed, fitted and
+    /// square children first, in order, then what remains among the fills
+    /// by weight. When there is not enough room, later children get less.
+    fn distribute(&mut self, axis: Axis, area: Rect, children: &[Widget<Hit>]) -> Vec<u32> {
+        let available = axis.length(area);
+        let mut remaining = available;
+        let mut lengths: Vec<u32> = children
+            .iter()
+            .map(|child| {
+                let wanted = match child.size {
+                    SizePolicy::Fixed(length) => length,
+                    SizePolicy::Square => axis.thickness(area),
+                    SizePolicy::Fit => self.natural_length(child, axis),
+                    SizePolicy::Fill { .. } => 0,
+                };
+                let granted = wanted.min(remaining);
+                remaining -= granted;
+                granted
+            })
+            .collect();
+        let total_weight: u32 = children
             .iter()
             .map(|child| match child.size {
-                SizePolicy::Fixed(length) => length,
-                SizePolicy::Fit => natural_length(child, axis, fit_width),
-                SizePolicy::Square | SizePolicy::Fill { .. } => 0,
+                SizePolicy::Fill { weight } => weight,
+                SizePolicy::Fixed(_) | SizePolicy::Fit | SizePolicy::Square => 0,
             })
-            .sum(),
-        WidgetKind::Glyph(_) | WidgetKind::Fill => 0,
+            .sum();
+        if total_weight > 0 {
+            let free = remaining;
+            let mut given = 0;
+            let mut weight_so_far = 0;
+            for (child, length) in children.iter().zip(&mut lengths) {
+                if let SizePolicy::Fill { weight } = child.size {
+                    // Shares end at cumulative boundaries, so rounding never
+                    // loses a pixel: the fills together get exactly what was
+                    // free.
+                    weight_so_far += weight;
+                    let end = u32::try_from(
+                        u64::from(free) * u64::from(weight_so_far) / u64::from(total_weight),
+                    )
+                    .expect("a share of a u32 fits in a u32");
+                    *length = end - given;
+                    given = end;
+                }
+            }
+        }
+        lengths
+    }
+
+    /// Returns how much room `widget` needs along `axis` when fitted.
+    fn natural_length(&mut self, widget: &Widget<Hit>, axis: Axis) -> u32 {
+        match &widget.kind {
+            WidgetKind::Text(text) => match axis {
+                Axis::Horizontal => (self.fit_width)(text, widget.element),
+                // A text line's height is its container's; columns of text
+                // give each line a fixed size instead.
+                Axis::Vertical => 0,
+            },
+            WidgetKind::Row(children) | WidgetKind::Column(children) => children
+                .iter()
+                .map(|child| match child.size {
+                    SizePolicy::Fixed(length) => length,
+                    SizePolicy::Fit => self.natural_length(child, axis),
+                    SizePolicy::Square | SizePolicy::Fill { .. } => 0,
+                })
+                .sum(),
+            WidgetKind::Glyph(_) | WidgetKind::Fill => 0,
+        }
     }
 }
 
