@@ -47,7 +47,7 @@ use crate::launcher::Launcher;
 use crate::layers::{Layers, OutputLayers};
 use crate::placement_strategy::Room;
 use crate::protocols::ProtocolStates;
-use crate::resources::{self, ResourceLedger};
+use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::Scene;
 use crate::signals::{ProcessSignals, SignalRequest};
 use crate::window::{Frame, NewWindow, OutputArea, Toplevel, Window, WindowId};
@@ -81,6 +81,9 @@ pub struct Compositor {
     /// Whether a client released a surface or a capture session since the
     /// last cleanup: renderers and Smithay may still reference its memory.
     pub(crate) client_cleanup_pending: bool,
+    /// How many clients were connected at the last cleanup; fewer now means
+    /// some left, and what they held must be let go.
+    connected_clients: usize,
     /// The window whose titlebar the pointer is holding down, if any.
     pub(crate) held_titlebar: Option<WindowId>,
     /// The configuration in effect.
@@ -262,6 +265,7 @@ impl Compositor {
             input: InputState::default(),
             loop_handle: handle.clone(),
             client_cleanup_pending: false,
+            connected_clients: 0,
             physical_keymap,
             focus: Focus::default(),
             snap_minimized: None,
@@ -408,14 +412,17 @@ impl Compositor {
     }
 
     /// Lets go of everything still referencing what clients released, if
-    /// anything was released since the last call.
+    /// anything was released, or a client left, since the last call.
     ///
     /// Smithay keeps a list of capture sessions and renderers cache client
     /// buffers; both are pruned only when asked. Without this, a closed
     /// capture session keeps its client's memory pool mapped forever, and
     /// the list grows with every session (found by the screenshot leak test).
     fn release_dead_client_resources(&mut self) {
-        if std::mem::take(&mut self.client_cleanup_pending) {
+        let connected = self.ledger.count(ResourceKind::Client).live;
+        let has_client_left = connected < self.connected_clients;
+        self.connected_clients = connected;
+        if std::mem::take(&mut self.client_cleanup_pending) || has_client_left {
             self.protocols.image_copy_capture.cleanup();
             self.backend.release_unused_textures();
             self.capture.release_unused_textures();

@@ -98,7 +98,7 @@ A method that needs no Smithay call does not belong in them.
   a move or resize through `ExecutionContext::grab` instead.
 - The Wayland `Display` lives beside the `Compositor`, not inside it, so
   clients are dispatched without `unsafe` (R-X3).
-- After clients release surfaces or capture sessions,
+- After clients release surfaces or capture sessions, or leave,
   `Compositor::release_dead_client_resources` prunes Smithay's capture session
   list and the renderers' caches, and schedules a frame: a gone client's last
   buffers are let go when that frame is drawn.

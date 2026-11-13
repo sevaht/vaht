@@ -114,3 +114,19 @@ fn layer_surfaces_leave_nothing_behind() {
     vaht.wait_for_disconnections(1);
     vaht.stop().assert_nothing_left_behind();
 }
+
+#[test]
+fn a_client_leaving_after_its_windows_closed_and_were_redrawn_leaves_nothing_behind() {
+    // The frame after the windows close is drawn before the client leaves,
+    // so only the client's leaving can prompt the cleanup frame that
+    // wait_for_disconnections waits for.
+    let vaht = start_vaht();
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(2);
+    let drawn = vaht.logged_count("frame drawn");
+    client.close_windows();
+    vaht.wait_for_logged("frame drawn", drawn + 1);
+    drop(client);
+    vaht.wait_for_disconnections(1);
+    vaht.stop().assert_nothing_left_behind();
+}
