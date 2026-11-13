@@ -93,6 +93,24 @@ enum DragProgress {
     },
     /// A resize, or one just finished whose last size is still to arrive.
     Resize(ResizeAnchor),
+    /// A resize shown as an outline: the client is asked for nothing until
+    /// it ends, at `size`.
+    Outline {
+        /// The edges dragged, and the content area it began with.
+        anchor: ResizeAnchor,
+        /// The content size reached.
+        size: Size<i32, Logical>,
+    },
+}
+
+/// How a resize by hand is shown while it lasts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResizeStyle {
+    /// The window itself takes each size the drag reaches.
+    Live,
+    /// An outline shows the size, which the window takes when the drag
+    /// ends (Fluxbox's `opaqueResize: false`).
+    Outline,
 }
 
 /// A managed window.
@@ -419,6 +437,7 @@ impl Window {
         &mut self,
         drag: WindowDrag,
         pointer: Point<f64, Logical>,
+        style: ResizeStyle,
         metrics: Metrics,
     ) {
         match drag {
@@ -430,14 +449,40 @@ impl Window {
             }
             WindowDrag::Resize { edges } => {
                 self.float(None, metrics);
-                self.drag = Some(DragProgress::Resize(ResizeAnchor {
+                let anchor = ResizeAnchor {
                     edges,
                     initial: self.content_area(),
                     is_finishing: false,
-                }));
-                self.request(|requested| requested.is_resizing = true);
+                };
+                match style {
+                    ResizeStyle::Live => {
+                        self.drag = Some(DragProgress::Resize(anchor));
+                        self.request(|requested| requested.is_resizing = true);
+                    }
+                    ResizeStyle::Outline => {
+                        self.drag = Some(DragProgress::Outline {
+                            anchor,
+                            size: anchor.initial.size,
+                        });
+                    }
+                }
             }
         }
+    }
+
+    /// Returns where the frame would be if an outline resize ended now;
+    /// none unless one is in progress.
+    pub(crate) fn outline(&self, metrics: Metrics) -> Option<Area> {
+        let Some(DragProgress::Outline { anchor, size }) = self.drag else {
+            return None;
+        };
+        let location = anchor.edges.anchored_location(anchor.initial, size);
+        let content = Rectangle::new(location, size);
+        Some(if self.has_frame() {
+            FrameGeometry::around(content, metrics, FrameShape::Open).outer
+        } else {
+            content
+        })
     }
 
     /// Follows the drag in progress after the pointer moved `delta` since
@@ -460,6 +505,11 @@ impl Window {
                 let limits = self.committed.size_limits;
                 self.request_size(anchor.edges.resize(anchor.initial.size, delta, limits));
             }
+            Some(DragProgress::Outline { anchor, .. }) => {
+                let limits = self.committed.size_limits;
+                let size = anchor.edges.resize(anchor.initial.size, delta, limits);
+                self.drag = Some(DragProgress::Outline { anchor, size });
+            }
             Some(DragProgress::Resize(_)) | None => {}
         }
     }
@@ -472,6 +522,19 @@ impl Window {
             Some(DragProgress::Resize(anchor)) => {
                 anchor.is_finishing = true;
                 self.request(|requested| requested.is_resizing = false);
+            }
+            Some(DragProgress::Outline { anchor, size }) => {
+                let (anchor, size) = (*anchor, *size);
+                if size == anchor.initial.size {
+                    self.drag = None;
+                } else {
+                    // The size arrives as a live resize's last one does.
+                    self.drag = Some(DragProgress::Resize(ResizeAnchor {
+                        is_finishing: true,
+                        ..anchor
+                    }));
+                    self.request_size(size);
+                }
             }
             None => {}
         }

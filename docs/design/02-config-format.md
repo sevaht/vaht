@@ -177,7 +177,10 @@ rest by name, so a setting never silently does nothing:
   was added for Fluxbox's `ColMinOverlapPlacement`. The smart strategies
   try only corners flush against edges, so `row` and `row-min-overlap`
   place alike.
-- `[windows]`: `edge_snap_distance`, `double_click_ms`, and `[windows.frame]`
+- `[windows]`: `edge_snap_distance`, `double_click_ms`, `opaque_resize`
+  (false shows a 2-pixel outline of the new frame while resizing, and the
+  window takes the size when the drag ends; from Fluxbox's
+  `opaqueResize`), and `[windows.frame]`
   with `titlebar_left` and `titlebar_right` (buttons `shade`, `stick`,
   `minimize`, `maximize`, `close`) and `handle` (the strip along the
   bottom with a grip at each end, 20 pixels wide as Fluxbox's; dragging

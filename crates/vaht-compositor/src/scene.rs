@@ -16,6 +16,7 @@ mod backdrop;
 mod corner_texture;
 mod frame_textures;
 mod menu_texture;
+mod outline;
 mod panel_texture;
 
 use smithay::backend::renderer::element::AsRenderElements as _;
@@ -31,6 +32,7 @@ pub(crate) use self::backdrop::Backdrop;
 pub(crate) use self::corner_texture::CornerTexture;
 pub(crate) use self::frame_textures::FrameTextures;
 pub(crate) use self::menu_texture::MenuTexture;
+pub(crate) use self::outline::Outline;
 pub(crate) use self::panel_texture::PanelTexture;
 use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, OutputLayers};
 use crate::menu::MenuStack;
@@ -151,8 +153,8 @@ pub(crate) struct Scene<'state> {
     layers: OutputLayers<'state>,
 }
 
-/// What vaht draws itself: the windows' frames, the taskbar and the menus
-/// over the windows, and the wallpaper beneath them.
+/// What vaht draws itself: the windows' frames, the taskbar, the menus and
+/// a resize's outline over the windows, and the wallpaper beneath them.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Drawn<'state> {
     /// The windows' frames, as the renderer takes them.
@@ -163,6 +165,8 @@ pub(crate) struct Drawn<'state> {
     pub(crate) menus: &'state MenuStack,
     /// The wallpaper.
     pub(crate) backdrop: &'state Backdrop,
+    /// The outline of an outline resize.
+    pub(crate) outline: &'state Outline,
 }
 
 impl<'state> Scene<'state> {
@@ -225,6 +229,7 @@ impl<'state> Scene<'state> {
     {
         // Menus are above everything, even the overlay layer.
         let mut elements = self.drawn.menus.render_elements(renderer, scale);
+        elements.extend(self.drawn.outline.render_elements(scale));
         self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
         elements.extend(
             self.shown_taskbar()

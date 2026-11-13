@@ -124,6 +124,10 @@ pub(crate) struct WindowSettings {
     pub(crate) edge_snap_distance: u16,
     /// The longest time between the presses of a double click.
     double_click_ms: u64,
+    /// Whether a window resized by hand takes each size as the pointer
+    /// moves; otherwise an outline shows the size, which the window takes
+    /// when the drag ends.
+    pub(crate) opaque_resize: bool,
     /// What the frame shows.
     pub(crate) frame: FrameSettings,
 }
@@ -140,6 +144,7 @@ impl Default for WindowSettings {
         Self {
             edge_snap_distance: 10,
             double_click_ms: 250,
+            opaque_resize: true,
             frame: FrameSettings::default(),
         }
     }

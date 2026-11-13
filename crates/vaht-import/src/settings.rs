@@ -214,6 +214,18 @@ impl InitFile {
         if let Some(interval) = self.number("session.doubleClickInterval") {
             self.set(&["windows", "double_click_ms"], Value::from(interval));
         }
+        self.convert_flag("opaqueResize", &["windows", "opaque_resize"]);
+        // vaht moves windows as they are dragged; an outline move is not
+        // built.
+        if let Some(resource) = self.resources.get(&format!("{SCREEN}opaqueMove")).cloned()
+            && !resource.value.eq_ignore_ascii_case("true")
+        {
+            self.note(
+                report,
+                resource.line,
+                "an outline move (opaqueMove: false)".to_owned(),
+            );
+        }
         for (side, key) in [("left", "titlebar_left"), ("right", "titlebar_right")] {
             let Some(resource) = self
                 .resources
@@ -584,6 +596,16 @@ session.screen0.toolbar.widthPercent:\t80
             [(7, Reason::Dropped), (8, Reason::Dropped)],
             "the tabs and the opaque alpha"
         );
+    }
+
+    #[test]
+    fn an_outline_resize_is_kept_and_an_opaque_move_is_vahts_own() {
+        let init = "session.screen0.opaqueResize:\tfalse\nsession.screen0.opaqueMove:\ttrue\n";
+        let mut report = Report::default();
+        let document =
+            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        assert_eq!(document.to_string(), "[windows]\nopaque_resize = false\n");
+        assert!(report.notes().is_empty(), "{report}");
     }
 
     #[test]

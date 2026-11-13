@@ -202,6 +202,7 @@ impl ImageCopyCaptureHandler for Compositor {
                 taskbar: self.taskbar.as_ref(),
                 menus: &self.menus,
                 backdrop: &self.backdrop,
+                outline: &self.outline,
             },
             OutputLayers::new(output, self.backend.output_geometry()),
         );

@@ -69,7 +69,7 @@ use crate::layers::{Layers, OutputLayers};
 use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack};
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceKind, ResourceLedger};
-use crate::scene::{Backdrop, Drawn, FrameTextures, PointerTarget, Scene, WindowTarget};
+use crate::scene::{Backdrop, Drawn, FrameTextures, Outline, PointerTarget, Scene, WindowTarget};
 use crate::signals::ProcessSignals;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
 use crate::toplevels::{Toplevel, Toplevels};
@@ -107,6 +107,8 @@ pub struct Compositor {
     pub(crate) menus: MenuStack,
     /// The wallpaper.
     pub(crate) backdrop: Backdrop,
+    /// The outline of an outline resize.
+    pub(crate) outline: Outline,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
     /// Draws screenshots for capture clients.
@@ -263,6 +265,7 @@ impl Compositor {
             taskbar: Taskbar::new(&config.settings.taskbar),
             menus: MenuStack::default(),
             backdrop: Backdrop::new(&config.settings.wallpaper, config_source.directory()),
+            outline: Outline::default(),
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
             physical_keymap,
@@ -321,6 +324,7 @@ impl Compositor {
                 taskbar: self.taskbar.as_ref(),
                 menus: &self.menus,
                 backdrop: &self.backdrop,
+                outline: &self.outline,
             },
             self.output_layers(),
         )
@@ -392,6 +396,7 @@ impl Compositor {
                 taskbar: self.taskbar.as_ref(),
                 menus: &self.menus,
                 backdrop: &self.backdrop,
+                outline: &self.outline,
             },
             OutputLayers::new(&output, self.backend.output_geometry()),
         );
@@ -431,6 +436,7 @@ impl Compositor {
         self.menus.prepare(&self.config.theme, &mut self.typesetter);
         self.backdrop
             .prepare(self.backend.output_geometry(), &self.window_manager);
+        self.outline.update(self.window_manager.outline());
     }
 
     /// Starts managing the window of a new xdg-shell toplevel.

@@ -30,8 +30,8 @@ pub use self::window::WindowId;
 pub(crate) use self::window::{
     Area, Axes, ClientIcon, CommittedState, Direction, EdgeSnap, Ending, Frame, FrameGeometry,
     FramePart, GripSide, HorizontalEdge, OutputArea, Placement, PlacementKind, RequestedState,
-    ResizeEdges, SizeLimits, SnapStep, TileCell, TitlebarButton, TitlebarLayout, VerticalEdge,
-    Window, WindowDrag,
+    ResizeEdges, ResizeStyle, SizeLimits, SnapStep, TileCell, TitlebarButton, TitlebarLayout,
+    VerticalEdge, Window, WindowDrag,
 };
 use self::windows::Windows;
 use self::workspaces::Workspaces;
@@ -87,6 +87,8 @@ pub(crate) struct WindowManager {
     /// The frame sizes windows are laid out by: the theme's, as `frame`
     /// takes them.
     metrics: Metrics,
+    /// How a resize by hand is shown, from the settings.
+    resize_style: ResizeStyle,
     /// Windows asked to end, until the compositor takes them.
     endings: Vec<(WindowId, Ending)>,
     /// Whether anything shown changed since the compositor last asked.
@@ -109,9 +111,27 @@ impl WindowManager {
             theme_metrics: metrics,
             metrics: frame.frame_metrics(metrics),
             frame,
+            resize_style: Self::resize_style(settings),
             endings: Vec::new(),
             is_redraw_needed: false,
         }
+    }
+
+    /// Returns how `settings` say a resize by hand is shown.
+    const fn resize_style(settings: &Settings) -> ResizeStyle {
+        if settings.windows.opaque_resize {
+            ResizeStyle::Live
+        } else {
+            ResizeStyle::Outline
+        }
+    }
+
+    /// Returns where an outline resize in progress would put its window's
+    /// frame; none without one.
+    pub(crate) fn outline(&self) -> Option<Area> {
+        let metrics = self.metrics;
+        self.windows_top_down()
+            .find_map(|window| window.outline(metrics))
     }
 
     /// Returns the window with keyboard focus.
@@ -436,11 +456,11 @@ impl WindowManager {
         drag: WindowDrag,
         pointer: Point<f64, Logical>,
     ) -> bool {
-        let metrics = self.metrics;
+        let (metrics, style) = (self.metrics, self.resize_style);
         let Some(target) = self.window_mut(window) else {
             return false;
         };
-        target.begin_drag(drag, pointer, metrics);
+        target.begin_drag(drag, pointer, style, metrics);
         tracing::debug!(%window, ?drag, "drag started");
         true
     }
@@ -458,6 +478,8 @@ impl WindowManager {
         if let Some(target) = self.window_mut(window) {
             target.follow_drag(delta, &snap, metrics);
         }
+        // An outline moves without the window changing.
+        self.is_redraw_needed = true;
     }
 
     /// Ends the drag of `window`.
@@ -466,6 +488,7 @@ impl WindowManager {
             target.end_drag();
             tracing::debug!(%window, "drag ended");
         }
+        self.is_redraw_needed = true;
     }
 
     /// Holds down the titlebar button of `window` at `location`, if there
@@ -516,6 +539,7 @@ impl WindowManager {
         for window in self.windows.iter_mut() {
             window.set_titlebar_buttons(&buttons);
         }
+        self.resize_style = Self::resize_style(settings);
         if settings.windows.frame != self.frame {
             self.frame = settings.windows.frame.clone();
             self.restyle(self.theme_metrics);

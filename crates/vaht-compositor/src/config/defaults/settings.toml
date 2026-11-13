@@ -27,6 +27,10 @@ column_direction = "top-to-bottom"  # or bottom-to-top
 # window's edge to snap to it, in pixels; 0 turns snapping off.
 edge_snap_distance = 10
 double_click_ms = 250
+# Whether a window resized by hand takes each size as the pointer moves;
+# false shows an outline instead, and the window takes its size when the
+# drag ends.
+opaque_resize = true
 
 [windows.frame]
 # Buttons: shade, stick, minimize, maximize, close.

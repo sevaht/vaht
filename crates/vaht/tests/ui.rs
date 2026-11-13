@@ -477,3 +477,39 @@ corners = [\"top-left\", \"top-right\"]
         "the arc is drawn in the line's color: {arc:?}"
     );
 }
+
+#[test]
+fn an_outline_resize_shows_the_size_and_resizes_on_release() {
+    let mut window = OneWindow::open_with_settings("[windows]\nopaque_resize = false\n");
+    let content = window.content;
+    let corner = (content.right + 1, content.bottom + 1);
+    let target = (corner.0 + 40, corner.1 + 30);
+    window.client.move_pointer_to(corner.0, corner.1);
+    window.client.press(BUTTON_LEFT);
+    window.client.move_pointer_to(target.0, target.1);
+    let during = window.client.screenshot();
+    // The outline covers the frame's border and the content's outermost
+    // column; within, the window is as it was, and does not reach further.
+    let (_, middle_y) = OneWindow::middle(content);
+    assert_eq!(during.rgb(content.right - 5, middle_y), WINDOW_COLOR);
+    assert_ne!(
+        during.rgb(content.right + 10, middle_y),
+        WINDOW_COLOR,
+        "the window keeps its size while the outline moves"
+    );
+    // The outline's right line is the frame's last two columns there.
+    let [red, green, blue] = during.rgb(target.0, content.top + 10);
+    assert!(
+        red > 180 && green > 180 && blue > 180,
+        "a light outline: {red} {green} {blue}"
+    );
+    window.client.release(BUTTON_LEFT);
+    assert_eq!(
+        window.find_content(),
+        Bounds {
+            right: content.right + 40,
+            bottom: content.bottom + 30,
+            ..content
+        }
+    );
+}
