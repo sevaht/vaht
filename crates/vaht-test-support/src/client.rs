@@ -234,6 +234,20 @@ impl TestClient {
         self.roundtrip();
     }
 
+    /// Returns the interface names of the globals vaht advertises, sorted.
+    #[must_use]
+    pub fn global_interfaces(&self) -> Vec<String> {
+        let mut interfaces: Vec<String> = self
+            .state
+            .registry
+            .globals()
+            .map(|global| global.interface.clone())
+            .collect();
+        interfaces.sort();
+        interfaces.dedup();
+        interfaces
+    }
+
     /// Presses `button` (a Linux input code, such as [`BUTTON_LEFT`]).
     ///
     /// # Panics

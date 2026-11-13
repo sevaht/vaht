@@ -31,6 +31,7 @@ use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
 use smithay::utils::{Rectangle, Serial};
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
 use smithay::wayland::selection::data_device::set_data_device_focus;
+use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::shell::xdg::ToplevelSurface;
 use smithay::wayland::socket::ListeningSocketSource;
 use vaht_ui::{Theme, Typesetter};
@@ -183,7 +184,14 @@ impl Compositor {
             .get_keyboard()
             .expect("create_seat adds a keyboard")
             .keymap_file();
-        let backend = Backend::start(options.backend, handle, &display_handle, &ledger)?;
+        let mut backend = Backend::start(options.backend, handle, &display_handle, &ledger)?;
+        if let Some(formats) = backend.dmabuf_formats() {
+            protocols.dmabuf_global = Some(
+                protocols
+                    .dmabuf
+                    .create_global::<Self>(&display_handle, formats),
+            );
+        }
 
         let socket = ListeningSocketSource::new_auto().map_err(RunError::Listen)?;
         let socket_name = socket.socket_name().to_os_string();
@@ -593,7 +601,8 @@ impl Compositor {
         let client = surface
             .as_ref()
             .and_then(|surface| self.display_handle.get_client(surface.id()).ok());
-        set_data_device_focus(&self.display_handle, &self.seat, client);
+        set_data_device_focus(&self.display_handle, &self.seat, client.clone());
+        set_primary_focus(&self.display_handle, &self.seat, client);
         keyboard.set_focus(self, surface, serial);
         self.schedule_render();
     }

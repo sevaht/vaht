@@ -6,9 +6,12 @@
 //! family. They are gateways (M4): they translate protocol events into calls
 //! on vaht's own types and decide nothing themselves.
 
+mod activation;
 mod decoration;
+mod dmabuf;
 mod output;
 mod seat;
+mod selection;
 mod surfaces;
 mod virtual_input;
 mod xdg_shell;
@@ -16,15 +19,21 @@ mod xdg_shell;
 use smithay::input::SeatState;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::wayland::compositor::CompositorState;
+use smithay::wayland::dmabuf::{DmabufGlobal, DmabufState};
+use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::image_capture_source::OutputCaptureSourceState;
 use smithay::wayland::image_copy_capture::ImageCopyCaptureState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
+use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
+use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::virtual_pointer::VirtualPointerManagerState;
+use smithay::wayland::xdg_activation::XdgActivationState;
 
 use crate::Compositor;
 
@@ -43,6 +52,23 @@ pub(crate) struct ProtocolStates {
     pub(crate) seat: SeatState<Compositor>,
     /// `wl_data_device_manager`: the clipboard and drag and drop.
     pub(crate) data_device: DataDeviceState,
+    /// `zwp_primary_selection_device_manager_v1`: the middle-click paste.
+    pub(crate) primary_selection: PrimarySelectionState,
+    /// `xdg_activation_v1`: programs bringing their windows forward.
+    pub(crate) activation: XdgActivationState,
+    /// `zwp_linux_dmabuf_v1`: GPU buffers.
+    pub(crate) dmabuf: DmabufState,
+    /// The dmabuf global, when the renderer can import GPU buffers.
+    pub(crate) dmabuf_global: Option<DmabufGlobal>,
+    /// `wp_viewporter`, `wp_fractional_scale_manager_v1` and
+    /// `wp_single_pixel_buffer_manager_v1`: surfaces scaled and cropped,
+    /// told their scale, and filled with one color. Held only to keep the
+    /// globals alive; Smithay applies them when drawing.
+    _surface_extensions: (
+        ViewporterState,
+        FractionalScaleManagerState,
+        SinglePixelBufferState,
+    ),
     /// `zxdg_decoration_manager_v1`: vaht draws every frame. Held only to
     /// keep the global alive.
     _xdg_decoration: XdgDecorationState,
@@ -69,6 +95,15 @@ impl ProtocolStates {
             _output_manager: OutputManagerState::new_with_xdg_output::<Compositor>(display),
             seat: SeatState::new(),
             data_device: DataDeviceState::new::<Compositor>(display),
+            primary_selection: PrimarySelectionState::new::<Compositor>(display),
+            activation: XdgActivationState::new::<Compositor>(display),
+            dmabuf: DmabufState::new(),
+            dmabuf_global: None,
+            _surface_extensions: (
+                ViewporterState::new::<Compositor>(display),
+                FractionalScaleManagerState::new::<Compositor>(display),
+                SinglePixelBufferState::new::<Compositor>(display),
+            ),
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
             output_capture_source: OutputCaptureSourceState::new::<Compositor>(display),
             image_copy_capture: ImageCopyCaptureState::new::<Compositor>(display),

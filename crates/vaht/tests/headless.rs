@@ -74,3 +74,32 @@ fn screenshots_leave_nothing_behind() {
     vaht.wait_for_disconnections(1);
     vaht.stop().assert_nothing_left_behind();
 }
+
+#[test]
+fn clients_find_the_protocols_everyday_programs_use() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let client = TestClient::connect(vaht.socket());
+    let interfaces = client.global_interfaces();
+    for expected in [
+        "wl_compositor",
+        "wl_data_device_manager",
+        "wl_seat",
+        "wl_shm",
+        "wp_fractional_scale_manager_v1",
+        "wp_single_pixel_buffer_manager_v1",
+        "wp_viewporter",
+        "xdg_activation_v1",
+        "xdg_wm_base",
+        "zwp_primary_selection_device_manager_v1",
+        "zxdg_decoration_manager_v1",
+    ] {
+        assert!(
+            interfaces.iter().any(|name| name == expected),
+            "{expected} missing: {interfaces:?}"
+        );
+    }
+    assert!(
+        !interfaces.iter().any(|name| name == "zwp_linux_dmabuf_v1"),
+        "the software renderer cannot import GPU buffers, so clients must not be offered them"
+    );
+}

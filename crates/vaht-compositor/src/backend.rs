@@ -9,6 +9,8 @@
 mod headless;
 mod winit;
 
+use smithay::backend::allocator::Format;
+use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::output::Output;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::wayland_server::DisplayHandle;
@@ -105,6 +107,24 @@ impl Backend {
         match self {
             Self::Winit(backend) => backend.release_unused_textures(),
             Self::Headless(backend) => backend.release_unused_textures(),
+        }
+    }
+
+    /// Returns the GPU buffer formats the renderer can import, if it can
+    /// import any.
+    pub(crate) fn dmabuf_formats(&mut self) -> Option<Vec<Format>> {
+        match self {
+            Self::Winit(backend) => Some(backend.dmabuf_formats()),
+            Self::Headless(_) => None,
+        }
+    }
+
+    /// Imports a client's GPU buffer; returns whether the renderer can use
+    /// it.
+    pub(crate) fn import_dmabuf(&mut self, dmabuf: &Dmabuf) -> bool {
+        match self {
+            Self::Winit(backend) => backend.import_dmabuf(dmabuf),
+            Self::Headless(_) => false,
         }
     }
 

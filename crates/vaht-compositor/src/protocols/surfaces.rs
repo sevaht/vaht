@@ -1,11 +1,15 @@
-//! Surfaces and buffers: `wl_compositor`, `wl_subcompositor` and `wl_shm`.
+//! Surfaces and buffers: `wl_compositor`, `wl_subcompositor`, `wl_shm`, and
+//! the fractional scale clients are told to draw at.
 
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::reexports::wayland_server::Client;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::buffer::BufferHandler;
-use smithay::wayland::compositor::{CompositorClientState, CompositorHandler, CompositorState};
+use smithay::wayland::compositor::{
+    CompositorClientState, CompositorHandler, CompositorState, with_states,
+};
+use smithay::wayland::fractional_scale::{FractionalScaleHandler, with_fractional_scale};
 use smithay::wayland::shm::{ShmHandler, ShmState};
 
 use crate::Compositor;
@@ -40,5 +44,14 @@ impl BufferHandler for Compositor {
 impl ShmHandler for Compositor {
     fn shm_state(&self) -> &ShmState {
         &self.protocols.shm
+    }
+}
+
+impl FractionalScaleHandler for Compositor {
+    fn new_fractional_scale(&mut self, surface: WlSurface) {
+        // Every output is at scale 1 until outputs have their own scales.
+        with_states(&surface, |states| {
+            with_fractional_scale(states, |fractional| fractional.set_preferred_scale(1.0));
+        });
     }
 }

@@ -3,9 +3,11 @@
 
 use std::fmt;
 
-use smithay::backend::renderer::Renderer as _;
+use smithay::backend::allocator::Format;
+use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::gles::GlesRenderer;
+use smithay::backend::renderer::{ImportDma as _, Renderer as _};
 use smithay::backend::winit::{self as host_window, WinitEvent, WinitGraphicsBackend};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::LoopHandle;
@@ -132,6 +134,27 @@ impl WinitBackend {
                 .map_err(RenderError::Submit)?;
         }
         Ok(())
+    }
+
+    /// Returns the GPU buffer formats the renderer can import.
+    pub(crate) fn dmabuf_formats(&mut self) -> Vec<Format> {
+        self.graphics
+            .renderer()
+            .dmabuf_formats()
+            .into_iter()
+            .collect()
+    }
+
+    /// Imports a client's GPU buffer; returns whether the renderer can use
+    /// it.
+    pub(crate) fn import_dmabuf(&mut self, dmabuf: &Dmabuf) -> bool {
+        match self.graphics.renderer().import_dmabuf(dmabuf, None) {
+            Ok(_) => true,
+            Err(error) => {
+                tracing::debug!(%error, "a client's GPU buffer could not be imported");
+                false
+            }
+        }
     }
 
     /// Frees textures cached for client buffers that no longer exist.

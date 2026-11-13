@@ -112,6 +112,11 @@ A method that needs no Smithay call does not belong in them.
 - A window's area follows from its `Placement`: code that maximizes, tiles
   or fullscreens a window builds a new `Placement` and calls
   `Window::place`, never moves or sizes it directly.
+- Primary selection focus is set with the clipboard's, for the same
+  reason.
+- The dmabuf global exists only when the backend's renderer imports GPU
+  buffers (`Backend::dmabuf_formats`). Advertising it without that would
+  make GL clients fail instead of falling back to shared memory.
 - Clipboard focus is set together with keyboard focus in
   `Compositor::focus_window`: Smithay clears the focus of a destroyed
   surface silently, and the clipboard would otherwise keep a disconnected
