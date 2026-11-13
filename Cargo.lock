@@ -1975,6 +1975,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -2138,6 +2139,7 @@ dependencies = [
  "tracing-journald",
  "tracing-subscriber",
  "vaht-compositor",
+ "vaht-import",
  "vaht-test-support",
  "xdg",
 ]
@@ -2158,6 +2160,17 @@ dependencies = [
  "toml",
  "tracing",
  "vaht-ui",
+]
+
+[[package]]
+name = "vaht-import"
+version = "0.1.0"
+dependencies = [
+ "rstest",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml_edit",
+ "vaht-compositor",
 ]
 
 [[package]]

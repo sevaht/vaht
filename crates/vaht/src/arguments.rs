@@ -66,6 +66,30 @@ pub enum Subcommand {
         #[arg(long)]
         print_defaults: bool,
     },
+    /// Converts another window manager's configuration to vaht's.
+    Import {
+        /// Whose configuration.
+        #[command(subcommand)]
+        source: ImportSource,
+    },
+}
+
+/// The configurations `vaht import` converts.
+#[derive(Debug, clap::Subcommand)]
+pub enum ImportSource {
+    /// A Fluxbox setup (`init`, `keys`), or a fluxland one: the same format.
+    Fluxbox {
+        /// The setup's directory [default: ~/.fluxbox].
+        #[arg(long)]
+        from: Option<PathBuf>,
+        /// Where to write vaht's files [default: the configuration
+        /// directory].
+        #[arg(long)]
+        to: Option<PathBuf>,
+        /// Replaces vaht files that exist already.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// The `--backend` values.

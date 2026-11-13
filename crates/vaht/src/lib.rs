@@ -8,9 +8,10 @@
 
 pub mod arguments;
 pub mod check;
+pub mod import;
 pub mod logging;
 
-pub use arguments::{Arguments, Subcommand};
+pub use arguments::{Arguments, ImportSource, Subcommand};
 pub use logging::Logging;
 
 /// Runs the command line's request, with diagnostic output already installed.

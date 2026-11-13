@@ -41,11 +41,13 @@ tempfile = "3"
 thiserror = "2"
 tiny-skia = "0.12"
 toml = "1"
+toml_edit = "0.25"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-journald = "0.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 vaht-compositor = { path = "crates/vaht-compositor" }
+vaht-import = { path = "crates/vaht-import" }
 vaht-ui = { path = "crates/vaht-ui" }
 vaht-test-support = { path = "crates/vaht-test-support" }
 xdg = "3"

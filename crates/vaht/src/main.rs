@@ -5,20 +5,26 @@ use std::process::ExitCode;
 
 use clap::Parser as _;
 
-use vaht::{Arguments, Subcommand};
+use vaht::{Arguments, ImportSource, Subcommand};
 
 /// Runs the application and converts its outcome to an exit code.
 fn main() -> ExitCode {
     let arguments = Arguments::parse();
     // The tools run without the compositor's logging, which would rotate
     // its log file.
-    match arguments.command {
+    match &arguments.command {
         Some(Subcommand::Check {
             print_defaults: true,
         }) => return vaht::check::print_defaults(),
         Some(Subcommand::Check {
             print_defaults: false,
         }) => return vaht::check::run(&arguments.config_directory()),
+        Some(Subcommand::Import {
+            source: ImportSource::Fluxbox { from, to, force },
+        }) => {
+            let to = to.clone().unwrap_or_else(|| arguments.config_directory());
+            return vaht::import::fluxbox(from.as_deref(), &to, *force);
+        }
         None => {}
     }
     // Before any thread starts: logging starts the first one.

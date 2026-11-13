@@ -135,3 +135,47 @@ fn check_prints_the_built_in_files() {
     assert!(printed.contains("# ===== bindings.toml ====="), "{printed}");
     assert!(printed.contains("\"Alt+F4\" = \"close\""), "{printed}");
 }
+
+#[test]
+fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
+    let setup = tempfile::tempdir().expect("a temporary directory");
+    std::fs::write(
+        setup.path().join("init"),
+        "session.screen0.focusModel: MouseFocus\n",
+    )
+    .expect("written");
+    std::fs::write(
+        setup.path().join("keys"),
+        "Mod4 T :Exec kitty\nMod4 Tab :NextTab\n",
+    )
+    .expect("written");
+    let target = tempfile::tempdir().expect("a temporary directory");
+    let logs = log_directory();
+    let path = |directory: &tempfile::TempDir| {
+        directory
+            .path()
+            .to_str()
+            .expect("temporary paths are UTF-8")
+            .to_owned()
+    };
+    let output = run_executable(
+        &[
+            "import",
+            "fluxbox",
+            "--from",
+            &path(&setup),
+            "--to",
+            &path(&target),
+        ],
+        logs.path(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let printed = String::from_utf8_lossy(&output.stdout);
+    assert!(printed.contains("keys:2: dropped"), "{printed}");
+    let settings = std::fs::read_to_string(target.path().join("settings.toml")).expect("written");
+    assert!(settings.contains("model = \"sloppy\""), "{settings}");
+    assert!(
+        std::fs::read_dir(setup.path()).expect("readable").count() == 2,
+        "the source is untouched"
+    );
+}

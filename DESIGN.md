@@ -20,10 +20,11 @@ repeating them.
 | `crates/vaht-compositor` | The compositor |
 | `crates/vaht-ui` | The panel toolkit; no Wayland |
 | `crates/vaht-ipc` | IPC message types |
+| `crates/vaht-import` | `vaht import fluxbox`: Fluxbox (and fluxland) setups to vaht's TOML |
 | `crates/vaht-test-support` | Test-only: a headless vaht, a client that clicks and takes screenshots |
 
-The remaining crates in 01 §2 (`vaht-dialog`, `vaht-import`, `vaht-menu-gtk`)
-are added when work on them starts.
+The remaining crates in 01 §2 (`vaht-dialog`, `vaht-menu-gtk`) are added
+when work on them starts.
 
 ## Testing
 

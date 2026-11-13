@@ -711,6 +711,13 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
     `PseudoTransparent`, `FocusProtection`, `RunDialog`) are understood as
     extensions of it.
 
+- **Built so far:** `init` to `settings.toml` and `keys` to `bindings.toml`.
+  Every setting, binding or pattern vaht lacks is reported as "not in vaht
+  yet", so importing again as features arrive picks them up. `apps`, the
+  menus, the style and `startup` are reported until rules, menus and themes
+  exist. Commands are translated by `FluxboxCommand`. A sequence loses the
+  parts vaht drops on purpose (`ActivateTab`), but a part vaht lacks for
+  now leaves the whole binding out.
 - It never overwrites an existing file without `--force`, and never touches
   the source.
 - It writes only keys that differ from vaht's defaults, with a header comment

@@ -10,6 +10,8 @@ hardware. The design documents are in [`docs/design/`](docs/design/), and
 
 `vaht check` validates the configuration in `~/.config/vaht`, and
 `vaht check --print-defaults` prints the built-in files.
+`vaht import fluxbox --from ~/.fluxbox` converts a Fluxbox setup, and
+reports every line it could not convert.
 
 ## Development
 
