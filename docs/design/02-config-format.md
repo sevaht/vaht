@@ -203,12 +203,14 @@ rest by name, so a setting never silently does nothing:
 - `[wallpaper]`: `image` (PNG, JPEG, GIF, WebP, BMP, TIFF, TGA, PNM, QOI
   or ICO, known by its contents; `~/` is the home directory, a relative
   path is from the configuration directory) and `fit` (`fill`, `fit`,
-  `center`, `tile`, `stretch`). It is decoded once, painted once per output
-  size, and drawn beneath everything; where it does not reach, and with no
+  `center`, `tile`, `stretch`). It is decoded once, painted once for each
+  output, at its size, and drawn beneath everything; where it does not reach, and with no
   image, the desktop is dark grey. `per_workspace` is not built.
 - `theme`: the name of a theme in `themes/` (§10); without it, the built-in
   theme.
-- `[taskbar]`: `enabled`, `edge` (`top` or `bottom`), `width_percent`
+- `[taskbar]`: `enabled`, `output` (the name of the output it shows on,
+  such as `HDMI-A-1`; the primary output without one, or while that one
+  is not there), `edge` (`top` or `bottom`), `width_percent`
   (1 to 100) and `align` (`left`, `center`, `right`; from `placement`'s
   second half), `auto_hide` and `auto_hide_delay_ms` (hidden until the
   pointer touches the edge, hidden again that long after it leaves; an

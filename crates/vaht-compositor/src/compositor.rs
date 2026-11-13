@@ -66,7 +66,7 @@ use crate::grab::{GrabKind, WindowGrab};
 use crate::input::{self, AfterClick, ButtonPress, Input, KeyPress, PressOutcome};
 use crate::ipc::IpcServer;
 use crate::launcher::Launcher;
-use crate::layers::{Layers, OutputLayers};
+use crate::layers::{LayerMaps, Layers, OutputLayers};
 use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack};
 use crate::outputs::Outputs;
 use crate::protocols::ProtocolStates;
@@ -351,13 +351,13 @@ impl Compositor {
                 tooltip: &self.tooltip,
                 snap: &self.snap_overlay,
             },
-            self.output_layers(),
+            self.layer_maps(),
         )
     }
 
-    /// Returns the output's layer surfaces.
-    pub(crate) fn output_layers(&self) -> OutputLayers<'_> {
-        OutputLayers::new(self.outputs.primary(), self.outputs.primary_geometry())
+    /// Returns every output's layer surfaces.
+    pub(crate) fn layer_maps(&self) -> LayerMaps<'_> {
+        LayerMaps::new(&self.outputs)
     }
 
     /// Asks vaht to stop after the current events.
@@ -428,7 +428,6 @@ impl Compositor {
     /// drawing.
     pub(crate) fn render(&mut self) {
         self.prepare_frames();
-        let output = self.outputs.primary().clone();
         let scene = Scene::new(
             &self.window_manager,
             &self.toplevels,
@@ -441,7 +440,7 @@ impl Compositor {
                 tooltip: &self.tooltip,
                 snap: &self.snap_overlay,
             },
-            OutputLayers::new(&output, self.outputs.primary_geometry()),
+            LayerMaps::new(&self.outputs),
         );
         if let Err(error) = self.backend.render(&scene) {
             tracing::warn!(error = &error as &dyn std::error::Error, "frame skipped");
@@ -456,8 +455,8 @@ impl Compositor {
                 .unwrap_or_else(|| self.outputs.primary());
             toplevel.send_frame(shown_on, time);
         }
-        for layer in self.layers.iter() {
-            layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+        for (layer, output) in self.layers.iter() {
+            layer.send_frame(output, time, Some(Duration::ZERO), |_, _| {
                 Some(output.clone())
             });
         }
@@ -472,12 +471,13 @@ impl Compositor {
             .paint_frames(&self.config.theme, &mut self.typesetter);
         self.frame_textures
             .update(&self.window_manager, &self.config.theme, &self.ledger);
+        let taskbar_whole = Outputs::geometry(self.taskbar_output());
         if let Some(taskbar) = &mut self.taskbar {
             let now = Zoned::now();
             let view = TaskbarView {
                 window_manager: &self.window_manager,
                 settings: &self.config.settings.taskbar,
-                whole: self.outputs.primary_geometry(),
+                whole: taskbar_whole,
                 now: &now,
             };
             taskbar.prepare(
@@ -488,8 +488,8 @@ impl Compositor {
             );
         }
         self.menus.prepare(&self.config.theme, &mut self.typesetter);
-        self.backdrop
-            .prepare(self.outputs.primary_geometry(), &self.window_manager);
+        let output_areas: Vec<_> = self.outputs.iter().map(Outputs::geometry).collect();
+        self.backdrop.prepare(&output_areas, &self.window_manager);
         self.outline
             .update(self.window_manager.outline(), &self.config.theme);
         self.snap_overlay.update(&self.window_manager);
@@ -520,7 +520,7 @@ impl Compositor {
             }
             self.commit_window(&root, surface == &root);
         }
-        if self.output_layers().commit(surface) {
+        if self.layer_maps().commit(surface) {
             self.refresh_layer_keyboard();
             self.refresh_output_area();
         }
@@ -539,8 +539,7 @@ impl Compositor {
 
     /// Updates layer surfaces after `surface`, one of them, is gone.
     pub(crate) fn remove_layer_surface(&mut self, surface: &WlSurface) {
-        let output = self.outputs.primary().clone();
-        self.layers.unmap(surface, &output);
+        self.layers.unmap(surface);
         self.refresh_layer_keyboard();
         self.refresh_output_area();
         self.schedule_render();
@@ -733,24 +732,36 @@ impl Compositor {
     }
 
     /// Returns the parts of each output windows can be placed in: all of
-    /// it, and what panels leave free; the taskbar is on the primary one.
+    /// it, and what panels, the taskbar among them, leave free.
     fn output_areas(&self) -> OutputAreas {
+        let taskbar_output = self.taskbar_output();
         let area_of = |output: &Output| {
             let whole = Outputs::geometry(output);
-            OutputArea {
-                whole,
-                usable: OutputLayers::new(output, whole).usable_area(),
-            }
+            let usable = OutputLayers::new(output, whole).usable_area();
+            let usable = match &self.taskbar {
+                Some(taskbar) if output == taskbar_output => {
+                    taskbar.reserve(usable, whole, self.config.theme.metrics().taskbar_height)
+                }
+                Some(_) | None => usable,
+            };
+            OutputArea { whole, usable }
         };
-        let mut primary = area_of(self.outputs.primary());
-        if let Some(taskbar) = &self.taskbar {
-            primary.usable = taskbar.reserve(
-                primary.usable,
-                primary.whole,
-                self.config.theme.metrics().taskbar_height,
-            );
-        }
-        OutputAreas::new(primary, self.outputs.others().map(area_of).collect())
+        OutputAreas::new(
+            area_of(self.outputs.primary()),
+            self.outputs.others().map(area_of).collect(),
+        )
+    }
+
+    /// Returns the output the taskbar shows on: the one the settings name,
+    /// or the primary one.
+    fn taskbar_output(&self) -> &Output {
+        self.config
+            .settings
+            .taskbar
+            .output
+            .as_deref()
+            .and_then(|name| self.outputs.named(name))
+            .unwrap_or_else(|| self.outputs.primary())
     }
 
     /// Returns each of `outputs` whole, before panels take any of it.
@@ -841,7 +852,7 @@ impl Compositor {
     }
 
     /// Returns where the pointer is.
-    fn pointer_location(&self) -> Point<f64, Logical> {
+    pub(crate) fn pointer_location(&self) -> Point<f64, Logical> {
         self.seat
             .get_pointer()
             .expect("the seat gets a pointer at startup")
@@ -882,8 +893,7 @@ impl Compositor {
     /// Gives the keyboard to a layer surface that wants it to itself, or
     /// back to the windows when none does any more.
     fn refresh_layer_keyboard(&mut self) {
-        let output = OutputLayers::new(self.outputs.primary(), self.outputs.primary_geometry());
-        self.layers.refresh_keyboard(output);
+        self.layers.refresh_keyboard(LayerMaps::new(&self.outputs));
     }
 
     /// Tells the window manager where windows can be placed now.
@@ -1287,7 +1297,7 @@ impl Compositor {
 
     /// Moves the pointer to `location`, telling the surface under it.
     fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
-        let whole = self.outputs.primary_geometry();
+        let whole = Outputs::geometry(self.taskbar_output());
         if let Some(taskbar) = &mut self.taskbar
             && taskbar.follow_pointer(location, whole, (&self.loop_handle, &self.ledger))
         {

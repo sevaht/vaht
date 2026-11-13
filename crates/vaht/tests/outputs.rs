@@ -5,7 +5,8 @@
 use std::path::Path;
 
 use vaht_test_support::{
-    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, TestClient, WINDOW_COLOR, keys,
+    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, TestClient, TestLayer, WINDOW_COLOR, keys,
+    solid_png,
 };
 
 /// The executable cargo built for these tests.
@@ -17,9 +18,30 @@ const OUTPUTS: &str = "800x600,640x480";
 /// The first output's width: where the second begins.
 const FIRST_WIDTH: u32 = 800;
 
+/// The wallpaper's color.
+const SKY: [u8; 3] = [0x30, 0xa0, 0x50];
+
+/// A layer surface's color.
+const BACKDROP: [u8; 3] = [0xc0, 0x40, 0x90];
+
 /// Starts vaht on [`OUTPUTS`], with a client.
 fn two_outputs() -> (HeadlessVaht, TestClient) {
-    let vaht = HeadlessVaht::start_with_outputs(Path::new(EXECUTABLE), OUTPUTS, &[]);
+    with_settings("")
+}
+
+/// Starts vaht on [`OUTPUTS`] with a solid wallpaper and `settings`, with
+/// a client.
+fn with_settings(settings: &str) -> (HeadlessVaht, TestClient) {
+    let picture = solid_png(16, SKY);
+    let settings = format!("[wallpaper]\nimage = \"sky.png\"\nfit = \"tile\"\n{settings}");
+    let vaht = HeadlessVaht::start_with_outputs(
+        Path::new(EXECUTABLE),
+        OUTPUTS,
+        &[
+            ("settings.toml", settings.as_bytes()),
+            ("sky.png", &picture),
+        ],
+    );
     let client = TestClient::connect(vaht.socket());
     (vaht, client)
 }
@@ -101,4 +123,35 @@ fn a_window_maximizes_on_its_own_output() {
         client.screenshot_of("HEADLESS-1").bounds_of(WINDOW_COLOR),
         None
     );
+}
+
+#[test]
+fn the_wallpaper_covers_every_output() {
+    let (_vaht, mut client) = two_outputs();
+    assert_eq!(client.screenshot_of("HEADLESS-1").rgb(5, 5), SKY);
+    let second = client.screenshot_of("HEADLESS-2");
+    assert_eq!(second.rgb(5, 5), SKY);
+    assert_eq!(second.rgb(second.width() - 1, second.height() - 1), SKY);
+}
+
+#[test]
+fn the_taskbar_shows_on_the_output_the_settings_name() {
+    let (_vaht, mut client) = with_settings("[taskbar]\noutput = \"HEADLESS-2\"\n");
+    let first = client.screenshot_of("HEADLESS-1");
+    assert_eq!(first.rgb(5, first.height() - 2), SKY, "no taskbar here");
+    let second = client.screenshot_of("HEADLESS-2");
+    assert_ne!(
+        second.rgb(5, second.height() - 2),
+        SKY,
+        "the taskbar is here"
+    );
+}
+
+#[test]
+fn a_layer_surface_opens_on_the_output_the_pointer_is_on() {
+    let (_vaht, mut client) = two_outputs();
+    client.move_pointer_to(FIRST_WIDTH + 100, 100);
+    client.open_backdrop(TestLayer::Background, BACKDROP);
+    assert_eq!(client.screenshot_of("HEADLESS-1").rgb(5, 5), SKY);
+    assert_eq!(client.screenshot_of("HEADLESS-2").rgb(5, 5), BACKDROP);
 }

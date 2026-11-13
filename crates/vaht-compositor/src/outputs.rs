@@ -42,6 +42,12 @@ impl Outputs {
         Self::geometry(&self.primary)
     }
 
+    /// Returns the output named `name`, such as `HDMI-A-1`, if there is
+    /// one.
+    pub(crate) fn named(&self, name: &str) -> Option<&Output> {
+        self.iter().find(|output| output.name() == name)
+    }
+
     /// Returns every output but the primary one.
     pub(crate) fn others(&self) -> impl Iterator<Item = &Output> {
         self.others.iter()

@@ -76,6 +76,8 @@ names = ["Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4"]
 
 [taskbar]
 enabled = true
+# The output it shows on, by name, such as output = "HDMI-A-1"; without
+# one, the primary output (outputs.toml).
 edge = "bottom"                     # or top
 # How much of the edge it spans, 1 to 100 percent, and where it sits when
 # narrower: left, center or right.

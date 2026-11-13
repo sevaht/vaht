@@ -39,7 +39,7 @@ pub(crate) use self::menu_texture::MenuTexture;
 pub(crate) use self::outline::Outline;
 pub(crate) use self::panel_texture::PanelTexture;
 pub(crate) use self::snap_overlay::SnapOverlay;
-use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, OutputLayers};
+use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, LayerMaps};
 use crate::menu::MenuStack;
 use crate::outputs::Outputs;
 use crate::taskbar::{Taskbar, TaskbarHit};
@@ -150,8 +150,8 @@ impl PointerTarget {
     }
 }
 
-/// What an output shows: its layer surfaces, and the windows shown, with
-/// their frames.
+/// What the outputs show: their layer surfaces, and the windows shown,
+/// with their frames, in global coordinates; each output draws its part.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Scene<'state> {
     /// Which windows are shown, and where.
@@ -160,8 +160,8 @@ pub(crate) struct Scene<'state> {
     toplevels: &'state Toplevels,
     /// What vaht draws itself.
     drawn: Drawn<'state>,
-    /// The output's layer surfaces.
-    layers: OutputLayers<'state>,
+    /// The outputs' layer surfaces.
+    layers: LayerMaps<'state>,
 }
 
 /// What vaht draws itself: the windows' frames, the taskbar, the menus and
@@ -187,12 +187,12 @@ pub(crate) struct Drawn<'state> {
 impl<'state> Scene<'state> {
     /// Creates the scene of the windows `window_manager` shows, drawn from
     /// their `toplevels`, with what vaht has `drawn` itself, between the
-    /// output's `layers`.
+    /// outputs' `layers`.
     pub(crate) const fn new(
         window_manager: &'state WindowManager,
         toplevels: &'state Toplevels,
         drawn: Drawn<'state>,
-        layers: OutputLayers<'state>,
+        layers: LayerMaps<'state>,
     ) -> Self {
         Self {
             window_manager,
@@ -256,7 +256,7 @@ impl<'state> Scene<'state> {
         );
         self.push_windows(&mut elements, renderer, scale, false);
         self.push_layers(&mut elements, renderer, &BELOW_WINDOWS, scale);
-        elements.extend(self.drawn.backdrop.render_element(renderer, scale));
+        elements.extend(self.drawn.backdrop.render_elements(renderer, scale));
         elements
     }
 

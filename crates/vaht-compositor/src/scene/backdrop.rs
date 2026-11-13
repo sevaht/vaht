@@ -2,7 +2,7 @@
 //! pieces of it pseudo-transparent windows show through (00 §4).
 //!
 //! The image is decoded once, when the settings name it, and painted once
-//! per output size ([`vaht_ui::Wallpaper`]). A window a rule makes
+//! for each output, at its size ([`vaht_ui::Wallpaper`]). A window a rule makes
 //! pseudo-transparent gets its own copy of the piece under its content,
 //! drawn beneath its surface and over the windows below, so where it is
 //! translucent only the wallpaper shows (fluxland's `pseudo_transparency.c`,
@@ -31,15 +31,25 @@ pub(crate) struct Backdrop {
     config_directory: PathBuf,
     /// The decoded image; none without one, or if it could not be read.
     image: Option<Wallpaper>,
-    /// The image painted for the output, and the output area it was
-    /// painted for.
-    painting: Option<(Rectangle<i32, Logical>, Pixmap)>,
+    /// The image painted for each output.
+    paintings: Vec<Painting>,
     /// Counts paintings, so pieces know when theirs is stale.
     generation: u64,
-    /// The painting, as the renderer takes it.
-    texture: PanelTexture,
     /// Each pseudo-transparent window's piece.
     pieces: HashMap<WindowId, Piece>,
+}
+
+/// The wallpaper painted for one output.
+#[derive(Debug)]
+struct Painting {
+    /// The output's area, in global coordinates.
+    area: Rectangle<i32, Logical>,
+    /// The pixels.
+    pixels: Pixmap,
+    /// Which painting it is, counting every one.
+    generation: u64,
+    /// The pixels, as the renderer takes them.
+    texture: PanelTexture,
 }
 
 /// The wallpaper under one pseudo-transparent window.
@@ -68,9 +78,8 @@ impl Backdrop {
             settings: settings.clone(),
             config_directory: config_directory.to_owned(),
             image: Self::load(settings, config_directory),
-            painting: None,
+            paintings: Vec::new(),
             generation: 0,
-            texture: PanelTexture::new(),
             pieces: HashMap::new(),
         }
     }
@@ -80,87 +89,121 @@ impl Backdrop {
     pub(crate) fn apply(&mut self, settings: &WallpaperSettings) {
         self.settings = settings.clone();
         self.image = Self::load(settings, &self.config_directory);
-        self.painting = None;
+        self.paintings.clear();
     }
 
-    /// Paints the wallpaper for an output covering `output`, if it is not
-    /// painted for that already, and copies the pieces the
+    /// Paints the wallpaper for each output covering one of `outputs`
+    /// that is not painted for already, and copies the pieces the
     /// pseudo-transparent windows `window_manager` shows need.
     pub(crate) fn prepare(
         &mut self,
-        output: Rectangle<i32, Logical>,
+        outputs: &[Rectangle<i32, Logical>],
         window_manager: &WindowManager,
     ) {
-        let is_stale = self
-            .painting
-            .as_ref()
-            .is_none_or(|(area, _)| *area != output);
-        if is_stale && let Some(image) = &self.image {
-            let size = vaht_ui::Size::new(to_u32(output.size.w), to_u32(output.size.h));
-            self.painting = image
-                .paint(size, self.settings.fit, Self::BACKGROUND)
-                .map(|pixels| (output, pixels));
-            self.generation += 1;
-            if let Some((_, pixels)) = &self.painting {
-                self.texture.upload_pixels(pixels, self.generation);
-            }
-        }
+        self.paint(outputs);
         self.pieces.retain(|window, _| {
             window_manager
                 .window(*window)
                 .is_some_and(Window::is_pseudo_transparent)
         });
-        let Some((painted, pixels)) = &self.painting else {
-            self.pieces.clear();
-            return;
-        };
         for window in window_manager.shown_top_down() {
             if !window.is_pseudo_transparent() || !window.shows_content() {
                 continue;
             }
-            let Some(area) = window.content_area().intersection(*painted) else {
-                self.pieces.remove(&window.id());
-                continue;
-            };
-            let piece = self.pieces.entry(window.id()).or_insert_with(|| Piece {
-                area,
-                generation: 0,
-                copies: 0,
-                texture: PanelTexture::new(),
-            });
-            if piece.area == area && piece.generation == self.generation {
+            self.cut_piece(window);
+        }
+    }
+
+    /// Paints the image for each of `outputs` not painted for, and drops
+    /// the paintings of outputs gone or changed.
+    fn paint(&mut self, outputs: &[Rectangle<i32, Logical>]) {
+        let Some(image) = &self.image else {
+            self.paintings.clear();
+            return;
+        };
+        self.paintings
+            .retain(|painting| outputs.contains(&painting.area));
+        for output in outputs {
+            if self
+                .paintings
+                .iter()
+                .any(|painting| painting.area == *output)
+            {
                 continue;
             }
-            let within = area.loc - painted.loc;
-            let Some(rect) = tiny_skia::IntRect::from_xywh(
-                within.x,
-                within.y,
-                to_u32(area.size.w),
-                to_u32(area.size.h),
-            ) else {
-                continue;
-            };
-            if let Some(copy) = pixels.clone_rect(rect) {
-                piece.area = area;
-                piece.generation = self.generation;
-                piece.copies += 1;
-                piece.texture.upload_pixels(&copy, piece.copies);
+            let size = vaht_ui::Size::new(to_u32(output.size.w), to_u32(output.size.h));
+            if let Some(pixels) = image.paint(size, self.settings.fit, Self::BACKGROUND) {
+                self.generation += 1;
+                let mut texture = PanelTexture::new();
+                texture.upload_pixels(&pixels, self.generation);
+                self.paintings.push(Painting {
+                    area: *output,
+                    pixels,
+                    generation: self.generation,
+                    texture,
+                });
             }
         }
     }
 
-    /// Returns the element that draws the wallpaper; none without one.
-    pub(crate) fn render_element<R>(
+    /// Copies the piece of wallpaper under `window`'s content, from the
+    /// output showing most of it, unless its piece is up to date.
+    fn cut_piece(&mut self, window: &Window) {
+        let content = window.content_area();
+        let under = self
+            .paintings
+            .iter()
+            .filter_map(|painting| Some((painting, painting.area.intersection(content)?)))
+            .max_by_key(|(_, area)| area.size.w * area.size.h);
+        let Some((painting, area)) = under else {
+            self.pieces.remove(&window.id());
+            return;
+        };
+        let piece = self.pieces.entry(window.id()).or_insert_with(|| Piece {
+            area,
+            generation: 0,
+            copies: 0,
+            texture: PanelTexture::new(),
+        });
+        if piece.area == area && piece.generation == painting.generation {
+            return;
+        }
+        let within = area.loc - painting.area.loc;
+        let Some(rect) = tiny_skia::IntRect::from_xywh(
+            within.x,
+            within.y,
+            to_u32(area.size.w),
+            to_u32(area.size.h),
+        ) else {
+            return;
+        };
+        if let Some(copy) = painting.pixels.clone_rect(rect) {
+            piece.area = area;
+            piece.generation = painting.generation;
+            piece.copies += 1;
+            piece.texture.upload_pixels(&copy, piece.copies);
+        }
+    }
+
+    /// Returns the elements that draw the wallpaper on each output; none
+    /// without one.
+    pub(crate) fn render_elements<R>(
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
-    ) -> Option<SceneElement<R>>
+    ) -> Vec<SceneElement<R>>
     where
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
-        let (area, _) = self.painting.as_ref()?;
-        self.texture.render_element(renderer, area.loc, scale, 1.0)
+        self.paintings
+            .iter()
+            .filter_map(|painting| {
+                painting
+                    .texture
+                    .render_element(renderer, painting.area.loc, scale, 1.0)
+            })
+            .collect()
     }
 
     /// Returns the element that draws the wallpaper under `window`, if it

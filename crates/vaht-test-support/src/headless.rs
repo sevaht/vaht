@@ -106,22 +106,18 @@ impl HeadlessVaht {
 
     /// Starts `executable` headless with outputs of `sizes` (such as
     /// `1920x1080,1280x720`, laid out side by side from the left and named
-    /// `HEADLESS-1` on) and configuration `files`, and waits until it
-    /// accepts clients.
+    /// `HEADLESS-1` on) and configuration `files`, each a path in its
+    /// directory and its contents, and waits until it accepts clients.
     ///
     /// # Panics
     ///
     /// Panics if the files cannot be written, or vaht cannot start or does
     /// not accept clients in time.
     #[must_use]
-    pub fn start_with_outputs(executable: &Path, sizes: &str, files: &[(&str, &str)]) -> Self {
-        let files: Vec<(&str, &[u8])> = files
-            .iter()
-            .map(|(name, text)| (*name, text.as_bytes()))
-            .collect();
+    pub fn start_with_outputs(executable: &Path, sizes: &str, files: &[(&str, &[u8])]) -> Self {
         Self::launch(
             executable,
-            (&files, &[]),
+            (files, &[]),
             &[("VAHT_HEADLESS_OUTPUTS", sizes)],
         )
     }

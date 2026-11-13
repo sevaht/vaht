@@ -17,6 +17,9 @@ use crate::config::WindowMatcher;
 pub(crate) struct TaskbarSettings {
     /// Whether there is one.
     pub(crate) enabled: bool,
+    /// The name of the output it shows on, such as `HDMI-A-1`; the
+    /// primary output without one, or while that output is not there.
+    pub(crate) output: Option<String>,
     /// The output edge it runs along.
     pub(crate) edge: TaskbarEdge,
     /// How much of the edge it spans.
@@ -46,6 +49,7 @@ impl Default for TaskbarSettings {
     fn default() -> Self {
         Self {
             enabled: true,
+            output: None,
             edge: TaskbarEdge::Bottom,
             width_percent: WidthPercent::WHOLE,
             align: TaskbarAlign::Center,

@@ -1,6 +1,7 @@
 //! Layer surfaces: `zwlr_layer_shell_v1`.
 
 use smithay::desktop::{LayerSurface as MappedLayerSurface, PopupKind};
+use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::wayland::shell::wlr_layer::{
     Layer, LayerSurface, WlrLayerShellHandler, WlrLayerShellState,
@@ -17,12 +18,17 @@ impl WlrLayerShellHandler for Compositor {
     fn new_layer_surface(
         &mut self,
         surface: LayerSurface,
-        _output: Option<WlOutput>,
+        output: Option<WlOutput>,
         _layer: Layer,
         namespace: String,
     ) {
-        // Every layer surface goes on the one output until there are more.
-        let output = self.outputs.primary().clone();
+        // On the output it names; else, as is usual, the one the pointer
+        // is on.
+        let output = output
+            .as_ref()
+            .and_then(Output::from_resource)
+            .or_else(|| self.outputs.at(self.pointer_location()).cloned())
+            .unwrap_or_else(|| self.outputs.primary().clone());
         self.layers.map(
             MappedLayerSurface::new(surface, namespace),
             &output,

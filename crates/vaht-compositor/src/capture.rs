@@ -29,7 +29,7 @@ use smithay::wayland::image_copy_capture::{
 };
 
 use crate::Compositor;
-use crate::layers::OutputLayers;
+use crate::layers::LayerMaps;
 use crate::resources::{ResourceKind, Tracked};
 use crate::scene::{self, Drawn, Scene};
 use crate::shared_memory::{self, SharedMemoryError};
@@ -214,7 +214,7 @@ impl ImageCopyCaptureHandler for Compositor {
                 tooltip: &self.tooltip,
                 snap: &self.snap_overlay,
             },
-            OutputLayers::new(self.outputs.primary(), self.outputs.primary_geometry()),
+            LayerMaps::new(&self.outputs),
         );
         self.capture
             .capture(frame, &scene, &output, self.start_time.elapsed());
