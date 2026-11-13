@@ -10,7 +10,8 @@
 //!   and a new program inherits both; the standard library's `Command`
 //!   resets neither, which a test found: programs started from vaht could
 //!   not be stopped with SIGTERM. `posix_spawn` sets both safely.
-//! - with no input, and its output discarded.
+//! - with no input, and its output discarded; a dialog's errors are read
+//!   from a pipe instead and logged, since nothing else would show them.
 //!
 //! Every program is kept, and counted, until it has exited and been reaped:
 //! vaht is told of exits by SIGCHLD (see `signals`), so no zombie outlives
@@ -19,6 +20,7 @@
 use std::collections::BTreeMap;
 use std::ffi::{CString, OsStr, OsString};
 use std::fs::File;
+use std::io::Read as _;
 use std::os::fd::AsRawFd as _;
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
@@ -28,14 +30,25 @@ use nix::sys::signal::{SigSet, Signal};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::Pid;
 
-use crate::WindowId;
+use calloop::generic::Generic;
+use calloop::{Interest, LoopHandle, Mode, PostAction};
+
+use crate::event_source::EventSource;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
+use crate::{Compositor, WindowId};
 
 /// Starts programs and reaps them.
 #[derive(Debug)]
 pub(crate) struct Launcher {
     /// The programs started that have not been reaped yet.
     running: Vec<(Pid, Tracked)>,
+    /// The error output of dialogs still writing it, by process.
+    error_outputs: BTreeMap<i32, EventSource<Compositor>>,
+    /// Dialogs whose error output ended during the last dispatch: their
+    /// sources go after it, never from inside their own callback.
+    ended_outputs: Vec<i32>,
+    /// Registers the error outputs' sources.
+    loop_handle: LoopHandle<'static, Compositor>,
     /// Variables set for every program, on top of vaht's own environment:
     /// `WAYLAND_DISPLAY`, `VAHT_SOCKET`, and whatever `set-environment`
     /// set.
@@ -51,10 +64,19 @@ impl Launcher {
     const SHELL: &str = "/bin/sh";
 
     /// Creates a launcher whose programs connect to `socket_name`, and
-    /// whose dialogs are shown by `executable`.
-    pub(crate) fn new(socket_name: OsString, executable: PathBuf, ledger: &ResourceLedger) -> Self {
+    /// whose dialogs are shown by `executable`; their errors are read on
+    /// `loop_handle`'s loop.
+    pub(crate) fn new(
+        socket_name: OsString,
+        executable: PathBuf,
+        loop_handle: &LoopHandle<'static, Compositor>,
+        ledger: &ResourceLedger,
+    ) -> Self {
         Self {
             running: Vec::new(),
+            error_outputs: BTreeMap::new(),
+            ended_outputs: Vec::new(),
+            loop_handle: loop_handle.clone(),
             environment: BTreeMap::from([(OsString::from("WAYLAND_DISPLAY"), socket_name)]),
             executable,
             ledger: ledger.clone(),
@@ -64,7 +86,16 @@ impl Launcher {
     /// Starts `command_line` with the shell.
     pub(crate) fn run(&mut self, command_line: &str) {
         let arguments = ["sh", "-c", command_line].map(OsStr::new);
-        self.start(Path::new(Self::SHELL), &arguments, command_line);
+        if let Err(error) = self.start(Path::new(Self::SHELL), &arguments, command_line, None) {
+            Self::warn_not_started(&error, command_line);
+        }
+    }
+
+    /// Drops the sources of the error outputs that ended.
+    pub(crate) fn release_ended_outputs(&mut self) {
+        for pid in self.ended_outputs.drain(..) {
+            self.error_outputs.remove(&pid);
+        }
     }
 
     /// Shows vaht's dialog `name` (`vaht dialog <name>`), styled by the
@@ -101,7 +132,76 @@ impl Launcher {
             OsStr::new(name),
         ];
         arguments.extend_from_slice(extra);
-        self.start(&executable, &arguments, &format!("the {name} dialog"));
+        let what = format!("the {name} dialog");
+        let started = std::io::pipe()
+            .map_err(SpawnError::Pipe)
+            .and_then(|(reader, writer)| {
+                // vaht's end of the writing side closes once the dialog has
+                // its own, so the pipe ends when the dialog does.
+                let writer = std::os::fd::OwnedFd::from(writer);
+                let pid = self.start(&executable, &arguments, &what, Some(&writer))?;
+                Ok((pid, reader))
+            });
+        match started {
+            Ok((pid, reader)) => self.read_errors(pid, reader, name.to_owned()),
+            Err(error) => Self::warn_not_started(&error, &what),
+        }
+    }
+
+    /// Logs what the dialog `name`, process `pid`, writes to `reader`, a
+    /// line at a time, until it closes it.
+    fn read_errors(&mut self, pid: Pid, reader: std::io::PipeReader, name: String) {
+        let reader = File::from(std::os::fd::OwnedFd::from(reader));
+        let mut pending = Vec::new();
+        let source = Generic::new(reader, Interest::READ, Mode::Level);
+        let key = pid.as_raw();
+        let inserted = EventSource::insert(
+            &self.loop_handle,
+            &self.ledger,
+            source,
+            move |_, reader, compositor| {
+                let mut chunk = [0; 1024];
+                let read = (&mut &**reader).read(&mut chunk);
+                let is_ended = match read {
+                    Ok(0) | Err(_) => true,
+                    Ok(count) => {
+                        pending.extend_from_slice(&chunk[..count]);
+                        false
+                    }
+                };
+                while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+                    let line: Vec<u8> = pending.drain(..=end).collect();
+                    let line = String::from_utf8_lossy(&line);
+                    tracing::warn!(dialog = name, "{}", line.trim_end());
+                }
+                if !is_ended {
+                    return Ok(PostAction::Continue);
+                }
+                if !pending.is_empty() {
+                    tracing::warn!(dialog = name, "{}", String::from_utf8_lossy(&pending));
+                }
+                compositor.launcher.ended_outputs.push(key);
+                Ok(PostAction::Disable)
+            },
+        );
+        match inserted {
+            Ok(source) => {
+                self.error_outputs.insert(key, source);
+            }
+            Err(error) => tracing::warn!(
+                error = &error.error as &dyn std::error::Error,
+                "a dialog's errors cannot be read"
+            ),
+        }
+    }
+
+    /// Logs that the program `what` could not be started, and why.
+    fn warn_not_started(error: &SpawnError, what: &str) {
+        tracing::warn!(
+            error = error as &dyn std::error::Error,
+            what,
+            "could not start a program"
+        );
     }
 
     /// Sets `name` to `value` for every program started from now on.
@@ -126,26 +226,31 @@ impl Launcher {
             });
     }
 
-    /// Starts `program` with `arguments` (its own name first), keeping it
-    /// until it is reaped; `what` names it in the log.
-    fn start(&mut self, program: &Path, arguments: &[&OsStr], what: &str) {
-        match self.spawn(program, arguments) {
-            Ok(pid) => {
-                tracing::debug!(%pid, what, "program started");
-                self.running
-                    .push((pid, self.ledger.track(ResourceKind::Program)));
-            }
-            Err(error) => tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                what,
-                "could not start a program"
-            ),
-        }
+    /// Starts `program` with `arguments` (its own name first), its errors
+    /// going to `errors` if given, keeping it until it is reaped; `what`
+    /// names it in the log.
+    fn start(
+        &mut self,
+        program: &Path,
+        arguments: &[&OsStr],
+        what: &str,
+        errors: Option<&std::os::fd::OwnedFd>,
+    ) -> Result<Pid, SpawnError> {
+        let pid = self.spawn(program, arguments, errors)?;
+        tracing::debug!(%pid, what, "program started");
+        self.running
+            .push((pid, self.ledger.track(ResourceKind::Program)));
+        Ok(pid)
     }
 
     /// Starts `program` with `arguments` as described in the module
-    /// documentation.
-    fn spawn(&self, program: &Path, arguments: &[&OsStr]) -> Result<Pid, SpawnError> {
+    /// documentation; its error output goes to `errors` if given.
+    fn spawn(
+        &self,
+        program: &Path,
+        arguments: &[&OsStr],
+        errors: Option<&std::os::fd::OwnedFd>,
+    ) -> Result<Pid, SpawnError> {
         let arguments = arguments
             .iter()
             .map(|argument| CString::new(argument.as_bytes()))
@@ -179,8 +284,12 @@ impl Launcher {
             .map_err(SpawnError::OpenNull)?;
         let mut file_actions = PosixSpawnFileActions::init().map_err(SpawnError::Prepare)?;
         for standard in 0..=2 {
+            let target = match errors {
+                Some(errors) if standard == 2 => errors.as_raw_fd(),
+                Some(_) | None => null.as_raw_fd(),
+            };
             file_actions
-                .add_dup2(null.as_raw_fd(), standard)
+                .add_dup2(target, standard)
                 .map_err(SpawnError::Prepare)?;
         }
         posix_spawn(
@@ -220,6 +329,9 @@ enum SpawnError {
     /// The spawn attributes could not be set up.
     #[error("could not prepare to start the program")]
     Prepare(#[source] nix::Error),
+    /// No pipe could be made for a dialog's errors.
+    #[error("could not make a pipe for the program's errors")]
+    Pipe(#[source] std::io::Error),
     /// `/dev/null` could not be opened for the program's input and output.
     #[error("could not open /dev/null")]
     OpenNull(#[source] std::io::Error),

@@ -129,3 +129,25 @@ fn the_title_dialog_retitles_the_window() {
     let listed = String::from_utf8(listed.stdout).expect("UTF-8");
     assert!(listed.trim_end().ends_with("\tnotes"), "{listed}");
 }
+
+#[test]
+fn what_a_dialog_writes_to_its_errors_reaches_vahts_log() {
+    // Not valid, so vaht runs on its built-in configuration, and the
+    // dialog says so as it starts.
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[nonsense]\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    let shown = std::process::Command::new(EXECUTABLE)
+        .args(["msg", "run", "run-dialog"])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .status()
+        .expect("vaht msg runs");
+    assert!(shown.success());
+    vaht.wait_for_logged("placed first", 1);
+    vaht.wait_for_logged("dialog=\"run\"", 1);
+    assert!(vaht.logged_count("using the built-in theme") >= 1);
+    client.type_chord(&[keys::ESCAPE]);
+    vaht.wait_for_logged("window closed", 1);
+}

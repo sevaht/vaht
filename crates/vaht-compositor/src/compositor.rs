@@ -173,6 +173,7 @@ impl Compositor {
             if let Some(ipc) = &mut compositor.ipc {
                 ipc.release_ended();
             }
+            compositor.launcher.release_ended_outputs();
             compositor.settle();
             display
                 .dispatch_clients(&mut compositor)
@@ -244,6 +245,7 @@ impl Compositor {
         let mut launcher = Launcher::new(
             listener.socket_name().to_os_string(),
             options.executable,
+            handle,
             &ledger,
         );
         let ipc = Self::open_ipc(handle, &listener, &ledger);
