@@ -42,17 +42,18 @@ pub struct Wallpaper {
 }
 
 impl Wallpaper {
-    /// Decodes the PNG image at `path`.
+    /// Decodes the image at `path`, in any format [`crate::raster`] reads.
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be read or is not a PNG image.
+    /// Returns an error if the file cannot be read or is not an image vaht
+    /// can decode.
     pub fn load(path: &Path) -> Result<Self, WallpaperError> {
         let data = std::fs::read(path).map_err(|source| WallpaperError::Read {
             path: path.to_owned(),
             source,
         })?;
-        let image = Pixmap::decode_png(&data).map_err(|error| WallpaperError::Decode {
+        let image = crate::raster::decode(&data, path).map_err(|error| WallpaperError::Decode {
             path: path.to_owned(),
             reason: error.to_string(),
         })?;
@@ -134,8 +135,8 @@ pub enum WallpaperError {
         #[source]
         source: std::io::Error,
     },
-    /// The file is not a PNG image vaht can decode.
-    #[error("the wallpaper {} is not a PNG image vaht can read: {reason}", path.display())]
+    /// The file is not an image vaht can decode.
+    #[error("the wallpaper {} is not an image vaht can read: {reason}", path.display())]
     Decode {
         /// The file.
         path: PathBuf,

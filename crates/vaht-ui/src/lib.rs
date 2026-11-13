@@ -17,6 +17,7 @@ pub mod geometry;
 pub mod icon;
 pub mod layout;
 pub mod panel;
+pub mod raster;
 pub mod text;
 pub mod texture;
 pub mod theme;

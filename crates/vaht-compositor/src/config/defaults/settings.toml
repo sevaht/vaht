@@ -93,7 +93,7 @@ submenu_delay_ms = 200
 search = "item-start"
 
 [wallpaper]
-# A PNG image drawn under everything, such as "~/Pictures/sky.png" ("~/" is
+# An image (PNG, JPEG, WebP, GIF and other common formats) drawn under everything, such as "~/Pictures/sky.png" ("~/" is
 # the home directory; a relative path is from this directory). Without one,
 # the desktop is dark grey.
 # image = "~/Pictures/sky.png"

@@ -95,24 +95,23 @@ impl Icon {
         Self::fitted(&pixmap, width.max(height))
     }
 
-    /// Reads the PNG or SVG file at `path` as an icon `size` wide.
+    /// Reads the SVG or raster image (any format [`crate::raster`] reads)
+    /// at `path` as an icon `size` wide.
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be read or decoded, or is
-    /// neither a PNG nor an SVG.
+    /// Returns an error if the file cannot be read or decoded.
     pub fn load(path: &Path, size: u32) -> Result<Self, IconError> {
         let data = std::fs::read(path).map_err(|error| IconError::Read {
             path: path.to_path_buf(),
             error,
         })?;
         let decoded = match path.extension().and_then(|extension| extension.to_str()) {
-            Some("png") => Pixmap::decode_png(&data).map_err(|error| IconError::Decode {
+            Some("svg") => Self::render_svg(path, &data, size)?,
+            _ => crate::raster::decode(&data, path).map_err(|error| IconError::Decode {
                 path: path.to_path_buf(),
                 error: Box::new(error),
             })?,
-            Some("svg") => Self::render_svg(path, &data, size)?,
-            _ => return Err(IconError::Format(path.to_path_buf())),
         };
         Self::fitted(&decoded, size).ok_or(IconError::Empty(path.to_path_buf()))
     }

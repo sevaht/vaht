@@ -47,6 +47,9 @@ strum = { version = "0.28", features = ["derive"] }
 tempfile = "3"
 thiserror = "2"
 tiny-skia = { version = "0.12", features = ["png-format"] }
+# Raster images (wallpapers, icons) in every common format, chosen by their
+# contents; no encoders or threads, which vaht does not need.
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
 # Application icons drawn as SVG; no text or fonts, which icons do not need.
 resvg = { version = "0.49", default-features = false }
 toml = "1"

@@ -310,7 +310,7 @@ impl Default for MenuSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct WallpaperSettings {
-    /// The PNG image, as written: `~/` is the home directory, and a
+    /// The image (any common format), as written: `~/` is the home directory, and a
     /// relative path is from the configuration directory. None for no
     /// wallpaper.
     image: Option<String>,

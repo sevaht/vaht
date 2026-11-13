@@ -191,12 +191,12 @@ rest by name, so a setting never silently does nothing:
   `defaultDeco`'s preset or mask.
 - `[workspaces]`: `names`, at least one.
 - `[session]`: `autostart`.
-- `[wallpaper]`: `image` (a PNG; `~/` is the home directory, a relative
+- `[wallpaper]`: `image` (PNG, JPEG, GIF, WebP, BMP, TIFF, TGA, PNM, QOI
+  or ICO, known by its contents; `~/` is the home directory, a relative
   path is from the configuration directory) and `fit` (`fill`, `fit`,
   `center`, `tile`, `stretch`). It is decoded once, painted once per output
   size, and drawn beneath everything; where it does not reach, and with no
-  image, the desktop is dark grey. `per_workspace` is not built, and JPEG
-  is not read yet.
+  image, the desktop is dark grey. `per_workspace` is not built.
 - `theme`: the name of a theme in `themes/` (§10); without it, the built-in
   theme.
 - `[taskbar]`: `enabled`, `edge` (`top` or `bottom`), `width_percent`
