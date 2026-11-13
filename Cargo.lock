@@ -2268,10 +2268,12 @@ name = "vaht-import"
 version = "0.1.0"
 dependencies = [
  "rstest",
+ "strum",
  "tempfile",
  "thiserror 2.0.21",
  "toml_edit",
  "vaht-compositor",
+ "vaht-ui",
 ]
 
 [[package]]

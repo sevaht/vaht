@@ -738,13 +738,25 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
     `PseudoTransparent`, `FocusProtection`, `RunDialog`) are understood as
     extensions of it.
 
-- **Built so far:** `init` to `settings.toml`, `keys` to `bindings.toml`
-  and `apps` to `rules.toml`.
+- **Built so far:** `init` to `settings.toml`, `keys` to `bindings.toml`,
+  `apps` to `rules.toml`, and the style `session.styleFile` names (a file,
+  or a directory with `theme.cfg`) to `themes/<name>.toml`, which the
+  converted `settings.toml` chooses.
   Every setting, binding or pattern vaht lacks is reported as "not in vaht
-  yet", so importing again as features arrive picks them up. The menus,
-  the style and `startup` are reported until menus and themes exist. Commands are translated by `FluxboxCommand`. A sequence loses the
-  parts vaht drops on purpose (`ActivateTab`), but a part vaht lacks for
-  now leaves the whole binding out.
+  yet", so importing again as features arrive picks them up. The menus and
+  `startup` are reported until menus exist. Commands are translated by
+  `FluxboxCommand`. A sequence loses the parts vaht drops on purpose
+  (`ActivateTab`), but a part vaht lacks for now leaves the whole binding
+  out.
+- **How a style converts.** Each vaht element in each state gets what
+  Fluxbox would give the resources behind it, looked up as Xlib's resource
+  manager does (wildcards, tight before loose bindings) and through
+  fluxland's fallback chains (`window.label.focus.font`, then
+  `window.font`). The theme is then written as the fewest layers that give
+  every element exactly that, which a test checks against vaht's own
+  resolver. Padding, borders and bar heights are written per element only.
+  Colors keep their X11 names. Pixmaps, interlacing and the gradients vaht
+  lacks are reported; `ParentRelative` takes the parent element's texture.
 - It never overwrites an existing file without `--force`, and never touches
   the source.
 - It writes only keys that differ from vaht's defaults, with a header comment

@@ -8,8 +8,9 @@
 //! Every line that is not converted is in the [`Report`], with why.
 //!
 //! Converted today: `init` to `settings.toml`, `keys` to `bindings.toml`,
-//! `apps` to `rules.toml`. `menu`, the style and `startup` are reported until
-//! vaht has menus and themes.
+//! `apps` to `rules.toml`, and the style `init` names to
+//! `themes/<name>.toml`, which `settings.toml` then chooses. `menu` and
+//! `startup` are reported until vaht has menus.
 
 mod apps;
 mod command;
@@ -17,6 +18,7 @@ mod keys;
 mod report;
 mod resources;
 mod settings;
+mod style;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -27,6 +29,7 @@ use crate::apps::AppsFile;
 use crate::keys::KeysFile;
 use crate::resources::Resources;
 use crate::settings::InitFile;
+use crate::style::StyleFile;
 
 /// A Fluxbox configuration directory, read.
 #[derive(Debug)]
@@ -39,6 +42,8 @@ pub struct FluxboxSetup {
     keys: Option<(PathBuf, String)>,
     /// The `apps` file: where, and what it says.
     apps: Option<(PathBuf, String)>,
+    /// The style `init` names: where, and what it says.
+    style: Option<(PathBuf, String)>,
     /// The other files vaht cannot convert yet, if they exist.
     unconverted: Vec<(PathBuf, &'static str)>,
 }
@@ -57,6 +62,17 @@ impl FluxboxSetup {
             error,
         })?;
         let mut init = Resources::parse(&init_path, &init_text);
+        // A style is a file, or a directory holding theme.cfg.
+        let style_path = init
+            .value("session.styleFile")
+            .map(|path| directory.join(Self::expand_home(path)))
+            .map(|path| {
+                if path.is_dir() {
+                    path.join("theme.cfg")
+                } else {
+                    path
+                }
+            });
         let mut file = |resource: &str, default: &str| {
             init.value(resource).map_or_else(
                 || directory.join(default),
@@ -75,10 +91,6 @@ impl FluxboxSetup {
                 "the window menu: vaht has no menus yet",
             ),
             (
-                file("session.styleFile", "styles"),
-                "the style: vaht has no themes yet",
-            ),
-            (
                 directory.join("startup"),
                 "the startup script: add it to session.autostart if vaht should run it",
             ),
@@ -91,6 +103,7 @@ impl FluxboxSetup {
             init,
             keys: Self::read_optional(keys_path)?,
             apps: Self::read_optional(apps_path)?,
+            style: style_path.map(Self::read_optional).transpose()?.flatten(),
             unconverted,
         })
     }
@@ -116,22 +129,34 @@ impl FluxboxSetup {
         };
         let mut files = Vec::new();
         let init_path = self.init.path().to_path_buf();
-        let settings = InitFile::new(self.init).convert(&mut report);
-        files.push(OutputFile {
-            name: "settings.toml",
-            text: header(&init_path) + &settings.to_string(),
-        });
+        let mut settings = InitFile::new(self.init).convert(&mut report);
+        if let Some((path, text)) = &self.style {
+            let name = Self::theme_name(path);
+            let theme = StyleFile::new(path, text).convert(&mut report);
+            settings.insert("theme", toml_edit::value(name.clone()));
+            files.push(OutputFile {
+                name: format!("themes/{name}.toml"),
+                text: header(path) + &theme.to_string(),
+            });
+        }
+        files.insert(
+            0,
+            OutputFile {
+                name: "settings.toml".to_owned(),
+                text: header(&init_path) + &settings.to_string(),
+            },
+        );
         if let Some((path, text)) = &self.keys {
             let bindings = KeysFile::new(path, text).convert(&mut report);
             files.push(OutputFile {
-                name: "bindings.toml",
+                name: "bindings.toml".to_owned(),
                 text: header(path) + &bindings.to_string(),
             });
         }
         if let Some((path, text)) = &self.apps {
             let rules = AppsFile::new(path, text).convert(&mut report);
             files.push(OutputFile {
-                name: "rules.toml",
+                name: "rules.toml".to_owned(),
                 text: header(path) + &rules.to_string(),
             });
         }
@@ -142,6 +167,35 @@ impl FluxboxSetup {
             source: self.directory,
             files,
             report,
+        }
+    }
+
+    /// Returns the name the theme converted from the style at `path` gets:
+    /// the style's own (its directory's, for a `theme.cfg`), with anything
+    /// but letters, digits, `-` and `_` made `-`.
+    fn theme_name(path: &Path) -> String {
+        let named = if path.file_name().is_some_and(|name| name == "theme.cfg") {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        };
+        let name: String = named
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        if name.is_empty() {
+            "imported".to_owned()
+        } else {
+            name
         }
     }
 
@@ -158,8 +212,9 @@ impl FluxboxSetup {
 /// One file of vaht's configuration, converted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputFile {
-    /// Its name in the configuration directory.
-    pub name: &'static str,
+    /// Its path in the configuration directory, such as `settings.toml` or
+    /// `themes/nacitar.toml`.
+    pub name: String,
     /// Its contents.
     pub text: String,
 }
@@ -205,7 +260,7 @@ impl Conversion {
             && let Some(existing) = self
                 .files
                 .iter()
-                .map(|file| directory.join(file.name))
+                .map(|file| directory.join(&file.name))
                 .find(|path| path.exists())
         {
             return Err(ImportError::Exists(existing));
@@ -215,7 +270,13 @@ impl Conversion {
             error,
         })?;
         for file in &self.files {
-            let path = directory.join(file.name);
+            let path = directory.join(&file.name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| ImportError::Write {
+                    path: parent.to_path_buf(),
+                    error,
+                })?;
+            }
             std::fs::write(&path, &file.text)
                 .map_err(|error| ImportError::Write { path, error })?;
         }

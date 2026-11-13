@@ -173,7 +173,13 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     let setup = tempfile::tempdir().expect("a temporary directory");
     std::fs::write(
         setup.path().join("init"),
-        "session.screen0.focusModel: MouseFocus\n",
+        "session.screen0.focusModel: MouseFocus\nsession.styleFile: styles/Night Sky\n",
+    )
+    .expect("written");
+    std::fs::create_dir_all(setup.path().join("styles/Night Sky")).expect("made");
+    std::fs::write(
+        setup.path().join("styles/Night Sky/theme.cfg"),
+        "*.color: SteelBlue\nwindow.title.height: 24\nmenu.frame.color: black\n",
     )
     .expect("written");
     std::fs::write(
@@ -206,8 +212,14 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     assert!(printed.contains("keys:2: dropped"), "{printed}");
     let settings = std::fs::read_to_string(target.path().join("settings.toml")).expect("written");
     assert!(settings.contains("model = \"sloppy\""), "{settings}");
+    assert!(settings.contains("theme = \"Night-Sky\""), "{settings}");
+    let theme =
+        std::fs::read_to_string(target.path().join("themes/Night-Sky.toml")).expect("written");
+    assert!(theme.contains("SteelBlue"), "{theme}");
+    assert!(theme.contains("height = 24"), "{theme}");
+    assert!(printed.contains("menu.frame.color: menus"), "{printed}");
     assert!(
-        std::fs::read_dir(setup.path()).expect("readable").count() == 2,
+        std::fs::read_dir(setup.path()).expect("readable").count() == 3,
         "the source is untouched"
     );
 }

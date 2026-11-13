@@ -13,9 +13,11 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+strum.workspace = true
 thiserror.workspace = true
 toml_edit.workspace = true
 vaht-compositor.workspace = true
+vaht-ui.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true

@@ -29,7 +29,7 @@ pub fn fluxbox(from: Option<&Path>, to: &Path, replace: bool) -> ExitCode {
     }
     let mut output = String::new();
     for file in conversion.files() {
-        writeln!(output, "Wrote {}", to.join(file.name).display())
+        writeln!(output, "Wrote {}", to.join(&file.name).display())
             .expect("writing to a String cannot fail");
     }
     let notes = conversion.report().notes().len();

@@ -1,0 +1,1180 @@
+//! Fluxbox styles to vaht themes (02 §10).
+//!
+//! [`StyleFile`] reads a style as Fluxbox does (fluxland's `style.c` is the
+//! reference): each vaht element in each state gets what the style gives
+//! the Fluxbox resources behind it, through the same fallback chains
+//! (`window.label.focus.font`, then `window.font`). The theme is then
+//! written as the fewest layers that give every element exactly that: a
+//! value most elements share goes in `[default]`, one a state shares in
+//! `[state.<state>]`, and so on down to `[<element>.<state>]`. Colors keep
+//! the names the style used.
+//!
+//! What Fluxbox draws that vaht does not yet (pixmaps, interlacing, some
+//! gradients, menus, rounded corners) is reported, as is every style line
+//! nothing used.
+
+mod database;
+
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
+
+use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value};
+use vaht_ui::{Color, ThemeElement, WidgetState};
+
+use self::database::StyleDatabase;
+use crate::report::{Reason, Report};
+
+/// A property of a theme's style, as the converter writes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, strum::EnumIter)]
+enum Property {
+    /// `texture`.
+    Texture,
+    /// `font`.
+    Font,
+    /// `text_effect`.
+    TextEffect,
+    /// `text_color`.
+    TextColor,
+    /// `glyph_color`.
+    GlyphColor,
+    /// `justify`.
+    Justify,
+    /// `padding`.
+    Padding,
+    /// `border`.
+    Border,
+    /// `height`.
+    Height,
+}
+
+impl Property {
+    /// Returns whether the property is an element's own geometry (its
+    /// padding, border and bar height), written only for the element, never
+    /// as a default or for a state, so no other element takes it on.
+    const fn is_own_geometry(self) -> bool {
+        matches!(self, Self::Padding | Self::Border | Self::Height)
+    }
+
+    /// Returns the property's key in theme files.
+    const fn key(self) -> &'static str {
+        match self {
+            Self::Texture => "texture",
+            Self::Font => "font",
+            Self::TextEffect => "text_effect",
+            Self::TextColor => "text_color",
+            Self::GlyphColor => "glyph_color",
+            Self::Justify => "justify",
+            Self::Padding => "padding",
+            Self::Border => "border",
+            Self::Height => "height",
+        }
+    }
+}
+
+/// A property's value as written in TOML, compared by its text.
+#[derive(Debug, Clone)]
+struct Written(Value);
+
+impl Written {
+    /// Returns a texture with its bevel the other way: raised for sunken,
+    /// sunken for raised.
+    fn with_bevel_reversed(&self) -> Self {
+        let mut value = self.0.clone();
+        if let Some(texture) = value.as_inline_table_mut() {
+            let reversed = match texture.get("bevel").and_then(Value::as_str) {
+                Some("raised") => Some("sunken"),
+                Some("sunken") => Some("raised"),
+                _ => None,
+            };
+            if let Some(bevel) = reversed {
+                texture.insert("bevel", Value::from(bevel));
+            }
+        }
+        Self(value)
+    }
+
+    /// Returns the text the value is written as.
+    fn text(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl PartialEq for Written {
+    fn eq(&self, other: &Self) -> bool {
+        self.text() == other.text()
+    }
+}
+
+/// What the style gives one element in one state: a value per property the
+/// element uses. A property it has no use for is absent, and any layer's
+/// value suits it.
+type Cell = BTreeMap<Property, Written>;
+
+/// Where a texture comes from.
+#[derive(Debug, Clone)]
+enum TextureSource {
+    /// Its own value.
+    Own(Written),
+    /// Its parent's (Fluxbox's `ParentRelative`).
+    Parent,
+}
+
+/// The Fluxbox resources behind one vaht element in one state.
+#[derive(Debug, Clone, Copy)]
+struct Sources {
+    /// The texture's resource names, the first the style has winning.
+    texture: &'static [&'static str],
+    /// The element whose texture `ParentRelative` means.
+    parent: Option<ThemeElement>,
+    /// The font's names.
+    font: Option<&'static [&'static str]>,
+    /// The text color's names.
+    text_color: Option<&'static [&'static str]>,
+    /// The picture color's names.
+    glyph_color: Option<&'static [&'static str]>,
+    /// The justification's names.
+    justify: Option<&'static [&'static str]>,
+    /// The space vaht keeps around the element's content, which Fluxbox
+    /// implies by its own drawing rather than says: top, right, bottom,
+    /// left.
+    padding: Option<[u32; 4]>,
+}
+
+impl Sources {
+    /// Sources with only a texture.
+    const fn texture(texture: &'static [&'static str]) -> Self {
+        Self {
+            texture,
+            parent: None,
+            font: None,
+            text_color: None,
+            glyph_color: None,
+            justify: None,
+            padding: None,
+        }
+    }
+
+    /// Returns the resources behind `element` in `state`. Where Fluxbox
+    /// has no such state (a pressed label), the focused one stands in.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one table of every element's resources"
+    )]
+    fn of(element: ThemeElement, state: WidgetState) -> Self {
+        use WidgetState::{Focused, Pressed, Unfocused};
+        let window = |focus: &'static [&'static str], unfocus: &'static [&'static str]| match state
+        {
+            Focused | Pressed => focus,
+            Unfocused => unfocus,
+        };
+        match element {
+            ThemeElement::Titlebar => {
+                Self::texture(window(&["window.title.focus"], &["window.title.unfocus"]))
+            }
+            ThemeElement::Label => Self {
+                texture: window(
+                    &["window.label.focus", "toolbar.windowLabel"],
+                    &["window.label.unfocus", "toolbar.windowLabel"],
+                ),
+                parent: Some(ThemeElement::Titlebar),
+                font: Some(window(
+                    &["window.label.focus.font", "window.font"],
+                    &["window.label.unfocus.font", "window.font"],
+                )),
+                text_color: Some(window(
+                    &["window.label.focus.textColor"],
+                    &["window.label.unfocus.textColor"],
+                )),
+                justify: Some(window(
+                    &[
+                        "window.label.focus.justify",
+                        "window.label.justify",
+                        "window.justify",
+                    ],
+                    &[
+                        "window.label.unfocus.justify",
+                        "window.label.justify",
+                        "window.justify",
+                    ],
+                )),
+                padding: Some([0, 4, 0, 4]),
+                ..Self::texture(&[])
+            },
+            ThemeElement::Button => Self {
+                texture: match state {
+                    Focused => &["window.button.focus"],
+                    Unfocused => &["window.button.unfocus"],
+                    Pressed => &["window.button.pressed"],
+                },
+                parent: Some(ThemeElement::Titlebar),
+                glyph_color: Some(match state {
+                    Focused => &["window.button.focus.picColor"],
+                    Unfocused => &["window.button.unfocus.picColor"],
+                    Pressed => &[
+                        "window.button.pressed.picColor",
+                        "window.button.focus.picColor",
+                    ],
+                }),
+                padding: Some([5, 5, 5, 5]),
+                ..Self::texture(&[])
+            },
+            ThemeElement::Handle => {
+                Self::texture(window(&["window.handle.focus"], &["window.handle.unfocus"]))
+            }
+            ThemeElement::Grip => {
+                Self::texture(window(&["window.grip.focus"], &["window.grip.unfocus"]))
+            }
+            ThemeElement::Border => Self::texture(&[]),
+            ThemeElement::Taskbar => Self::texture(&["toolbar"]),
+            ThemeElement::TaskbarButton => Self {
+                texture: match state {
+                    Pressed => &["toolbar.button.pressed"],
+                    Focused | Unfocused => &["toolbar.button", "toolbar.clock"],
+                },
+                parent: Some(ThemeElement::Taskbar),
+                glyph_color: Some(&[
+                    "toolbar.button.picColor",
+                    "toolbar.clock.picColor",
+                    "toolbar.clock.textColor",
+                    "toolbar.textColor",
+                ]),
+                padding: Some([5, 5, 5, 5]),
+                ..Self::texture(&[])
+            },
+            ThemeElement::TaskbarWorkspace => Self {
+                texture: &["toolbar.workspace", "toolbar.label"],
+                parent: Some(ThemeElement::Taskbar),
+                font: Some(&["toolbar.workspace.font", "toolbar.font"]),
+                text_color: Some(&[
+                    "toolbar.workspace.textColor",
+                    "toolbar.label.textColor",
+                    "toolbar.textColor",
+                ]),
+                justify: Some(&["toolbar.workspace.justify", "toolbar.justify"]),
+                padding: Some([0, 8, 0, 8]),
+                ..Self::texture(&[])
+            },
+            ThemeElement::TaskbarClock => Self {
+                texture: &["toolbar.clock"],
+                parent: Some(ThemeElement::Taskbar),
+                font: Some(&["toolbar.clock.font", "toolbar.font"]),
+                text_color: Some(&["toolbar.clock.textColor", "toolbar.textColor"]),
+                justify: Some(&["toolbar.clock.justify", "toolbar.justify"]),
+                padding: Some([0, 8, 0, 8]),
+                ..Self::texture(&[])
+            },
+            ThemeElement::WindowListEntry => Self {
+                texture: match state {
+                    Focused | Pressed => &["toolbar.iconbar.focused", "toolbar.windowLabel"],
+                    Unfocused => &["toolbar.iconbar.unfocused", "toolbar.windowLabel"],
+                },
+                parent: Some(ThemeElement::Taskbar),
+                font: Some(match state {
+                    Focused | Pressed => &[
+                        "toolbar.iconbar.focused.font",
+                        "window.font",
+                        "toolbar.font",
+                    ],
+                    Unfocused => &[
+                        "toolbar.iconbar.unfocused.font",
+                        "window.font",
+                        "toolbar.font",
+                    ],
+                }),
+                text_color: Some(match state {
+                    Focused | Pressed => {
+                        &["toolbar.iconbar.focused.textColor", "toolbar.textColor"]
+                    }
+                    Unfocused => &["toolbar.iconbar.unfocused.textColor", "toolbar.textColor"],
+                }),
+                justify: Some(match state {
+                    Focused | Pressed => &[
+                        "toolbar.iconbar.focused.justify",
+                        "toolbar.iconbar.justify",
+                        "window.justify",
+                    ],
+                    Unfocused => &[
+                        "toolbar.iconbar.unfocused.justify",
+                        "toolbar.iconbar.justify",
+                        "window.justify",
+                    ],
+                }),
+                padding: Some([0, 10, 0, 10]),
+                ..Self::texture(&[])
+            },
+            ThemeElement::WindowListEmpty => Self {
+                texture: &[
+                    "toolbar.iconbar.empty",
+                    "toolbar.iconbar",
+                    "toolbar.windowLabel",
+                    "toolbar",
+                ],
+                parent: Some(ThemeElement::Taskbar),
+                ..Self::texture(&[])
+            },
+        }
+    }
+}
+
+/// The style's lines that vaht leaves out on purpose or cannot use yet, by
+/// how their names start, with why.
+const UNUSED_REASONS: [(&str, Reason, &str); 8] = [
+    ("menu", Reason::NotYetInVaht, "menus: vaht has no menus yet"),
+    (
+        "systray",
+        Reason::NotYetInVaht,
+        "the tray: vaht has no tray yet",
+    ),
+    ("slit", Reason::Dropped, "the slit is gone"),
+    ("window.tab", Reason::Dropped, "tabs are gone"),
+    (
+        "background",
+        Reason::Dropped,
+        "themes cannot set the wallpaper",
+    ),
+    (
+        "rootcommand",
+        Reason::Dropped,
+        "themes cannot set the wallpaper",
+    ),
+    (
+        "window.roundcorners",
+        Reason::NotYetInVaht,
+        "rounded corners",
+    ),
+    ("toolbar.shaped", Reason::NotYetInVaht, "rounded corners"),
+];
+
+/// A Fluxbox style being converted.
+#[derive(Debug)]
+pub(crate) struct StyleFile {
+    /// Its lines.
+    database: StyleDatabase,
+}
+
+impl StyleFile {
+    /// Converts the style `text`, read from `path`.
+    pub(crate) fn new(path: &Path, text: &str) -> Self {
+        Self {
+            database: StyleDatabase::parse(path, text),
+        }
+    }
+
+    /// Converts the style to a theme file, noting in `report` what it
+    /// leaves out.
+    pub(crate) fn convert(mut self, report: &mut Report) -> DocumentMut {
+        let cells = self.cells(report);
+        self.report_unused(report);
+        Layers::fitting(&cells).document()
+    }
+
+    /// Returns what the style gives every element in every state.
+    fn cells(&mut self, report: &mut Report) -> Vec<(ThemeElement, WidgetState, Cell)> {
+        let mut cells = Vec::new();
+        let mut textures: HashMap<(ThemeElement, WidgetState), Written> = HashMap::new();
+        // Parents first, so ParentRelative finds their textures.
+        let mut elements: Vec<ThemeElement> =
+            <ThemeElement as strum::IntoEnumIterator>::iter().collect();
+        elements
+            .sort_by_key(|element| Sources::of(*element, WidgetState::Focused).parent.is_some());
+        for element in elements {
+            for state in <WidgetState as strum::IntoEnumIterator>::iter() {
+                let sources = Sources::of(element, state);
+                let mut cell = Cell::new();
+                if !sources.texture.is_empty() {
+                    // Without its own, a pressed taskbar button is the
+                    // button with its bevel the other way, as in Fluxbox.
+                    let is_unstyled_press = element == ThemeElement::TaskbarButton
+                        && state == WidgetState::Pressed
+                        && self.database.first_given(sources.texture).is_none();
+                    let texture = if is_unstyled_press {
+                        textures
+                            .get(&(element, WidgetState::Focused))
+                            .map(Written::with_bevel_reversed)
+                    } else {
+                        match self.texture(sources.texture, report) {
+                            TextureSource::Own(texture) => Some(texture),
+                            TextureSource::Parent => sources
+                                .parent
+                                .and_then(|parent| textures.get(&(parent, state)).cloned()),
+                        }
+                    };
+                    if let Some(texture) = texture {
+                        textures.insert((element, state), texture.clone());
+                        cell.insert(Property::Texture, texture);
+                    }
+                }
+                if let Some(names) = sources.font {
+                    self.add_font(&mut cell, names, report);
+                }
+                let white = || "white".to_owned();
+                if let Some(names) = sources.text_color {
+                    let color = self.color_chain(names, report).unwrap_or_else(white);
+                    cell.insert(Property::TextColor, Written(Value::from(color)));
+                }
+                if let Some(names) = sources.glyph_color {
+                    let color = self.color_chain(names, report).unwrap_or_else(white);
+                    cell.insert(Property::GlyphColor, Written(Value::from(color)));
+                }
+                if let Some(names) = sources.justify {
+                    let justify = self.justify(names);
+                    cell.insert(Property::Justify, Written(Value::from(justify)));
+                }
+                if let Some(padding) = sources.padding {
+                    let array: Array = padding.iter().map(|side| i64::from(*side)).collect();
+                    cell.insert(Property::Padding, Written(Value::Array(array)));
+                }
+                self.add_sizes(&mut cell, element, state, report);
+                cells.push((element, state, cell));
+            }
+        }
+        cells
+    }
+
+    /// Adds to `cell` the border and the bar height `element` has in
+    /// `state`, where it has them.
+    fn add_sizes(
+        &mut self,
+        cell: &mut Cell,
+        element: ThemeElement,
+        state: WidgetState,
+        report: &mut Report,
+    ) {
+        let height = match element {
+            ThemeElement::Titlebar => self
+                .number(&["window.title.height"])
+                .filter(|height| *height > 0),
+            ThemeElement::Handle => self.number(&["window.handleWidth"]),
+            ThemeElement::Taskbar => self
+                .number(&["toolbar.height"])
+                .filter(|height| *height > 0),
+            ThemeElement::Label
+            | ThemeElement::Button
+            | ThemeElement::Grip
+            | ThemeElement::Border
+            | ThemeElement::TaskbarButton
+            | ThemeElement::TaskbarWorkspace
+            | ThemeElement::TaskbarClock
+            | ThemeElement::WindowListEntry
+            | ThemeElement::WindowListEmpty => None,
+        };
+        if let Some(height) = height {
+            cell.insert(Property::Height, Written(Value::from(i64::from(height))));
+        }
+        let border: Option<(&[&str], &[&str])> = match (element, state) {
+            (ThemeElement::Border, WidgetState::Focused | WidgetState::Pressed) => Some((
+                &["window.focus.borderWidth", "window.borderWidth"],
+                &["window.focus.borderColor", "window.borderColor"],
+            )),
+            (ThemeElement::Border, WidgetState::Unfocused) => Some((
+                &["window.unfocus.borderWidth", "window.borderWidth"],
+                &["window.unfocus.borderColor", "window.borderColor"],
+            )),
+            (ThemeElement::Taskbar, _) => {
+                Some((&["toolbar.borderWidth"], &["toolbar.borderColor"]))
+            }
+            _ => None,
+        };
+        if let Some((widths, colors)) = border {
+            let width = self.number(widths).unwrap_or(0);
+            let color = self
+                .color_chain(colors, report)
+                .unwrap_or_else(|| "black".to_owned());
+            let mut border = InlineTable::new();
+            border.insert("width", Value::from(i64::from(width)));
+            border.insert("color", Value::from(color));
+            cell.insert(Property::Border, Written(Value::InlineTable(border)));
+        }
+    }
+
+    /// Returns the texture the first of `names` the style has gives, with
+    /// its colors: Fluxbox's `darkgray` and `white` where it gives none.
+    fn texture(&mut self, names: &[&str], report: &mut Report) -> TextureSource {
+        let name = self.database.first_given(names).unwrap_or(names[0]);
+        let spec = self
+            .database
+            .get(name)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if spec.contains("parentrelative") || spec.contains("parent_relative") {
+            return TextureSource::Parent;
+        }
+        let from = self
+            .color(&format!("{name}.color"), report)
+            .unwrap_or_else(|| "darkgray".to_owned());
+        let to = self
+            .color(&format!("{name}.colorTo"), report)
+            .unwrap_or_else(|| "white".to_owned());
+        let mut texture = InlineTable::new();
+        if spec.contains("gradient") {
+            let direction = [
+                ("crossdiagonal", "cross-diagonal"),
+                ("diagonal", "diagonal"),
+                ("horizontal", "horizontal"),
+                ("vertical", "vertical"),
+            ]
+            .into_iter()
+            .find(|(word, _)| spec.contains(word))
+            .map_or_else(
+                || {
+                    self.note_resource(
+                        name,
+                        report,
+                        "a pipecross, elliptic, rectangle or pyramid gradient, drawn diagonal",
+                    );
+                    "diagonal"
+                },
+                |(_, direction)| direction,
+            );
+            texture.insert("gradient", Value::from(direction));
+            texture.insert("from", Value::from(from));
+            texture.insert("to", Value::from(to));
+        } else {
+            if spec.contains("pixmap") && !spec.contains("solid") {
+                self.note_resource(name, report, "a pixmap texture, drawn in its color");
+            }
+            texture.insert("solid", Value::from(from));
+        }
+        if spec.contains("interlaced") {
+            self.note_resource(name, report, "interlacing");
+        }
+        if spec.contains("raised") {
+            texture.insert("bevel", Value::from("raised"));
+        } else if spec.contains("sunken") {
+            texture.insert("bevel", Value::from("sunken"));
+        }
+        TextureSource::Own(Written(Value::InlineTable(texture)))
+    }
+
+    /// Adds to `cell` the font, and its effect, the first of `names` the
+    /// style has gives: Fluxbox's `sans-10` if none.
+    fn add_font(&mut self, cell: &mut Cell, names: &[&str], report: &mut Report) {
+        let key = self.database.first_given(names);
+        let spec = key
+            .and_then(|key| self.database.get(key))
+            .unwrap_or("sans-10")
+            .to_owned();
+        let Some(font) = FluxboxFont::parse(&spec) else {
+            if let Some(key) = key {
+                self.note_resource(key, report, "an X11 core font name");
+            }
+            return;
+        };
+        cell.insert(Property::Font, Written(Value::InlineTable(font.table())));
+        let effect = key.map_or_else(
+            || Value::from("none"),
+            |key| self.effect(key, font.has_halo, report),
+        );
+        cell.insert(Property::TextEffect, Written(effect));
+    }
+
+    /// Returns the effect `key.effect` says, with its color and offsets.
+    fn effect(&mut self, key: &str, has_halo: bool, report: &mut Report) -> Value {
+        let effect = self
+            .database
+            .get(&format!("{key}.effect"))
+            .map(str::to_ascii_lowercase);
+        let mut table = InlineTable::new();
+        match effect.as_deref() {
+            Some("shadow") => {
+                let color = self
+                    .color(&format!("{key}.shadow.color"), report)
+                    .unwrap_or_else(|| "black".to_owned());
+                let x = self.number(&[&format!("{key}.shadow.x")]).unwrap_or(0);
+                let y = self.number(&[&format!("{key}.shadow.y")]).unwrap_or(0);
+                table.insert("shadow", Value::from(color));
+                let offset: Array = [x, y].iter().map(|offset| i64::from(*offset)).collect();
+                table.insert("offset", Value::Array(offset));
+            }
+            Some("halo") => {
+                let color = self
+                    .color(&format!("{key}.halo.color"), report)
+                    .unwrap_or_else(|| "black".to_owned());
+                table.insert("halo", Value::from(color));
+            }
+            _ if has_halo => {
+                table.insert("halo", Value::from("black"));
+            }
+            _ => return Value::from("none"),
+        }
+        Value::InlineTable(table)
+    }
+
+    /// Returns the justification the first of `names` the style has gives:
+    /// left if none.
+    fn justify(&mut self, names: &[&str]) -> &'static str {
+        let value = self
+            .database
+            .first_given(names)
+            .and_then(|name| self.database.get(name))
+            .map(str::to_ascii_lowercase);
+        match value.as_deref() {
+            Some("center" | "centre") => "center",
+            Some("right") => "right",
+            _ => "left",
+        }
+    }
+
+    /// Returns the color the first of `names` the style has gives.
+    fn color_chain(&mut self, names: &[&str], report: &mut Report) -> Option<String> {
+        let name = self.database.first_given(names)?;
+        self.color(name, report)
+    }
+
+    /// Returns the color the resource `name` gives, as written, if vaht
+    /// reads it; one it cannot read is reported.
+    fn color(&mut self, name: &str, report: &mut Report) -> Option<String> {
+        let value = self.database.get(name)?.to_owned();
+        if value.parse::<Color>().is_ok() {
+            return Some(value);
+        }
+        report.note(
+            self.database.path(),
+            self.database.line_of(name),
+            Reason::Unreadable,
+            format!("{name}: {value} is no color vaht reads"),
+        );
+        None
+    }
+
+    /// Returns the whole number the first of `names` the style has gives.
+    fn number(&mut self, names: &[&str]) -> Option<u32> {
+        let name = self.database.first_given(names).unwrap_or(names[0]);
+        self.database.get(name)?.parse().ok()
+    }
+
+    /// Notes that what the resource `name` asks for is not in vaht yet.
+    fn note_resource(&self, name: &str, report: &mut Report, what: &str) {
+        report.note(
+            self.database.path(),
+            self.database.line_of(name),
+            Reason::NotYetInVaht,
+            format!("{name}: {what}"),
+        );
+    }
+
+    /// Notes every line nothing used, with why.
+    fn report_unused(&self, report: &mut Report) {
+        for line in self.database.unused() {
+            let name = line.name.to_ascii_lowercase();
+            let (reason, why) = UNUSED_REASONS
+                .iter()
+                .find(|(prefix, ..)| name.starts_with(prefix))
+                .map_or(
+                    (Reason::NotYetInVaht, "not used by vaht's theme"),
+                    |(_, reason, why)| (*reason, *why),
+                );
+            report.note(
+                self.database.path(),
+                line.line,
+                reason,
+                format!("{}: {why}", line.name),
+            );
+        }
+    }
+}
+
+/// A font as Fluxbox styles name it: `family-size:option:…`, or
+/// `pango:Family Size`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FluxboxFont {
+    /// The family, as written.
+    family: String,
+    /// The size in points.
+    size: u16,
+    /// Whether it is bold.
+    is_bold: bool,
+    /// Whether it is italic.
+    is_italic: bool,
+    /// Whether `:halo` asks for a halo, as fluxland 1.x styles did.
+    has_halo: bool,
+}
+
+impl FluxboxFont {
+    /// Fluxbox's size when a font names none.
+    const DEFAULT_SIZE: u16 = 10;
+
+    /// Parses `spec`; `None` for an X11 core font name (`-misc-fixed-…`).
+    fn parse(spec: &str) -> Option<Self> {
+        let first = spec.split('|').next().unwrap_or_default().trim();
+        if first.starts_with('-') {
+            return None;
+        }
+        if let Some(pango) = first.strip_prefix("pango:") {
+            // `Family [Style…] [Size]`: style words follow the family.
+            let mut words: Vec<&str> = pango.split_whitespace().collect();
+            let size = words
+                .last()
+                .and_then(|word| word.parse().ok())
+                .inspect(|_| {
+                    words.pop();
+                })
+                .unwrap_or(Self::DEFAULT_SIZE);
+            let mut is_bold = false;
+            let mut is_italic = false;
+            while let Some(word) = words.last().map(|word| word.to_ascii_lowercase()) {
+                match word.as_str() {
+                    "bold" | "heavy" | "black" => is_bold = true,
+                    "italic" | "oblique" => is_italic = true,
+                    "normal" | "regular" | "book" | "roman" => {}
+                    _ => break,
+                }
+                words.pop();
+            }
+            return Some(Self {
+                family: words.join(" "),
+                size,
+                is_bold,
+                is_italic,
+                has_halo: false,
+            });
+        }
+        let (name, options) = first.split_once(':').unwrap_or((first, ""));
+        let (family, size) = match name.rsplit_once('-') {
+            Some((family, size)) if !family.is_empty() && size.parse::<f32>().is_ok() => {
+                let points = size
+                    .parse::<f32>()
+                    .unwrap_or(f32::from(Self::DEFAULT_SIZE))
+                    .round();
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "font sizes are small positive numbers"
+                )]
+                (family, points as u16)
+            }
+            _ => (name, Self::DEFAULT_SIZE),
+        };
+        let options = options.to_ascii_lowercase();
+        Some(Self {
+            family: if family == "fixed" {
+                "sans".to_owned()
+            } else {
+                family.to_owned()
+            },
+            size,
+            is_bold: options.contains("bold"),
+            is_italic: options.contains("italic") || options.contains("oblique"),
+            has_halo: options.split(':').any(|option| option == "halo"),
+        })
+    }
+
+    /// Returns the font as a theme's `font` table.
+    fn table(&self) -> InlineTable {
+        let mut table = InlineTable::new();
+        table.insert("family", Value::from(self.family.clone()));
+        table.insert("size", Value::from(i64::from(self.size)));
+        if self.is_bold {
+            table.insert("weight", Value::from("bold"));
+        }
+        if self.is_italic {
+            table.insert("style", Value::from("italic"));
+        }
+        table
+    }
+}
+
+/// A theme as layers: each property's value in each layer, chosen so the
+/// layers give every element in every state exactly its value.
+#[derive(Debug, Default)]
+struct Layers {
+    /// `[default]`.
+    default: BTreeMap<Property, Written>,
+    /// `[state.<state>]`.
+    by_state: Vec<(WidgetState, BTreeMap<Property, Written>)>,
+    /// `[<element>]`.
+    by_element: Vec<(ThemeElement, BTreeMap<Property, Written>)>,
+    /// `[<element>.<state>]`.
+    by_element_state: Vec<((ThemeElement, WidgetState), BTreeMap<Property, Written>)>,
+}
+
+impl Layers {
+    /// Returns the fewest layers that give each of `cells` its values.
+    ///
+    /// Property by property: the value most cells share is the default; a
+    /// state, then an element, gets its own value where that spares more
+    /// overrides than it costs; what is left differs per element and
+    /// state.
+    fn fitting(cells: &[(ThemeElement, WidgetState, Cell)]) -> Self {
+        let mut layers = Self::default();
+        let states: Vec<WidgetState> = <WidgetState as strum::IntoEnumIterator>::iter().collect();
+        let elements: Vec<ThemeElement> =
+            <ThemeElement as strum::IntoEnumIterator>::iter().collect();
+        for property in <Property as strum::IntoEnumIterator>::iter() {
+            let given: Vec<(ThemeElement, WidgetState, &Written)> = cells
+                .iter()
+                .filter_map(|(element, state, cell)| Some((*element, *state, cell.get(&property)?)))
+                .collect();
+            let default = if property.is_own_geometry() {
+                None
+            } else {
+                most_common(given.iter().map(|(.., value)| *value))
+            };
+            if let Some(default) = &default {
+                layers.default.insert(property, default.clone());
+            }
+            let mut state_values: HashMap<WidgetState, Written> = HashMap::new();
+            for state in default.iter().flat_map(|_| &states) {
+                let in_state = || {
+                    given
+                        .iter()
+                        .filter(|(_, given_state, _)| given_state == state)
+                };
+                if let Some(candidate) = most_common(in_state().map(|(.., value)| *value)) {
+                    let spared = in_state()
+                        .filter(|(.., value)| **value == candidate)
+                        .count();
+                    let kept = in_state()
+                        .filter(|(.., value)| Some(*value) == default.as_ref())
+                        .count();
+                    if spared > kept + 1 {
+                        layers
+                            .layer(LayerKey::State(*state))
+                            .insert(property, candidate.clone());
+                        state_values.insert(*state, candidate);
+                    }
+                }
+            }
+            let inherited =
+                |state: WidgetState| state_values.get(&state).or(default.as_ref()).cloned();
+            for element in &elements {
+                let of_element: Vec<&(ThemeElement, WidgetState, &Written)> = given
+                    .iter()
+                    .filter(|(given_element, ..)| given_element == element)
+                    .collect();
+                let Some(candidate) = most_common(of_element.iter().map(|(.., value)| *value))
+                else {
+                    continue;
+                };
+                let without = of_element
+                    .iter()
+                    .filter(|(_, state, value)| Some(*value) != inherited(*state).as_ref())
+                    .count();
+                let with = of_element
+                    .iter()
+                    .filter(|(.., value)| **value != candidate)
+                    .count();
+                let element_value = (with + 1 < without).then_some(candidate);
+                if let Some(value) = &element_value {
+                    layers
+                        .layer(LayerKey::Element(*element))
+                        .insert(property, value.clone());
+                }
+                for (_, state, value) in of_element {
+                    let resolved = element_value.clone().or_else(|| inherited(*state));
+                    if Some(*value) != resolved.as_ref() {
+                        layers
+                            .layer(LayerKey::ElementState(*element, *state))
+                            .insert(property, (*value).clone());
+                    }
+                }
+            }
+        }
+        layers
+    }
+
+    /// Returns the layer `key` names, adding it if it is new.
+    fn layer(&mut self, key: LayerKey) -> &mut BTreeMap<Property, Written> {
+        match key {
+            LayerKey::State(state) => entry(&mut self.by_state, state),
+            LayerKey::Element(element) => entry(&mut self.by_element, element),
+            LayerKey::ElementState(element, state) => {
+                entry(&mut self.by_element_state, (element, state))
+            }
+        }
+    }
+
+    /// Returns the layers as a theme file.
+    fn document(&self) -> DocumentMut {
+        let mut document = DocumentMut::new();
+        document.insert("default", Item::Table(Self::table(&self.default)));
+        if !self.by_state.is_empty() {
+            let mut states = Table::new();
+            states.set_implicit(true);
+            for (state, values) in &self.by_state {
+                states.insert(state.name(), Item::Table(Self::table(values)));
+            }
+            document.insert("state", Item::Table(states));
+        }
+        for element in <ThemeElement as strum::IntoEnumIterator>::iter() {
+            let own = self.by_element.iter().find(|(known, _)| *known == element);
+            let by_state: Vec<_> = self
+                .by_element_state
+                .iter()
+                .filter(|((known, _), _)| *known == element)
+                .collect();
+            if own.is_none() && by_state.is_empty() {
+                continue;
+            }
+            let table = Self::element_table(&mut document, element.path());
+            if let Some((_, values)) = own {
+                for (property, value) in values {
+                    table.insert(property.key(), Item::Value(value.0.clone()));
+                }
+                table.set_implicit(false);
+            }
+            for ((_, state), values) in by_state {
+                table.insert(state.name(), Item::Table(Self::table(values)));
+            }
+        }
+        document
+    }
+
+    /// Returns the table at the dotted `path` of `document`, made implicit
+    /// (shown only through its children) where it is new.
+    fn element_table<'document>(
+        document: &'document mut DocumentMut,
+        path: &str,
+    ) -> &'document mut Table {
+        let mut table = document.as_table_mut();
+        for part in path.split('.') {
+            let item = table.entry(part).or_insert_with(|| {
+                let mut new = Table::new();
+                new.set_implicit(true);
+                Item::Table(new)
+            });
+            table = item.as_table_mut().expect("theme paths name tables");
+        }
+        table
+    }
+
+    /// Returns `values` as a table.
+    fn table(values: &BTreeMap<Property, Written>) -> Table {
+        let mut table = Table::new();
+        for (property, value) in values {
+            table.insert(property.key(), Item::Value(value.0.clone()));
+        }
+        table
+    }
+}
+
+/// Which layer.
+#[derive(Debug, Clone, Copy)]
+enum LayerKey {
+    /// `[state.<state>]`.
+    State(WidgetState),
+    /// `[<element>]`.
+    Element(ThemeElement),
+    /// `[<element>.<state>]`.
+    ElementState(ThemeElement, WidgetState),
+}
+
+/// Returns the values kept for `key` in `layers`, adding them if new.
+fn entry<Key: PartialEq + Copy>(
+    layers: &mut Vec<(Key, BTreeMap<Property, Written>)>,
+    key: Key,
+) -> &mut BTreeMap<Property, Written> {
+    let position = layers
+        .iter()
+        .position(|(known, _)| *known == key)
+        .unwrap_or_else(|| {
+            layers.push((key, BTreeMap::new()));
+            layers.len() - 1
+        });
+    &mut layers[position].1
+}
+
+/// Returns the value most of `values` share; the first of equals.
+fn most_common<'value>(values: impl Iterator<Item = &'value Written>) -> Option<Written> {
+    let mut counts: Vec<(Written, usize)> = Vec::new();
+    for value in values {
+        match counts.iter_mut().find(|(known, _)| known == value) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((value.clone(), 1)),
+        }
+    }
+    let highest = counts.iter().map(|(_, count)| *count).max()?;
+    counts
+        .into_iter()
+        .find(|(_, count)| *count == highest)
+        .map(|(value, _)| value)
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use vaht_ui::Theme;
+    use vaht_ui::theme::ThemeLayers;
+
+    use super::*;
+
+    /// My style's lines that vaht's theme uses, and a pixmap and a
+    /// parent-relative texture to show those cases.
+    const STYLE: &str = "\
+*.font:\t\t\t\tdejavu sans-8:bold
+*.font.effect:\t\t\thalo
+*.font.halo.color:\t\tblack
+*.justify:\t\t\t\tcenter
+window.borderWidth:\t\t\t1
+toolbar.height:\t\t\t\t20
+window.title.height:\t\t\t20
+handleWidth:\t\t\t\t\t1
+*.color:\t\t\t\tgrey30
+*.colorTo:\t\t\t\tgrey5
+toolbar*.focused.color:\t\tgrey55
+window*.focus.color:\t\tgrey55
+*.textColor:\t\t\twhite
+*.picColor:\t\t\t\twhite
+toolbar*.unfocused.textColor:\tgrey55
+window*.unfocus.textColor:\t\tgrey55
+window*.unfocus.picColor:\t\tgrey55
+window.handle.focus.color:\t\twhite
+window.handle.focus.colorTo:\tgrey60
+*.pressed.color:\tgrey20
+*.pressed.colorTo:\tgrey40
+*.borderColor: grey60
+*.button.pressed: sunken gradient crossdiagonal
+toolbar:\t\t\tgradient vertical
+toolbar.clock:\t\tparentrelative
+toolbar.workspace:\tpixmap
+toolbar.iconbar.focused:\traised gradient vertical
+toolbar.iconbar.unfocused:\tsunken gradient vertical
+window.label.focus:\t\t\tgradient vertical
+window.label.unfocus:\t\tgradient vertical
+window.handle.focus:\t\traised gradient vertical
+menu.frame.color:\tblack
+";
+
+    /// Converts `style`, returning what each element gets, the theme
+    /// written, and the report.
+    fn convert(style: &str) -> (Vec<(ThemeElement, WidgetState, Cell)>, String, Report) {
+        let mut report = Report::default();
+        let mut file = StyleFile::new(Path::new("style"), style);
+        let cells = file.cells(&mut report);
+        file.report_unused(&mut report);
+        let theme = Layers::fitting(&cells).document().to_string();
+        (cells, theme, report)
+    }
+
+    /// Returns `cell`'s properties as a theme file's `[default]`.
+    fn as_default(cell: &Cell) -> String {
+        cell.iter()
+            .fold("[default]\n".to_owned(), |text, (property, value)| {
+                format!("{text}{} = {}\n", property.key(), value.text())
+            })
+    }
+
+    #[test]
+    fn the_theme_gives_every_element_in_every_state_what_the_style_does() {
+        let (cells, theme, _) = convert(STYLE);
+        let theme = Theme::resolve(&ThemeLayers::from_toml(&theme).expect("a valid theme"));
+        for (element, state, cell) in &cells {
+            let expected =
+                Theme::resolve(&ThemeLayers::from_toml(&as_default(cell)).expect("a valid cell"));
+            let (got, want) = (
+                theme.style(*element, *state),
+                expected.style(*element, *state),
+            );
+            for property in cell.keys() {
+                let matches = match property {
+                    Property::Texture => got.texture == want.texture,
+                    Property::Font => got.text.font == want.text.font,
+                    Property::TextEffect => got.text.effect == want.text.effect,
+                    Property::TextColor => got.text.color == want.text.color,
+                    Property::GlyphColor => got.glyph_color == want.glyph_color,
+                    Property::Justify => got.text.justify == want.text.justify,
+                    Property::Padding => got.padding == want.padding,
+                    Property::Border => got.border == want.border,
+                    Property::Height => got.height == want.height,
+                };
+                assert!(
+                    matches,
+                    "{} {} {}",
+                    element.path(),
+                    state.name(),
+                    property.key()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_style_reads_as_fluxbox_reads_it() {
+        let (cells, _, _) = convert(STYLE);
+        let value = |element, state, property| {
+            cells
+                .iter()
+                .find(|(known, known_state, _)| *known == element && *known_state == state)
+                .and_then(|(.., cell)| cell.get(&property))
+                .map(Written::text)
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            value(ThemeElement::Label, WidgetState::Focused, Property::Texture),
+            r#"{ gradient = "vertical", from = "grey55", to = "grey5" }"#,
+            "window*.focus.color beats *.color"
+        );
+        assert_eq!(
+            value(
+                ThemeElement::TaskbarClock,
+                WidgetState::Focused,
+                Property::Texture
+            ),
+            value(
+                ThemeElement::Taskbar,
+                WidgetState::Focused,
+                Property::Texture
+            ),
+            "parentrelative takes the taskbar's"
+        );
+        assert_eq!(
+            value(
+                ThemeElement::WindowListEntry,
+                WidgetState::Unfocused,
+                Property::TextColor
+            ),
+            r#""grey55""#
+        );
+        assert_eq!(
+            value(ThemeElement::Label, WidgetState::Focused, Property::Font),
+            r#"{ family = "dejavu sans", size = 8, weight = "bold" }"#
+        );
+    }
+
+    #[test]
+    fn a_pressed_taskbar_button_without_a_texture_reverses_the_buttons_bevel() {
+        let (cells, _, _) = convert("toolbar.button: raised gradient vertical\n");
+        let texture = |state| {
+            cells
+                .iter()
+                .find(|(element, known, _)| {
+                    *element == ThemeElement::TaskbarButton && *known == state
+                })
+                .and_then(|(.., cell)| cell.get(&Property::Texture))
+                .map(Written::text)
+                .unwrap_or_default()
+        };
+        assert!(texture(WidgetState::Focused).contains("raised"));
+        assert!(texture(WidgetState::Pressed).contains("sunken"));
+    }
+
+    #[test]
+    fn what_vaht_cannot_draw_or_use_is_reported() {
+        let (_, _, report) = convert(STYLE);
+        let notes = report.to_string();
+        assert!(
+            notes.contains("toolbar.workspace: a pixmap texture"),
+            "{notes}"
+        );
+        assert!(notes.contains("menu.frame.color: menus"), "{notes}");
+    }
+
+    #[rstest]
+    #[case::fluxbox("dejavu sans-8:bold", Some(("dejavu sans", 8, true, false)))]
+    #[case::italic("Sans-9.5:italic", Some(("Sans", 10, false, true)))]
+    #[case::no_size("monospace", Some(("monospace", 10, false, false)))]
+    #[case::pango("pango:DejaVu Sans Bold Italic 11", Some(("DejaVu Sans", 11, true, true)))]
+    #[case::pango_without_size("pango:Cantarell", Some(("Cantarell", 10, false, false)))]
+    #[case::x11_core("-misc-fixed-medium-r-normal--13-*", None)]
+    fn fonts_read_as_fluxbox_writes_them(
+        #[case] spec: &str,
+        #[case] expected: Option<(&str, u16, bool, bool)>,
+    ) {
+        let font = FluxboxFont::parse(spec)
+            .map(|font| (font.family, font.size, font.is_bold, font.is_italic));
+        assert_eq!(
+            font,
+            expected.map(|(family, size, bold, italic)| (family.to_owned(), size, bold, italic))
+        );
+    }
+}

@@ -5,6 +5,7 @@
 //! lent to whatever is being drawn. Text is drawn into a layer the size of its
 //! area, which clips it there, and the layer is then composited.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use cosmic_text::{
@@ -123,6 +124,8 @@ pub struct Typesetter {
     cache: SwashCache,
     /// The screen resolution that turns points into pixels.
     dots_per_inch: u16,
+    /// Family names as asked for, and as the font database knows them.
+    installed_families: HashMap<String, String>,
 }
 
 impl Typesetter {
@@ -152,6 +155,7 @@ impl Typesetter {
             font_system: FontSystem::new(),
             cache: SwashCache::new(),
             dots_per_inch,
+            installed_families: HashMap::new(),
         }
     }
 
@@ -244,6 +248,26 @@ impl Typesetter {
         );
     }
 
+    /// Returns the name the font database knows the family `requested` by,
+    /// matched in any letter case as fontconfig matches it: Fluxbox styles
+    /// write `dejavu sans` for `DejaVu Sans`. An unknown family is
+    /// returned as asked, and falls back as cosmic-text decides.
+    fn installed_family(&mut self, requested: &str) -> String {
+        if let Some(installed) = self.installed_families.get(requested) {
+            return installed.clone();
+        }
+        let installed = self
+            .font_system
+            .db()
+            .faces()
+            .flat_map(|face| face.families.iter())
+            .find(|(name, _)| name.eq_ignore_ascii_case(requested))
+            .map_or_else(|| requested.to_owned(), |(name, _)| name.clone());
+        self.installed_families
+            .insert(requested.to_owned(), installed.clone());
+        installed
+    }
+
     /// Returns `font`'s size in pixels at this resolution.
     fn pixel_size(&self, font: &Font) -> f32 {
         f32::from(font.size_points) * f32::from(self.dots_per_inch) / Self::POINTS_PER_INCH
@@ -263,8 +287,9 @@ impl Typesetter {
         } else {
             SlantStyle::Normal
         };
+        let family = self.installed_family(&font.family);
         let attributes = Attrs::new()
-            .family(Family::Name(&font.family))
+            .family(Family::Name(&family))
             .weight(weight)
             .style(slant);
         buffer.set_text(text, &attributes, Shaping::Advanced, None);
@@ -447,5 +472,27 @@ mod tests {
         let transparent = PremultipliedColorU8::from_rgba(0, 0, 0, 0).expect("valid");
         let blended = blend_over(transparent, cosmic_text::Color::rgba(255, 255, 255, 128));
         assert_eq!((blended.red(), blended.alpha()), (128, 128));
+    }
+
+    #[test]
+    fn a_family_is_found_in_any_letter_case() {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let Some(installed) = typesetter
+            .font_system
+            .db()
+            .faces()
+            .find_map(|face| face.families.first())
+            .map(|(name, _)| name.clone())
+        else {
+            return;
+        };
+        assert_eq!(
+            typesetter.installed_family(&installed.to_lowercase()),
+            installed
+        );
+        assert_eq!(
+            typesetter.installed_family("no such family"),
+            "no such family"
+        );
     }
 }
