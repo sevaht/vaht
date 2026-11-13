@@ -135,6 +135,25 @@ impl<'pixmap> Canvas<'pixmap> {
         }
     }
 
+    /// Returns the filled triangle of an arrow `glyph` in the square of
+    /// `side` at `left`, `top`: half as wide as tall, pointing its way.
+    /// `None` for a glyph that is no arrow.
+    fn arrow(glyph: Glyph, left: f32, top: f32, side: f32) -> Option<tiny_skia::Path> {
+        let (tip, base) = match glyph {
+            Glyph::ArrowLeft => (left + side / 4.0, left + side * 3.0 / 4.0),
+            Glyph::ArrowRight => (left + side * 3.0 / 4.0, left + side / 4.0),
+            Glyph::Close | Glyph::Maximize | Glyph::Minimize | Glyph::Shade | Glyph::Stick => {
+                return None;
+            }
+        };
+        let mut path = PathBuilder::new();
+        path.move_to(tip, top + side / 2.0);
+        path.line_to(base, top);
+        path.line_to(base, top + side);
+        path.close();
+        path.finish()
+    }
+
     /// Strokes `glyph` in `color`, centered in the largest square inside `rect`.
     fn draw_glyph(&mut self, glyph: Glyph, color: Color, rect: Rect) {
         let side = rect.width.min(rect.height);
@@ -151,6 +170,19 @@ impl<'pixmap> Canvas<'pixmap> {
             side as f32,
         );
         let (right, bottom) = (left + side, top + side);
+        if let Some(arrow) = Self::arrow(glyph, left, top, side) {
+            let mut paint = Paint::default();
+            paint.set_color(color.to_skia());
+            paint.anti_alias = true;
+            self.pixmap.fill_path(
+                &arrow,
+                &paint,
+                tiny_skia::FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
+            return;
+        }
         let mut path = PathBuilder::new();
         match glyph {
             Glyph::Close => {
@@ -183,6 +215,7 @@ impl<'pixmap> Canvas<'pixmap> {
                         .expect("a square of positive side"),
                 );
             }
+            Glyph::ArrowLeft | Glyph::ArrowRight => {}
         }
         if let Some(path) = path.finish() {
             let mut paint = Paint::default();

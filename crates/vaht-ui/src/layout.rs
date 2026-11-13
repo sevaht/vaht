@@ -6,7 +6,7 @@
 //! widget drawn on top is the one that is clicked.
 
 use crate::geometry::{Point, Rect};
-use crate::theme::ThemeElement;
+use crate::theme::{ThemeElement, WidgetState};
 use crate::widget::{Glyph, SizePolicy, Widget, WidgetKind};
 
 /// What a placed widget draws inside its rectangle.
@@ -33,6 +33,8 @@ pub struct Placed<Hit> {
     pub hit: Option<Hit>,
     /// Whether it is drawn pressed while held.
     pub is_button: bool,
+    /// The state it is drawn in, when not its panel's.
+    pub state: Option<WidgetState>,
 }
 
 /// A widget tree placed in an area.
@@ -138,6 +140,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
             content,
             hit: widget.hit,
             is_button: widget.is_button,
+            state: widget.state,
         });
         let (axis, children) = match &widget.kind {
             WidgetKind::Row(children) => (Axis::Horizontal, children),
@@ -153,8 +156,9 @@ impl<Hit: Copy> Placer<'_, Hit> {
     }
 
     /// Divides `area`'s main axis among `children`: fixed, fitted and
-    /// square children first, in order, then what remains among the fills
-    /// by weight. When there is not enough room, later children get less.
+    /// square children first, in order, then equal shares (each up to its
+    /// most) for the sharing ones, then what remains among the fills by
+    /// weight. When there is not enough room, later children get less.
     fn distribute(&mut self, axis: Axis, area: Rect, children: &[Widget<Hit>]) -> Vec<u32> {
         let available = axis.length(area);
         let mut remaining = available;
@@ -165,18 +169,37 @@ impl<Hit: Copy> Placer<'_, Hit> {
                     SizePolicy::Fixed(length) => length,
                     SizePolicy::Square => axis.thickness(area),
                     SizePolicy::Fit => self.natural_length(child, axis),
-                    SizePolicy::Fill { .. } => 0,
+                    SizePolicy::Share { .. } | SizePolicy::Fill { .. } => 0,
                 };
                 let granted = wanted.min(remaining);
                 remaining -= granted;
                 granted
             })
             .collect();
+        let sharing = children
+            .iter()
+            .filter(|child| matches!(child.size, SizePolicy::Share { .. }))
+            .count();
+        if let Some(each) = u32::try_from(sharing)
+            .ok()
+            .filter(|count| *count > 0)
+            .map(|count| remaining / count)
+        {
+            for (child, length) in children.iter().zip(&mut lengths) {
+                if let SizePolicy::Share { max } = child.size {
+                    *length = each.min(max);
+                    remaining -= *length;
+                }
+            }
+        }
         let total_weight: u32 = children
             .iter()
             .map(|child| match child.size {
                 SizePolicy::Fill { weight } => weight,
-                SizePolicy::Fixed(_) | SizePolicy::Fit | SizePolicy::Square => 0,
+                SizePolicy::Fixed(_)
+                | SizePolicy::Fit
+                | SizePolicy::Square
+                | SizePolicy::Share { .. } => 0,
             })
             .sum();
         if total_weight > 0 {
@@ -215,7 +238,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
                 .map(|child| match child.size {
                     SizePolicy::Fixed(length) => length,
                     SizePolicy::Fit => self.natural_length(child, axis),
-                    SizePolicy::Square | SizePolicy::Fill { .. } => 0,
+                    SizePolicy::Square | SizePolicy::Share { .. } | SizePolicy::Fill { .. } => 0,
                 })
                 .sum(),
             WidgetKind::Glyph(_) | WidgetKind::Fill => 0,
@@ -322,5 +345,25 @@ mod tests {
             None,
             "outside the panel"
         );
+    }
+
+    #[test]
+    fn sharing_children_split_the_room_equally_up_to_their_most() {
+        let entry = |max| Widget::fill(ThemeElement::Label).with_size(SizePolicy::Share { max });
+        let widths = |width, count| -> Vec<u32> {
+            let root: Widget<()> = Widget::row(ThemeElement::Titlebar, vec![entry(128); count]);
+            Layout::new(&root, Rect::new(0, 0, width, 20), &mut |_, _| 0)
+                .placed()
+                .iter()
+                .skip(1)
+                .map(|placed| placed.rect.width)
+                .collect()
+        };
+        assert_eq!(
+            widths(1000, 3),
+            [128, 128, 128],
+            "room to spare: each at its most"
+        );
+        assert_eq!(widths(300, 3), [100, 100, 100], "crowded: equal shares");
     }
 }

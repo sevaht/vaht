@@ -20,6 +20,9 @@ const PANEL_COLOR: [u8; 3] = [0xc0, 0x30, 0x30];
 /// A wallpaper's color.
 const WALLPAPER_COLOR: [u8; 3] = [0x30, 0xa0, 0x40];
 
+/// The built-in taskbar's height, in pixels; it runs along the bottom.
+const TASKBAR_HEIGHT: u32 = 20;
+
 /// A panel's height, in pixels.
 const PANEL_HEIGHT: u32 = 30;
 
@@ -65,7 +68,7 @@ fn a_wallpaper_is_below_windows_and_an_overlay_above_them() {
     client.open_windows(1);
     client.type_chord(&[keys::LEFT_SUPER, keys::UP]);
     let maximized = client.screenshot();
-    let bottom = maximized.height() - 1;
+    let bottom = maximized.height() - 1 - TASKBAR_HEIGHT;
     assert_eq!(
         maximized.rgb(maximized.width() / 2, bottom - BORDER_WIDTH - 1),
         WINDOW_COLOR,

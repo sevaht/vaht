@@ -7,7 +7,7 @@
 //! when the widget is clicked. A *button* also looks pressed while held; a
 //! plain hit region (a title to drag, say) never changes look.
 
-use crate::theme::ThemeElement;
+use crate::theme::{ThemeElement, WidgetState};
 
 /// One node of a panel's content.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +22,9 @@ pub struct Widget<Hit> {
     pub hit: Option<Hit>,
     /// Whether it is a button: drawn pressed while the pointer holds it.
     pub is_button: bool,
+    /// The state it is drawn in, when not its panel's: a focused window's
+    /// entry among unfocused ones.
+    pub state: Option<WidgetState>,
 }
 
 impl<Hit> Widget<Hit> {
@@ -80,6 +83,13 @@ impl<Hit> Widget<Hit> {
         self
     }
 
+    /// Returns the widget drawn in `state` rather than its panel's.
+    #[must_use]
+    pub const fn with_state(mut self, state: WidgetState) -> Self {
+        self.state = Some(state);
+        self
+    }
+
     /// Returns the widget as a button: it reports `hit` when clicked and is
     /// drawn pressed while held.
     #[must_use]
@@ -97,6 +107,7 @@ impl<Hit> Widget<Hit> {
             size,
             hit: None,
             is_button: false,
+            state: None,
         }
     }
 }
@@ -125,6 +136,13 @@ pub enum SizePolicy {
     Fit,
     /// As long as the parent's cross axis: a square in a row.
     Square,
+    /// An equal share, with the other sharing siblings, of the room the
+    /// fixed, fitted and square ones leave, but no more than `max` pixels:
+    /// a window list's entries.
+    Share {
+        /// The most room it takes.
+        max: u32,
+    },
     /// A share of the room the other children leave, by `weight`.
     Fill {
         /// This child's share relative to its fill siblings'.
@@ -145,4 +163,8 @@ pub enum Glyph {
     Shade,
     /// A dot: keep the window on every workspace.
     Stick,
+    /// A triangle pointing left: the previous one.
+    ArrowLeft,
+    /// A triangle pointing right: the next one.
+    ArrowRight,
 }

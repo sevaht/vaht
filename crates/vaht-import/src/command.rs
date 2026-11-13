@@ -9,6 +9,7 @@
 
 use toml_edit::{Array, InlineTable, Value};
 
+use crate::pattern::{self, ClientPattern};
 use crate::report::Reason;
 
 /// A command translated, and what it lost on the way.
@@ -222,10 +223,8 @@ impl FluxboxCommand<'_> {
                 other => losses.push((Reason::NotYetInVaht, format!("the {other} option"))),
             }
         }
-        let mut windows = InlineTable::new();
-        for criterion in Self::parenthesized(arguments) {
-            Self::add_criterion(&mut windows, criterion, &mut losses);
-        }
+        let (windows, lost) = ClientPattern::new(arguments).matcher();
+        losses.extend(lost);
         if windows.is_empty() {
             return Translated {
                 value: Value::from(action),
@@ -241,88 +240,9 @@ impl FluxboxCommand<'_> {
         }
     }
 
-    /// Adds a Fluxbox pattern criterion (`workspace=[current]`) to the
-    /// matcher `windows`, or notes it lost.
-    fn add_criterion(
-        windows: &mut InlineTable,
-        criterion: &str,
-        losses: &mut Vec<(Reason, String)>,
-    ) {
-        let Some((key, value)) = criterion.split_once('=') else {
-            losses.push((Reason::NotYetInVaht, format!("the pattern ({criterion})")));
-            return;
-        };
-        let (key, is_negated) = key
-            .strip_suffix('!')
-            .map_or((key, false), |key| (key, true));
-        let value = value.trim();
-        let matched = match (key.trim().to_ascii_lowercase().as_str(), value) {
-            ("workspace", "[current]") => Some(("workspace", Value::from("current"))),
-            ("class", text) => Some(("app_id", Self::pattern(text))),
-            ("title", text) => Some(("title", Self::pattern(text))),
-            ("minimized", "yes") => Some(("minimized", Value::from(true))),
-            ("minimized", "no") => Some(("minimized", Value::from(false))),
-            _ => None,
-        };
-        match (matched, is_negated) {
-            (Some((key, value)), false) => {
-                windows.insert(key, value);
-            }
-            (Some((key, value)), true) => {
-                let mut excluded = InlineTable::new();
-                excluded.insert(key, value);
-                windows.insert("not", Value::InlineTable(excluded));
-            }
-            (None, _) => losses.push((Reason::NotYetInVaht, format!("the pattern ({criterion})"))),
-        }
-    }
-
-    /// Returns a Fluxbox pattern value as a vaht text pattern: exact if it
-    /// has no regular expression syntax, otherwise `{ regex = .. }`, since
-    /// Fluxbox patterns are regular expressions.
-    fn pattern(text: &str) -> Value {
-        let is_plain = text
-            .chars()
-            .all(|character| character.is_alphanumeric() || "-_ ".contains(character));
-        if is_plain {
-            Value::from(text)
-        } else {
-            let mut regex = InlineTable::new();
-            regex.insert("regex", Value::from(text));
-            Value::InlineTable(regex)
-        }
-    }
-
     /// Returns the contents of the top-level `{...}` groups in `text`.
     fn braced(text: &str) -> Vec<&str> {
-        Self::groups(text, '{', '}')
-    }
-
-    /// Returns the contents of the top-level `(...)` groups in `text`.
-    fn parenthesized(text: &str) -> Vec<&str> {
-        Self::groups(text, '(', ')')
-    }
-
-    /// Returns the contents of the top-level groups `open`...`close` in
-    /// `text`, nested groups included in their parent's contents.
-    fn groups(text: &str, open: char, close: char) -> Vec<&str> {
-        let mut groups = Vec::new();
-        let mut depth = 0_usize;
-        let mut start = 0;
-        for (index, character) in text.char_indices() {
-            if character == open {
-                if depth == 0 {
-                    start = index + character.len_utf8();
-                }
-                depth += 1;
-            } else if character == close && depth > 0 {
-                depth -= 1;
-                if depth == 0 {
-                    groups.push(text[start..index].trim());
-                }
-            }
-        }
-        groups
+        pattern::groups(text, '{', '}')
     }
 }
 

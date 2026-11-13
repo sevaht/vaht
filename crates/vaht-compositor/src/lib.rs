@@ -29,6 +29,7 @@ pub mod resources;
 mod scene;
 mod shared_memory;
 mod signals;
+mod taskbar;
 mod toplevels;
 mod window_manager;
 

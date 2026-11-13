@@ -6,10 +6,13 @@
 //! Sections for features vaht does not have yet are not accepted, so a
 //! setting never silently does nothing.
 
+mod taskbar;
+
 use std::time::Duration;
 
 use smithay::utils::{Logical, Point, Size};
 
+pub(crate) use self::taskbar::{TaskbarEdge, TaskbarSettings, TaskbarWidget};
 use crate::window_manager::{
     ColumnDirection, PlacementStrategy, Room, RowDirection, TitlebarButton, TitlebarLayout,
 };
@@ -28,6 +31,8 @@ pub(crate) struct Settings {
     pub(crate) windows: WindowSettings,
     /// The workspaces.
     pub(crate) workspaces: WorkspaceSettings,
+    /// The taskbar.
+    pub(crate) taskbar: TaskbarSettings,
     /// Starting the session.
     pub(crate) session: SessionSettings,
 }
@@ -247,7 +252,7 @@ mod tests {
 
     #[test]
     fn settings_for_features_vaht_lacks_are_refused() {
-        let error = toml::from_str::<Settings>("[taskbar]\nrows = 2\n").expect_err("no taskbar");
+        let error = toml::from_str::<Settings>("[taskbar]\nrows = 2\n").expect_err("no rows");
         assert!(error.message().contains("unknown field"), "{error}");
     }
 }

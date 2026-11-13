@@ -43,6 +43,10 @@
 "ScrollUp" = "workspace previous"
 "ScrollDown" = "workspace next"
 
+[mouse.taskbar]
+"ScrollUp" = "workspace previous"
+"ScrollDown" = "workspace next"
+
 [mouse.window]
 "Alt+Left" = ["raise", "focus", "start-moving"]
 "Alt+Right" = ["raise", "focus", "start-resizing nearest-corner"]

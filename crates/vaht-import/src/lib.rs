@@ -15,6 +15,7 @@
 mod apps;
 mod command;
 mod keys;
+mod pattern;
 mod report;
 mod resources;
 mod settings;

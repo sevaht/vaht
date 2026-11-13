@@ -110,6 +110,16 @@ impl WindowManager {
         self.focus.focused()
     }
 
+    /// Returns the workspace shown.
+    pub(crate) const fn current_workspace(&self) -> Workspace {
+        self.workspaces.current()
+    }
+
+    /// Returns the name of the workspace shown.
+    pub(crate) fn current_workspace_name(&self) -> &str {
+        self.workspaces.name(self.workspaces.current())
+    }
+
     /// Returns the window with `id`, if it still exists.
     pub(crate) fn window(&self, id: WindowId) -> Option<&Window> {
         self.windows.get(id)
@@ -240,6 +250,23 @@ impl WindowManager {
         }
         self.raise(window);
         self.focus(Some(window));
+    }
+
+    /// Minimizes `window` if it has focus and is shown, as clicking the
+    /// focused window's taskbar entry does; otherwise brings it into view
+    /// and gives it focus.
+    pub(crate) fn activate_or_minimize(&mut self, window: WindowId) {
+        let current = self.workspaces.current();
+        let is_in_front = self.focused() == Some(window)
+            && self
+                .windows
+                .get(window)
+                .is_some_and(|target| target.is_shown_on(current));
+        if is_in_front {
+            self.minimize(Some(window));
+        } else {
+            self.activate(window);
+        }
     }
 
     /// Moves `window` above all others.
@@ -940,6 +967,20 @@ mod tests {
             Point::from((desk.outer(first).size.w, 0)),
             "the row strategy puts it right of the first"
         );
+    }
+
+    #[test]
+    fn a_taskbar_click_brings_a_window_forward_or_minimizes_the_focused_one() {
+        let mut desk = Desk::new();
+        let behind = desk.open();
+        let front = desk.open();
+        desk.manager.activate_or_minimize(front);
+        assert!(desk.window(front).state().is_minimized, "it had focus");
+        assert_eq!(desk.manager.focused(), Some(behind));
+        desk.manager.activate_or_minimize(front);
+        assert!(!desk.window(front).state().is_minimized);
+        assert_eq!(desk.manager.focused(), Some(front));
+        assert_eq!(desk.shown().first(), Some(&front), "and raised");
     }
 
     #[test]

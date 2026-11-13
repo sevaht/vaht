@@ -70,6 +70,20 @@ impl Resources {
             .find(|resource| resource.name == name)
     }
 
+    /// Marks `name` used if its value is `default`, as when it asks for
+    /// what vaht does anyway; otherwise it stays to be reported.
+    pub(crate) fn accept_default(&mut self, name: &str, default: &str) {
+        let is_default = self
+            .entries
+            .iter()
+            .rev()
+            .find(|resource| resource.name == name)
+            .is_some_and(|resource| resource.value.eq_ignore_ascii_case(default));
+        if is_default {
+            self.used.insert(name.to_owned());
+        }
+    }
+
     /// Returns `name`'s value, if it is set.
     pub(crate) fn value(&mut self, name: &str) -> Option<&str> {
         self.get(name).map(|resource| resource.value.as_str())

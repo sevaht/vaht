@@ -22,6 +22,9 @@ use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 /// The layers drawn above the windows, topmost first.
 pub(crate) const ABOVE_WINDOWS: [Layer; 2] = [Layer::Overlay, Layer::Top];
 
+/// The layers drawn above a fullscreen window, which covers the rest.
+pub(crate) const ABOVE_FULLSCREEN: [Layer; 1] = [Layer::Overlay];
+
 /// The layers drawn below the windows, topmost first.
 pub(crate) const BELOW_WINDOWS: [Layer; 2] = [Layer::Bottom, Layer::Background];
 
@@ -138,13 +141,13 @@ impl<'output> OutputLayers<'output> {
     /// its origin in global coordinates.
     pub(crate) fn surface_under(
         self,
-        layers: [Layer; 2],
+        layers: &[Layer],
         point: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
         let map = layer_map_for_output(self.output);
         let local = point - self.whole.loc.to_f64();
-        layers.into_iter().find_map(|layer| {
-            let surface = map.layer_under(layer, local)?;
+        layers.iter().find_map(|layer| {
+            let surface = map.layer_under(*layer, local)?;
             let geometry = map.layer_geometry(surface)?;
             let (under, offset) =
                 surface.surface_under(local - geometry.loc.to_f64(), WindowSurfaceType::ALL)?;
@@ -198,13 +201,13 @@ impl<'output> OutputLayers<'output> {
     /// and its origin in global coordinates.
     pub(crate) fn each(
         self,
-        layers: [Layer; 2],
+        layers: &[Layer],
         mut visit: impl FnMut(&LayerSurface, Point<i32, Logical>),
     ) {
         let map: MutexGuard<'_, LayerMap> = layer_map_for_output(self.output);
         for layer in layers {
             // The map lists each layer's surfaces bottom first.
-            let surfaces: Vec<&LayerSurface> = map.layers_on(layer).collect();
+            let surfaces: Vec<&LayerSurface> = map.layers_on(*layer).collect();
             for surface in surfaces.into_iter().rev() {
                 if let Some(geometry) = map.layer_geometry(surface) {
                     visit(surface, geometry.loc + self.whole.loc);

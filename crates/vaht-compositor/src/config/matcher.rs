@@ -38,6 +38,15 @@ pub(crate) struct WindowMatcher {
 }
 
 impl WindowMatcher {
+    /// Returns the matcher of the windows on the workspace shown (sticky
+    /// ones included).
+    pub(crate) fn on_current_workspace() -> Self {
+        Self {
+            workspace: Some(WorkspaceSelector::Current),
+            ..Self::default()
+        }
+    }
+
     /// Returns whether `window` matches while `current` is the workspace
     /// shown.
     pub(crate) fn matches(&self, window: &Window, current: Workspace) -> bool {

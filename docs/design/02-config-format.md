@@ -184,6 +184,16 @@ rest by name, so a setting never silently does nothing:
 - `[session]`: `autostart`.
 - `theme`: the name of a theme in `themes/` (§10); without it, the built-in
   theme.
+- `[taskbar]`: `enabled`, `edge` (`top` or `bottom`), `reserve_space`,
+  `widgets` (`workspace-previous`, `workspace-name`, `workspace-next`,
+  `window-list`, `clock`; `tray` is refused until it exists),
+  `[taskbar.window_list]` with `show` (a matcher) and
+  `entry_width = { max }`, and `[taskbar.clock]` with `format`, checked
+  when read. The taskbar spans the output; clicking an arrow shows the
+  workspace before or after, clicking an entry brings its window forward
+  or, if it has focus, minimizes it, and the `taskbar` and
+  `window-list-entry` mouse bindings take every other press. A fullscreen
+  window covers it.
 
 A window is placed when its client first commits a size, so the smart
 strategies know how large it is.
@@ -748,6 +758,10 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
   `FluxboxCommand`. A sequence loses the parts vaht drops on purpose
   (`ActivateTab`), but a part vaht lacks for now leaves the whole binding
   out.
+- **The toolbar converts to `[taskbar]`:** its placement, tools, `maxOver`,
+  `strftimeFormat`, `iconbar.mode` (a client pattern) and
+  `iconbar.iconWidth`; settings that already ask for what vaht does are
+  accepted silently.
 - **How a style converts.** Each vaht element in each state gets what
   Fluxbox would give the resources behind it, looked up as Xlib's resource
   manager does (wildcards, tight before loose bindings) and through

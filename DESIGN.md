@@ -75,7 +75,8 @@ RUST.md §4). The compositor crate has two halves:
   object, the only code that speaks the protocol to a window),
   `FrameTextures` (frame pixels as the renderer takes them), `Layers`,
   `Input` (key filtering, button presses, double clicks, repeat and
-  auto-raise timers),
+  auto-raise timers), the `Taskbar` (a panel whose content it reads from
+  the window manager and the clock as frames are prepared),
   the backend and the protocol states. It routes events and carries out
   the window manager's decisions; it decides nothing about windows.
 
@@ -141,6 +142,9 @@ configures for windows or sets keyboard focus.
   `Compositor::release_dead_client_resources` prunes Smithay's capture session
   list and the renderers' caches, and schedules a frame: a gone client's last
   buffers are let go when that frame is drawn.
+- When the topmost window shown is fullscreen, the `Scene` draws and
+  hit-tests neither the top layer nor the taskbar: the window covers them,
+  and only the overlay layer is above it (01 §9).
 - Drawing and hit-testing go through `Scene`, which shows only the windows
   of the current workspace (not minimized), without frames when
   fullscreen and without content when shaded, between the layer surfaces:

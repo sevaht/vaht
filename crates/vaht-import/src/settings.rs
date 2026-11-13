@@ -9,6 +9,7 @@
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 use vaht_compositor::Config;
 
+use crate::pattern::ClientPattern;
 use crate::report::{Reason, Report};
 use crate::resources::Resources;
 
@@ -71,6 +72,7 @@ impl InitFile {
         self.convert_placement(report);
         self.convert_windows(report);
         self.convert_workspaces();
+        self.convert_taskbar(report);
         self.report_unused(report);
         self.document
     }
@@ -220,6 +222,133 @@ impl InitFile {
         self.set(&["workspaces", "names"], Value::Array(names));
     }
 
+    /// The `[taskbar]` section, from the toolbar's and iconbar's resources.
+    fn convert_taskbar(&mut self, report: &mut Report) {
+        let toolbar = |name: &str| format!("{SCREEN}toolbar.{name}");
+        self.convert_flag("toolbar.visible", &["taskbar", "enabled"]);
+        if let Some(placement) = self.resources.get(&toolbar("placement")).cloned() {
+            let value = placement.value.to_ascii_lowercase();
+            let edge = ["top", "bottom"]
+                .into_iter()
+                .find(|edge| value.starts_with(edge));
+            match edge {
+                Some(edge) => {
+                    self.set(&["taskbar", "edge"], Value::from(edge));
+                    if !value.ends_with("center") {
+                        self.note(
+                            report,
+                            placement.line,
+                            format!("a taskbar placed {}", placement.value),
+                        );
+                    }
+                }
+                None => self.note(
+                    report,
+                    placement.line,
+                    format!("a taskbar along the {} side", placement.value),
+                ),
+            }
+        }
+        if let Some(covers) = self.resources.value(&toolbar("maxOver")) {
+            let reserves = !covers.eq_ignore_ascii_case("true");
+            self.set(&["taskbar", "reserve_space"], Value::from(reserves));
+        }
+        if let Some(tools) = self.resources.get(&toolbar("tools")).cloned() {
+            let mut widgets = Array::new();
+            for tool in tools
+                .value
+                .split(',')
+                .map(str::trim)
+                .filter(|tool| !tool.is_empty())
+            {
+                let widget = match tool.to_ascii_lowercase().as_str() {
+                    "prevworkspace" => Some("workspace-previous"),
+                    "workspacename" => Some("workspace-name"),
+                    "nextworkspace" => Some("workspace-next"),
+                    "iconbar" => Some("window-list"),
+                    "clock" => Some("clock"),
+                    _ => None,
+                };
+                match widget {
+                    Some(widget) => widgets.push(widget),
+                    None => self.note(report, tools.line, format!("the toolbar tool {tool}")),
+                }
+            }
+            self.set(&["taskbar", "widgets"], Value::Array(widgets));
+        }
+        self.convert_clock(report);
+        self.convert_window_list(report);
+        for (name, default) in [
+            ("widthPercent", "100"),
+            ("height", "0"),
+            ("onhead", "1"),
+            ("autoHide", "false"),
+            ("autoRaise", "false"),
+            ("layer", "Dock"),
+        ] {
+            self.resources.accept_default(&toolbar(name), default);
+        }
+    }
+
+    /// The clock's format, from `strftimeFormat`, if vaht reads it.
+    fn convert_clock(&mut self, report: &mut Report) {
+        let Some(format) = self
+            .resources
+            .get(&format!("{SCREEN}strftimeFormat"))
+            .cloned()
+        else {
+            return;
+        };
+        let sample = jiff::civil::date(2026, 1, 1)
+            .at(12, 0, 0, 0)
+            .to_zoned(jiff::tz::TimeZone::UTC);
+        let is_readable =
+            sample.is_ok_and(|sample| jiff::fmt::strtime::format(&format.value, &sample).is_ok());
+        if is_readable {
+            self.set(&["taskbar", "clock", "format"], Value::from(format.value));
+        } else {
+            report.note(
+                self.resources.path(),
+                format.line,
+                Reason::Unreadable,
+                format!("the clock format {}", format.value),
+            );
+        }
+    }
+
+    /// The window list, from the iconbar's mode and width.
+    fn convert_window_list(&mut self, report: &mut Report) {
+        if let Some(mode) = self
+            .resources
+            .get(&format!("{SCREEN}iconbar.mode"))
+            .cloned()
+        {
+            let (matcher, losses) = ClientPattern::new(&mode.value).matcher();
+            for (reason, lost) in losses {
+                report.note(self.resources.path(), mode.line, reason, lost);
+            }
+            self.set(
+                &["taskbar", "window_list", "show"],
+                Value::InlineTable(matcher),
+            );
+        }
+        if let Some(width) = self.number(&format!("{SCREEN}iconbar.iconWidth")) {
+            let mut entry_width = toml_edit::InlineTable::new();
+            entry_width.insert("max", Value::from(width));
+            self.set(
+                &["taskbar", "window_list", "entry_width"],
+                Value::InlineTable(entry_width),
+            );
+        }
+        self.resources
+            .accept_default(&format!("{SCREEN}iconbar.alignment"), "Relative");
+    }
+
+    /// Notes that what `init` says on line `line` is not in vaht yet.
+    fn note(&self, report: &mut Report, line: usize, what: String) {
+        report.note(self.resources.path(), line, Reason::NotYetInVaht, what);
+    }
+
     /// Converts a `true`/`false` screen resource to the setting at `path`.
     fn convert_flag(&mut self, resource: &str, path: &[&str]) {
         if let Some(value) = self.resources.value(&format!("{SCREEN}{resource}")) {
@@ -319,7 +448,7 @@ session.screen0.workspaceNames:\tWorkspace 1,Workspace 2,Workspace 3,Workspace 4
 session.screen0.edgeSnapThreshold:\t10
 session.screen0.tabs.usePixmap:\ttrue
 session.screen0.toolbar.alpha:\t255
-session.screen0.toolbar.widthPercent:\t100
+session.screen0.toolbar.widthPercent:\t80
 ";
         let mut report = Report::default();
         let document =
@@ -340,7 +469,37 @@ session.screen0.toolbar.widthPercent:\t100
                 (7, Reason::Dropped),
                 (8, Reason::Dropped),
                 (9, Reason::NotYetInVaht)
-            ]
+            ],
+            "a width other than the default is not in vaht yet"
+        );
+    }
+
+    #[test]
+    fn the_toolbar_becomes_the_taskbar() {
+        let init = "session.screen0.toolbar.placement:\tTopCenter
+session.screen0.toolbar.tools:\tprevworkspace, iconbar, systemtray, clock
+session.screen0.toolbar.maxOver:\ttrue
+session.screen0.strftimeFormat:\t%H:%M:%S
+session.screen0.iconbar.mode:\t{static groups} (workspace) (minimized=no)
+session.screen0.iconbar.iconWidth:\t200
+session.screen0.toolbar.widthPercent:\t100
+";
+        let mut report = Report::default();
+        let document =
+            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        assert_eq!(
+            document.to_string(),
+            "[taskbar]\nedge = \"top\"\nreserve_space = false\n\
+             widgets = [\"workspace-previous\", \"window-list\", \"clock\"]\n\n\
+             [taskbar.clock]\nformat = \"%H:%M:%S\"\n\n\
+             [taskbar.window_list]\nshow = { workspace = \"current\", minimized = false }\n\
+             entry_width = { max = 200 }\n"
+        );
+        let notes: Vec<String> = report.notes().iter().map(ToString::to_string).collect();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(
+            notes[0].contains("the toolbar tool systemtray"),
+            "{notes:?}"
         );
     }
 }

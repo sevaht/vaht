@@ -36,6 +36,25 @@ titlebar_right = ["minimize", "maximize", "close"]
 [workspaces]
 names = ["Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4"]
 
+[taskbar]
+enabled = true
+edge = "bottom"                     # or top
+# Whether maximized and tiled windows leave the taskbar uncovered.
+reserve_space = true
+# Left to right: workspace-previous, workspace-name, workspace-next,
+# window-list and clock.
+widgets = ["workspace-previous", "workspace-name", "workspace-next", "window-list", "clock"]
+
+[taskbar.window_list]
+# Which windows have an entry: a window matcher, as bindings take one.
+show = { workspace = "current" }
+# Entries share the list equally, each at most this wide, in pixels.
+entry_width = { max = 128 }
+
+[taskbar.clock]
+# strftime: %k:%M is the hour, space-padded, and the minutes.
+format = "%k:%M"
+
 [session]
 # Command lines run once when vaht starts, as exec runs them.
 autostart = []

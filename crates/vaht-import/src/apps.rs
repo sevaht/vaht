@@ -8,6 +8,7 @@ use std::path::Path;
 
 use toml_edit::{ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 
+use crate::pattern::{self, ClientPattern};
 use crate::report::{Reason, Report};
 
 /// A Fluxbox `apps` file being converted.
@@ -129,28 +130,10 @@ impl<'text> AppsFile<'text> {
 
     /// Opens a block for `[app] patterns` on line `line`.
     fn open(self, line: usize, patterns: &str, report: &mut Report) -> Block {
-        let mut matcher = InlineTable::new();
-        let mut is_unmatchable = false;
-        for pattern in Self::groups(patterns, '(', ')') {
-            let converted = pattern.split_once('=').and_then(|(key, value)| {
-                let key = match key.trim().to_ascii_lowercase().as_str() {
-                    "class" => "app_id",
-                    "title" => "title",
-                    _ => return None,
-                };
-                Some((key, value.trim()))
-            });
-            if let Some((key, value)) = converted {
-                matcher.insert(key, Value::from(value));
-            } else {
-                report.note(
-                    self.path,
-                    line,
-                    Reason::NotYetInVaht,
-                    format!("the pattern ({pattern})"),
-                );
-                is_unmatchable = true;
-            }
+        let (matcher, losses) = ClientPattern::new(patterns).matcher();
+        let is_unmatchable = !losses.is_empty();
+        for (reason, lost) in losses {
+            report.note(self.path, line, reason, lost);
         }
         Block {
             line,
@@ -163,11 +146,11 @@ impl<'text> AppsFile<'text> {
     /// Converts `setting` into `block`'s rule, or notes it.
     fn setting(self, block: &mut Block, setting: Setting<'_>, report: &mut Report) {
         let Setting { line, name, rest } = setting;
-        let value = Self::groups(rest, '{', '}')
+        let value = pattern::groups(rest, '{', '}')
             .first()
             .copied()
             .unwrap_or_default();
-        let argument = Self::groups(rest, '(', ')')
+        let argument = pattern::groups(rest, '(', ')')
             .first()
             .copied()
             .unwrap_or_default();
@@ -287,22 +270,6 @@ impl<'text> AppsFile<'text> {
             (Some(Ok(x)), Some(Ok(y)), None) => Some((x, y)),
             _ => None,
         }
-    }
-
-    /// Returns the contents of the top-level `open`...`close` groups.
-    fn groups(text: &str, open: char, close: char) -> Vec<&str> {
-        let mut groups = Vec::new();
-        let mut start = None;
-        for (index, character) in text.char_indices() {
-            if character == open && start.is_none() {
-                start = Some(index + character.len_utf8());
-            } else if character == close
-                && let Some(first) = start.take()
-            {
-                groups.push(text[first..index].trim());
-            }
-        }
-        groups
     }
 }
 

@@ -27,6 +27,7 @@ use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use jiff::Zoned;
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, ButtonState, Event, InputBackend, InputEvent, InputTime, KeyState,
     KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
@@ -56,6 +57,7 @@ use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::{
     Action, Command, Config, ConfigSource, FocusModel, KeyChord, Modifiers, ResizeFrom,
+    WindowManagerAction,
 };
 use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
@@ -67,9 +69,11 @@ use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::{FrameTextures, PointerTarget, Scene, WindowTarget};
 use crate::signals::ProcessSignals;
+use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::window_manager::{
     ClientRequest, FramePart, OutputArea, Window, WindowDrag, WindowId, WindowManager,
+    WorkspaceTarget,
 };
 
 /// The running compositor.
@@ -94,6 +98,8 @@ pub struct Compositor {
     pub(crate) popups: PopupManager,
     /// The mapped layer surfaces.
     pub(crate) layers: Layers,
+    /// The taskbar, if the settings want one.
+    pub(crate) taskbar: Option<Taskbar>,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
     /// Draws screenshots for capture clients.
@@ -231,6 +237,7 @@ impl Compositor {
             frame_textures: FrameTextures::default(),
             popups: PopupManager::default(),
             layers: Layers::default(),
+            taskbar: Taskbar::new(&config.settings.taskbar),
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
             physical_keymap,
@@ -250,6 +257,7 @@ impl Compositor {
         compositor
             .config_source
             .watch(&compositor.loop_handle, &compositor.ledger);
+        compositor.schedule_clock();
         for command_line in &compositor.config.settings.session.autostart {
             compositor.launcher.run(command_line);
         }
@@ -262,6 +270,7 @@ impl Compositor {
             &self.window_manager,
             &self.toplevels,
             &self.frame_textures,
+            self.taskbar.as_ref(),
             self.output_layers(),
         )
     }
@@ -283,10 +292,17 @@ impl Compositor {
         match self.config_source.load() {
             Ok(config) => {
                 self.window_manager.apply_settings(&config.settings);
+                if config.settings.taskbar != self.config.settings.taskbar {
+                    self.taskbar = Taskbar::new(&config.settings.taskbar);
+                }
                 if config.theme != self.config.theme {
                     self.window_manager.restyle(config.theme.metrics());
+                    if let Some(taskbar) = &mut self.taskbar {
+                        taskbar.invalidate();
+                    }
                 }
                 self.config = config;
+                self.schedule_clock();
                 tracing::info!(
                     directory = %self.config_source.directory().display(),
                     "configuration reloaded"
@@ -314,6 +330,7 @@ impl Compositor {
             &self.window_manager,
             &self.toplevels,
             &self.frame_textures,
+            self.taskbar.as_ref(),
             OutputLayers::new(&output, self.backend.output_geometry()),
         );
         if let Err(error) = self.backend.render(&scene) {
@@ -339,6 +356,16 @@ impl Compositor {
             .paint_frames(&self.config.theme, &mut self.typesetter);
         self.frame_textures
             .update(&self.window_manager, &self.config.theme, &self.ledger);
+        if let Some(taskbar) = &mut self.taskbar {
+            let now = Zoned::now();
+            let view = TaskbarView {
+                window_manager: &self.window_manager,
+                settings: &self.config.settings.taskbar,
+                whole: self.backend.output_geometry(),
+                now: &now,
+            };
+            taskbar.prepare(view, &self.config.theme, &mut self.typesetter);
+        }
     }
 
     /// Starts managing the window of a new xdg-shell toplevel.
@@ -577,10 +604,46 @@ impl Compositor {
     /// Returns the parts of the output windows can be placed in: all of
     /// it, and what panels leave free.
     fn output_area(&self) -> OutputArea {
+        let whole = self.backend.output_geometry();
+        let usable = self.output_layers().usable_area();
         OutputArea {
-            whole: self.backend.output_geometry(),
-            usable: self.output_layers().usable_area(),
+            whole,
+            usable: self.taskbar.as_ref().map_or(usable, |taskbar| {
+                taskbar.reserve(usable, whole, self.config.theme.metrics().taskbar_height)
+            }),
         }
+    }
+
+    /// Wakes vaht when the taskbar's clock next changes, if it shows one.
+    fn schedule_clock(&mut self) {
+        if let Some(taskbar) = &mut self.taskbar {
+            taskbar.schedule_clock(&Zoned::now(), (&self.loop_handle, &self.ledger));
+        }
+    }
+
+    /// Lets go of a held taskbar button with the pointer at `location`,
+    /// doing what clicking it means if the pointer is still on it.
+    fn release_taskbar_button(&mut self, location: Point<f64, Logical>) {
+        let Some(clicked) = self
+            .taskbar
+            .as_mut()
+            .and_then(|taskbar| taskbar.release(location))
+        else {
+            return;
+        };
+        tracing::debug!(?clicked, "taskbar button clicked");
+        match clicked {
+            TaskbarHit::WorkspacePrevious => self.window_manager.run(
+                &WindowManagerAction::Workspace(WorkspaceTarget::Previous),
+                None,
+            ),
+            TaskbarHit::WorkspaceNext => self
+                .window_manager
+                .run(&WindowManagerAction::Workspace(WorkspaceTarget::Next), None),
+            TaskbarHit::Entry(window) => self.window_manager.activate_or_minimize(window),
+            TaskbarHit::WorkspaceName | TaskbarHit::Clock => {}
+        }
+        self.schedule_render();
     }
 
     /// Returns where the pointer is.
@@ -911,7 +974,10 @@ impl Compositor {
                 self.press_button(event.button_code(), location, serial);
             }
             ButtonState::Pressed => {}
-            ButtonState::Released => self.window_manager.release_titlebar_button(location),
+            ButtonState::Released => {
+                self.window_manager.release_titlebar_button(location);
+                self.release_taskbar_button(location);
+            }
         }
         // A client clicked has keyboard focus by the time it hears of it.
         self.settle();
@@ -955,6 +1021,7 @@ impl Compositor {
                 self.layers.click(&surface);
                 return;
             }
+            PressOutcome::ClickTaskbar { window, then } => (window, then),
             PressOutcome::Click {
                 window,
                 raises,
@@ -978,6 +1045,12 @@ impl Compositor {
         match then {
             AfterClick::HoldTitlebarButton(pressed) => {
                 self.window_manager.press_titlebar_button(pressed, location);
+            }
+            AfterClick::HoldTaskbarButton => {
+                if let Some(taskbar) = &mut self.taskbar {
+                    taskbar.press(location);
+                }
+                self.schedule_render();
             }
             AfterClick::RunBinding { press, drag } => {
                 if let Some(command) = press {
@@ -1034,7 +1107,7 @@ impl Compositor {
         else {
             return false;
         };
-        let window = target.as_ref().and_then(PointerTarget::window);
+        let window = target.as_ref().and_then(PointerTarget::binding_window);
         self.execute(&command, &mut ExecutionContext::for_window(window));
         true
     }

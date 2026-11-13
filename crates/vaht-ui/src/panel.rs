@@ -149,7 +149,7 @@ impl<Content: PanelContent> Panel<Content> {
                 if placed.is_button && placed.hit.is_some() && placed.hit == pressed {
                     WidgetState::Pressed
                 } else {
-                    base
+                    placed.state.unwrap_or(base)
                 }
             });
         }
@@ -318,5 +318,48 @@ mod tests {
             .collect();
         assert!(colors.contains(&(255, 255, 255)), "white letters");
         assert!(colors.iter().any(|&(red, _, _)| red < 20), "a black halo");
+    }
+
+    /// Two fills side by side, the right one drawn unfocused in a focused
+    /// panel.
+    struct Entries;
+
+    impl PanelContent for Entries {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            Widget::row(
+                ThemeElement::Taskbar,
+                vec![
+                    Widget::fill(ThemeElement::WindowListEntry),
+                    Widget::fill(ThemeElement::WindowListEntry).with_state(WidgetState::Unfocused),
+                ],
+            )
+        }
+
+        fn state(&self) -> WidgetState {
+            WidgetState::Focused
+        }
+    }
+
+    #[test]
+    fn a_widget_may_be_drawn_in_a_state_of_its_own() {
+        let layers = crate::theme::ThemeLayers::from_toml(
+            "[state.focused]\ntexture = { solid = \"red\" }\n\
+             [state.unfocused]\ntexture = { solid = \"blue\" }\n",
+        )
+        .expect("a valid theme");
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(Entries, Size::new(100, 10));
+        assert!(panel.paint(&Theme::resolve(&layers), &mut typesetter));
+        let color = |x| {
+            let pixel = panel
+                .pixels()
+                .and_then(|pixels| pixels.pixel(x, 5))
+                .expect("inside the panel");
+            (pixel.red(), pixel.green(), pixel.blue())
+        };
+        assert_eq!(color(25), (255, 0, 0));
+        assert_eq!(color(75), (0, 0, 255));
     }
 }

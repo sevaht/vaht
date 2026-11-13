@@ -103,6 +103,11 @@ impl Workspaces {
         self.names.len()
     }
 
+    /// Returns the name of `workspace`; empty if it does not exist.
+    pub(crate) fn name(&self, workspace: Workspace) -> &str {
+        self.names.get(workspace.0).map_or("", String::as_str)
+    }
+
     /// Returns whether `workspace` exists.
     pub(crate) const fn contains(&self, workspace: Workspace) -> bool {
         workspace.0 < self.count()

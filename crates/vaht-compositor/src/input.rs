@@ -25,6 +25,7 @@ use crate::event_source::{RepeatingTimer, Timer};
 use crate::execution::ExecutionContext;
 use crate::resources::ResourceLedger;
 use crate::scene::{PointerTarget, WindowTarget};
+use crate::taskbar::TaskbarHit;
 use crate::window_manager::{FramePart, ResizeEdges, WindowId};
 
 /// Scroll distance per wheel notch, in the 120ths that high-resolution
@@ -81,6 +82,13 @@ pub(crate) enum PressOutcome {
     /// pressed: the press is its client's alone, and the surface may take
     /// the keyboard.
     ClickLayer(WlSurface),
+    /// The taskbar was pressed; focus stays where it is.
+    ClickTaskbar {
+        /// The window whose entry was pressed, which a binding acts on.
+        window: Option<WindowId>,
+        /// What happens.
+        then: AfterClick,
+    },
     /// A window, or the desktop, was pressed.
     Click {
         /// The window pressed, which gets focus; none for the desktop,
@@ -98,6 +106,8 @@ pub(crate) enum PressOutcome {
 pub(crate) enum AfterClick {
     /// The titlebar button of this window is held down until released.
     HoldTitlebarButton(WindowId),
+    /// The taskbar button pressed is held down until released.
+    HoldTaskbarButton,
     /// The press is bound: `press` runs now, and the press is held from the
     /// client, `drag` running if the pointer moves first.
     RunBinding {
@@ -193,6 +203,18 @@ impl Input {
         {
             return PressOutcome::ClickLayer(surface.clone());
         }
+        if let Some(PointerTarget::Taskbar(hit)) = target {
+            let then = match hit {
+                Some(hit) if hit.is_button() && press.modifiers == Modifiers::default() => {
+                    AfterClick::HoldTaskbarButton
+                }
+                Some(_) | None => self.bound_or_border(press, config),
+            };
+            return PressOutcome::ClickTaskbar {
+                window: hit.and_then(TaskbarHit::window),
+                then,
+            };
+        }
         let window = target.and_then(PointerTarget::window);
         let then = match target {
             Some(PointerTarget::Window(WindowTarget::Frame {
@@ -276,7 +298,7 @@ impl Input {
     /// Returns what `press`, past the titlebar buttons, does: its binding,
     /// or a border resize, or nothing.
     fn bound_or_border(&mut self, press: &ButtonPress<'_>, config: &Config) -> AfterClick {
-        let window = press.target.and_then(PointerTarget::window);
+        let window = press.target.and_then(PointerTarget::binding_window);
         let interval = config.settings.windows.double_click_interval();
         let is_double = self.is_double_click(press.button, window, press.time, interval);
         let bound = MouseButton::from_code(press.button).and_then(|button| {
@@ -300,6 +322,7 @@ impl Input {
             })) => AfterClick::ResizeBorder(*window, *edges),
             Some(
                 PointerTarget::Window(WindowTarget::Frame { .. } | WindowTarget::Surface { .. })
+                | PointerTarget::Taskbar(_)
                 | PointerTarget::Layer { .. },
             )
             | None => AfterClick::PassToClient,
@@ -384,6 +407,10 @@ mod tests {
     /// What is under the pointer.
     #[derive(Debug, Clone, Copy)]
     enum Under {
+        /// A window's taskbar entry.
+        TaskbarEntry,
+        /// The taskbar's clock.
+        TaskbarClock,
         /// The bare desktop.
         Desktop,
         /// The window's titlebar, off its buttons.
@@ -405,6 +432,13 @@ mod tests {
             };
             let titlebar = FramePart::Titlebar(vaht_ui::Point::new(5, 5));
             match self {
+                Self::TaskbarEntry => (
+                    Some(PointerTarget::Taskbar(Some(TaskbarHit::Entry(window())))),
+                    false,
+                ),
+                Self::TaskbarClock => {
+                    (Some(PointerTarget::Taskbar(Some(TaskbarHit::Clock))), false)
+                }
                 Self::Desktop => (None, false),
                 Self::Titlebar => (frame(titlebar), false),
                 Self::TitlebarButton => (frame(titlebar), true),
@@ -423,7 +457,8 @@ mod tests {
 
     /// Bindings on the titlebar and on windows with Alt.
     const BINDINGS: &str = "[mouse.titlebar]\n\"Double+Left\" = \"maximize\"\n\
-                            [mouse.window]\n\"Alt+Left\" = \"start-moving\"\n";
+                            [mouse.window]\n\"Alt+Left\" = \"start-moving\"\n\
+                            [mouse.window-list-entry]\n\"Alt+Left\" = \"lower\"\n";
 
     /// Presses the left button once on `under` with `modifiers` held.
     fn press(
@@ -450,6 +485,7 @@ mod tests {
     fn then(outcome: PressOutcome) -> (AfterClick, bool) {
         match outcome {
             PressOutcome::Click { then, raises, .. } => (then, raises),
+            PressOutcome::ClickTaskbar { then, .. } => (then, false),
             PressOutcome::ClickLayer(_) => panic!("no layer surface was pressed"),
         }
     }
@@ -474,6 +510,9 @@ mod tests {
     #[case::unbound_border(Under::Border, false, AfterClick::ResizeBorder(window(), right_edge()))]
     #[case::bound_border(Under::Border, true, runs("start-moving"))]
     #[case::unbound_desktop(Under::Desktop, false, AfterClick::PassToClient)]
+    #[case::taskbar_entry(Under::TaskbarEntry, false, AfterClick::HoldTaskbarButton)]
+    #[case::taskbar_entry_with_alt_runs_its_binding(Under::TaskbarEntry, true, runs("lower"))]
+    #[case::unbound_clock(Under::TaskbarClock, false, AfterClick::PassToClient)]
     fn a_press_does_what_is_under_it_and_its_bindings_say(
         #[case] under: Under,
         #[case] holds_alt: bool,
@@ -517,6 +556,22 @@ mod tests {
             Instant::now(),
         );
         assert_eq!(then(outcome).1, raises);
+    }
+
+    #[test]
+    fn a_taskbar_press_leaves_focus_alone_and_acts_on_the_entrys_window() {
+        let config = config(BINDINGS, "");
+        let outcome = press(
+            &mut Input::default(),
+            &config,
+            Under::TaskbarEntry,
+            alt(),
+            Instant::now(),
+        );
+        assert!(matches!(
+            outcome,
+            PressOutcome::ClickTaskbar { window: Some(entry), .. } if entry == window()
+        ));
     }
 
     #[test]

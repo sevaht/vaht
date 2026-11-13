@@ -17,6 +17,9 @@ const TITLEBAR_HEIGHT: u32 = 20;
 /// The built-in theme's border width, in pixels.
 const BORDER_WIDTH: u32 = 1;
 
+/// The built-in taskbar's height, in pixels; it runs along the bottom.
+const TASKBAR_HEIGHT: u32 = 20;
+
 /// How long to wait for a program vaht started to leave its mark.
 const PATIENCE: Duration = Duration::from_secs(10);
 
@@ -95,7 +98,7 @@ fn the_titlebar_has_the_buttons_settings_name() {
             left: BORDER_WIDTH,
             top: 2 * BORDER_WIDTH + TITLEBAR_HEIGHT,
             right: maximized.width() - 1 - BORDER_WIDTH,
-            bottom: maximized.height() - 1 - BORDER_WIDTH,
+            bottom: maximized.height() - 1 - TASKBAR_HEIGHT - BORDER_WIDTH,
         }),
         "the left square is the maximize button"
     );

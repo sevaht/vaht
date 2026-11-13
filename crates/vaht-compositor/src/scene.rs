@@ -3,17 +3,17 @@
 //! Composition is the single walk over what is visible: drawing uses its
 //! elements, and hit-testing ([`Scene::target_at`]) walks the same layers
 //! and windows in the same order, so what is clicked is always what is seen
-//! (01 §9). From the top: the overlay and top layers, the windows, then the
-//! bottom and background layers. Each window
-//! contributes its client surfaces, then the frame vaht draws beneath them;
-//! the taskbar, menus and the wallpaper will join as further [`SceneElement`]
-//! variants.
+//! (01 §9). From the top: the overlay and top layers, the taskbar, the
+//! windows, then the bottom and background layers. Each window contributes
+//! its client surfaces, then the frame vaht draws beneath them; menus and
+//! the wallpaper will join as further [`SceneElement`] variants.
 //!
-//! The scene joins three sources: the window manager says which windows are
-//! shown and where, the [`Toplevels`] draw and hit-test their surfaces, and
-//! [`FrameTextures`] draws their frames.
+//! The scene joins four sources: the window manager says which windows are
+//! shown and where, the [`Toplevels`] draw and hit-test their surfaces,
+//! [`FrameTextures`] draws their frames, and the [`Taskbar`] itself.
 
 mod frame_textures;
+mod panel_texture;
 
 use smithay::backend::renderer::element::AsRenderElements as _;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
@@ -25,7 +25,9 @@ use smithay::utils::{Logical, Point, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 pub(crate) use self::frame_textures::FrameTextures;
-use crate::layers::{ABOVE_WINDOWS, BELOW_WINDOWS, OutputLayers};
+pub(crate) use self::panel_texture::PanelTexture;
+use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, OutputLayers};
+use crate::taskbar::{Taskbar, TaskbarHit};
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::window_manager::{FramePart, Window, WindowId, WindowManager};
 
@@ -78,6 +80,8 @@ impl WindowTarget {
 pub(crate) enum PointerTarget {
     /// A window, or its frame.
     Window(WindowTarget),
+    /// The taskbar: one of its widgets, or its background.
+    Taskbar(Option<TaskbarHit>),
     /// A layer surface.
     Layer {
         /// The surface under the pointer (the layer surface, or one of its
@@ -92,11 +96,21 @@ pub(crate) enum PointerTarget {
 }
 
 impl PointerTarget {
-    /// Returns the window under the pointer, if it is a window.
+    /// Returns the window under the pointer, if it is a window: the one a
+    /// press focuses, and sloppy focus follows.
     pub(crate) const fn window(&self) -> Option<WindowId> {
         match self {
             Self::Window(target) => Some(target.window()),
-            Self::Layer { .. } => None,
+            Self::Taskbar(_) | Self::Layer { .. } => None,
+        }
+    }
+
+    /// Returns the window a binding run here acts on: the window under the
+    /// pointer, or the one whose taskbar entry it is on.
+    pub(crate) const fn binding_window(&self) -> Option<WindowId> {
+        match self {
+            Self::Taskbar(Some(hit)) => hit.window(),
+            Self::Window(_) | Self::Taskbar(None) | Self::Layer { .. } => self.window(),
         }
     }
 
@@ -110,7 +124,7 @@ impl PointerTarget {
             | Self::Layer {
                 surface, origin, ..
             } => Some((surface.clone(), *origin)),
-            Self::Window(WindowTarget::Frame { .. }) => None,
+            Self::Window(WindowTarget::Frame { .. }) | Self::Taskbar(_) => None,
         }
     }
 }
@@ -125,24 +139,28 @@ pub(crate) struct Scene<'state> {
     toplevels: &'state Toplevels,
     /// The windows' frames, as the renderer takes them.
     frame_textures: &'state FrameTextures,
+    /// The taskbar, if there is one.
+    taskbar: Option<&'state Taskbar>,
     /// The output's layer surfaces.
     layers: OutputLayers<'state>,
 }
 
 impl<'state> Scene<'state> {
     /// Creates the scene of the windows `window_manager` shows, drawn from
-    /// their `toplevels` and `frame_textures`, between the output's
-    /// `layers`.
+    /// their `toplevels` and `frame_textures`, under the `taskbar`, between
+    /// the output's `layers`.
     pub(crate) const fn new(
         window_manager: &'state WindowManager,
         toplevels: &'state Toplevels,
         frame_textures: &'state FrameTextures,
+        taskbar: Option<&'state Taskbar>,
         layers: OutputLayers<'state>,
     ) -> Self {
         Self {
             window_manager,
             toplevels,
             frame_textures,
+            taskbar,
             layers,
         }
     }
@@ -170,9 +188,14 @@ impl<'state> Scene<'state> {
                     is_below_windows,
                 })
         };
-        layer(ABOVE_WINDOWS, false)
+        layer(self.layers_above_windows(), false)
+            .or_else(|| {
+                self.shown_taskbar()
+                    .filter(|taskbar| taskbar.covers(point))
+                    .map(|taskbar| PointerTarget::Taskbar(taskbar.hit_at(point)))
+            })
             .or_else(|| self.window_at(point).map(PointerTarget::Window))
-            .or_else(|| layer(BELOW_WINDOWS, true))
+            .or_else(|| layer(&BELOW_WINDOWS, true))
     }
 
     /// Returns the elements to draw at `scale`, topmost first, as damage
@@ -183,7 +206,11 @@ impl<'state> Scene<'state> {
         R::TextureId: Send + Clone + 'static,
     {
         let mut elements = Vec::new();
-        self.push_layers(&mut elements, renderer, ABOVE_WINDOWS, scale);
+        self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
+        elements.extend(
+            self.shown_taskbar()
+                .and_then(|taskbar| taskbar.render_element(renderer, scale)),
+        );
         let metrics = self.window_manager.metrics();
         for (window, toplevel) in self.windows() {
             if window.shows_content() {
@@ -205,8 +232,33 @@ impl<'state> Scene<'state> {
                 ));
             }
         }
-        self.push_layers(&mut elements, renderer, BELOW_WINDOWS, scale);
+        self.push_layers(&mut elements, renderer, &BELOW_WINDOWS, scale);
         elements
+    }
+
+    /// Returns whether the topmost window shown is fullscreen: it then
+    /// covers the top layer and the taskbar, which neither show nor take
+    /// clicks, and only the overlay layer is above it (01 §9).
+    fn is_fullscreen_on_top(&self) -> bool {
+        self.window_manager
+            .shown_top_down()
+            .next()
+            .is_some_and(|window| window.placement().is_fullscreen())
+    }
+
+    /// Returns the layers above the windows: the overlay and top layers, or
+    /// only the overlay above a fullscreen window.
+    fn layers_above_windows(&self) -> &'static [Layer] {
+        if self.is_fullscreen_on_top() {
+            &ABOVE_FULLSCREEN
+        } else {
+            &ABOVE_WINDOWS
+        }
+    }
+
+    /// Returns the taskbar, unless a fullscreen window covers it.
+    fn shown_taskbar(&self) -> Option<&'state Taskbar> {
+        self.taskbar.filter(|_| !self.is_fullscreen_on_top())
     }
 
     /// Returns the topmost shown window's client surface or frame at
@@ -240,7 +292,7 @@ impl<'state> Scene<'state> {
         &self,
         elements: &mut Vec<SceneElement<R>>,
         renderer: &mut R,
-        layers: [Layer; 2],
+        layers: &[Layer],
         scale: Scale<f64>,
     ) where
         R: Renderer + ImportAll + ImportMem,

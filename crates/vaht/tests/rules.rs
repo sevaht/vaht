@@ -13,6 +13,9 @@ const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 /// The built-in theme's titlebar height, in pixels.
 const TITLEBAR_HEIGHT: u32 = 20;
 
+/// The built-in taskbar's height, in pixels; it runs along the bottom.
+const TASKBAR_HEIGHT: u32 = 20;
+
 /// The built-in theme's border width, in pixels.
 const BORDER_WIDTH: u32 = 1;
 
@@ -38,8 +41,9 @@ fn a_position_rule_centers_the_frame() {
         (frame_left, frame_top),
         (
             (screenshot.width() - frame_width) / 2,
-            (screenshot.height() - frame_height) / 2
-        )
+            (screenshot.height() - TASKBAR_HEIGHT - frame_height) / 2
+        ),
+        "centered in what the taskbar leaves"
     );
 }
 

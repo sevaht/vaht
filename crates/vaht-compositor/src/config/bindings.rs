@@ -24,6 +24,7 @@ use smithay::input::keyboard::{Keysym, xkb};
 use super::command::Command;
 use super::unique_map;
 use crate::scene::{PointerTarget, WindowTarget};
+use crate::taskbar::TaskbarHit;
 use crate::window_manager::FramePart;
 
 /// Every binding.
@@ -275,7 +276,8 @@ pub(crate) enum MouseContext {
 
 impl MouseContext {
     /// Returns the contexts a press on `target` (none: the desktop) looks
-    /// in, most specific first: a frame part's own, then `window`. A layer
+    /// in, most specific first: a frame part's own, then `window`; a window
+    /// list entry's, then `taskbar`. A layer
     /// surface below the windows (a wallpaper) counts as the desktop; one
     /// above them (a panel) has no bindings: its client handles the press.
     pub(crate) const fn search_order(target: Option<&PointerTarget>) -> &'static [Self] {
@@ -289,6 +291,10 @@ impl MouseContext {
                 ..
             })) => &[Self::Border, Self::Window],
             Some(PointerTarget::Window(WindowTarget::Surface { .. })) => &[Self::Window],
+            Some(PointerTarget::Taskbar(Some(TaskbarHit::Entry(_)))) => {
+                &[Self::WindowListEntry, Self::Taskbar]
+            }
+            Some(PointerTarget::Taskbar(_)) => &[Self::Taskbar],
             Some(PointerTarget::Layer {
                 is_below_windows: true,
                 ..

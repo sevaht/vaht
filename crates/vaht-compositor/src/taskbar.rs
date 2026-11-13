@@ -1,0 +1,483 @@
+//! The taskbar: workspace buttons and name, the window list and the clock,
+//! along an output edge (01 §6.3).
+//!
+//! [`Taskbar`] is a panel like a window's frame: its content
+//! ([`TaskbarContent`]) says what it shows, read from the window manager
+//! and the clock each time a frame is prepared, and vaht-ui lays it out,
+//! paints it and hit-tests it. Clicking an arrow or a window's entry holds
+//! it down until released, as a titlebar button is; the compositor then
+//! runs what it means ([`TaskbarHit`]). Other presses, and the wheel, go to
+//! the `taskbar` and `window-list-entry` mouse bindings.
+//!
+//! The clock wakes vaht when its text changes: each minute, or each second
+//! if its format shows seconds.
+
+use std::time::Duration;
+
+use jiff::Zoned;
+use smithay::backend::renderer::{ImportMem, Renderer};
+use smithay::reexports::calloop::LoopHandle;
+use smithay::utils::{Logical, Point, Rectangle, Scale};
+use vaht_ui::{
+    Glyph, Panel, PanelContent, SizePolicy, Theme, ThemeElement, Typesetter, Widget, WidgetState,
+};
+
+use crate::Compositor;
+use crate::config::{TaskbarEdge, TaskbarSettings, TaskbarWidget};
+use crate::event_source::Timer;
+use crate::resources::ResourceLedger;
+use crate::scene::{PanelTexture, SceneElement};
+use crate::window_manager::{Area, Window, WindowId, WindowManager};
+
+/// What clicking the taskbar can report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum TaskbarHit {
+    /// The arrow to the workspace before.
+    WorkspacePrevious,
+    /// The arrow to the workspace after.
+    WorkspaceNext,
+    /// The workspace's name.
+    WorkspaceName,
+    /// A window's entry in the window list.
+    Entry(WindowId),
+    /// The clock.
+    Clock,
+}
+
+impl TaskbarHit {
+    /// Returns the window an entry stands for.
+    pub(crate) const fn window(self) -> Option<WindowId> {
+        match self {
+            Self::Entry(window) => Some(window),
+            Self::WorkspacePrevious | Self::WorkspaceNext | Self::WorkspaceName | Self::Clock => {
+                None
+            }
+        }
+    }
+
+    /// Returns whether it is a button, held down by a press and clicked by
+    /// a release on it.
+    pub(crate) const fn is_button(self) -> bool {
+        match self {
+            Self::WorkspacePrevious | Self::WorkspaceNext | Self::Entry(_) => true,
+            Self::WorkspaceName | Self::Clock => false,
+        }
+    }
+}
+
+/// The taskbar, along one edge of the output.
+#[derive(Debug)]
+pub(crate) struct Taskbar {
+    /// What it shows, laid out and painted.
+    panel: Panel<TaskbarContent>,
+    /// The edge it runs along.
+    edge: TaskbarEdge,
+    /// Whether maximized windows leave it uncovered.
+    reserves_space: bool,
+    /// Where it is, in global coordinates; set as frames are prepared.
+    area: Area,
+    /// Its pixels, as the renderer takes them.
+    texture: PanelTexture,
+    /// Whether its clock shows seconds, and so ticks each second.
+    clock_shows_seconds: bool,
+    /// Wakes vaht when the clock's text next changes.
+    clock_timer: Option<Timer<Compositor>>,
+}
+
+impl Taskbar {
+    /// Creates the taskbar `settings` describe, if they want one.
+    pub(crate) fn new(settings: &TaskbarSettings) -> Option<Self> {
+        settings.enabled.then(|| Self {
+            panel: Panel::new(
+                TaskbarContent {
+                    widgets: settings.widgets.clone(),
+                    workspace_name: String::new(),
+                    entries: Vec::new(),
+                    entry_max_width: settings.window_list.entry_width.max,
+                    clock: String::new(),
+                },
+                vaht_ui::Size::default(),
+            ),
+            edge: settings.edge,
+            reserves_space: settings.reserve_space,
+            area: Area::default(),
+            texture: PanelTexture::new(),
+            clock_shows_seconds: settings.clock.format.shows_seconds()
+                && settings.widgets.contains(&TaskbarWidget::Clock),
+            clock_timer: None,
+        })
+    }
+
+    /// Returns the area the taskbar `height` pixels tall takes along its
+    /// edge of an output covering `whole`.
+    pub(crate) fn area_in(&self, whole: Area, height: u32) -> Area {
+        let height = i32::try_from(height)
+            .expect("a taskbar is far shorter than i32::MAX")
+            .min(whole.size.h);
+        let top = match self.edge {
+            TaskbarEdge::Top => whole.loc.y,
+            TaskbarEdge::Bottom => whole.loc.y + whole.size.h - height,
+        };
+        Rectangle::new((whole.loc.x, top).into(), (whole.size.w, height).into())
+    }
+
+    /// Returns `usable` less the taskbar's area, if it reserves its space,
+    /// on an output covering `whole`.
+    pub(crate) fn reserve(&self, usable: Area, whole: Area, height: u32) -> Area {
+        if !self.reserves_space {
+            return usable;
+        }
+        let taken = self.area_in(whole, height);
+        let (top, bottom) = (usable.loc.y, usable.loc.y + usable.size.h);
+        let (top, bottom) = match self.edge {
+            TaskbarEdge::Top => (top.max(taken.loc.y + taken.size.h), bottom),
+            TaskbarEdge::Bottom => (top, bottom.min(taken.loc.y)),
+        };
+        Rectangle::new(
+            (usable.loc.x, top).into(),
+            (usable.size.w, (bottom - top).max(0)).into(),
+        )
+    }
+
+    /// Returns whether the taskbar covers global `point`.
+    pub(crate) fn covers(&self, point: Point<f64, Logical>) -> bool {
+        self.area.contains(point.to_i32_floor())
+    }
+
+    /// Returns the widget at global `point` that clicking reports, if any.
+    pub(crate) fn hit_at(&self, point: Point<f64, Logical>) -> Option<TaskbarHit> {
+        self.panel.hit_at(self.local(point.to_i32_floor()))
+    }
+
+    /// Brings what the taskbar shows up to date with `window_manager`,
+    /// `settings` and the time `now`, and paints it to fill its edge of an
+    /// output covering `whole`, `height` pixels tall, as `theme` styles it.
+    pub(crate) fn prepare(
+        &mut self,
+        view: TaskbarView<'_>,
+        theme: &Theme,
+        typesetter: &mut Typesetter,
+    ) {
+        self.area = self.area_in(view.whole, theme.metrics().taskbar_height);
+        let content = TaskbarContent::of(&view, &self.panel.content().widgets);
+        if *self.panel.content() != content {
+            self.panel.update(|current| *current = content);
+        }
+        let size = vaht_ui::Size::new(
+            u32::try_from(self.area.size.w).unwrap_or(0),
+            u32::try_from(self.area.size.h).unwrap_or(0),
+        );
+        self.panel.resize(size);
+        self.panel.paint(theme, typesetter);
+        self.texture.upload(&self.panel);
+    }
+
+    /// Repaints the taskbar at the next prepare, as when the theme changed.
+    pub(crate) fn invalidate(&mut self) {
+        self.panel.invalidate();
+    }
+
+    /// Holds down the button at global `point`, if there is one; returns
+    /// whether there was.
+    pub(crate) fn press(&mut self, point: Point<f64, Logical>) -> bool {
+        let local = self.local(point.to_i32_floor());
+        if self.panel.hit_at(local).is_some_and(TaskbarHit::is_button) {
+            self.panel.press(local);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Lets go of the held button with the pointer at global `point`;
+    /// returns it if that clicks it.
+    pub(crate) fn release(&mut self, point: Point<f64, Logical>) -> Option<TaskbarHit> {
+        self.panel.pressed()?;
+        self.panel.release(self.local(point.to_i32_floor()))
+    }
+
+    /// Returns the element that draws the taskbar.
+    pub(crate) fn render_element<R>(
+        &self,
+        renderer: &mut R,
+        scale: Scale<f64>,
+    ) -> Option<SceneElement<R>>
+    where
+        R: Renderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        self.texture.render_element(renderer, self.area.loc, scale)
+    }
+
+    /// Wakes vaht to draw the clock anew when its text next changes, at
+    /// `now`: the next whole minute, or second if it shows seconds.
+    pub(crate) fn schedule_clock(
+        &mut self,
+        now: &Zoned,
+        event_loop: (&LoopHandle<'static, Compositor>, &ResourceLedger),
+    ) {
+        if !self.panel.content().widgets.contains(&TaskbarWidget::Clock) {
+            return;
+        }
+        let delay = Self::until_clock_changes(now, self.clock_shows_seconds);
+        let (handle, ledger) = event_loop;
+        let tick = Timer::once(handle, ledger, delay, |compositor: &mut Compositor| {
+            compositor.schedule_render();
+            let now = Zoned::now();
+            if let Some(taskbar) = &mut compositor.taskbar {
+                taskbar.schedule_clock(&now, (&compositor.loop_handle, &compositor.ledger));
+            }
+        });
+        match tick {
+            Ok(timer) => self.clock_timer = Some(timer),
+            Err(error) => tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "could not schedule the clock"
+            ),
+        }
+    }
+
+    /// Returns how long after `now` a clock's text next changes: at the next
+    /// whole second if it `shows_seconds`, else at the next whole minute.
+    fn until_clock_changes(now: &Zoned, shows_seconds: bool) -> Duration {
+        let into_second = Duration::from_nanos(u64::try_from(now.subsec_nanosecond()).unwrap_or(0));
+        let (period, into_period) = if shows_seconds {
+            (Duration::from_secs(1), into_second)
+        } else {
+            let seconds = Duration::from_secs(u64::try_from(now.second()).unwrap_or(0));
+            (Duration::from_secs(60), seconds + into_second)
+        };
+        period.saturating_sub(into_period)
+    }
+
+    /// Returns global `pixel` in the taskbar's own pixels.
+    fn local(&self, pixel: Point<i32, Logical>) -> vaht_ui::Point {
+        let inside = pixel - self.area.loc;
+        vaht_ui::Point::new(inside.x, inside.y)
+    }
+}
+
+/// What the taskbar shows comes from.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TaskbarView<'state> {
+    /// The windows and workspaces.
+    pub(crate) window_manager: &'state WindowManager,
+    /// The taskbar's settings.
+    pub(crate) settings: &'state TaskbarSettings,
+    /// The output's area.
+    pub(crate) whole: Area,
+    /// The time.
+    pub(crate) now: &'state Zoned,
+}
+
+/// What the taskbar shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskbarContent {
+    /// Its widgets, left to right.
+    widgets: Vec<TaskbarWidget>,
+    /// The name of the workspace shown.
+    workspace_name: String,
+    /// The window list's entries, in the order the windows opened.
+    entries: Vec<WindowListEntry>,
+    /// The most an entry is wide.
+    entry_max_width: u32,
+    /// The clock's text.
+    clock: String,
+}
+
+impl TaskbarContent {
+    /// Returns what the taskbar of `widgets` shows of `view`.
+    fn of(view: &TaskbarView<'_>, widgets: &[TaskbarWidget]) -> Self {
+        let manager = view.window_manager;
+        let current = manager.current_workspace();
+        let mut windows: Vec<&Window> = manager
+            .windows_top_down()
+            .filter(|window| {
+                window.is_placed() && view.settings.window_list.show.matches(window, current)
+            })
+            .collect();
+        windows.sort_by_key(|window| window.id());
+        Self {
+            widgets: widgets.to_vec(),
+            workspace_name: manager.current_workspace_name().to_owned(),
+            entries: windows
+                .into_iter()
+                .map(|window| WindowListEntry {
+                    window: window.id(),
+                    title: window.title().to_owned(),
+                    is_focused: manager.focused() == Some(window.id()),
+                    is_minimized: window.state().is_minimized,
+                })
+                .collect(),
+            entry_max_width: view.settings.window_list.entry_width.max,
+            clock: view.settings.clock.format.format(view.now),
+        }
+    }
+
+    /// Returns the widget a taskbar widget is.
+    fn widget(&self, widget: TaskbarWidget) -> Widget<TaskbarHit> {
+        match widget {
+            TaskbarWidget::WorkspacePrevious => {
+                Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowLeft)
+                    .with_button(TaskbarHit::WorkspacePrevious)
+            }
+            TaskbarWidget::WorkspaceNext => {
+                Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowRight)
+                    .with_button(TaskbarHit::WorkspaceNext)
+            }
+            TaskbarWidget::WorkspaceName => {
+                Widget::text(ThemeElement::TaskbarWorkspace, self.workspace_name.clone())
+                    .with_hit(TaskbarHit::WorkspaceName)
+            }
+            TaskbarWidget::WindowList => Widget::row(
+                ThemeElement::WindowListEmpty,
+                self.entries
+                    .iter()
+                    .map(|entry| entry.widget(self.entry_max_width))
+                    .collect(),
+            ),
+            TaskbarWidget::Clock => Widget::text(ThemeElement::TaskbarClock, self.clock.clone())
+                .with_hit(TaskbarHit::Clock),
+        }
+    }
+}
+
+impl PanelContent for TaskbarContent {
+    type Hit = TaskbarHit;
+
+    fn build(&self) -> Widget<TaskbarHit> {
+        Widget::row(
+            ThemeElement::Taskbar,
+            self.widgets
+                .iter()
+                .map(|widget| self.widget(*widget))
+                .collect(),
+        )
+    }
+
+    fn state(&self) -> WidgetState {
+        WidgetState::Focused
+    }
+}
+
+/// One window's entry in the window list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WindowListEntry {
+    /// The window.
+    window: WindowId,
+    /// Its title.
+    title: String,
+    /// Whether it has focus.
+    is_focused: bool,
+    /// Whether it is minimized: its title is then shown in parentheses, as
+    /// Fluxbox shows it.
+    is_minimized: bool,
+}
+
+impl WindowListEntry {
+    /// Returns the entry's widget, at most `max_width` wide.
+    fn widget(&self, max_width: u32) -> Widget<TaskbarHit> {
+        let title = if self.is_minimized {
+            format!("({})", self.title)
+        } else {
+            self.title.clone()
+        };
+        let state = if self.is_focused {
+            WidgetState::Focused
+        } else {
+            WidgetState::Unfocused
+        };
+        Widget::text(ThemeElement::WindowListEntry, title)
+            .with_size(SizePolicy::Share { max: max_width })
+            .with_button(TaskbarHit::Entry(self.window))
+            .with_state(state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    /// A 1920 × 1080 output.
+    fn whole() -> Area {
+        Rectangle::from_size((1920, 1080).into())
+    }
+
+    /// The default taskbar, on `edge`.
+    fn taskbar(edge: TaskbarEdge) -> Taskbar {
+        let settings = TaskbarSettings {
+            edge,
+            ..TaskbarSettings::default()
+        };
+        Taskbar::new(&settings).expect("enabled by default")
+    }
+
+    #[rstest]
+    #[case::bottom(TaskbarEdge::Bottom, (0, 1060), (0, 1060))]
+    #[case::top(TaskbarEdge::Top, (0, 0), (20, 1060))]
+    fn the_taskbar_runs_along_its_edge_and_windows_keep_off_it(
+        #[case] edge: TaskbarEdge,
+        #[case] corner: (i32, i32),
+        #[case] usable_span: (i32, i32),
+    ) {
+        let bar = taskbar(edge);
+        let area = bar.area_in(whole(), 20);
+        assert_eq!((area.loc.x, area.loc.y), corner);
+        assert_eq!((area.size.w, area.size.h), (1920, 20));
+        let usable = bar.reserve(whole(), whole(), 20);
+        assert_eq!((usable.loc.y, usable.size.h), usable_span);
+    }
+
+    #[test]
+    fn a_taskbar_that_reserves_nothing_leaves_the_usable_area_alone() {
+        let settings = TaskbarSettings {
+            reserve_space: false,
+            ..TaskbarSettings::default()
+        };
+        let bar = Taskbar::new(&settings).expect("enabled");
+        assert_eq!(bar.reserve(whole(), whole(), 20), whole());
+    }
+
+    #[test]
+    fn no_taskbar_when_disabled() {
+        let settings = TaskbarSettings {
+            enabled: false,
+            ..TaskbarSettings::default()
+        };
+        assert!(Taskbar::new(&settings).is_none());
+    }
+
+    #[test]
+    fn entries_are_buttons_drawn_focused_or_not_and_minimized_in_parentheses() {
+        let entry = WindowListEntry {
+            window: WindowId::new(3),
+            title: "kitty".to_owned(),
+            is_focused: false,
+            is_minimized: true,
+        };
+        let widget = entry.widget(128);
+        assert_eq!(
+            widget.kind,
+            vaht_ui::widget::WidgetKind::Text("(kitty)".to_owned())
+        );
+        assert_eq!(widget.hit, Some(TaskbarHit::Entry(WindowId::new(3))));
+        assert!(widget.is_button);
+        assert_eq!(widget.state, Some(WidgetState::Unfocused));
+    }
+
+    #[rstest]
+    #[case::minutes(false, Duration::from_millis(17_750))]
+    #[case::seconds(true, Duration::from_millis(750))]
+    fn the_clock_wakes_vaht_when_its_text_changes(
+        #[case] shows_seconds: bool,
+        #[case] expected: Duration,
+    ) {
+        let now = jiff::civil::date(2026, 11, 13)
+            .at(9, 41, 42, 250_000_000)
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .expect("a valid time");
+        assert_eq!(Taskbar::until_clock_changes(&now, shows_seconds), expected);
+    }
+}

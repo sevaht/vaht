@@ -20,6 +20,9 @@ const TITLEBAR_HEIGHT: u32 = 20;
 /// The built-in theme's border width, in pixels.
 const BORDER_WIDTH: u32 = 1;
 
+/// The built-in taskbar's height, in pixels; it runs along the bottom.
+const TASKBAR_HEIGHT: u32 = 20;
+
 /// How far each new window is placed from the one before, in pixels.
 const CASCADE_STEP: u32 = 32;
 
@@ -73,6 +76,15 @@ const fn content_within(outer: Bounds) -> Bounds {
     }
 }
 
+/// Returns the part of `screenshot`'s output windows maximize and tile in:
+/// all of it but the taskbar.
+const fn usable_output(screenshot: &Screenshot) -> Bounds {
+    Bounds {
+        bottom: screenshot.height() - 1 - TASKBAR_HEIGHT,
+        ..whole_output(screenshot)
+    }
+}
+
 /// Returns the whole of `screenshot`'s output.
 const fn whole_output(screenshot: &Screenshot) -> Bounds {
     Bounds {
@@ -92,8 +104,8 @@ fn snap_step_up_maximizes_and_down_restores() {
     let maximized = desktop.screenshot();
     assert_eq!(
         maximized.bounds_of(WINDOW_COLOR),
-        Some(content_within(whole_output(&maximized))),
-        "the frame fills the output"
+        Some(content_within(usable_output(&maximized))),
+        "the frame fills the output, but for the taskbar"
     );
 
     desktop.type_chord(&[keys::LEFT_SUPER, keys::DOWN]);
@@ -107,7 +119,7 @@ fn snap_step_left_fills_the_left_half_and_right_undoes_it() {
 
     desktop.type_chord(&[keys::LEFT_SUPER, keys::LEFT]);
     let snapped = desktop.screenshot();
-    let output = whole_output(&snapped);
+    let output = usable_output(&snapped);
     let left_half = Bounds {
         right: snapped.width() / 2 - 1,
         ..output
@@ -143,7 +155,8 @@ fn fullscreen_covers_the_whole_output_without_a_frame() {
     let fullscreen = desktop.screenshot();
     assert_eq!(
         fullscreen.bounds_of(WINDOW_COLOR),
-        Some(whole_output(&fullscreen))
+        Some(whole_output(&fullscreen)),
+        "over the taskbar too"
     );
 
     desktop.type_chord(&[keys::LEFT_ALT, keys::F11]);
@@ -162,7 +175,7 @@ fn the_maximize_button_maximizes() {
     let maximized = desktop.screenshot();
     assert_eq!(
         maximized.bounds_of(WINDOW_COLOR),
-        Some(content_within(whole_output(&maximized)))
+        Some(content_within(usable_output(&maximized)))
     );
 }
 
