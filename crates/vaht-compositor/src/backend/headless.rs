@@ -1,5 +1,6 @@
 //! Running without a screen: frames are drawn in memory by the software
-//! renderer, paced like a 60 Hz display.
+//! renderer, paced like a 60 Hz display, on one output or as many as
+//! [`HeadlessBackend::OUTPUTS_VARIABLE`] asks for.
 //!
 //! Clients see an ordinary output and receive frame callbacks, so they behave
 //! as on a real display. Tests use this to run vaht anywhere, with no GPU and
@@ -15,24 +16,23 @@ use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::pixman::{FormatCode, Image};
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Logical, Physical, Rectangle, Size, Transform};
+use smithay::utils::{Physical, Size, Transform};
 
 use super::{BackendError, RenderError};
 use crate::Compositor;
 use crate::event_source::Timer;
+use crate::outputs::Outputs;
 use crate::resources::ResourceLedger;
 use crate::scene::{self, Scene};
 
-/// An output that exists only in memory.
+/// Outputs that exist only in memory.
 pub(crate) struct HeadlessBackend {
     /// The software renderer.
     renderer: PixmanRenderer,
-    /// The image frames are drawn into.
-    target: Image<'static, 'static>,
-    /// The output clients see.
-    output: Output,
-    /// Knows what changed since earlier frames, to redraw only that.
-    damage_tracker: OutputDamageTracker,
+    /// The first output, which is primary.
+    primary: Screen,
+    /// The rest.
+    others: Vec<Screen>,
     /// Registers the frame timer.
     loop_handle: LoopHandle<'static, Compositor>,
     /// Counts the frame timer.
@@ -41,15 +41,26 @@ pub(crate) struct HeadlessBackend {
     frame_timer: Option<Timer<Compositor>>,
 }
 
-impl HeadlessBackend {
-    /// The output's name, as clients see it.
-    const OUTPUT_NAME: &str = "headless";
+/// One in-memory output.
+struct Screen {
+    /// The output clients see.
+    output: Output,
+    /// The image its frames are drawn into.
+    target: Image<'static, 'static>,
+    /// Knows what changed since its earlier frames, to redraw only that.
+    damage_tracker: OutputDamageTracker,
+}
 
-    /// The output's width and height: a common desktop resolution, so
-    /// clients size themselves as they would on a real display.
-    const WIDTH: u16 = 1920;
-    /// See [`Self::WIDTH`].
-    const HEIGHT: u16 = 1080;
+impl HeadlessBackend {
+    /// The environment variable that sets the outputs' sizes, such as
+    /// `1920x1080,1280x1024` for two; one output of [`Self::DEFAULT_SIZE`]
+    /// without it.
+    pub(crate) const OUTPUTS_VARIABLE: &str = "VAHT_HEADLESS_OUTPUTS";
+
+    /// An output's width and height unless asked otherwise: a common
+    /// desktop resolution, so clients size themselves as they would on a
+    /// real display.
+    const DEFAULT_SIZE: (i32, i32) = (1920, 1080);
 
     /// The refresh rate reported, in millihertz.
     const REFRESH_MILLIHERTZ: i32 = 60_000;
@@ -57,11 +68,11 @@ impl HeadlessBackend {
     /// The time between frames at that rate.
     const FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
-    /// Creates the in-memory output and advertises it.
+    /// Creates the in-memory outputs and advertises them.
     ///
     /// # Errors
     ///
-    /// Returns an error if the software renderer or its image cannot be
+    /// Returns an error if the software renderer or an image cannot be
     /// created.
     pub(crate) fn new(
         handle: &LoopHandle<'static, Compositor>,
@@ -69,65 +80,59 @@ impl HeadlessBackend {
         ledger: &ResourceLedger,
     ) -> Result<Self, BackendError> {
         let renderer = PixmanRenderer::new().map_err(BackendError::SoftwareRenderer)?;
-        let target = Image::new(
-            FormatCode::A8R8G8B8,
-            usize::from(Self::WIDTH),
-            usize::from(Self::HEIGHT),
-            false,
-        )
-        .map_err(BackendError::FrameImage)?;
-        let output = Output::new(
-            Self::OUTPUT_NAME.to_owned(),
-            PhysicalProperties {
-                size: (0, 0).into(),
-                subpixel: Subpixel::Unknown,
-                make: "vaht".to_owned(),
-                model: "headless".to_owned(),
-                serial_number: String::new(),
-            },
-        );
-        // The global lives as long as the display; nothing removes it.
-        let _global = output.create_global::<Compositor>(display);
-        let mode = Mode {
-            size: Self::size(),
-            refresh: Self::REFRESH_MILLIHERTZ,
-        };
-        output.change_current_state(
-            Some(mode),
-            Some(Transform::Normal),
-            None,
-            Some((0, 0).into()),
-        );
-        output.set_preferred(mode);
-        let damage_tracker = OutputDamageTracker::from_output(&output);
+        let asked = std::env::var(Self::OUTPUTS_VARIABLE).ok();
+        let sizes = asked.as_deref().map_or_else(Vec::new, |text| {
+            Self::sizes(text).unwrap_or_else(|| {
+                tracing::warn!(
+                    variable = Self::OUTPUTS_VARIABLE,
+                    value = text,
+                    "not a list of sizes such as 1920x1080,1280x1024; one output it is"
+                );
+                Vec::new()
+            })
+        });
+        let (first, rest) = sizes
+            .split_first()
+            .map_or((Self::DEFAULT_SIZE.into(), &[][..]), |(first, rest)| {
+                (*first, rest)
+            });
+        let primary = Screen::new(1, first, display)?;
+        let others = rest
+            .iter()
+            .zip(2..)
+            .map(|(size, number)| Screen::new(number, *size, display))
+            .collect::<Result<_, _>>()?;
         Ok(Self {
             renderer,
-            target,
-            output,
-            damage_tracker,
+            primary,
+            others,
             loop_handle: handle.clone(),
             ledger: ledger.clone(),
             frame_timer: None,
         })
     }
 
-    /// Returns the output clients see.
-    pub(crate) const fn output(&self) -> &Output {
-        &self.output
+    /// Reads `WIDTHxHEIGHT` sizes separated by commas; none if one is not
+    /// a size.
+    fn sizes(text: &str) -> Option<Vec<Size<i32, Physical>>> {
+        text.split(',')
+            .map(|size| {
+                let (width, height) = size.trim().split_once('x')?;
+                let (width, height) = (width.parse().ok()?, height.parse().ok()?);
+                (width > 0 && height > 0).then(|| Size::from((width, height)))
+            })
+            .collect()
     }
 
-    /// Returns the output's area in global coordinates.
-    pub(crate) fn output_geometry(&self) -> Rectangle<i32, Logical> {
-        let size = self
-            .output
-            .current_mode()
-            .map_or_else(Self::size, |mode| mode.size);
-        Rectangle::new((0, 0).into(), size.to_logical(1))
-    }
-
-    /// Returns the output's size in pixels.
-    fn size() -> Size<i32, Physical> {
-        Size::from((i32::from(Self::WIDTH), i32::from(Self::HEIGHT)))
+    /// Returns the outputs, laid out side by side.
+    pub(crate) fn outputs(&self) -> Outputs {
+        Outputs::in_a_row(
+            self.primary.output.clone(),
+            self.others
+                .iter()
+                .map(|screen| screen.output.clone())
+                .collect(),
+        )
     }
 
     /// Returns the renderer.
@@ -171,21 +176,85 @@ impl HeadlessBackend {
         }
     }
 
-    /// Draws `scene` into the in-memory image.
+    /// Draws `scene` into each output's in-memory image.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a frame could not be drawn; the outputs after it
+    /// are still drawn.
+    pub(crate) fn render(&mut self, scene: &Scene<'_>) -> Result<(), RenderError> {
+        let mut result = Ok(());
+        for screen in std::iter::once(&mut self.primary).chain(&mut self.others) {
+            let drawn = screen.render(&mut self.renderer, scene);
+            result = result.and(drawn);
+        }
+        result
+    }
+}
+
+impl Screen {
+    /// Creates output `number` (counting from 1) of `size` and advertises
+    /// it on `display`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if its image cannot be created.
+    fn new(
+        number: usize,
+        size: Size<i32, Physical>,
+        display: &DisplayHandle,
+    ) -> Result<Self, BackendError> {
+        let dimension = |value: i32| usize::try_from(value).unwrap_or_default();
+        let target = Image::new(
+            FormatCode::A8R8G8B8,
+            dimension(size.w),
+            dimension(size.h),
+            false,
+        )
+        .map_err(BackendError::FrameImage)?;
+        let output = Output::new(
+            format!("HEADLESS-{number}"),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: Subpixel::Unknown,
+                make: "vaht".to_owned(),
+                model: "headless".to_owned(),
+                serial_number: String::new(),
+            },
+        );
+        // The global lives as long as the display; nothing removes it.
+        let _global = output.create_global::<Compositor>(display);
+        let mode = Mode {
+            size,
+            refresh: HeadlessBackend::REFRESH_MILLIHERTZ,
+        };
+        output.change_current_state(Some(mode), Some(Transform::Normal), None, None);
+        output.set_preferred(mode);
+        let damage_tracker = OutputDamageTracker::from_output(&output);
+        Ok(Self {
+            output,
+            target,
+            damage_tracker,
+        })
+    }
+
+    /// Draws what `scene` shows on this output into its image.
     ///
     /// # Errors
     ///
     /// Returns an error if the frame could not be drawn.
-    pub(crate) fn render(&mut self, scene: &Scene<'_>) -> Result<(), RenderError> {
-        let mut framebuffer = self
-            .renderer
+    fn render(
+        &mut self,
+        renderer: &mut PixmanRenderer,
+        scene: &Scene<'_>,
+    ) -> Result<(), RenderError> {
+        let mut framebuffer = renderer
             .bind(&mut self.target)
             .map_err(RenderError::BindSoftware)?;
-        let scale = self.output.current_scale().fractional_scale().into();
-        let elements = scene.elements(&mut self.renderer, scale);
+        let elements = scene.output_elements(renderer, &self.output);
         self.damage_tracker
             .render_output(
-                &mut self.renderer,
+                renderer,
                 &mut framebuffer,
                 0,
                 &elements,
@@ -200,7 +269,23 @@ impl fmt::Debug for HeadlessBackend {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HeadlessBackend")
-            .field("output", &self.output.name())
+            .field("primary", &self.primary.output.name())
+            .field("others", &self.others.len())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sizes_are_read_from_a_list() {
+        assert_eq!(
+            HeadlessBackend::sizes("1920x1080, 1280x1024"),
+            Some(vec![Size::from((1920, 1080)), Size::from((1280, 1024))])
+        );
+        assert_eq!(HeadlessBackend::sizes("1920x0"), None);
+        assert_eq!(HeadlessBackend::sizes("wide"), None);
     }
 }

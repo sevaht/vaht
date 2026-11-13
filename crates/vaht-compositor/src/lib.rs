@@ -27,6 +27,7 @@ mod ipc;
 mod launcher;
 mod layers;
 mod menu;
+mod outputs;
 mod protocols;
 pub mod resources;
 mod scene;

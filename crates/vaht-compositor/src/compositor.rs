@@ -44,7 +44,7 @@ use smithay::reexports::calloop::{EventLoop, LoopHandle};
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _, Weak};
-use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
+use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial};
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
 use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::selection::primary_selection::set_primary_focus;
@@ -67,6 +67,7 @@ use crate::ipc::IpcServer;
 use crate::launcher::Launcher;
 use crate::layers::{Layers, OutputLayers};
 use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack};
+use crate::outputs::Outputs;
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::{
@@ -94,6 +95,8 @@ pub struct Compositor {
     pub(crate) seat: Seat<Self>,
     /// Where frames go and input comes from.
     pub(crate) backend: Backend,
+    /// The outputs the backend shows on, and where each is.
+    pub(crate) outputs: Outputs,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -245,7 +248,8 @@ impl Compositor {
             Config::built_in()
         });
 
-        let whole = backend.output_geometry();
+        let outputs = backend.outputs();
+        let whole = outputs.primary_geometry();
         let window_manager = WindowManager::new(
             &config.settings,
             OutputArea {
@@ -273,6 +277,7 @@ impl Compositor {
             protocols,
             seat,
             backend,
+            outputs,
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -355,7 +360,7 @@ impl Compositor {
 
     /// Returns the output's layer surfaces.
     pub(crate) fn output_layers(&self) -> OutputLayers<'_> {
-        OutputLayers::new(self.backend.output(), self.backend.output_geometry())
+        OutputLayers::new(self.outputs.primary(), self.outputs.primary_geometry())
     }
 
     /// Asks vaht to stop after the current events.
@@ -426,7 +431,7 @@ impl Compositor {
     /// drawing.
     pub(crate) fn render(&mut self) {
         self.prepare_frames();
-        let output = self.backend.output().clone();
+        let output = self.outputs.primary().clone();
         let scene = Scene::new(
             &self.window_manager,
             &self.toplevels,
@@ -439,14 +444,20 @@ impl Compositor {
                 tooltip: &self.tooltip,
                 snap: &self.snap_overlay,
             },
-            OutputLayers::new(&output, self.backend.output_geometry()),
+            OutputLayers::new(&output, self.outputs.primary_geometry()),
         );
         if let Err(error) = self.backend.render(&scene) {
             tracing::warn!(error = &error as &dyn std::error::Error, "frame skipped");
         }
         let time = self.start_time.elapsed();
-        for (_, toplevel) in scene.windows() {
-            toplevel.send_frame(&output, time);
+        for (window, toplevel) in scene.windows() {
+            let area = window.content_area();
+            toplevel.enter_outputs(&self.outputs, area, window.surface_origin());
+            let shown_on = self
+                .outputs
+                .most_overlapping(area)
+                .unwrap_or_else(|| self.outputs.primary());
+            toplevel.send_frame(shown_on, time);
         }
         for layer in self.layers.iter() {
             layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
@@ -469,7 +480,7 @@ impl Compositor {
             let view = TaskbarView {
                 window_manager: &self.window_manager,
                 settings: &self.config.settings.taskbar,
-                whole: self.backend.output_geometry(),
+                whole: self.outputs.primary_geometry(),
                 now: &now,
             };
             taskbar.prepare(
@@ -481,7 +492,7 @@ impl Compositor {
         }
         self.menus.prepare(&self.config.theme, &mut self.typesetter);
         self.backdrop
-            .prepare(self.backend.output_geometry(), &self.window_manager);
+            .prepare(self.outputs.primary_geometry(), &self.window_manager);
         self.outline
             .update(self.window_manager.outline(), &self.config.theme);
         self.snap_overlay.update(&self.window_manager);
@@ -531,15 +542,25 @@ impl Compositor {
 
     /// Updates layer surfaces after `surface`, one of them, is gone.
     pub(crate) fn remove_layer_surface(&mut self, surface: &WlSurface) {
-        let output = self.backend.output().clone();
+        let output = self.outputs.primary().clone();
         self.layers.unmap(surface, &output);
         self.refresh_layer_keyboard();
         self.refresh_output_area();
         self.schedule_render();
     }
 
-    /// Delivers one input event.
+    /// Delivers one input event; absolute motion spans every output.
     pub(crate) fn handle_input<B: InputBackend>(&mut self, event: InputEvent<B>) {
+        self.handle_input_within(event, None);
+    }
+
+    /// Delivers one input event; absolute motion spans `absolute_area`
+    /// (global coordinates), or every output without it.
+    pub(crate) fn handle_input_within<B: InputBackend>(
+        &mut self,
+        event: InputEvent<B>,
+        absolute_area: Option<Rectangle<i32, Logical>>,
+    ) {
         // A key typed right after a binding moved focus goes where it went.
         self.settle();
         #[expect(
@@ -557,22 +578,13 @@ impl Compositor {
                 );
             }
             InputEvent::PointerMotion { event } => {
-                let output = self.backend.output_geometry().to_f64();
-                let moved = self.pointer_location() + event.delta();
-                // The far edges are outside the output, so stop just short.
-                let location = Point::from((
-                    moved
-                        .x
-                        .clamp(output.loc.x, output.loc.x + output.size.w - 1.0),
-                    moved
-                        .y
-                        .clamp(output.loc.y, output.loc.y + output.size.h - 1.0),
-                ));
+                let from = self.pointer_location();
+                let location = self.outputs.clamp(from, from + event.delta());
                 self.move_pointer_to(location, event.time());
             }
             InputEvent::PointerMotionAbsolute { event } => {
-                let output = self.backend.output_geometry();
-                let location = event.position_transformed(output.size) + output.loc.to_f64();
+                let area = absolute_area.unwrap_or_else(|| self.outputs.bounds());
+                let location = event.position_transformed(area.size) + area.loc.to_f64();
                 self.move_pointer_to(location, event.time());
             }
             InputEvent::PointerButton { event } => self.handle_pointer_button::<B>(&event),
@@ -712,7 +724,7 @@ impl Compositor {
             return;
         };
         // The positioner works relative to the popup's parent.
-        let mut target = self.backend.output_geometry();
+        let mut target = self.outputs.primary_geometry();
         target.loc -= get_popup_toplevel_coords(&kind);
         target.loc -= location;
         popup.with_pending_state(|state| {
@@ -723,7 +735,7 @@ impl Compositor {
     /// Returns the parts of the output windows can be placed in: all of
     /// it, and what panels leave free.
     fn output_area(&self) -> OutputArea {
-        let whole = self.backend.output_geometry();
+        let whole = self.outputs.primary_geometry();
         let usable = self.output_layers().usable_area();
         OutputArea {
             whole,
@@ -847,7 +859,7 @@ impl Compositor {
     /// Gives the keyboard to a layer surface that wants it to itself, or
     /// back to the windows when none does any more.
     fn refresh_layer_keyboard(&mut self) {
-        let output = OutputLayers::new(self.backend.output(), self.backend.output_geometry());
+        let output = OutputLayers::new(self.outputs.primary(), self.outputs.primary_geometry());
         self.layers.refresh_keyboard(output);
     }
 
@@ -1238,7 +1250,7 @@ impl Compositor {
     /// Shows the tooltip for what the pointer has rested on.
     pub(crate) fn show_tooltip(&mut self) {
         let pointer = self.pointer_location().to_i32_round();
-        let bounds = self.backend.output_geometry();
+        let bounds = self.outputs.primary_geometry();
         self.tooltip
             .show(pointer, bounds, (&self.config.theme, &mut self.typesetter));
         tracing::debug!("tooltip shown");
@@ -1247,7 +1259,7 @@ impl Compositor {
 
     /// Moves the pointer to `location`, telling the surface under it.
     fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
-        let whole = self.backend.output_geometry();
+        let whole = self.outputs.primary_geometry();
         if let Some(taskbar) = &mut self.taskbar
             && taskbar.follow_pointer(location, whole, (&self.loop_handle, &self.ledger))
         {

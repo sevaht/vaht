@@ -67,8 +67,8 @@ impl ScreenCapture {
         }
     }
 
-    /// Returns `scene` as packed 32-bit BGRA rows (ARGB8888
-    /// in memory) of `size`.
+    /// Returns what `scene` shows on `output`, whose mode is `size` pixels,
+    /// as packed 32-bit BGRA rows (ARGB8888 in memory).
     ///
     /// # Errors
     ///
@@ -76,9 +76,10 @@ impl ScreenCapture {
     fn render(
         &mut self,
         scene: &Scene<'_>,
+        output: &Output,
         size: Size<i32, Physical>,
-        scale: Scale<f64>,
     ) -> Result<Vec<u8>, CaptureError> {
+        let scale: Scale<f64> = output.current_scale().fractional_scale().into();
         let width = usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?;
         let height = usize::try_from(size.h).map_err(|_negative| CaptureError::EmptyOutput)?;
         let mut image =
@@ -88,7 +89,7 @@ impl ScreenCapture {
             .bind(&mut image)
             .map_err(CaptureError::Renderer)?;
         let mut framebuffer = framebuffer;
-        let elements = scene.elements(&mut self.renderer, scale);
+        let elements = scene.output_elements(&mut self.renderer, output);
         OutputDamageTracker::new(size, scale, Transform::Normal)
             .render_output(
                 &mut self.renderer,
@@ -119,9 +120,8 @@ impl ScreenCapture {
             frame.fail(CaptureFailureReason::Stopped);
             return;
         };
-        let scale = output.current_scale().fractional_scale().into();
         let size = mode.size;
-        let result = self.render(scene, size, scale).and_then(|pixels| {
+        let result = self.render(scene, output, size).and_then(|pixels| {
             let (width, height) = (
                 usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?,
                 usize::try_from(size.h).map_err(|_negative| CaptureError::EmptyOutput)?,
@@ -191,9 +191,17 @@ impl ImageCopyCaptureHandler for Compositor {
         self.client_cleanup_pending = true;
     }
 
-    fn frame(&mut self, _session: &SessionRef, frame: Frame) {
+    fn frame(&mut self, session: &SessionRef, frame: Frame) {
+        let Some(output) = session
+            .source()
+            .user_data()
+            .get::<WeakOutput>()
+            .and_then(WeakOutput::upgrade)
+        else {
+            frame.fail(CaptureFailureReason::Stopped);
+            return;
+        };
         self.prepare_frames();
-        let output = self.backend.output();
         let scene = Scene::new(
             &self.window_manager,
             &self.toplevels,
@@ -206,10 +214,10 @@ impl ImageCopyCaptureHandler for Compositor {
                 tooltip: &self.tooltip,
                 snap: &self.snap_overlay,
             },
-            OutputLayers::new(output, self.backend.output_geometry()),
+            OutputLayers::new(self.outputs.primary(), self.outputs.primary_geometry()),
         );
         self.capture
-            .capture(frame, &scene, output, self.start_time.elapsed());
+            .capture(frame, &scene, &output, self.start_time.elapsed());
     }
 }
 

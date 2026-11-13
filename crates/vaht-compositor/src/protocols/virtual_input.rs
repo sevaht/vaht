@@ -6,17 +6,24 @@
 //! and go through the same handling as a real mouse and keyboard, so
 //! bindings, focus and grabs treat them alike.
 
-use smithay::backend::input::InputEvent;
+use smithay::backend::input::{Event as _, InputEvent};
 use smithay::wayland::virtual_keyboard::{
     VirtualKeyboardBackend, VirtualKeyboardHandler, VirtualKeyboardSpecialEvent,
 };
 use smithay::wayland::virtual_pointer::{VirtualPointerBackend, VirtualPointerHandler};
 
 use crate::Compositor;
+use crate::outputs::Outputs;
 
 impl VirtualPointerHandler for Compositor {
     fn process_virtual_pointer_event(&mut self, event: InputEvent<VirtualPointerBackend>) {
-        self.handle_input(event);
+        // A pointer made for one output moves over that output alone.
+        let bound = if let InputEvent::PointerMotionAbsolute { event } = &event {
+            event.device().output()
+        } else {
+            None
+        };
+        self.handle_input_within(event, bound.as_ref().map(Outputs::geometry));
     }
 }
 

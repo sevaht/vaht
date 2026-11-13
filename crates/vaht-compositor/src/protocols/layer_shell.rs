@@ -22,7 +22,7 @@ impl WlrLayerShellHandler for Compositor {
         namespace: String,
     ) {
         // Every layer surface goes on the one output until there are more.
-        let output = self.backend.output().clone();
+        let output = self.outputs.primary().clone();
         self.layers.map(
             MappedLayerSurface::new(surface, namespace),
             &output,

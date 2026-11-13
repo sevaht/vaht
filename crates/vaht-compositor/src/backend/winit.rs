@@ -12,11 +12,12 @@ use smithay::backend::winit::{self as host_window, WinitEvent, WinitGraphicsBack
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::wayland_server::DisplayHandle;
-use smithay::utils::{Logical, Physical, Rectangle, Size, Transform};
+use smithay::utils::{Physical, Size, Transform};
 
 use super::{BackendError, RenderError};
 use crate::Compositor;
 use crate::event_source::EventSource;
+use crate::outputs::Outputs;
 use crate::resources::ResourceLedger;
 use crate::scene::{self, Scene};
 
@@ -100,14 +101,9 @@ impl WinitBackend {
         })
     }
 
-    /// Returns the output clients see.
-    pub(crate) const fn output(&self) -> &Output {
-        &self.output
-    }
-
-    /// Returns the output's area in global coordinates.
-    pub(crate) fn output_geometry(&self) -> Rectangle<i32, Logical> {
-        Rectangle::new((0, 0).into(), self.graphics.window_size().to_logical(1))
+    /// Returns the one output: the host window.
+    pub(crate) fn outputs(&self) -> Outputs {
+        Outputs::in_a_row(self.output.clone(), Vec::new())
     }
 
     /// Asks the host for a redraw, which arrives as a [`WinitEvent::Redraw`].
@@ -124,10 +120,7 @@ impl WinitBackend {
         let age = self.graphics.buffer_age().unwrap_or(0);
         let damage = {
             let (renderer, mut framebuffer) = self.graphics.bind().map_err(RenderError::Bind)?;
-            let elements = scene.elements(
-                renderer,
-                self.output.current_scale().fractional_scale().into(),
-            );
+            let elements = scene.output_elements(renderer, &self.output);
             self.damage_tracker
                 .render_output(
                     renderer,

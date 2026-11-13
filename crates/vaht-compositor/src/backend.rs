@@ -12,15 +12,15 @@ mod winit;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Format, Fourcc};
 use smithay::backend::renderer::{ExportMem, ImportMemWl, Texture as _};
-use smithay::output::Output;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::Rectangle;
 
 pub(crate) use self::headless::HeadlessBackend;
 pub(crate) use self::winit::WinitBackend;
 use crate::Compositor;
+use crate::outputs::Outputs;
 use crate::resources::ResourceLedger;
 use crate::scene::Scene;
 
@@ -80,19 +80,11 @@ impl Backend {
         }
     }
 
-    /// Returns the output frames are shown on.
-    pub(crate) const fn output(&self) -> &Output {
+    /// Returns the outputs frames are shown on, laid out side by side.
+    pub(crate) fn outputs(&self) -> Outputs {
         match self {
-            Self::Winit(backend) => backend.output(),
-            Self::Headless(backend) => backend.output(),
-        }
-    }
-
-    /// Returns the output's area in global coordinates.
-    pub(crate) fn output_geometry(&self) -> Rectangle<i32, Logical> {
-        match self {
-            Self::Winit(backend) => backend.output_geometry(),
-            Self::Headless(backend) => backend.output_geometry(),
+            Self::Winit(backend) => backend.outputs(),
+            Self::Headless(backend) => backend.outputs(),
         }
     }
 

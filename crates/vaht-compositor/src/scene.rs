@@ -25,9 +25,11 @@ use smithay::backend::renderer::element::AsRenderElements as _;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
+use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
+use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Scale};
+use smithay::utils::{Logical, Physical, Point, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
 
 pub(crate) use self::backdrop::Backdrop;
@@ -39,6 +41,7 @@ pub(crate) use self::panel_texture::PanelTexture;
 pub(crate) use self::snap_overlay::SnapOverlay;
 use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, OutputLayers};
 use crate::menu::MenuStack;
+use crate::outputs::Outputs;
 use crate::taskbar::{Taskbar, TaskbarHit};
 use crate::tooltip::Tooltip;
 use crate::toplevels::{Toplevel, Toplevels};
@@ -58,6 +61,10 @@ smithay::backend::renderer::element::render_elements! {
     /// A plain colored rectangle, such as a border line.
     Solid = SolidColorRenderElement,
 }
+
+/// One drawable part of a frame, moved from global coordinates to where
+/// it is on one output.
+pub(crate) type OutputElement<R> = RelocateRenderElement<SceneElement<R>>;
 
 /// What of a window is under a point.
 #[derive(Debug, Clone, PartialEq)]
@@ -231,7 +238,7 @@ impl<'state> Scene<'state> {
 
     /// Returns the elements to draw at `scale`, topmost first, as damage
     /// tracking expects.
-    pub(crate) fn elements<R>(&self, renderer: &mut R, scale: Scale<f64>) -> Vec<SceneElement<R>>
+    fn elements<R>(&self, renderer: &mut R, scale: Scale<f64>) -> Vec<SceneElement<R>>
     where
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
@@ -251,6 +258,30 @@ impl<'state> Scene<'state> {
         self.push_layers(&mut elements, renderer, &BELOW_WINDOWS, scale);
         elements.extend(self.drawn.backdrop.render_element(renderer, scale));
         elements
+    }
+
+    /// Returns the elements `output` shows, topmost first, at its scale
+    /// and relative to its top left corner.
+    pub(crate) fn output_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+    ) -> Vec<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let scale = output.current_scale().fractional_scale().into();
+        let corner: Point<i32, Physical> = Outputs::geometry(output)
+            .loc
+            .to_physical_precise_round(scale);
+        let toward_origin = Point::from((-corner.x, -corner.y));
+        self.elements(renderer, scale)
+            .into_iter()
+            .map(|element| {
+                RelocateRenderElement::from_element(element, toward_origin, Relocate::Relative)
+            })
+            .collect()
     }
 
     /// Appends the elements of the windows shown, topmost first: those in

@@ -225,14 +225,15 @@ impl TestClient {
         self.state.close_requests
     }
 
-    /// Moves the pointer to `x`, `y` on the output.
+    /// Moves the pointer to `x`, `y` in global coordinates, which start at
+    /// the first output's top left corner.
     ///
     /// # Panics
     ///
     /// Panics if the connection to vaht fails.
     pub fn move_pointer_to(&mut self, x: u32, y: u32) {
-        let output_size = self.output_size();
-        self.input.move_pointer_to(x, y, output_size);
+        let layout_size = self.layout_size();
+        self.input.move_pointer_to(x, y, layout_size);
         self.roundtrip();
     }
 
@@ -486,18 +487,45 @@ impl TestClient {
         self.roundtrip();
     }
 
-    /// Captures the output as vaht shows it now.
+    /// Captures the (first) output as vaht shows it now.
     ///
     /// # Panics
     ///
     /// Panics if the capture fails or the connection to vaht does.
     pub fn screenshot(&mut self) -> Screenshot {
-        let handle = self.queue.handle();
         let output = self.output();
+        self.capture(&output)
+    }
+
+    /// Captures the output named `name` (such as `HEADLESS-2`) as vaht
+    /// shows it now.
+    ///
+    /// # Panics
+    ///
+    /// Panics if vaht has no such output, or the capture fails or the
+    /// connection to vaht does.
+    pub fn screenshot_of(&mut self, name: &str) -> Screenshot {
+        let output = self
+            .state
+            .outputs
+            .outputs()
+            .find(|output| {
+                self.state
+                    .outputs
+                    .info(output)
+                    .is_some_and(|info| info.name.as_deref() == Some(name))
+            })
+            .unwrap_or_else(|| panic!("vaht has an output named {name}"));
+        self.capture(&output)
+    }
+
+    /// Captures `output` as vaht shows it now.
+    fn capture(&mut self, output: &wl_output::WlOutput) -> Screenshot {
+        let handle = self.queue.handle();
         let source: ExtImageCaptureSourceV1 = self
             .state
             .capture_sources
-            .create_source(&output, &handle, NoEvents);
+            .create_source(output, &handle, NoEvents);
         let session = self.state.capture.create_session(
             &source,
             Options::empty(),
@@ -549,7 +577,7 @@ impl TestClient {
         self.roundtrip();
     }
 
-    /// Returns vaht's (only) output.
+    /// Returns vaht's first output.
     fn output(&self) -> wl_output::WlOutput {
         self.state
             .outputs
@@ -558,20 +586,34 @@ impl TestClient {
             .expect("vaht has an output")
     }
 
-    /// Returns the output's size in pixels.
-    fn output_size(&self) -> (u32, u32) {
-        let info = self
-            .state
+    /// Returns the size of the area every output fits in, from the
+    /// global origin, in pixels: what absolute pointer motion spans.
+    fn layout_size(&self) -> (u32, u32) {
+        let unsigned = |value: i32| {
+            u32::try_from(value).expect("the layout lies right of and below the origin")
+        };
+        self.state
             .outputs
-            .info(&self.output())
-            .expect("the output's details arrived");
-        let mode = info
-            .modes
-            .iter()
-            .find(|mode| mode.current)
-            .expect("the output has a current mode");
-        let unsigned = |value: i32| u32::try_from(value).expect("mode sizes are positive");
-        (unsigned(mode.dimensions.0), unsigned(mode.dimensions.1))
+            .outputs()
+            .map(|output| {
+                let info = self
+                    .state
+                    .outputs
+                    .info(&output)
+                    .expect("the output's details arrived");
+                let mode = info
+                    .modes
+                    .iter()
+                    .find(|mode| mode.current)
+                    .expect("the output has a current mode");
+                (
+                    unsigned(info.location.0 + mode.dimensions.0),
+                    unsigned(info.location.1 + mode.dimensions.1),
+                )
+            })
+            .fold((0, 0), |(width, height), (right, bottom)| {
+                (width.max(right), height.max(bottom))
+            })
     }
 
     /// Waits until vaht has processed everything sent so far.

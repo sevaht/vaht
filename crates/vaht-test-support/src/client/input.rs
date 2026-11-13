@@ -145,9 +145,9 @@ impl VirtualInput {
         }
     }
 
-    /// Moves the pointer to `x`, `y` on an output of `output_size`.
-    pub(super) fn move_pointer_to(&mut self, x: u32, y: u32, output_size: (u32, u32)) {
-        let (width, height) = output_size;
+    /// Moves the pointer to `x`, `y` in an output layout of `layout_size`.
+    pub(super) fn move_pointer_to(&mut self, x: u32, y: u32, layout_size: (u32, u32)) {
+        let (width, height) = layout_size;
         let time = self.tick();
         self.pointer.motion_absolute(time, x, y, width, height);
         self.pointer.frame();

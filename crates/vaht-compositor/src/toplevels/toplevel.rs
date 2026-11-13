@@ -14,17 +14,19 @@ use nix::unistd::Pid;
 use smithay::backend::renderer::element::AsRenderElements;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::{ImportAll, Renderer};
+use smithay::desktop::space::SpaceElement as _;
 use smithay::desktop::{Window as SurfaceWindow, WindowSurface, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource as _};
-use smithay::utils::{Logical, Physical, Point, Scale};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
 use smithay::wayland::xdg_toplevel_icon::ToplevelIconCachedState;
 
+use crate::outputs::Outputs;
 use crate::window_manager::{
     Axes, ClientIcon, CommittedState, Ending, PlacementKind, RequestedState, SizeLimits,
 };
@@ -158,6 +160,25 @@ impl Toplevel {
             .send_frame(output, time, Some(Duration::ZERO), |_, _| {
                 Some(output.clone())
             });
+    }
+
+    /// Tells the client which of `outputs` show its window, whose content
+    /// covers `area` (global coordinates) with its surface at `origin`.
+    pub(crate) fn enter_outputs(
+        &self,
+        outputs: &Outputs,
+        area: Rectangle<i32, Logical>,
+        origin: Point<i32, Logical>,
+    ) {
+        for output in outputs.iter() {
+            match Outputs::geometry(output).intersection(area) {
+                Some(mut overlap) => {
+                    overlap.loc -= origin;
+                    self.window.output_enter(output, overlap);
+                }
+                None => self.window.output_leave(output),
+            }
+        }
     }
 
     /// Updates what is known about the surface tree after a commit.

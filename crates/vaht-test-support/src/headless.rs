@@ -26,6 +26,9 @@ const CLIENT_RESOURCES: [&str; 8] = [
     "layer-surface",
 ];
 
+/// Files to write, each a path in its directory and its contents.
+type Files<'files> = &'files [(&'files str, &'files [u8])];
+
 /// A `vaht --backend headless` process with private directories: its
 /// socket, its configuration, its data (icons, desktop entries) and its log
 /// never meet the developer's own.
@@ -98,6 +101,39 @@ impl HeadlessVaht {
         config: &[(&str, &[u8])],
         data: &[(&str, &[u8])],
     ) -> Self {
+        Self::launch(executable, (config, data), &[])
+    }
+
+    /// Starts `executable` headless with outputs of `sizes` (such as
+    /// `1920x1080,1280x720`, laid out side by side from the left and named
+    /// `HEADLESS-1` on) and configuration `files`, and waits until it
+    /// accepts clients.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the files cannot be written, or vaht cannot start or does
+    /// not accept clients in time.
+    #[must_use]
+    pub fn start_with_outputs(executable: &Path, sizes: &str, files: &[(&str, &str)]) -> Self {
+        let files: Vec<(&str, &[u8])> = files
+            .iter()
+            .map(|(name, text)| (*name, text.as_bytes()))
+            .collect();
+        Self::launch(
+            executable,
+            (&files, &[]),
+            &[("VAHT_HEADLESS_OUTPUTS", sizes)],
+        )
+    }
+
+    /// Starts `executable` headless with configuration and data files
+    /// `(config, data)` and the further `environment` variables, and waits
+    /// until it accepts clients.
+    fn launch(
+        executable: &Path,
+        (config, data): (Files<'_>, Files<'_>),
+        environment: &[(&str, &str)],
+    ) -> Self {
         let write_all = |directory: &Path, files: &[(&str, &[u8])]| {
             for (name, contents) in files {
                 let path = directory.join(name);
@@ -139,6 +175,8 @@ impl HeadlessVaht {
             .env("DBUS_SYSTEM_BUS_ADDRESS", Self::absent_bus(runtime.path()))
             .env("DBUS_SESSION_BUS_ADDRESS", Self::absent_bus(runtime.path()))
             .env_remove("VAHT_LOG")
+            .env_remove("VAHT_HEADLESS_OUTPUTS")
+            .envs(environment.iter().copied())
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("DISPLAY")
             .stdout(Stdio::null())
