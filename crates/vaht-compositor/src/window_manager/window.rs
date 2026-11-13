@@ -201,6 +201,21 @@ impl Window {
         self.frame.set_title(&shown);
     }
 
+    /// Returns the window's icon at `size` pixels, looked up in `store`:
+    /// the one its client named or drew, else its application's.
+    pub(crate) fn icon_in(
+        &self,
+        store: &mut vaht_ui::IconStore,
+        size: u32,
+    ) -> Option<vaht_ui::Icon> {
+        match self.icon() {
+            Some(ClientIcon::Named(name)) => store.named(name, size),
+            Some(ClientIcon::Pixels(icon)) => Some(icon.clone()),
+            None => None,
+        }
+        .or_else(|| store.app_icon(self.app_id(), size))
+    }
+
     /// Returns the application id its client set.
     pub(crate) fn app_id(&self) -> &str {
         &self.committed.app_id

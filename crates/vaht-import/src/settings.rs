@@ -282,6 +282,7 @@ impl InitFile {
         }
         self.convert_flag("opaqueResize", &["windows", "opaque_resize"]);
         self.convert_flag("allowRemoteActions", &["ipc", "allow_commands"]);
+        self.convert_flag("clientMenu.usePixmap", &["menus", "window_icons"]);
         for (state, key) in [("focus", "focused_alpha"), ("unfocus", "unfocused_alpha")] {
             if let Some(alpha) = self.number(&format!("{SCREEN}window.{state}.alpha")) {
                 self.set(&["windows", key], Value::from(alpha.clamp(0, 255)));

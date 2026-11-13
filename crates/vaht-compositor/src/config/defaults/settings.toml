@@ -91,6 +91,8 @@ submenu_delay_ms = 200
 # with what was typed (item-start), has it anywhere (anywhere), or nothing
 # (off). Backspace takes a letter back.
 search = "item-start"
+# Whether lists of windows show each window's icon beside its title.
+window_icons = true
 
 [wallpaper]
 # An image (PNG, JPEG, WebP, GIF and other common formats) drawn under everything, such as "~/Pictures/sky.png" ("~/" is

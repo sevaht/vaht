@@ -492,6 +492,7 @@ mod tests {
                 window: None,
             },
             mark: None,
+            icon: None,
         }
     }
 

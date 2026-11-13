@@ -111,6 +111,8 @@ pub struct Compositor {
     pub(crate) outline: Outline,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
+    /// Finds application icons, for the taskbar and menus.
+    icons: vaht_ui::IconStore,
     /// Draws screenshots for capture clients.
     pub(crate) capture: ScreenCapture,
     /// vaht's own keymap, restored after a virtual keyboard used its own.
@@ -271,6 +273,7 @@ impl Compositor {
             backdrop: Backdrop::new(&config.settings.wallpaper, config_source.directory()),
             outline: Outline::default(),
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
+            icons: vaht_ui::IconStore::from_environment(),
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
             physical_keymap,
             keyboard_focus: None,
@@ -390,6 +393,7 @@ impl Compositor {
         }
         self.backdrop.apply(&config.settings.wallpaper);
         // A reload is when icons installed or changed since show.
+        self.icons.forget();
         if let Some(taskbar) = &mut self.taskbar {
             taskbar.forget_icons();
         }
@@ -451,7 +455,12 @@ impl Compositor {
                 whole: self.backend.output_geometry(),
                 now: &now,
             };
-            taskbar.prepare(view, &self.config.theme, &mut self.typesetter);
+            taskbar.prepare(
+                view,
+                &self.config.theme,
+                &mut self.typesetter,
+                &mut self.icons,
+            );
         }
         self.menus.prepare(&self.config.theme, &mut self.typesetter);
         self.backdrop
@@ -978,11 +987,13 @@ impl Compositor {
             return;
         }
         let window = window.or_else(|| self.window_manager.focused());
+        let icons = self.window_icons_for_menus();
         let builder = MenuBuilder::new(&self.config.menus, &self.window_manager, window)
             .with_themes(
                 ThemeFile::available(self.config_source.directory()),
                 self.config.settings.theme.as_deref(),
-            );
+            )
+            .with_window_icons(icons);
         let model = match request {
             MenuRequest::Root => builder.build(Menus::ROOT),
             MenuRequest::Window => window.and_then(|_| builder.build(Menus::WINDOW)),
@@ -1005,6 +1016,19 @@ impl Compositor {
         );
         self.menus.mark_opened_by(request.clone());
         self.schedule_render();
+    }
+
+    /// Returns each placed window's icon at the size a menu item shows it;
+    /// none if the settings want no icons in menus.
+    fn window_icons_for_menus(&mut self) -> std::collections::HashMap<WindowId, vaht_ui::Icon> {
+        if !self.config.settings.menus.window_icons {
+            return std::collections::HashMap::new();
+        }
+        let size = vaht_ui::WidgetIcon::side(self.config.theme.metrics().menu.item_height);
+        self.window_manager
+            .windows_top_down()
+            .filter_map(|window| Some((window.id(), window.icon_in(&mut self.icons, size)?)))
+            .collect()
     }
 
     /// Opens the submenu of the item highlighted in the last menu: the

@@ -264,6 +264,8 @@ pub(crate) struct MenuSettings {
     submenu_delay_ms: u64,
     /// How typing in an open menu finds an item.
     pub(crate) search: MenuSearch,
+    /// Whether lists of windows show each window's icon.
+    pub(crate) window_icons: bool,
 }
 
 /// How typing in an open menu finds an item (Fluxbox's `menuSearch`).
@@ -304,6 +306,7 @@ impl Default for MenuSettings {
         Self {
             submenu_delay_ms: 200,
             search: MenuSearch::ItemStart,
+            window_icons: true,
         }
     }
 }

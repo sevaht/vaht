@@ -11,8 +11,8 @@
 use smithay::utils::{Logical, Point, Rectangle};
 use vaht_ui::theme::MenuMetrics;
 use vaht_ui::{
-    Corner, CornerRadii, Glyph, PanelContent, SizePolicy, Theme, ThemeElement, Typesetter, Widget,
-    WidgetState,
+    Corner, CornerRadii, Glyph, IconEmphasis, PanelContent, SizePolicy, Theme, ThemeElement,
+    Typesetter, Widget, WidgetIcon, WidgetState,
 };
 
 use super::model::{MenuItem, MenuModel};
@@ -58,18 +58,20 @@ impl MenuContent {
         let title = self.model.title.as_deref().map_or(0, |title| {
             fit(ThemeElement::MenuTitle, WidgetState::Focused, title)
         });
+        let icon_span = WidgetIcon::span(self.metrics.item_height);
         let items = self
             .model
             .items
             .iter()
-            .filter_map(MenuItem::label)
-            .map(|label| {
+            .filter_map(|item| Some((item.label()?, item.has_icon())))
+            .map(|(label, has_icon)| {
                 // A highlighted item may be drawn in a wider font.
-                fit(ThemeElement::MenuItem, WidgetState::Focused, label).max(fit(
+                let text = fit(ThemeElement::MenuItem, WidgetState::Focused, label).max(fit(
                     ThemeElement::MenuItem,
                     WidgetState::Hovered,
                     label,
-                ))
+                ));
+                if has_icon { text + icon_span } else { text }
             })
             .max()
             .unwrap_or(0);
@@ -135,10 +137,19 @@ impl PanelContent for MenuContent {
                 MenuItem::Inert { label } => Widget::text(ThemeElement::MenuItem, label.clone())
                     .with_size(row)
                     .with_state(WidgetState::Disabled),
-                MenuItem::Choice { label, mark, .. } => {
+                MenuItem::Choice {
+                    label, mark, icon, ..
+                } => {
                     let widget = Widget::text(ThemeElement::MenuItem, label.clone())
                         .with_size(row)
                         .with_hit(index);
+                    let widget = match icon {
+                        Some(icon) => widget.with_icon(WidgetIcon {
+                            icon: icon.clone(),
+                            emphasis: IconEmphasis::Full,
+                        }),
+                        None => widget,
+                    };
                     if *mark == Some(true) {
                         widget.with_mark_on(Glyph::Check, self.metrics.bullet_side)
                     } else {

@@ -146,3 +146,43 @@ fn the_window_menu_toggles_the_window_it_was_opened_on() {
         "shaded: the content is rolled up"
     );
 }
+
+/// Opens a window whose application has a solid icon, then the window-list
+/// menu at the pointer, with `settings`; returns the color where the first
+/// item's icon goes.
+fn window_list_icon_spot(settings: &str) -> [u8; 3] {
+    let icon = [0x00, 0xff, 0x00];
+    let png = vaht_test_support::solid_png(32, icon);
+    let vaht = HeadlessVaht::start_with_files(
+        Path::new(EXECUTABLE),
+        &[
+            ("settings.toml", settings.as_bytes()),
+            ("bindings.toml", b"[keys]\nF1 = \"window-list-menu\"\n"),
+        ],
+        &[
+            (
+                "applications/vaht.test.desktop",
+                b"[Desktop Entry]\nName=Test\nIcon=vaht-test-icon\n",
+            ),
+            ("icons/hicolor/32x32/apps/vaht-test-icon.png", &png),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    client.move_pointer_to(OPENED_AT.0, OPENED_AT.1);
+    client.type_chord(&[keys::F1]);
+    // The list has no title: the first item is just inside the outline.
+    client.screenshot().rgb(
+        OPENED_AT.0 + BORDER + 4,
+        OPENED_AT.1 + BORDER + ITEM_HEIGHT / 2,
+    )
+}
+
+#[test]
+fn the_window_list_shows_each_window_s_icon() {
+    assert_eq!(window_list_icon_spot(""), [0x00, 0xff, 0x00]);
+    assert_ne!(
+        window_list_icon_spot("[menus]\nwindow_icons = false\n"),
+        [0x00, 0xff, 0x00]
+    );
+}

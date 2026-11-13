@@ -582,7 +582,9 @@ items = [
   Enter, Escape, and typing: `[menus] search` (`item-start`, `anywhere` or
   `off`, from Fluxbox's `menuSearch`) highlights the first item found by
   what was typed, a letter finding nothing is not kept, and Backspace takes
-  one back. Not yet: `pipe`, `icon`, the `outputs` and `profiles` lists,
+  one back. `[menus] window_icons` (from `clientMenu.usePixmap`) shows
+  each window's icon in lists of windows. Not yet: `pipe`, `icon`, the
+  `outputs` and `profiles` lists,
   and the GTK presenter.
 - **Dropped:**
   - Fluxbox's `[config]` editor menu: settings are reached through

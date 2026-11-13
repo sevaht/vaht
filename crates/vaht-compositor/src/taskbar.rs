@@ -42,7 +42,7 @@ use crate::resources::ResourceLedger;
 use crate::scene::{PanelTexture, SceneElement};
 use crate::tray::{ItemIcon, Tray, TrayAction, TrayHooks, TrayItem, TrayItemKey};
 use crate::wall_clock::{ClockHooks, WallClock, ZoneSources};
-use crate::window_manager::{Area, ClientIcon, Window, WindowId, WindowManager};
+use crate::window_manager::{Area, Window, WindowId, WindowManager};
 
 /// What clicking the taskbar can report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -112,8 +112,6 @@ pub(crate) struct Taskbar {
     clock_shows_seconds: bool,
     /// Wakes vaht when the clock's text next changes.
     wall_clock: Option<WallClock<Compositor>>,
-    /// The entries' and tray items' icons.
-    icons: IconStore,
     /// The tray, once started, if the taskbar shows one.
     tray: Option<Tray<Compositor>>,
 }
@@ -147,7 +145,6 @@ impl Taskbar {
             clock_shows_seconds: settings.clock.format.shows_seconds()
                 && settings.widgets.contains(&TaskbarWidget::Clock),
             wall_clock: None,
-            icons: IconStore::from_environment(),
             tray: None,
         })
     }
@@ -263,6 +260,7 @@ impl Taskbar {
         view: TaskbarView<'_>,
         theme: &Theme,
         typesetter: &mut Typesetter,
+        icons: &mut IconStore,
     ) {
         let height = theme.metrics().taskbar_height;
         self.area = self.area_in(view.whole, height);
@@ -273,7 +271,7 @@ impl Taskbar {
             &view,
             &self.panel.content().widgets,
             &tray_items,
-            (&mut self.icons, height),
+            (icons, height),
         );
         if *self.panel.content() != content {
             self.panel.update(|current| *current = content);
@@ -292,10 +290,9 @@ impl Taskbar {
         self.panel.invalidate();
     }
 
-    /// Looks icons up again at the next prepare, so icons installed or
-    /// changed since show.
+    /// Lays out and paints the taskbar again at the next prepare, so icons
+    /// looked up again show.
     pub(crate) fn forget_icons(&mut self) {
-        self.icons.forget();
         self.panel.invalidate();
     }
 
@@ -528,14 +525,7 @@ impl TaskbarContent {
                     is_focused: manager.focused() == Some(window.id()),
                     is_minimized: window.state().is_minimized,
                     icon: shows_icons
-                        .then(|| {
-                            match window.icon() {
-                                Some(ClientIcon::Named(name)) => store.named(name, icon_size),
-                                Some(ClientIcon::Pixels(icon)) => Some(icon.clone()),
-                                None => None,
-                            }
-                            .or_else(|| store.app_icon(window.app_id(), icon_size))
-                        })
+                        .then(|| window.icon_in(store, icon_size))
                         .flatten(),
                 })
                 .collect(),

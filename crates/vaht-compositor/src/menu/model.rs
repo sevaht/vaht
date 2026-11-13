@@ -8,6 +8,8 @@
 //! windows. The model knows nothing of how it is drawn, so another
 //! presenter (a toolkit's menus) can show it alike.
 
+use std::collections::HashMap;
+
 use crate::config::{
     Action, Command, MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowManagerAction,
     WindowToggle,
@@ -34,6 +36,8 @@ pub(crate) enum MenuItem {
         choice: MenuChoice,
         /// Its toggle's mark, if it toggles something.
         mark: Option<bool>,
+        /// Its icon, if it shows one: a window's, in a list of windows.
+        icon: Option<vaht_ui::Icon>,
     },
     /// An item that opens another menu.
     Submenu {
@@ -60,6 +64,11 @@ impl MenuItem {
             }
             Self::Separator => None,
         }
+    }
+
+    /// Returns whether the item shows an icon.
+    pub(crate) const fn has_icon(&self) -> bool {
+        matches!(self, Self::Choice { icon: Some(_), .. })
     }
 
     /// Returns whether the item can be highlighted and chosen.
@@ -96,6 +105,8 @@ pub(crate) struct MenuBuilder<'state> {
     themes: Vec<String>,
     /// The theme in use, if not the built-in one.
     current_theme: Option<&'state str>,
+    /// Each window's icon, for lists of windows that show them.
+    window_icons: HashMap<WindowId, vaht_ui::Icon>,
 }
 
 impl<'state> MenuBuilder<'state> {
@@ -114,7 +125,7 @@ impl<'state> MenuBuilder<'state> {
     ];
 
     /// A builder of menus about `window`.
-    pub(crate) const fn new(
+    pub(crate) fn new(
         menus: &'state Menus,
         window_manager: &'state WindowManager,
         window: Option<WindowId>,
@@ -125,7 +136,16 @@ impl<'state> MenuBuilder<'state> {
             window,
             themes: Vec::new(),
             current_theme: None,
+            window_icons: HashMap::new(),
         }
+    }
+
+    /// Returns the builder showing `icons` beside the windows they belong
+    /// to in lists of windows (Fluxbox's `clientMenu.usePixmap`).
+    #[must_use]
+    pub(crate) fn with_window_icons(mut self, icons: HashMap<WindowId, vaht_ui::Icon>) -> Self {
+        self.window_icons = icons;
+        self
     }
 
     /// Returns the builder listing `themes` in the `themes` list, `current`
@@ -164,6 +184,7 @@ impl<'state> MenuBuilder<'state> {
                         window: self.window,
                     },
                     mark: None,
+                    icon: None,
                 }),
                 MenuEntry::Submenu { label, menu } => {
                     if depth >= Self::MAX_DEPTH {
@@ -234,7 +255,35 @@ impl<'state> MenuBuilder<'state> {
                 window: self.window,
             },
             mark: Some(is_on),
+            icon: None,
         })
+    }
+
+    /// Returns the placed windows, in the order they opened, a minimized
+    /// one's title in parentheses; choosing one brings it forward.
+    fn window_list(&self) -> Vec<MenuItem> {
+        let manager = self.window_manager;
+        let mut windows: Vec<_> = manager
+            .windows_top_down()
+            .filter(|window| window.is_placed())
+            .collect();
+        windows.sort_by_key(|window| window.id());
+        windows
+            .into_iter()
+            .map(|window| {
+                let title = if window.state().is_minimized {
+                    format!("({})", window.title())
+                } else {
+                    window.title().to_owned()
+                };
+                MenuItem::Choice {
+                    label: title,
+                    choice: MenuChoice::Activate(window.id()),
+                    mark: None,
+                    icon: self.window_icons.get(&window.id()).cloned(),
+                }
+            })
+            .collect()
     }
 
     /// Returns the items of the list `generator` makes.
@@ -269,31 +318,11 @@ impl<'state> MenuBuilder<'state> {
                             window,
                         },
                         mark: Some(is_here),
+                        icon: None,
                     }
                 })
                 .collect(),
-            MenuGenerator::WindowList => {
-                let mut windows: Vec<_> = manager
-                    .windows_top_down()
-                    .filter(|window| window.is_placed())
-                    .collect();
-                windows.sort_by_key(|window| window.id());
-                windows
-                    .into_iter()
-                    .map(|window| {
-                        let title = if window.state().is_minimized {
-                            format!("({})", window.title())
-                        } else {
-                            window.title().to_owned()
-                        };
-                        MenuItem::Choice {
-                            label: title,
-                            choice: MenuChoice::Activate(window.id()),
-                            mark: None,
-                        }
-                    })
-                    .collect()
-            }
+            MenuGenerator::WindowList => self.window_list(),
             MenuGenerator::Themes => self
                 .themes
                 .iter()
@@ -304,6 +333,7 @@ impl<'state> MenuBuilder<'state> {
                         window: None,
                     },
                     mark: Some(self.current_theme == Some(name.as_str())),
+                    icon: None,
                 })
                 .collect(),
             MenuGenerator::Layer => {
@@ -319,6 +349,7 @@ impl<'state> MenuBuilder<'state> {
                             window: self.window,
                         },
                         mark: Some(current == Some(*layer)),
+                        icon: None,
                     })
                     .collect()
             }
@@ -333,6 +364,7 @@ impl<'state> MenuBuilder<'state> {
                         window: self.window,
                     },
                     mark: None,
+                    icon: None,
                 })
                 .collect(),
         }
