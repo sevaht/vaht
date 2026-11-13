@@ -25,7 +25,7 @@ use smithay::utils::{Logical, Point, Rectangle, Size};
 use vaht_ui::theme::Metrics;
 use vaht_ui::{Theme, Typesetter};
 
-pub(crate) use client::{CommittedState, Ending, PlacementKind, RequestedState};
+pub(crate) use client::{ClientIcon, CommittedState, Ending, PlacementKind, RequestedState};
 pub(crate) use edge_snap::EdgeSnap;
 pub(crate) use frame::{
     Frame, FrameGeometry, FramePart, FrameShape, GripSide, TitlebarButton, TitlebarLayout,
@@ -164,9 +164,9 @@ impl Window {
         &self.committed.app_id
     }
 
-    /// Returns the name of the icon its client chose, if it named one.
-    pub(crate) fn icon_name(&self) -> Option<&str> {
-        self.committed.icon_name.as_deref()
+    /// Returns the icon its client chose, if it chose one.
+    pub(crate) const fn icon(&self) -> Option<&ClientIcon> {
+        self.committed.icon.as_ref()
     }
 
     /// Returns where the content's top-left corner is.

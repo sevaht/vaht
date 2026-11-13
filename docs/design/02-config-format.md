@@ -198,7 +198,8 @@ rest by name, so a setting never silently does nothing:
   `window-list`, `tray`, `clock`),
   `[taskbar.window_list]` with `show` (a matcher),
   `entry_width = { max }` and `icons` (each entry's icon: the one the
-  window names over xdg-toplevel-icon, else its desktop entry's `Icon`,
+  window names or draws over xdg-toplevel-icon (a drawn one is read back
+  through the renderer, with no `unsafe`), else its desktop entry's `Icon`,
   found in the `hicolor` theme or `pixmaps`; PNG and SVG; from
   `iconbar.usePixmap`), `[taskbar.tray]` with `pin_left` and `pin_right`
   (item ids, from `systray.pinLeft` and `systray.pinRight`), and

@@ -42,7 +42,7 @@ use crate::resources::ResourceLedger;
 use crate::scene::{PanelTexture, SceneElement};
 use crate::tray::{ItemIcon, Tray, TrayAction, TrayHooks, TrayItem, TrayItemKey};
 use crate::wall_clock::{ClockHooks, WallClock, ZoneSources};
-use crate::window_manager::{Area, Window, WindowId, WindowManager};
+use crate::window_manager::{Area, ClientIcon, Window, WindowId, WindowManager};
 
 /// What clicking the taskbar can report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -528,10 +528,12 @@ impl TaskbarContent {
                     is_minimized: window.state().is_minimized,
                     icon: shows_icons
                         .then(|| {
-                            window
-                                .icon_name()
-                                .and_then(|name| store.named(name, icon_size))
-                                .or_else(|| store.app_icon(window.app_id(), icon_size))
+                            match window.icon() {
+                                Some(ClientIcon::Named(name)) => store.named(name, icon_size),
+                                Some(ClientIcon::Pixels(icon)) => Some(icon.clone()),
+                                None => None,
+                            }
+                            .or_else(|| store.app_icon(window.app_id(), icon_size))
                         })
                         .flatten(),
                 })

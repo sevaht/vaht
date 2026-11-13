@@ -17,6 +17,7 @@ use smithay::backend::renderer::{ImportAll, Renderer};
 use smithay::desktop::{Window as SurfaceWindow, WindowSurface, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
+use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource as _};
 use smithay::utils::{Logical, Physical, Point, Scale};
@@ -25,7 +26,7 @@ use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgTople
 use smithay::wayland::xdg_toplevel_icon::ToplevelIconCachedState;
 
 use crate::window_manager::{
-    Axes, CommittedState, Ending, PlacementKind, RequestedState, SizeLimits,
+    Axes, ClientIcon, CommittedState, Ending, PlacementKind, RequestedState, SizeLimits,
 };
 
 /// The client's side of a window.
@@ -33,6 +34,9 @@ use crate::window_manager::{
 pub(crate) struct Toplevel {
     /// Smithay's surface-agnostic window, which tracks the surface tree.
     window: SurfaceWindow,
+    /// The icon picture last read, with the buffer it was read from, so an
+    /// unchanged icon is not read again.
+    read_icon: Option<(WlBuffer, vaht_ui::Icon)>,
 }
 
 impl Toplevel {
@@ -40,6 +44,7 @@ impl Toplevel {
     pub(crate) fn from_xdg(surface: ToplevelSurface) -> Self {
         Self {
             window: SurfaceWindow::new_wayland_window(surface),
+            read_icon: None,
         }
     }
 
@@ -53,8 +58,12 @@ impl Toplevel {
         self.wl_surface() == surface
     }
 
-    /// Returns what the client last committed.
-    pub(crate) fn committed_state(&self) -> CommittedState {
+    /// Returns what the client last committed; `read` reads the picture
+    /// in a buffer, for an icon the client drew.
+    pub(crate) fn committed_state(
+        &mut self,
+        read: impl FnOnce(&WlBuffer) -> Option<vaht_ui::Icon>,
+    ) -> CommittedState {
         let (title, app_id) = self
             .with_attributes(|attributes| {
                 (
@@ -63,21 +72,59 @@ impl Toplevel {
                 )
             })
             .unwrap_or_default();
-        let icon_name = with_states(self.wl_surface(), |states| {
-            states
-                .cached_state
-                .get::<ToplevelIconCachedState>()
-                .current()
-                .icon_name()
-                .map(str::to_owned)
+        let (icon_name, icon_buffer) = with_states(self.wl_surface(), |states| {
+            let mut cached = states.cached_state.get::<ToplevelIconCachedState>();
+            let icon = cached.current();
+            (
+                icon.icon_name().map(str::to_owned),
+                Self::largest_buffer(icon.buffers()),
+            )
         });
+        // A name scales with the theme, so it comes before a picture.
+        let icon = match (icon_name, icon_buffer) {
+            (Some(name), _) => Some(ClientIcon::Named(name)),
+            (None, Some(buffer)) => self.icon_in(&buffer, read).map(ClientIcon::Pixels),
+            (None, None) => None,
+        };
         CommittedState {
             title,
             app_id,
-            icon_name,
+            icon,
             geometry: self.window.geometry(),
             size_limits: self.size_limits(),
         }
+    }
+
+    /// Returns the picture in `buffer`: the one read before, if it is the
+    /// same buffer, else what `read` reads now.
+    fn icon_in(
+        &mut self,
+        buffer: &WlBuffer,
+        read: impl FnOnce(&WlBuffer) -> Option<vaht_ui::Icon>,
+    ) -> Option<vaht_ui::Icon> {
+        if let Some((known, icon)) = &self.read_icon
+            && known == buffer
+        {
+            return Some(icon.clone());
+        }
+        let icon = read(buffer)?;
+        self.read_icon = Some((buffer.clone(), icon.clone()));
+        Some(icon)
+    }
+
+    /// Returns the widest of a client's icon `buffers` (each with its
+    /// scale), which reads best scaled down.
+    fn largest_buffer(buffers: &[(WlBuffer, i32)]) -> Option<WlBuffer> {
+        buffers
+            .iter()
+            .max_by_key(|(buffer, scale)| {
+                // Only the description is read here, never the memory.
+                let width =
+                    smithay::wayland::shm::with_buffer_contents(buffer, |_, _, data| data.width)
+                        .unwrap_or(0);
+                (width, *scale)
+            })
+            .map(|(buffer, _)| buffer.clone())
     }
 
     /// Returns the surface under `point` (relative to the surface origin) and

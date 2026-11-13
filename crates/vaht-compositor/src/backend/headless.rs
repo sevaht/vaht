@@ -130,6 +130,11 @@ impl HeadlessBackend {
         Size::from((i32::from(Self::WIDTH), i32::from(Self::HEIGHT)))
     }
 
+    /// Returns the renderer.
+    pub(crate) const fn renderer(&mut self) -> &mut PixmanRenderer {
+        &mut self.renderer
+    }
+
     /// Schedules the next frame one refresh interval from now, unless one is
     /// already scheduled.
     pub(crate) fn schedule_render(&mut self) {

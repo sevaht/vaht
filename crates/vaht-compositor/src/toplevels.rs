@@ -29,6 +29,13 @@ impl Toplevels {
         self.by_window.get(&window).map(|(toplevel, _)| toplevel)
     }
 
+    /// Returns the toplevel of `window` to change, if it has one.
+    pub(crate) fn get_mut(&mut self, window: WindowId) -> Option<&mut Toplevel> {
+        self.by_window
+            .get_mut(&window)
+            .map(|(toplevel, _)| toplevel)
+    }
+
     /// Returns the window whose root surface is `surface`.
     pub(crate) fn window_of(&self, surface: &WlSurface) -> Option<WindowId> {
         self.by_window

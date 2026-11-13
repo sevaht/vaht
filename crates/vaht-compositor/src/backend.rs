@@ -9,11 +9,13 @@
 mod headless;
 mod winit;
 
-use smithay::backend::allocator::Format;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::allocator::{Format, Fourcc};
+use smithay::backend::renderer::{ExportMem, ImportMemWl, Texture as _};
 use smithay::output::Output;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::wayland_server::DisplayHandle;
+use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::utils::{Logical, Rectangle};
 
 pub(crate) use self::headless::HeadlessBackend;
@@ -128,6 +130,19 @@ impl Backend {
         }
     }
 
+    /// Returns the picture in a client's shared-memory `buffer` as an icon
+    /// (a window's, set over xdg-toplevel-icon), if it can be read.
+    ///
+    /// The renderer reads it: it takes the buffer in as a texture and
+    /// hands its pixels back, which needs no `unsafe` in vaht (R-X3), as
+    /// reading the client's memory directly would.
+    pub(crate) fn read_icon(&mut self, buffer: &WlBuffer) -> Option<vaht_ui::Icon> {
+        match self {
+            Self::Winit(backend) => Self::read_icon_with(backend.renderer(), buffer),
+            Self::Headless(backend) => Self::read_icon_with(backend.renderer(), buffer),
+        }
+    }
+
     /// Draws a frame of `scene`.
     ///
     /// # Errors
@@ -138,6 +153,25 @@ impl Backend {
             Self::Winit(backend) => backend.render(scene),
             Self::Headless(backend) => backend.render(scene),
         }
+    }
+
+    /// Reads `buffer` as an icon with `renderer`.
+    fn read_icon_with<R>(renderer: &mut R, buffer: &WlBuffer) -> Option<vaht_ui::Icon>
+    where
+        R: ImportMemWl + ExportMem,
+    {
+        let texture = renderer
+            .import_shm_buffer(buffer, None, &[])
+            .inspect_err(|error| tracing::debug!(%error, "a window's icon could not be taken in"))
+            .ok()?;
+        let size = texture.size();
+        let mapping = renderer
+            .copy_texture(&texture, Rectangle::from_size(size), Fourcc::Argb8888)
+            .inspect_err(|error| tracing::debug!(%error, "a window's icon could not be read"))
+            .ok()?;
+        let bytes = renderer.map_texture(&mapping).ok()?;
+        let (width, height) = (u32::try_from(size.w).ok()?, u32::try_from(size.h).ok()?);
+        vaht_ui::Icon::from_argb8888(width, height, bytes)
     }
 }
 

@@ -28,10 +28,10 @@ use self::focus::Focus;
 pub(crate) use self::placement_strategy::{ColumnDirection, PlacementStrategy, Room, RowDirection};
 pub use self::window::WindowId;
 pub(crate) use self::window::{
-    Area, Axes, CommittedState, Direction, EdgeSnap, Ending, Frame, FrameGeometry, FramePart,
-    GripSide, HorizontalEdge, OutputArea, Placement, PlacementKind, RequestedState, ResizeEdges,
-    SizeLimits, SnapStep, TileCell, TitlebarButton, TitlebarLayout, VerticalEdge, Window,
-    WindowDrag,
+    Area, Axes, ClientIcon, CommittedState, Direction, EdgeSnap, Ending, Frame, FrameGeometry,
+    FramePart, GripSide, HorizontalEdge, OutputArea, Placement, PlacementKind, RequestedState,
+    ResizeEdges, SizeLimits, SnapStep, TileCell, TitlebarButton, TitlebarLayout, VerticalEdge,
+    Window, WindowDrag,
 };
 use self::windows::Windows;
 use self::workspaces::Workspaces;
@@ -892,7 +892,7 @@ mod tests {
             let committed = CommittedState {
                 title: format!("window {window}"),
                 app_id: app_id.to_owned(),
-                icon_name: None,
+                icon: None,
                 geometry: Rectangle::from_size(size.into()),
                 size_limits: SizeLimits::default(),
             };

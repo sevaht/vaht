@@ -88,12 +88,16 @@ pub(crate) struct ProtocolStates {
     /// `zwp_virtual_keyboard_manager_v1`: key input from programs. Held only
     /// to keep the global alive.
     _virtual_keyboard: VirtualKeyboardManagerState,
-    /// `xdg_toplevel_icon_manager_v1`: windows naming their icon, which
-    /// their commits carry. Held only to keep the global alive.
+    /// `xdg_toplevel_icon_manager_v1`: windows naming or drawing their
+    /// icon, which their commits carry. Held only to keep the global alive.
     _toplevel_icon: XdgToplevelIconManager,
 }
 
 impl ProtocolStates {
+    /// The icon sizes windows are asked to draw, in pixels: around the
+    /// taskbar's (18 by default) and larger, which read well scaled down.
+    const TOPLEVEL_ICON_SIZES: [i32; 4] = [16, 24, 32, 48];
+
     /// Creates every global on `display`.
     pub(crate) fn new(display: &DisplayHandle) -> Self {
         Self {
@@ -127,7 +131,11 @@ impl ProtocolStates {
                 display,
                 |_client| true,
             ),
-            _toplevel_icon: XdgToplevelIconManager::new::<Compositor>(display),
+            _toplevel_icon: {
+                let mut icons = XdgToplevelIconManager::new::<Compositor>(display);
+                icons.replace_icon_sizes(Self::TOPLEVEL_ICON_SIZES);
+                icons
+            },
         }
     }
 }

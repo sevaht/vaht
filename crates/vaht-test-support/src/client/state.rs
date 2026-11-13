@@ -6,7 +6,7 @@ use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Fra
 use smithay_client_toolkit::dispatch2::Dispatch2;
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::client::globals::GlobalList;
-use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_seat, wl_shm, wl_surface};
+use smithay_client_toolkit::reexports::client::protocol::{wl_buffer, wl_keyboard, wl_output, wl_seat, wl_shm, wl_surface};
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
 use smithay_client_toolkit::reexports::client::{Connection, QueueHandle};
@@ -61,6 +61,8 @@ pub(super) struct ClientState {
     pub(super) capture: ExtImageCopyCaptureManagerV1,
     /// Gives windows icons.
     pub(super) toplevel_icons: XdgToplevelIconManagerV1,
+    /// The buffers of icons the client drew, kept while vaht may read them.
+    pub(super) icon_buffers: Vec<smithay_client_toolkit::shm::slot::Buffer>,
     /// Shared-memory buffers.
     pub(super) shm: Shm,
     /// Where buffers are allocated.
@@ -112,6 +114,7 @@ impl ClientState {
             ),
             capture: bind(globals, handle, "ext_image_copy_capture_manager_v1"),
             toplevel_icons: bind(globals, handle, "xdg_toplevel_icon_manager_v1"),
+            icon_buffers: Vec::new(),
             pool: SlotPool::new(pool_size, &shm).expect("a shared-memory pool"),
             shm,
             windows: Vec::new(),
@@ -128,6 +131,24 @@ impl ClientState {
     /// to hear when it is shown.
     pub(super) fn draw(&mut self, window: &Window, handle: &QueueHandle<Self>, size: (u32, u32)) {
         self.fill(window.wl_surface(), handle, size, WINDOW_COLOR);
+    }
+
+    /// Returns a buffer `size` pixels square, all `color`, for an icon.
+    pub(super) fn icon_buffer(&mut self, size: u32, color: [u8; 3]) -> wl_buffer::WlBuffer {
+        let extent = i32::try_from(size).expect("icon sizes fit in i32");
+        let stride = extent * i32::try_from(BYTES_PER_PIXEL).expect("4 fits in i32");
+        let (buffer, canvas) = self
+            .pool
+            .create_buffer(extent, extent, stride, wl_shm::Format::Argb8888)
+            .expect("the pool has room");
+        let [red, green, blue] = color;
+        let (pixels, _) = canvas.as_chunks_mut::<4>();
+        for pixel in pixels {
+            *pixel = [blue, green, red, u8::MAX];
+        }
+        let wl_buffer = buffer.wl_buffer().clone();
+        self.icon_buffers.push(buffer);
+        wl_buffer
     }
 
     /// Fills `surface` with `color` at `size`, and commits it.

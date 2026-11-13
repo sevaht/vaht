@@ -784,14 +784,15 @@ impl Compositor {
         let Some(window) = self.toplevels.window_of(root) else {
             return;
         };
-        let Some(toplevel) = self.toplevels.get(window) else {
+        let Some(toplevel) = self.toplevels.get_mut(window) else {
             return;
         };
         toplevel.on_commit();
         if !is_root {
             return;
         }
-        let committed = toplevel.committed_state();
+        let backend = &mut self.backend;
+        let committed = toplevel.committed_state(|buffer| backend.read_icon(buffer));
         let pointer = self.pointer_location().to_i32_round();
         self.window_manager
             .commit(window, committed, &self.config, pointer);

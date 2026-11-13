@@ -69,6 +69,32 @@ impl Icon {
         Self::fitted(&pixmap, width.max(height))
     }
 
+    /// Returns the picture `width` by `height` whose pixels `bytes` holds
+    /// as Wayland's ARGB8888 lays them out in memory: blue, green, red and
+    /// alpha, premultiplied, rows packed; none if the bytes are not exactly
+    /// that.
+    #[must_use]
+    pub fn from_argb8888(width: u32, height: u32, bytes: &[u8]) -> Option<Self> {
+        let mut pixmap = Pixmap::new(width, height)?;
+        let (pixels, rest) = bytes.as_chunks::<4>();
+        if pixels.len() != pixmap.pixels().len() || !rest.is_empty() {
+            return None;
+        }
+        for (target, [blue, green, red, alpha]) in pixmap.pixels_mut().iter_mut().zip(pixels) {
+            // A client's premultiplied color may exceed its alpha; clamped,
+            // it is always a premultiplied color.
+            let channel = |value: u8| value.min(*alpha);
+            *target = tiny_skia::PremultipliedColorU8::from_rgba(
+                channel(*red),
+                channel(*green),
+                channel(*blue),
+                *alpha,
+            )
+            .unwrap_or(tiny_skia::PremultipliedColorU8::TRANSPARENT);
+        }
+        Self::fitted(&pixmap, width.max(height))
+    }
+
     /// Reads the PNG or SVG file at `path` as an icon `size` wide.
     ///
     /// # Errors
@@ -280,6 +306,18 @@ mod tests {
             "too few bytes"
         );
         assert!(Icon::from_argb_bytes(0, 2, &[]).is_none(), "no area");
+    }
+
+    #[test]
+    fn wayland_pixels_become_an_icon() {
+        let half_blue = [128_u8, 0, 0, 128];
+        let icon = Icon::from_argb8888(2, 2, &half_blue.repeat(4)).expect("whole");
+        let pixel = icon.pixels().pixel(1, 1).expect("inside");
+        assert_eq!((pixel.blue(), pixel.alpha()), (128, 128));
+        assert!(
+            Icon::from_argb8888(2, 2, &half_blue).is_none(),
+            "too few bytes"
+        );
     }
 
     #[test]

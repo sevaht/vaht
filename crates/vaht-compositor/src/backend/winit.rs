@@ -170,6 +170,11 @@ impl WinitBackend {
         }
     }
 
+    /// Returns the renderer.
+    pub(crate) fn renderer(&mut self) -> &mut GlesRenderer {
+        self.graphics.renderer()
+    }
+
     /// Frees textures cached for client buffers that no longer exist.
     pub(crate) fn release_unused_textures(&mut self) {
         if let Err(error) = self.graphics.renderer().cleanup_texture_cache() {

@@ -298,3 +298,16 @@ fn a_narrower_taskbar_sits_where_it_is_aligned() {
     );
     assert_eq!(screenshot.rgb(screenshot.width() - 1, row), BACKGROUND);
 }
+
+#[test]
+fn a_window_s_drawn_icon_is_shown() {
+    const DRAWN_ICON: [u8; 3] = [0xff, 0xff, 0x00];
+    let (_vaht, mut client) = start_with_icon("");
+    client.draw_window_icons(16, DRAWN_ICON);
+    let screenshot = client.screenshot();
+    assert_eq!(
+        screenshot.rgb(9, screenshot.height() - HEIGHT / 2),
+        DRAWN_ICON,
+        "the picture the window drew, before its application's icon"
+    );
+}

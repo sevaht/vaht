@@ -173,6 +173,28 @@ impl TestClient {
         self.roundtrip();
     }
 
+    /// Has every window draw its own icon, `size` pixels square and all
+    /// `color` (xdg-toplevel-icon), and waits until vaht has the commits.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn draw_window_icons(&mut self, size: u32, color: [u8; 3]) {
+        let handle = self.queue.handle();
+        for index in 0..self.state.windows.len() {
+            let buffer = self.state.icon_buffer(size, color);
+            let drawn = self.state.toplevel_icons.create_icon(&handle, NoEvents);
+            drawn.add_buffer(&buffer, 1);
+            let window = &self.state.windows[index];
+            self.state
+                .toplevel_icons
+                .set_icon(window.xdg_toplevel(), Some(&drawn));
+            drawn.destroy();
+            window.commit();
+        }
+        self.roundtrip();
+    }
+
     /// Closes every window and waits until vaht has processed it.
     ///
     /// # Panics

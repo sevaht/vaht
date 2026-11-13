@@ -11,6 +11,15 @@ use smithay::utils::{Logical, Rectangle, Size};
 use super::placement::Axes;
 use super::resize::SizeLimits;
 
+/// The icon a client chose for its window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ClientIcon {
+    /// An icon by name, from the icon theme.
+    Named(String),
+    /// A picture the client drew.
+    Pixels(vaht_ui::Icon),
+}
+
 /// What a client last committed for its window.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct CommittedState {
@@ -18,9 +27,9 @@ pub(crate) struct CommittedState {
     pub(crate) title: String,
     /// The application id (or X11 class); empty when the client set none.
     pub(crate) app_id: String,
-    /// The name of the icon the client chose for the window, if it named
-    /// one (xdg-toplevel-icon).
-    pub(crate) icon_name: Option<String>,
+    /// The icon the client chose for the window (xdg-toplevel-icon), if
+    /// it chose one.
+    pub(crate) icon: Option<ClientIcon>,
     /// The content area within the client's surface: its size, and where
     /// it starts past any shadow the client draws around it.
     pub(crate) geometry: Rectangle<i32, Logical>,
