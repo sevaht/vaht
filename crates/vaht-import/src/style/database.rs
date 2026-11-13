@@ -98,6 +98,21 @@ impl StyleDatabase {
         self.lines.get(found).map(|line| line.value.as_str())
     }
 
+    /// Marks the line answering `name` used if it says `value` (in any
+    /// letter case): it asks for what vaht does anyway.
+    pub(crate) fn accept(&mut self, name: &str, value: &str) {
+        let Some(found) = self.find(name) else {
+            return;
+        };
+        if self
+            .lines
+            .get(found)
+            .is_some_and(|line| line.value.trim().eq_ignore_ascii_case(value))
+        {
+            self.used.insert(found);
+        }
+    }
+
     /// Returns the line, counting from 1, answering the resource `name`; 1
     /// if none does.
     pub(crate) fn line_of(&self, name: &str) -> usize {

@@ -281,6 +281,14 @@ impl InitFile {
             self.set(&["windows", "double_click_ms"], Value::from(interval));
         }
         self.convert_flag("opaqueResize", &["windows", "opaque_resize"]);
+        // The delay between live resizes matters only with them.
+        let is_outline_resize = self
+            .resources
+            .value(&format!("{SCREEN}opaqueResize"))
+            .is_some_and(|value| value.eq_ignore_ascii_case("false"));
+        if is_outline_resize {
+            self.resources.get(&format!("{SCREEN}opaqueResizeDelay"));
+        }
         self.convert_flag("allowRemoteActions", &["ipc", "allow_commands"]);
         self.convert_flag("clientMenu.usePixmap", &["menus", "window_icons"]);
         // Fluxbox's -1 turns tooltips off.

@@ -464,6 +464,19 @@ impl StyleFile {
     /// leaves outside it (8² · (1 − π/4) ≈ 13.7).
     const FLUXBOX_CORNER_RADIUS: u32 = 8;
 
+    /// Resources whose value asks for what vaht draws anyway: each name,
+    /// and that value.
+    const WHAT_VAHT_DRAWS: [(&str, &str); 4] = [
+        // The taskbar's corners are square.
+        ("toolbar.shaped", "false"),
+        // No bevel inside frames, the taskbar or menus.
+        ("window.bevelWidth", "0"),
+        // The window list's entries have no outline.
+        ("toolbar.iconbar.borderWidth", "0"),
+        // Text has no effect unless a theme gives it one.
+        ("window.font.effect", "none"),
+    ];
+
     /// Converts the style `text`, read from `path`.
     pub(crate) fn new(path: &Path, text: &str) -> Self {
         Self {
@@ -559,6 +572,9 @@ impl StyleFile {
                 }
                 cells.push((element, state, cell));
             }
+        }
+        for (name, value) in Self::WHAT_VAHT_DRAWS {
+            self.database.accept(name, value);
         }
         cells
     }
@@ -1473,6 +1489,17 @@ menu.bullet:\tsquare
             !notes.contains("menu.bullet"),
             "the bullet converts: {notes}"
         );
+    }
+
+    #[test]
+    fn style_lines_asking_for_what_vaht_draws_need_nothing() {
+        let (_, _, report) = convert(
+            "toolbar.shaped: false\n*.bevelWidth: 0\ntoolbar.iconbar.borderWidth: 0\n\
+             window.font.effect: none\n",
+        );
+        assert!(report.notes().is_empty(), "{report}");
+        let (_, _, report) = convert("toolbar.shaped: true\n");
+        assert!(report.to_string().contains("toolbar.shaped"), "{report}");
     }
 
     #[test]
