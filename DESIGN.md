@@ -78,8 +78,9 @@ RUST.md §4). The compositor crate has two halves:
   auto-raise timers), the `Taskbar` (a panel whose content it reads from
   the window manager and the clock as frames are prepared; its
   `WallClock` wakes it at each minute by the time of day, and whenever the
-  clock is set, the system resumes or the time zone changes, which both
-  timedated's D-Bus signal and a watch on `/etc/localtime` report),
+  clock is set, the system resumes or the time zone changes: timedated's
+  D-Bus signal while timedated runs, else a watch on `/etc/localtime`,
+  switched as the bus announces timedated starting and stopping),
   the backend and the protocol states. It routes events and carries out
   the window manager's decisions; it decides nothing about windows.
 

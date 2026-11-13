@@ -15,17 +15,24 @@
 //! the clock is set, which a moment that moved further away (the clock
 //! set back) needs.
 //!
-//! A time zone change is seen two ways ([`ZoneSources`]), so that either
-//! alone suffices: timedated, which `timedatectl` and desktop settings ask
-//! to change it, announces it on the system bus; and every change, whoever
-//! makes it, replaces `/etc/localtime`, which an inotify watch on its
-//! directory sees. jiff, which otherwise checks for a new zone only every
-//! few minutes, is then told to read it again.
+//! A time zone change is heard from timedated, which `timedatectl` and
+//! desktop settings ask to change it, and which announces it on the system
+//! bus, while timedated runs. While it does not (it exits when idle, and
+//! the bus starts it again on demand), or once the bus is lost, the clock
+//! watches the zone file (`/etc/localtime`, which every change replaces)
+//! instead, and from the start, until timedated is known to run: one
+//! source at a time, so vaht is not woken by writes to `/etc` while
+//! timedated speaks for the zone. Nothing is polled: the bus
+//! announces timedated starting and stopping (`NameOwnerChanged`), and the
+//! subscription to its news stays in place across both. jiff, which
+//! otherwise checks for a new zone only every few minutes, is then told to
+//! read it again.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use futures_util::{Stream, StreamExt};
+use futures_util::future::{Either, ready};
+use futures_util::{Stream, StreamExt, stream};
 use jiff::Timestamp;
 use nix::errno::Errno;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
@@ -33,6 +40,7 @@ use nix::sys::time::TimeSpec;
 use nix::sys::timerfd::{ClockId, Expiration, TimerFd, TimerFlags, TimerSetTimeFlags};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
+use zbus::fdo::{DBusProxy, PropertiesProxy};
 
 use crate::bus::Bus;
 use crate::event_source::{EventSource, StreamSource};
@@ -75,43 +83,108 @@ impl ZoneSources {
                 || invalidated.any(|name| name == Self::ZONE_PROPERTY))
     }
 
-    /// Returns timedated's announcements of a new zone, once subscribed;
-    /// none if the bus cannot be reached, which is logged.
-    fn announcements(&self) -> impl Stream<Item = ()> + 'static {
+    /// Returns what is heard of timedated: whether it runs, then each new
+    /// zone and each start and stop, then that it can no longer be heard,
+    /// if the bus goes; or only that, if the bus cannot be reached, which
+    /// is logged.
+    fn news(&self) -> impl Stream<Item = ZoneNews> + 'static {
         let bus = self.bus.clone();
-        futures_util::stream::once(async move { Self::subscribe(&bus).await })
-            .filter_map(|subscribed| async move {
-                subscribed
-                    .inspect_err(|error| {
-                        tracing::info!(
-                            error = error as &dyn std::error::Error,
-                            "timedated cannot be heard; time zone changes show by /etc/localtime"
-                        );
-                    })
-                    .ok()
-            })
-            .flatten()
+        stream::once(async move { Self::subscribe(&bus).await }).flat_map(|subscribed| {
+            match subscribed {
+                Ok(news) => Either::Left(news.chain(stream::once(ready(ZoneNews::Unheard)))),
+                Err(error) => {
+                    tracing::info!(
+                        error = &error as &dyn std::error::Error,
+                        "timedated cannot be heard; watching the zone file instead"
+                    );
+                    Either::Right(stream::once(ready(ZoneNews::Unheard)))
+                }
+            }
+        })
     }
 
-    /// Subscribes to timedated's property changes on `bus`, keeping those
-    /// that change the zone.
-    async fn subscribe(bus: &Bus) -> zbus::Result<impl Stream<Item = ()> + 'static + use<>> {
+    /// Subscribes on `bus` to timedated starting and stopping, and to its
+    /// property changes that change the zone; the news starts with whether
+    /// it runs now.
+    async fn subscribe(bus: &Bus) -> zbus::Result<impl Stream<Item = ZoneNews> + 'static + use<>> {
         let connection = bus.connect().await?;
-        let properties = zbus::fdo::PropertiesProxy::builder(&connection)
+        let daemon = DBusProxy::new(&connection).await?;
+        // Subscribed before asking, so a start or stop in between is heard.
+        let owners = daemon
+            .receive_name_owner_changed_with_args(&[(0, Self::TIMEDATED)])
+            .await?
+            .filter_map(|signal| async move {
+                let arguments = signal.args().ok()?;
+                Some(if arguments.new_owner().is_some() {
+                    ZoneNews::Started
+                } else {
+                    ZoneNews::Stopped
+                })
+            });
+        let properties = PropertiesProxy::builder(&connection)
             .destination(Self::TIMEDATED)
             .path(Self::TIMEDATED_PATH)
+            // The proxy would otherwise follow the name's owner itself.
+            .cache_properties(zbus::proxy::CacheProperties::No)
             .build()
             .await?;
-        let changes = properties.receive_properties_changed().await?;
-        Ok(changes.filter_map(|signal| async move {
-            let arguments = signal.args().ok()?;
-            Self::is_zone_change(
-                arguments.interface_name().as_str(),
-                arguments.changed_properties().keys().copied(),
-                arguments.invalidated_properties().iter().copied(),
-            )
-            .then_some(())
-        }))
+        let changes =
+            properties
+                .receive_properties_changed()
+                .await?
+                .filter_map(|signal| async move {
+                    let arguments = signal.args().ok()?;
+                    Self::is_zone_change(
+                        arguments.interface_name().as_str(),
+                        arguments.changed_properties().keys().copied(),
+                        arguments.invalidated_properties().iter().copied(),
+                    )
+                    .then_some(ZoneNews::Changed)
+                });
+        let is_running = daemon.name_has_owner(Self::TIMEDATED.try_into()?).await?;
+        let now = if is_running {
+            ZoneNews::Started
+        } else {
+            ZoneNews::Stopped
+        };
+        Ok(stream::once(ready(now)).chain(stream::select(owners, changes)))
+    }
+}
+
+/// What is heard of timedated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ZoneNews {
+    /// It runs: it speaks for the zone.
+    Started,
+    /// It stopped, or was not running.
+    Stopped,
+    /// It announced a new zone.
+    Changed,
+    /// The bus is gone, or could not be reached.
+    Unheard,
+}
+
+/// How a [`WallClock`] reaches its owner: what to call when the time of
+/// day changed, and how to find the clock again in the owner's state, as
+/// the clock changes how it listens.
+pub(crate) struct ClockHooks<State: 'static> {
+    /// Called when the time shown may have changed.
+    pub(crate) on_change: fn(&mut State),
+    /// Finds the clock in the state, while it exists.
+    pub(crate) find: fn(&mut State) -> Option<&mut WallClock<State>>,
+}
+
+impl<State> Clone for ClockHooks<State> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<State> Copy for ClockHooks<State> {}
+
+impl<State> std::fmt::Debug for ClockHooks<State> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("ClockHooks").finish_non_exhaustive()
     }
 }
 
@@ -120,12 +193,20 @@ impl ZoneSources {
 pub(crate) struct WallClock<State: 'static> {
     /// The alarm's registration; dropped before the alarm it reads.
     _alarm_source: EventSource<State>,
-    /// The time zone file's watch, when its directory can be watched.
-    _zone_watch: Option<EventSource<State>>,
-    /// timedated's announcements of a new zone.
-    _zone_announcements: StreamSource<State>,
+    /// What timedated says.
+    _zone_news: StreamSource<State>,
+    /// The zone file's watch, while timedated does not speak for the zone.
+    zone_watch: Option<EventSource<State>>,
     /// The alarm, armed at the next moment.
     alarm: Rc<TimerFd>,
+    /// The file a new zone replaces.
+    zone_file: PathBuf,
+    /// The loop the clock's sources are registered with.
+    handle: LoopHandle<'static, State>,
+    /// Counts the clock's sources.
+    ledger: ResourceLedger,
+    /// How the clock reaches its owner.
+    hooks: ClockHooks<State>,
 }
 
 impl<State: 'static> WallClock<State> {
@@ -135,10 +216,9 @@ impl<State: 'static> WallClock<State> {
         .union(AddWatchFlags::IN_CREATE)
         .union(AddWatchFlags::IN_DELETE);
 
-    /// Starts a clock that calls `on_change` at each moment it is armed
-    /// for, and whenever the clock is set or `zone` (normally
-    /// [`ZoneSources::system`]) shows a new time zone. A zone source that
-    /// cannot be watched is logged, and the other still serves.
+    /// Starts a clock that calls `hooks.on_change` at each moment it is
+    /// armed for, and whenever the clock is set or `zone` (normally
+    /// [`ZoneSources::system`]) shows a new time zone.
     ///
     /// # Errors
     ///
@@ -147,7 +227,7 @@ impl<State: 'static> WallClock<State> {
         handle: &LoopHandle<'static, State>,
         ledger: &ResourceLedger,
         zone: &ZoneSources,
-        on_change: fn(&mut State),
+        hooks: ClockHooks<State>,
     ) -> Result<Self, WallClockError> {
         let alarm = Rc::new(
             TimerFd::new(
@@ -165,7 +245,7 @@ impl<State: 'static> WallClock<State> {
                 // being set (as ECANCELED, which `wait` takes as a ring);
                 // EAGAIN is a wake-up with neither.
                 match alarm.wait() {
-                    Ok(()) => on_change(state),
+                    Ok(()) => (hooks.on_change)(state),
                     Err(Errno::EAGAIN) => {}
                     Err(error) => tracing::warn!(%error, "could not read the clock's alarm"),
                 }
@@ -173,27 +253,31 @@ impl<State: 'static> WallClock<State> {
             },
         )
         .map_err(|error| WallClockError::Register(error.error))?;
-        let zone_watch = Self::watch_zone(handle, ledger, &zone.file, on_change)
-            .inspect_err(|error| {
-                tracing::warn!(
-                    error = error as &dyn std::error::Error,
-                    file = %zone.file.display(),
-                    "time zone changes show only by timedated"
-                );
-            })
-            .ok();
-        let zone_announcements =
-            StreamSource::start(handle, ledger, zone.announcements(), move |(), state| {
+        let zone_news = StreamSource::start(handle, ledger, zone.news(), move |news, state| {
+            if let Some(clock) = (hooks.find)(state) {
+                clock.hear(news);
+            }
+            if matches!(news, ZoneNews::Changed | ZoneNews::Unheard) {
+                // A new zone, or whatever was missed as the bus went.
                 jiff::tz::reset_system_time_zone_cache();
-                on_change(state);
-            })
-            .map_err(WallClockError::Register)?;
-        Ok(Self {
-            _alarm_source: alarm_source,
-            _zone_watch: zone_watch,
-            _zone_announcements: zone_announcements,
-            alarm,
+                (hooks.on_change)(state);
+            }
         })
+        .map_err(WallClockError::Register)?;
+        let mut clock = Self {
+            _alarm_source: alarm_source,
+            _zone_news: zone_news,
+            zone_watch: None,
+            alarm,
+            zone_file: zone.file.clone(),
+            handle: handle.clone(),
+            ledger: ledger.clone(),
+            hooks,
+        };
+        // Until timedated is known to run, the file speaks for the zone, so
+        // no change goes unseen while the bus is asked.
+        clock.watch_zone_file();
+        Ok(clock)
     }
 
     /// Arms the clock to call back at `moment`, in place of any moment
@@ -210,6 +294,41 @@ impl<State: 'static> WallClock<State> {
                 TimerSetTimeFlags::TFD_TIMER_ABSTIME | TimerSetTimeFlags::TFD_TIMER_CANCEL_ON_SET,
             )
             .map_err(WallClockError::Arm)
+    }
+
+    /// Watches the zone file while timedated does not speak for the zone.
+    fn hear(&mut self, news: ZoneNews) {
+        match news {
+            ZoneNews::Started => {
+                if self.zone_watch.take().is_some() {
+                    tracing::debug!("timedated runs; the zone file is left alone");
+                }
+            }
+            ZoneNews::Stopped | ZoneNews::Unheard => self.watch_zone_file(),
+            ZoneNews::Changed => {}
+        }
+    }
+
+    /// Starts watching the zone file, unless it is watched already; a file
+    /// that cannot be watched is logged, and zone changes then show within
+    /// minutes, when jiff looks again.
+    fn watch_zone_file(&mut self) {
+        if self.zone_watch.is_some() {
+            return;
+        }
+        match Self::watch_zone(
+            &self.handle,
+            &self.ledger,
+            &self.zone_file,
+            self.hooks.on_change,
+        ) {
+            Ok(watch) => self.zone_watch = Some(watch),
+            Err(error) => tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                file = %self.zone_file.display(),
+                "time zone changes will show only within minutes"
+            ),
+        }
     }
 
     /// Watches the directory of `zone_file` for the file being replaced.
@@ -275,7 +394,7 @@ pub(crate) enum WallClockError {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use calloop::EventLoop;
     use rstest::rstest;
@@ -283,13 +402,14 @@ mod tests {
 
     use super::*;
     use crate::bus::PrivateBus;
-    use crate::resources::ResourceKind;
 
     /// What a test's event loop holds.
     #[derive(Debug, Default)]
     struct Probe {
         /// How many times the clock called back.
         calls: u32,
+        /// The clock under test.
+        clock: Option<WallClock<Probe>>,
         /// The connection playing timedated, once connected.
         timedated: Option<zbus::Connection>,
     }
@@ -297,151 +417,295 @@ mod tests {
     /// How long one dispatch waits for events.
     const WAIT: Duration = Duration::from_millis(50);
 
-    /// How long a test waits for a call it expects.
+    /// How long a test waits for something it expects.
     const PATIENCE: Duration = Duration::from_secs(5);
 
-    /// Counts a call.
-    fn count(probe: &mut Probe) {
-        probe.calls += 1;
+    /// The hooks that count calls and find the probe's clock.
+    const HOOKS: ClockHooks<Probe> = ClockHooks {
+        on_change: |probe| probe.calls += 1,
+        find: |probe| probe.clock.as_mut(),
+    };
+
+    /// A clock's world: a loop, a bus of its own, a zone file's directory.
+    struct World {
+        /// The loop the clock runs on.
+        event_loop: EventLoop<'static, Probe>,
+        /// Counts the clock's sources, and nothing else.
+        ledger: ResourceLedger,
+        /// The bus timedated may be on.
+        bus: PrivateBus,
+        /// Where the zone file is.
+        zone: tempfile::TempDir,
+        /// What the loop holds.
+        probe: Probe,
+        /// Runs the test's own futures, playing timedated.
+        timedated: calloop::futures::Scheduler<Option<zbus::Connection>>,
+        /// Keeps the test's executor registered.
+        _executor: EventSource<Probe>,
     }
 
-    /// Zone sources in `directory`, on a bus of the test's own.
-    fn sources(directory: &Path, bus: &PrivateBus) -> ZoneSources {
-        ZoneSources {
-            file: directory.join("localtime"),
-            bus: bus.bus(),
+    impl World {
+        /// A world with no clock yet, and no timedated.
+        fn new() -> Self {
+            let event_loop: EventLoop<'static, Probe> = EventLoop::try_new().expect("a loop");
+            let (executor, timedated) = calloop::futures::executor().expect("an executor");
+            let executor = EventSource::insert(
+                &event_loop.handle(),
+                &ResourceLedger::new(),
+                executor,
+                |connected: Option<zbus::Connection>, (), probe: &mut Probe| {
+                    if connected.is_some() {
+                        probe.timedated = connected;
+                    }
+                },
+            )
+            .expect("registered");
+            Self {
+                event_loop,
+                ledger: ResourceLedger::new(),
+                bus: PrivateBus::start(),
+                zone: tempfile::tempdir().expect("a temporary directory"),
+                probe: Probe::default(),
+                timedated,
+                _executor: executor,
+            }
         }
-    }
 
-    /// Dispatches `event_loop` until the clock has called back `expected`
-    /// times, or a while has passed.
-    fn dispatch_until(
-        event_loop: &mut EventLoop<'static, Probe>,
-        probe: &mut Probe,
-        expected: u32,
-    ) {
-        let deadline = std::time::Instant::now() + PATIENCE;
-        while probe.calls < expected && std::time::Instant::now() < deadline {
-            event_loop.dispatch(WAIT, probe).expect("dispatch");
+        /// Returns the zone file.
+        fn zone_file(&self) -> PathBuf {
+            self.zone.path().join("localtime")
+        }
+
+        /// Starts the clock.
+        fn start_clock(&mut self) {
+            let sources = ZoneSources {
+                file: self.zone_file(),
+                bus: self.bus.bus(),
+            };
+            let clock = WallClock::start(&self.event_loop.handle(), &self.ledger, &sources, HOOKS)
+                .expect("started");
+            self.probe.clock = Some(clock);
+        }
+
+        /// Puts timedated on the bus, and waits until it is.
+        fn start_timedated(&mut self) {
+            let bus = self.bus.bus();
+            self.timedated
+                .schedule(async move {
+                    let connection = bus.connect().await.expect("connected");
+                    connection
+                        .request_name(ZoneSources::TIMEDATED)
+                        .await
+                        .expect("named");
+                    Some(connection)
+                })
+                .expect("scheduled");
+            self.dispatch_until(|probe| probe.timedated.is_some());
+        }
+
+        /// Has timedated announce a new zone.
+        fn announce_zone(&self) {
+            let connection = self
+                .probe
+                .timedated
+                .clone()
+                .expect("timedated is on the bus");
+            self.timedated
+                .schedule(async move {
+                    let changed =
+                        HashMap::from([(ZoneSources::ZONE_PROPERTY, Variant::from("Europe/Oslo"))]);
+                    connection
+                        .emit_signal(
+                            None::<&str>,
+                            ZoneSources::TIMEDATED_PATH,
+                            "org.freedesktop.DBus.Properties",
+                            "PropertiesChanged",
+                            &(ZoneSources::TIMEDATED, changed, Vec::<&str>::new()),
+                        )
+                        .await
+                        .expect("announced");
+                    None
+                })
+                .expect("scheduled");
+        }
+
+        /// Replaces the zone file, as a new zone does.
+        fn replace_zone_file(&self) {
+            let staged = self.zone.path().join("new-zone");
+            std::fs::write(&staged, "x").expect("written");
+            std::fs::rename(&staged, self.zone_file()).expect("renamed");
+        }
+
+        /// Returns whether the clock watches the zone file.
+        fn watches_zone_file(&self) -> bool {
+            self.probe
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.zone_watch.is_some())
+        }
+
+        /// Dispatches until `done` holds of the probe, or a while has passed.
+        fn dispatch_until(&mut self, done: impl Fn(&Probe) -> bool) {
+            let deadline = Instant::now() + PATIENCE;
+            while !done(&self.probe) && Instant::now() < deadline {
+                self.event_loop
+                    .dispatch(WAIT, &mut self.probe)
+                    .expect("dispatch");
+            }
+        }
+
+        /// Dispatches for a moment, to let anything pending happen.
+        fn settle(&mut self) {
+            for _ in 0..4 {
+                self.event_loop
+                    .dispatch(WAIT, &mut self.probe)
+                    .expect("dispatch");
+            }
         }
     }
 
     #[test]
     fn the_clock_calls_back_at_its_moment_and_not_before() {
-        let mut event_loop: EventLoop<'static, Probe> = EventLoop::try_new().expect("a loop");
-        let ledger = ResourceLedger::new();
-        let zone = tempfile::tempdir().expect("a temporary directory");
-        let bus = PrivateBus::start();
-        let clock = WallClock::start(
-            &event_loop.handle(),
-            &ledger,
-            &sources(zone.path(), &bus),
-            count,
-        )
-        .expect("started");
-        let mut probe = Probe::default();
-        event_loop.dispatch(WAIT, &mut probe).expect("dispatch");
-        assert_eq!(probe.calls, 0, "unarmed, it stays quiet");
-
+        let mut world = World::new();
+        world.start_clock();
+        // Without timedated, the clock settles on the zone file first, and
+        // calls back once for that.
+        world.dispatch_until(|probe| {
+            probe
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.zone_watch.is_some())
+        });
+        world.settle();
+        let calls = world.probe.calls;
         let moment = Timestamp::now() + Duration::from_millis(50);
-        clock.ring_at(moment).expect("armed");
-        dispatch_until(&mut event_loop, &mut probe, 1);
-        assert_eq!(probe.calls, 1);
+        world
+            .probe
+            .clock
+            .as_ref()
+            .expect("started")
+            .ring_at(moment)
+            .expect("armed");
+        world.dispatch_until(|probe| probe.calls > calls);
+        assert_eq!(world.probe.calls, calls + 1);
         assert!(Timestamp::now() >= moment, "never early");
-
-        clock
+        world
+            .probe
+            .clock
+            .as_ref()
+            .expect("started")
             .ring_at(Timestamp::now() + Duration::from_millis(5))
             .expect("armed again");
-        dispatch_until(&mut event_loop, &mut probe, 2);
-        assert_eq!(probe.calls, 2, "it can be armed again");
+        world.dispatch_until(|probe| probe.calls > calls + 1);
+        assert_eq!(world.probe.calls, calls + 2, "it can be armed again");
     }
 
     #[test]
-    fn replacing_the_zone_file_calls_back() {
-        let mut event_loop: EventLoop<'static, Probe> = EventLoop::try_new().expect("a loop");
-        let ledger = ResourceLedger::new();
-        let zone = tempfile::tempdir().expect("a temporary directory");
-        let bus = PrivateBus::start();
-        let sources = sources(zone.path(), &bus);
-        let _clock =
-            WallClock::start(&event_loop.handle(), &ledger, &sources, count).expect("started");
-        let mut probe = Probe::default();
-        std::fs::write(zone.path().join("unrelated"), "x").expect("written");
-        event_loop.dispatch(WAIT, &mut probe).expect("dispatch");
-        assert_eq!(probe.calls, 0, "other files are not the zone");
-
-        std::fs::write(zone.path().join("new-zone"), "x").expect("written");
-        std::fs::rename(zone.path().join("new-zone"), &sources.file).expect("renamed");
-        dispatch_until(&mut event_loop, &mut probe, 1);
-        assert!(probe.calls >= 1, "replacing the zone file is a change");
-    }
-
-    #[test]
-    fn timedated_announcing_a_new_zone_calls_back() {
-        let mut event_loop: EventLoop<'static, Probe> = EventLoop::try_new().expect("a loop");
-        let ledger = ResourceLedger::new();
-        let zone = tempfile::tempdir().expect("a temporary directory");
-        let bus = PrivateBus::start();
-        let _clock = WallClock::start(
-            &event_loop.handle(),
-            &ledger,
-            &sources(zone.path(), &bus),
-            count,
-        )
-        .expect("started");
-        // timedated starts after vaht subscribed, as it does when the bus
-        // activates it to change the zone. It connects, then announces
-        // until heard, as vaht's subscription may not be in place yet.
-        let (executor, scheduler) = calloop::futures::executor().expect("an executor");
-        let _timedated = EventSource::insert(
-            &event_loop.handle(),
-            &ledger,
-            executor,
-            |connected: Option<zbus::Connection>, (), probe: &mut Probe| {
-                if connected.is_some() {
-                    probe.timedated = connected;
-                }
-            },
-        )
-        .expect("registered");
-        let timedated_bus = bus.bus();
-        scheduler
-            .schedule(async move {
-                let connection = timedated_bus.connect().await.expect("connected");
-                connection
-                    .request_name(ZoneSources::TIMEDATED)
-                    .await
-                    .expect("named");
-                Some(connection)
-            })
-            .expect("scheduled");
-        let mut probe = Probe::default();
-        let deadline = std::time::Instant::now() + PATIENCE;
-        while probe.calls == 0 && std::time::Instant::now() < deadline {
-            if let Some(connection) = probe.timedated.clone() {
-                scheduler
-                    .schedule(async move {
-                        let changed = HashMap::from([(
-                            ZoneSources::ZONE_PROPERTY,
-                            Variant::from("Europe/Oslo"),
-                        )]);
-                        connection
-                            .emit_signal(
-                                None::<&str>,
-                                ZoneSources::TIMEDATED_PATH,
-                                "org.freedesktop.DBus.Properties",
-                                "PropertiesChanged",
-                                &(ZoneSources::TIMEDATED, changed, Vec::<&str>::new()),
-                            )
-                            .await
-                            .expect("announced");
-                        None
-                    })
-                    .expect("scheduled");
-            }
-            event_loop.dispatch(WAIT, &mut probe).expect("dispatch");
+    fn with_timedated_its_news_is_heard_and_the_zone_file_left_alone() {
+        let mut world = World::new();
+        world.start_timedated();
+        world.start_clock();
+        assert!(world.watches_zone_file(), "until timedated is known to run");
+        world.dispatch_until(|probe| {
+            probe
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.zone_watch.is_none())
+        });
+        assert!(!world.watches_zone_file(), "no file watch beside timedated");
+        // Announce until heard: the subscription may not be in place yet.
+        let deadline = Instant::now() + PATIENCE;
+        while world.probe.calls == 0 && Instant::now() < deadline {
+            world.announce_zone();
+            world.settle();
         }
-        assert!(probe.calls >= 1, "the announcement was heard");
+        assert!(world.probe.calls >= 1, "the announcement was heard");
+        assert!(!world.watches_zone_file());
+    }
+
+    #[test]
+    fn without_timedated_the_zone_file_is_watched() {
+        let mut world = World::new();
+        world.start_clock();
+        world.dispatch_until(|probe| {
+            probe
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.zone_watch.is_some())
+        });
+        assert!(world.watches_zone_file());
+        let calls = world.probe.calls;
+        std::fs::write(world.zone.path().join("unrelated"), "x").expect("written");
+        world.settle();
+        assert_eq!(world.probe.calls, calls, "other files are not the zone");
+        world.replace_zone_file();
+        world.dispatch_until(|probe| probe.calls > calls);
+        assert!(
+            world.probe.calls > calls,
+            "replacing the zone file is a change"
+        );
+    }
+
+    #[test]
+    fn the_zone_file_is_watched_while_timedated_is_stopped() {
+        let mut world = World::new();
+        world.start_timedated();
+        world.start_clock();
+        world.dispatch_until(|probe| {
+            probe
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.zone_watch.is_none())
+        });
+        assert!(!world.watches_zone_file(), "timedated runs");
+        world.probe.timedated = None;
+        world.dispatch_until(|probe| {
+            probe
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.zone_watch.is_some())
+        });
+        assert!(world.watches_zone_file(), "timedated stopped");
+        world.start_timedated();
+        world.dispatch_until(|probe| {
+            probe
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.zone_watch.is_none())
+        });
+        assert!(!world.watches_zone_file(), "timedated runs again");
+        let calls = world.probe.calls;
+        let deadline = Instant::now() + PATIENCE;
+        while world.probe.calls == calls && Instant::now() < deadline {
+            world.announce_zone();
+            world.settle();
+        }
+        assert!(
+            world.probe.calls > calls,
+            "a timedated started after the clock is heard, as one the bus starts on demand"
+        );
+    }
+
+    #[test]
+    fn losing_the_bus_falls_back_to_the_zone_file() {
+        let mut world = World::new();
+        world.start_timedated();
+        world.start_clock();
+        world.dispatch_until(|probe| {
+            probe
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.zone_watch.is_none())
+        });
+        assert!(!world.watches_zone_file());
+        world.bus.stop();
+        world.dispatch_until(|probe| {
+            probe
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.zone_watch.is_some())
+        });
+        assert!(world.watches_zone_file(), "the file stands in for the bus");
     }
 
     #[rstest]
@@ -467,19 +731,29 @@ mod tests {
 
     #[test]
     fn dropping_the_clock_unregisters_it() {
-        let event_loop: EventLoop<'static, Probe> = EventLoop::try_new().expect("a loop");
-        let ledger = ResourceLedger::new();
-        let zone = tempfile::tempdir().expect("a temporary directory");
-        let bus = PrivateBus::start();
-        let clock = WallClock::start(
-            &event_loop.handle(),
-            &ledger,
-            &sources(zone.path(), &bus),
-            count,
-        )
-        .expect("started");
-        assert_eq!(ledger.count(ResourceKind::EventSource).live, 3);
-        drop(clock);
-        assert_eq!(ledger.count(ResourceKind::EventSource).live, 0);
+        let mut world = World::new();
+        world.start_clock();
+        world.dispatch_until(|probe| {
+            probe
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.zone_watch.is_some())
+        });
+        assert_eq!(
+            world
+                .ledger
+                .count(crate::resources::ResourceKind::EventSource)
+                .live,
+            3,
+            "the alarm, timedated's news and the file watch"
+        );
+        world.probe.clock = None;
+        assert_eq!(
+            world
+                .ledger
+                .count(crate::resources::ResourceKind::EventSource)
+                .live,
+            0
+        );
     }
 }

@@ -25,7 +25,7 @@ use crate::Compositor;
 use crate::config::{TaskbarEdge, TaskbarSettings, TaskbarWidget};
 use crate::resources::ResourceLedger;
 use crate::scene::{PanelTexture, SceneElement};
-use crate::wall_clock::{WallClock, ZoneSources};
+use crate::wall_clock::{ClockHooks, WallClock, ZoneSources};
 use crate::window_manager::{Area, Window, WindowId, WindowManager};
 
 /// What clicking the taskbar can report.
@@ -221,12 +221,11 @@ impl Taskbar {
         }
         if self.wall_clock.is_none() {
             let (handle, ledger) = event_loop;
-            let started = WallClock::start(
-                handle,
-                ledger,
-                &ZoneSources::system(),
-                Compositor::show_time_change,
-            );
+            let hooks = ClockHooks {
+                on_change: Compositor::show_time_change,
+                find: Self::wall_clock_of,
+            };
+            let started = WallClock::start(handle, ledger, &ZoneSources::system(), hooks);
             match started {
                 Ok(wall_clock) => self.wall_clock = Some(wall_clock),
                 Err(error) => {
@@ -247,6 +246,11 @@ impl Taskbar {
                 "could not schedule the clock"
             );
         }
+    }
+
+    /// Returns the taskbar's wall clock in `compositor`, while it has one.
+    fn wall_clock_of(compositor: &mut Compositor) -> Option<&mut WallClock<Compositor>> {
+        compositor.taskbar.as_mut()?.wall_clock.as_mut()
     }
 
     /// Returns when a clock's text next changes after `now`: at the next

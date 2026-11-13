@@ -84,13 +84,19 @@ impl PrivateBus {
     pub(crate) fn bus(&self) -> Bus {
         Bus::At(self.address.clone())
     }
+
+    /// Stops the bus, as a crashed or restarted daemon would: every
+    /// connection to it is lost.
+    pub(crate) fn stop(&mut self) {
+        // A daemon already gone needs nothing more.
+        let _ = self.daemon.kill();
+        let _ = self.daemon.wait();
+    }
 }
 
 #[cfg(test)]
 impl Drop for PrivateBus {
     fn drop(&mut self) {
-        // A daemon already gone needs nothing more.
-        let _ = self.daemon.kill();
-        let _ = self.daemon.wait();
+        self.stop();
     }
 }
