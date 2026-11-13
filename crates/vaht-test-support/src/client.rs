@@ -1,41 +1,33 @@
-//! A Wayland client that opens windows, drives a virtual pointer and takes
-//! screenshots, all on one connection.
+//! A Wayland client that opens windows and layer surfaces, drives a virtual
+//! pointer and keyboard, and takes screenshots, all on one connection.
 //!
 //! Requests on one connection reach vaht in order, so a screenshot taken
-//! after pointer input shows that input's effect.
+//! after pointer input shows that input's effect. [`TestClient`] is what
+//! tests use; its event handling is in `state`, its virtual devices in
+//! `input`.
 
-use std::fs::File;
-use std::os::fd::AsFd as _;
+mod input;
+mod state;
+
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
-use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, FrameCallbackData};
-use smithay_client_toolkit::dispatch2::Dispatch2;
-use smithay_client_toolkit::output::{OutputHandler, OutputState};
-use smithay_client_toolkit::reexports::client::globals::{GlobalList, registry_queue_init};
-use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
-use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
-use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
-use smithay_client_toolkit::reexports::client::{Connection, EventQueue, QueueHandle};
+use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
+use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm};
+use smithay_client_toolkit::reexports::client::{Connection, EventQueue};
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1;
-use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1;
-use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1};
-use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::{ExtImageCopyCaptureManagerV1, Options};
-use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1};
-use smithay_client_toolkit::reexports::protocols_wlr::virtual_pointer::v1::client::zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1;
-use smithay_client_toolkit::reexports::protocols_wlr::virtual_pointer::v1::client::zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1;
-use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
+use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
 use smithay_client_toolkit::shell::WaylandSurface as _;
 use smithay_client_toolkit::shell::wlr_layer::{
-    Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
-    LayerSurfaceConfigure,
+    Anchor, KeyboardInteractivity, Layer, LayerSurface,
 };
-use smithay_client_toolkit::shell::xdg::XdgShell;
-use smithay_client_toolkit::shell::xdg::window::{Window, WindowConfigure, WindowDecorations, WindowHandler};
-use smithay_client_toolkit::shm::slot::SlotPool;
-use smithay_client_toolkit::shm::{Shm, ShmHandler};
-use smithay_client_toolkit::{delegate_registry, registry_handlers};
+use smithay_client_toolkit::shell::xdg::window::WindowDecorations;
 
+pub use self::input::keys;
+use self::input::{KeyMotion, VirtualInput};
+use self::state::{
+    CaptureFrameEvents, CaptureSessionEvents, ClientState, KeyboardEvents, NoEvents, bind,
+};
 use crate::screenshot::Screenshot;
 
 /// A layer of the layer shell, for [`TestClient::open_bar`] and
@@ -77,53 +69,6 @@ pub const BUTTON_LEFT: u32 = 0x110;
 /// The Linux input code of the right mouse button (`BTN_RIGHT`).
 pub const BUTTON_RIGHT: u32 = 0x111;
 
-/// Linux input codes of a few keys (`KEY_*`), read with vaht's keymap.
-pub mod keys {
-    /// Escape.
-    pub const ESCAPE: u32 = 1;
-    /// Tab.
-    pub const TAB: u32 = 15;
-    /// The left Control key.
-    pub const LEFT_CONTROL: u32 = 29;
-    /// The left Shift key.
-    pub const LEFT_SHIFT: u32 = 42;
-    /// F1.
-    pub const F1: u32 = 59;
-    /// F2.
-    pub const F2: u32 = 60;
-    /// F11.
-    pub const F11: u32 = 87;
-    /// The up arrow.
-    pub const UP: u32 = 103;
-    /// The left arrow.
-    pub const LEFT: u32 = 105;
-    /// The right arrow.
-    pub const RIGHT: u32 = 106;
-    /// The down arrow.
-    pub const DOWN: u32 = 108;
-    /// The T key.
-    pub const LETTER_T: u32 = 20;
-    /// The left Alt key.
-    pub const LEFT_ALT: u32 = 56;
-    /// F4.
-    pub const F4: u32 = 62;
-    /// The left Super (Windows, logo) key.
-    pub const LEFT_SUPER: u32 = 125;
-}
-
-/// `wl_keyboard.key_state.released`.
-const KEY_RELEASED: u32 = 0;
-
-/// `wl_keyboard.key_state.pressed`.
-const KEY_PRESSED: u32 = 1;
-
-/// `wl_keyboard.keymap_format.no_keymap`: the keyboard uses the seat's keymap.
-const NO_KEYMAP_FORMAT: u32 = 0;
-
-/// The modifier mask of Alt in the default xkb keymap, where Alt is Mod1:
-/// the fourth real modifier, after Shift, Lock and Control.
-const ALT_MODIFIER_MASK: u32 = 1 << 3;
-
 /// Bytes per pixel of an ARGB8888 buffer.
 const BYTES_PER_PIXEL: u32 = 4;
 
@@ -145,16 +90,10 @@ pub struct TestClient {
     queue: EventQueue<ClientState>,
     /// What the client knows and has.
     state: ClientState,
-    /// The pointer it moves, and the output it moves on.
-    pointer: ZwlrVirtualPointerV1,
-    /// The keyboard it holds modifiers with.
-    keyboard: ZwpVirtualKeyboardV1,
-    /// The empty file sent as the keyboard's keymap; kept open until sent.
-    _no_keymap: File,
+    /// The virtual pointer and keyboard it drives vaht with.
+    input: VirtualInput,
     /// The seat's keyboard, which hears where keyboard focus is.
     _seat_keyboard: wl_keyboard::WlKeyboard,
-    /// The milliseconds clock stamped on pointer events.
-    time: u32,
 }
 
 impl TestClient {
@@ -171,46 +110,10 @@ impl TestClient {
         let (globals, mut queue) =
             registry_queue_init(&connection).expect("vaht lists its globals");
         let handle = queue.handle();
-        let shm = Shm::bind(&globals, &handle).expect("vaht offers wl_shm");
-        let pool_size = usize::try_from(WINDOW_SIZE.0 * WINDOW_SIZE.1 * BYTES_PER_PIXEL)
-            .expect("a small buffer size fits in usize");
-        let pointer_manager: ZwlrVirtualPointerManagerV1 =
-            bind(&globals, &handle, "zwlr_virtual_pointer_manager_v1");
-        let pointer = pointer_manager.create_virtual_pointer(None, &handle, NoEvents);
         let seat: wl_seat::WlSeat = bind(&globals, &handle, "wl_seat");
-        let keyboard_manager: ZwpVirtualKeyboardManagerV1 =
-            bind(&globals, &handle, "zwp_virtual_keyboard_manager_v1");
-        let keyboard = keyboard_manager.create_virtual_keyboard(&seat, &handle, NoEvents);
-        // `no_keymap`: the keyboard's modifier masks are read with vaht's own
-        // keymap, so no keymap needs writing. The protocol still wants a file.
-        let no_keymap = File::open("/dev/null").expect("/dev/null opens");
-        keyboard.keymap(NO_KEYMAP_FORMAT, no_keymap.as_fd(), 0);
+        let input = VirtualInput::bind(&globals, &handle, &seat);
         let seat_keyboard = seat.get_keyboard(&handle, KeyboardEvents);
-        let mut state = ClientState {
-            registry: RegistryState::new(&globals),
-            outputs: OutputState::new(&globals, &handle),
-            compositor: CompositorState::bind(&globals, &handle)
-                .expect("vaht offers wl_compositor"),
-            xdg_shell: XdgShell::bind(&globals, &handle).expect("vaht offers xdg_wm_base"),
-            layer_shell: LayerShell::bind(&globals, &handle).expect("vaht offers a layer shell"),
-            layers: Vec::new(),
-            layer_colors: Vec::new(),
-            capture_sources: bind(
-                &globals,
-                &handle,
-                "ext_output_image_capture_source_manager_v1",
-            ),
-            capture: bind(&globals, &handle, "ext_image_copy_capture_manager_v1"),
-            pool: SlotPool::new(pool_size, &shm).expect("a shared-memory pool"),
-            shm,
-            windows: Vec::new(),
-            first_draws: 0,
-            drawn: Vec::new(),
-            close_requests: 0,
-            capture_size: None,
-            capture_result: None,
-            keyboard_focus: None,
-        };
+        let mut state = ClientState::bind(&globals, &handle);
         // Learn the outputs before anything needs them.
         queue
             .roundtrip(&mut state)
@@ -218,11 +121,8 @@ impl TestClient {
         Self {
             queue,
             state,
-            pointer,
-            keyboard,
-            _no_keymap: no_keymap,
+            input,
             _seat_keyboard: seat_keyboard,
-            time: 0,
         }
     }
 
@@ -275,10 +175,8 @@ impl TestClient {
     ///
     /// Panics if the connection to vaht fails.
     pub fn move_pointer_to(&mut self, x: u32, y: u32) {
-        let (width, height) = self.output_size();
-        let time = self.tick();
-        self.pointer.motion_absolute(time, x, y, width, height);
-        self.pointer.frame();
+        let output_size = self.output_size();
+        self.input.move_pointer_to(x, y, output_size);
         self.roundtrip();
     }
 
@@ -464,7 +362,7 @@ impl TestClient {
     ///
     /// Panics if the connection to vaht fails.
     pub fn hold_alt(&mut self) {
-        self.keyboard.modifiers(ALT_MODIFIER_MASK, 0, 0, 0);
+        self.input.hold_alt();
         self.roundtrip();
     }
 
@@ -475,8 +373,7 @@ impl TestClient {
     ///
     /// Panics if the connection to vaht fails.
     pub fn press_key(&mut self, key: u32) {
-        let time = self.tick();
-        self.keyboard.key(time, key, KEY_PRESSED);
+        self.input.key(key, KeyMotion::Press);
         self.roundtrip();
     }
 
@@ -486,8 +383,7 @@ impl TestClient {
     ///
     /// Panics if the connection to vaht fails.
     pub fn release_key(&mut self, key: u32) {
-        let time = self.tick();
-        self.keyboard.key(time, key, KEY_RELEASED);
+        self.input.key(key, KeyMotion::Release);
         self.roundtrip();
     }
 
@@ -512,7 +408,7 @@ impl TestClient {
     ///
     /// Panics if the connection to vaht fails.
     pub fn release_modifiers(&mut self) {
-        self.keyboard.modifiers(0, 0, 0, 0);
+        self.input.release_modifiers();
         self.roundtrip();
     }
 
@@ -575,16 +471,8 @@ impl TestClient {
 
     /// Sends a button event and waits until vaht has processed it.
     fn send_button(&mut self, button: u32, state: wl_pointer::ButtonState) {
-        let time = self.tick();
-        self.pointer.button(time, button, state);
-        self.pointer.frame();
+        self.input.button(button, state);
         self.roundtrip();
-    }
-
-    /// Returns the next input event time, a millisecond after the last.
-    const fn tick(&mut self) -> u32 {
-        self.time += 1;
-        self.time
     }
 
     /// Returns vaht's (only) output.
@@ -628,316 +516,3 @@ impl TestClient {
         }
     }
 }
-
-/// Binds the global `name`, which vaht must offer.
-fn bind<I>(globals: &GlobalList, handle: &QueueHandle<ClientState>, name: &str) -> I
-where
-    I: smithay_client_toolkit::reexports::client::Proxy + 'static,
-    NoEvents: Dispatch2<I, ClientState>,
-{
-    globals
-        .bind(handle, 1..=1, NoEvents)
-        .unwrap_or_else(|error| panic!("vaht offers {name}: {error}"))
-}
-
-/// The client's state, which the toolkit's handlers update.
-#[derive(Debug)]
-struct ClientState {
-    /// The globals vaht offers.
-    registry: RegistryState,
-    /// vaht's outputs.
-    outputs: OutputState,
-    /// Creates surfaces.
-    compositor: CompositorState,
-    /// Creates windows.
-    xdg_shell: XdgShell,
-    /// Turns outputs into capture sources.
-    capture_sources: ExtOutputImageCaptureSourceManagerV1,
-    /// Captures them.
-    capture: ExtImageCopyCaptureManagerV1,
-    /// Shared-memory buffers.
-    shm: Shm,
-    /// Where buffers are allocated.
-    pool: SlotPool,
-    /// The open windows.
-    windows: Vec<Window>,
-    /// Makes layer surfaces.
-    layer_shell: LayerShell,
-    /// The open layer surfaces.
-    layers: Vec<LayerSurface>,
-    /// Each layer surface's color.
-    layer_colors: Vec<(wl_surface::WlSurface, [u8; 3])>,
-    /// How many windows have drawn for the first time.
-    first_draws: usize,
-    /// The surfaces of the windows that have drawn.
-    drawn: Vec<wl_surface::WlSurface>,
-    /// How many times vaht asked to close a window.
-    close_requests: usize,
-    /// The buffer size the current capture session asked for.
-    capture_size: Option<(u32, u32)>,
-    /// How the current capture ended.
-    capture_result: Option<Result<(), String>>,
-    /// The surface with keyboard focus, as vaht last told.
-    keyboard_focus: Option<wl_surface::WlSurface>,
-}
-
-impl ClientState {
-    /// Fills `window`, `size` pixels large, with [`WINDOW_COLOR`] and asks
-    /// to hear when it is shown.
-    fn draw(&mut self, window: &Window, handle: &QueueHandle<Self>, size: (u32, u32)) {
-        self.fill(window.wl_surface(), handle, size, WINDOW_COLOR);
-    }
-
-    /// Fills `surface` with `color` at `size`, and commits it.
-    fn fill(
-        &mut self,
-        surface: &wl_surface::WlSurface,
-        handle: &QueueHandle<Self>,
-        size: (u32, u32),
-        color: [u8; 3],
-    ) {
-        let width = i32::try_from(size.0).expect("window sizes fit in i32");
-        let height = i32::try_from(size.1).expect("window sizes fit in i32");
-        let stride = width * i32::try_from(BYTES_PER_PIXEL).expect("4 fits in i32");
-        let (buffer, canvas) = self
-            .pool
-            .create_buffer(width, height, stride, wl_shm::Format::Argb8888)
-            .expect("the pool has room");
-        let [red, green, blue] = color;
-        let (pixels, _) = canvas.as_chunks_mut::<4>();
-        for pixel in pixels {
-            *pixel = [blue, green, red, u8::MAX];
-        }
-        surface.frame(handle, FrameCallbackData(surface.clone()));
-        buffer.attach_to(surface).expect("a fresh buffer attaches");
-        surface.damage_buffer(0, 0, width, height);
-        surface.commit();
-    }
-}
-
-/// User data for objects whose events the client ignores or has none.
-#[derive(Debug, Clone, Copy)]
-struct NoEvents;
-
-/// Implements [`Dispatch2`] for interfaces whose events are ignored.
-macro_rules! ignore_events {
-    ($($interface:ty),+ $(,)?) => {
-        $(
-            impl Dispatch2<$interface, ClientState> for NoEvents {
-                fn event(
-                    &self,
-                    _: &mut ClientState,
-                    _: &$interface,
-                    _: <$interface as smithay_client_toolkit::reexports::client::Proxy>::Event,
-                    _: &Connection,
-                    _: &QueueHandle<ClientState>,
-                ) {
-                }
-            }
-        )+
-    };
-}
-
-ignore_events!(
-    wl_seat::WlSeat,
-    ZwpVirtualKeyboardManagerV1,
-    ZwpVirtualKeyboardV1,
-    ZwlrVirtualPointerManagerV1,
-    ZwlrVirtualPointerV1,
-    ExtOutputImageCaptureSourceManagerV1,
-    ExtImageCaptureSourceV1,
-    ExtImageCopyCaptureManagerV1,
-);
-
-/// User data of the seat's keyboard: records where keyboard focus is.
-#[derive(Debug, Clone, Copy)]
-struct KeyboardEvents;
-
-impl Dispatch2<wl_keyboard::WlKeyboard, ClientState> for KeyboardEvents {
-    fn event(
-        &self,
-        state: &mut ClientState,
-        _: &wl_keyboard::WlKeyboard,
-        event: wl_keyboard::Event,
-        _: &Connection,
-        _: &QueueHandle<ClientState>,
-    ) {
-        #[expect(
-            clippy::wildcard_enum_match_arm,
-            reason = "only where focus is matters to a test, not the keys"
-        )]
-        match event {
-            wl_keyboard::Event::Enter { surface, .. } => state.keyboard_focus = Some(surface),
-            wl_keyboard::Event::Leave { .. } => state.keyboard_focus = None,
-            _ => {}
-        }
-    }
-}
-
-/// User data of a capture session: records the buffer size it asks for.
-#[derive(Debug, Clone, Copy)]
-struct CaptureSessionEvents;
-
-impl Dispatch2<ExtImageCopyCaptureSessionV1, ClientState> for CaptureSessionEvents {
-    fn event(
-        &self,
-        state: &mut ClientState,
-        _: &ExtImageCopyCaptureSessionV1,
-        event: ext_image_copy_capture_session_v1::Event,
-        _: &Connection,
-        _: &QueueHandle<ClientState>,
-    ) {
-        if let ext_image_copy_capture_session_v1::Event::BufferSize { width, height } = event {
-            state.capture_size = Some((width, height));
-        }
-    }
-}
-
-/// User data of a capture frame: records how it ended.
-#[derive(Debug, Clone, Copy)]
-struct CaptureFrameEvents;
-
-impl Dispatch2<ExtImageCopyCaptureFrameV1, ClientState> for CaptureFrameEvents {
-    fn event(
-        &self,
-        state: &mut ClientState,
-        _: &ExtImageCopyCaptureFrameV1,
-        event: ext_image_copy_capture_frame_v1::Event,
-        _: &Connection,
-        _: &QueueHandle<ClientState>,
-    ) {
-        #[expect(
-            clippy::wildcard_enum_match_arm,
-            reason = "only the frame's outcome matters to a test"
-        )]
-        match event {
-            ext_image_copy_capture_frame_v1::Event::Ready => state.capture_result = Some(Ok(())),
-            ext_image_copy_capture_frame_v1::Event::Failed { reason } => {
-                state.capture_result = Some(Err(format!("{reason:?}")));
-            }
-            _ => {}
-        }
-    }
-}
-
-impl CompositorHandler for ClientState {
-    fn scale_factor_changed(
-        &mut self,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
-        _: i32,
-    ) {
-    }
-
-    fn transform_changed(
-        &mut self,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
-        _: wl_output::Transform,
-    ) {
-    }
-
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
-
-    fn surface_enter(
-        &mut self,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
-        _: &wl_output::WlOutput,
-    ) {
-    }
-
-    fn surface_leave(
-        &mut self,
-        _: &Connection,
-        _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
-        _: &wl_output::WlOutput,
-    ) {
-    }
-}
-
-impl OutputHandler for ClientState {
-    fn output_state(&mut self) -> &mut OutputState {
-        &mut self.outputs
-    }
-
-    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-
-    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-
-    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-}
-
-impl WindowHandler for ClientState {
-    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
-        self.close_requests += 1;
-    }
-
-    fn configure(
-        &mut self,
-        _: &Connection,
-        handle: &QueueHandle<Self>,
-        window: &Window,
-        configure: WindowConfigure,
-        _: u32,
-    ) {
-        // Take the size vaht asks for, as real clients do; with none, pick.
-        if !self.drawn.contains(window.wl_surface()) {
-            self.drawn.push(window.wl_surface().clone());
-            self.first_draws += 1;
-        }
-        let (width, height) = configure.new_size;
-        let size = (
-            width.map_or(WINDOW_SIZE.0, std::num::NonZeroU32::get),
-            height.map_or(WINDOW_SIZE.1, std::num::NonZeroU32::get),
-        );
-        self.draw(window, handle, size);
-    }
-}
-
-impl ShmHandler for ClientState {
-    fn shm_state(&mut self) -> &mut Shm {
-        &mut self.shm
-    }
-}
-
-impl ProvidesRegistryState for ClientState {
-    fn registry(&mut self) -> &mut RegistryState {
-        &mut self.registry
-    }
-
-    registry_handlers![OutputState];
-}
-
-impl LayerShellHandler for ClientState {
-    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &LayerSurface) {}
-
-    fn configure(
-        &mut self,
-        _: &Connection,
-        handle: &QueueHandle<Self>,
-        layer: &LayerSurface,
-        configure: LayerSurfaceConfigure,
-        _: u32,
-    ) {
-        let surface = layer.wl_surface().clone();
-        if !self.drawn.contains(&surface) {
-            self.drawn.push(surface.clone());
-            self.first_draws += 1;
-        }
-        let color = self
-            .layer_colors
-            .iter()
-            .find(|(known, _)| *known == surface)
-            .map_or(WINDOW_COLOR, |(_, color)| *color);
-        let (width, height) = configure.new_size;
-        self.fill(&surface, handle, (width.max(1), height.max(1)), color);
-    }
-}
-
-delegate_registry!(ClientState);
-smithay_client_toolkit::delegate_dispatch2!(ClientState);
