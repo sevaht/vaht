@@ -24,6 +24,7 @@ allow-renamed-params-for = [
     "smithay::input::pointer::PointerGrab",
     # The client toolkit calls its queue handle `qh`; vaht's tests use words.
     "smithay_client_toolkit::shell::xdg::window::WindowHandler",
+    "smithay_client_toolkit::shell::wlr_layer::LayerShellHandler",
 ]
 # Registrations that bypass vaht's guards would leak (03 §2).
 disallowed-methods = [

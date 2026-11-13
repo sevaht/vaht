@@ -104,8 +104,14 @@ A method that needs no Smithay call does not belong in them.
   buffers are let go when that frame is drawn.
 - Drawing and hit-testing go through `Scene`, which shows only the windows
   of the current workspace (not minimized), without frames when
-  fullscreen and without content when shaded. Nothing else walks the
-  stack to find what is under the pointer.
+  fullscreen and without content when shaded, between the layer surfaces:
+  overlay and top above, bottom and background below. Nothing else walks
+  the stack to find what is under the pointer.
+- The usable area (where windows maximize and tile) is what layer
+  surfaces' exclusive zones leave free, from Smithay's `LayerMap`
+  (`OutputLayers::usable_area`). A click on a layer below the windows (a
+  wallpaper) counts as the desktop for bindings; a click on one above (a
+  panel) is its client's alone.
 - A new window is placed on its client's first commit with a size
   (`Compositor::place_new_window`), not when it is created: the
   placement strategies need its size. Until then it counts for nothing.

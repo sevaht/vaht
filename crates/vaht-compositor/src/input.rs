@@ -30,6 +30,7 @@ use crate::config::{
 use crate::event_source::{RepeatingTimer, Timer};
 use crate::execute::{ExecutionContext, Press};
 
+use crate::scene::PointerTarget;
 use crate::window::{FramePart, WindowDrag, WindowId};
 use crate::windows::WindowTarget;
 
@@ -256,18 +257,13 @@ impl Compositor {
             .seat
             .get_pointer()
             .expect("the seat gets a pointer at startup");
-        if let Some(window) = target.as_ref().map(WindowTarget::window)
+        if let Some(window) = target.as_ref().and_then(PointerTarget::window)
             && !pointer.is_grabbed()
         {
             self.pointer_entered(window);
         }
         // Over a frame, no client has the pointer: the frame is vaht's.
-        let under = match target {
-            Some(WindowTarget::Surface {
-                surface, origin, ..
-            }) => Some((surface, origin)),
-            Some(WindowTarget::Frame { .. }) | None => None,
-        };
+        let under = target.as_ref().and_then(PointerTarget::client_surface);
         pointer.motion(
             self,
             under,
@@ -344,7 +340,17 @@ impl Compositor {
     fn press_button(&mut self, button: u32, location: Point<f64, Logical>, serial: Serial) {
         self.focus.finish_cycle();
         let target = self.scene().target_at(location);
-        let clicked = target.as_ref().map(WindowTarget::window);
+        if let Some(PointerTarget::Layer {
+            surface,
+            is_below_windows: false,
+            ..
+        }) = &target
+        {
+            // A panel or notification: the press is its client's alone.
+            self.focus_layer(surface);
+            return;
+        }
+        let clicked = target.as_ref().and_then(PointerTarget::window);
         if let Some(id) = clicked
             && self.config.settings.focus.raise_on_click
         {
@@ -352,10 +358,10 @@ impl Compositor {
         }
         self.focus_window(clicked, serial);
         let modifiers = self.held_modifiers();
-        if let Some(WindowTarget::Frame {
+        if let Some(PointerTarget::Window(WindowTarget::Frame {
             window,
             part: FramePart::Titlebar(_),
-        }) = target
+        })) = target
             && modifiers == Modifiers::default()
             && self.press_titlebar_button(window, location)
         {
@@ -398,12 +404,21 @@ impl Compositor {
             }
             (
                 None,
-                Some(WindowTarget::Frame {
+                Some(PointerTarget::Window(WindowTarget::Frame {
                     window,
                     part: FramePart::Border(edges),
-                }),
+                })),
             ) => self.start_window_grab(window, WindowDrag::Resize { edges }, press.start, serial),
-            (None, Some(WindowTarget::Frame { .. } | WindowTarget::Surface { .. }) | None) => {}
+            (
+                None,
+                Some(
+                    PointerTarget::Window(
+                        WindowTarget::Frame { .. } | WindowTarget::Surface { .. },
+                    )
+                    | PointerTarget::Layer { .. },
+                )
+                | None,
+            ) => {}
         }
     }
 
@@ -505,7 +520,7 @@ impl Compositor {
         let Some(command) = command else {
             return false;
         };
-        let window = target.as_ref().map(WindowTarget::window);
+        let window = target.as_ref().and_then(PointerTarget::window);
         self.execute(&command, &mut ExecutionContext::for_window(window));
         true
     }

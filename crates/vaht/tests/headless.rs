@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use vaht_test_support::{HeadlessVaht, TestClient};
+use vaht_test_support::{HeadlessVaht, TestClient, TestLayer};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
@@ -102,4 +102,15 @@ fn clients_find_the_protocols_everyday_programs_use() {
         !interfaces.iter().any(|name| name == "zwp_linux_dmabuf_v1"),
         "the software renderer cannot import GPU buffers, so clients must not be offered them"
     );
+}
+
+#[test]
+fn layer_surfaces_leave_nothing_behind() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_bar(TestLayer::Top, 30, true, [200, 10, 10]);
+    client.open_backdrop(TestLayer::Background, [10, 200, 10]);
+    drop(client);
+    vaht.wait_for_disconnections(1);
+    vaht.stop().assert_nothing_left_behind();
 }

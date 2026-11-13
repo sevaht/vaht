@@ -14,6 +14,8 @@ mod client;
 mod headless;
 mod screenshot;
 
-pub use client::{BUTTON_LEFT, BUTTON_RIGHT, TestClient, WINDOW_COLOR, WINDOW_SIZE, keys};
+pub use client::{
+    BUTTON_LEFT, BUTTON_RIGHT, TestClient, TestLayer, WINDOW_COLOR, WINDOW_SIZE, keys,
+};
 pub use headless::{ExitReport, HeadlessVaht};
 pub use screenshot::{Bounds, Screenshot};

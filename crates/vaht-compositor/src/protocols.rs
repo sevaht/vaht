@@ -9,6 +9,7 @@
 mod activation;
 mod decoration;
 mod dmabuf;
+mod layer_shell;
 mod output;
 mod seat;
 mod selection;
@@ -26,6 +27,7 @@ use smithay::wayland::image_copy_capture::ImageCopyCaptureState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
+use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
@@ -43,6 +45,8 @@ pub(crate) struct ProtocolStates {
     pub(crate) compositor: CompositorState,
     /// `xdg_wm_base`: application windows and popups.
     pub(crate) xdg_shell: XdgShellState,
+    /// `zwlr_layer_shell_v1`: wallpapers, panels and notifications.
+    pub(crate) layer_shell: WlrLayerShellState,
     /// `wl_shm`: shared-memory buffers.
     pub(crate) shm: ShmState,
     /// `wl_output` and `xdg_output`: what clients know about outputs. Held
@@ -91,6 +95,7 @@ impl ProtocolStates {
         Self {
             compositor: CompositorState::new::<Compositor>(display),
             xdg_shell: XdgShellState::new::<Compositor>(display),
+            layer_shell: WlrLayerShellState::new::<Compositor>(display),
             shm: ShmState::new::<Compositor>(display, Vec::new()),
             _output_manager: OutputManagerState::new_with_xdg_output::<Compositor>(display),
             seat: SeatState::new(),

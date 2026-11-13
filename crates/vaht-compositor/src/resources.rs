@@ -52,6 +52,8 @@ pub enum ResourceKind {
     CaptureSession,
     /// A program vaht started that has not been reaped yet.
     Program,
+    /// A mapped layer surface.
+    LayerSurface,
 }
 
 impl ResourceKind {
@@ -223,7 +225,7 @@ mod tests {
         let _tracked = ledger.track(ResourceKind::EventSource);
         assert_eq!(
             ledger.to_string(),
-            "event-source: 1 (peak 1)\nclient: 0 (peak 0)\nwindow: 0 (peak 0)\nframe: 0 (peak 0)\ncapture-session: 0 (peak 0)\nprogram: 0 (peak 0)\n"
+            "event-source: 1 (peak 1)\nclient: 0 (peak 0)\nwindow: 0 (peak 0)\nframe: 0 (peak 0)\ncapture-session: 0 (peak 0)\nprogram: 0 (peak 0)\nlayer-surface: 0 (peak 0)\n"
         );
     }
 }

@@ -27,6 +27,7 @@ use smithay::wayland::image_copy_capture::{
 };
 
 use crate::Compositor;
+use crate::layers::OutputLayers;
 use crate::resources::{ResourceKind, Tracked};
 use crate::scene::{self, Scene};
 use crate::shared_memory::{self, SharedMemoryError};
@@ -132,7 +133,12 @@ impl Compositor {
         let result = self
             .capture
             .render(
-                &Scene::new(&self.windows, metrics, self.workspaces.current()),
+                &Scene::new(
+                    &self.windows,
+                    metrics,
+                    self.workspaces.current(),
+                    OutputLayers::new(output, self.backend.output_geometry()),
+                ),
                 size,
                 scale,
             )

@@ -23,6 +23,7 @@ use smithay::input::keyboard::{Keysym, xkb};
 
 use super::command::Command;
 use super::unique_map;
+use crate::scene::PointerTarget;
 use crate::window::FramePart;
 use crate::windows::WindowTarget;
 
@@ -262,19 +263,29 @@ pub(crate) enum MouseContext {
 
 impl MouseContext {
     /// Returns the contexts a press on `target` (none: the desktop) looks
-    /// in, most specific first: a frame part's own, then `window`.
-    pub(crate) const fn search_order(target: Option<&WindowTarget>) -> &'static [Self] {
+    /// in, most specific first: a frame part's own, then `window`. A layer
+    /// surface below the windows (a wallpaper) counts as the desktop; one
+    /// above them (a panel) has no bindings: its client handles the press.
+    pub(crate) const fn search_order(target: Option<&PointerTarget>) -> &'static [Self] {
         match target {
-            Some(WindowTarget::Frame {
+            Some(PointerTarget::Window(WindowTarget::Frame {
                 part: FramePart::Titlebar(_),
                 ..
-            }) => &[Self::Titlebar, Self::Window],
-            Some(WindowTarget::Frame {
+            })) => &[Self::Titlebar, Self::Window],
+            Some(PointerTarget::Window(WindowTarget::Frame {
                 part: FramePart::Border(_),
                 ..
-            }) => &[Self::Border, Self::Window],
-            Some(WindowTarget::Surface { .. }) => &[Self::Window],
-            None => &[Self::Desktop],
+            })) => &[Self::Border, Self::Window],
+            Some(PointerTarget::Window(WindowTarget::Surface { .. })) => &[Self::Window],
+            Some(PointerTarget::Layer {
+                is_below_windows: true,
+                ..
+            })
+            | None => &[Self::Desktop],
+            Some(PointerTarget::Layer {
+                is_below_windows: false,
+                ..
+            }) => &[],
         }
     }
 }

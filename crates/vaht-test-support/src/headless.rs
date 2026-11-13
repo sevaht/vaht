@@ -15,7 +15,13 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// The resource kinds that exist only on behalf of clients; all must be gone
 /// once the clients are.
-const CLIENT_RESOURCES: [&str; 4] = ["client", "window", "frame", "capture-session"];
+const CLIENT_RESOURCES: [&str; 5] = [
+    "client",
+    "window",
+    "frame",
+    "capture-session",
+    "layer-surface",
+];
 
 /// A `vaht --backend headless` process with private directories: its
 /// socket, its configuration and its log never meet the developer's own.

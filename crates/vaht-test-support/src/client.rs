@@ -26,6 +26,9 @@ use smithay_client_toolkit::reexports::protocols_wlr::virtual_pointer::v1::clien
 use smithay_client_toolkit::reexports::protocols_wlr::virtual_pointer::v1::client::zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::shell::WaylandSurface as _;
+use smithay_client_toolkit::shell::wlr_layer::{
+    Anchor, Layer, LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure,
+};
 use smithay_client_toolkit::shell::xdg::XdgShell;
 use smithay_client_toolkit::shell::xdg::window::{Window, WindowConfigure, WindowDecorations, WindowHandler};
 use smithay_client_toolkit::shm::slot::SlotPool;
@@ -33,6 +36,31 @@ use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
 use crate::screenshot::Screenshot;
+
+/// A layer of the layer shell, for [`TestClient::open_bar`] and
+/// [`TestClient::open_backdrop`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestLayer {
+    /// Below everything: wallpapers.
+    Background,
+    /// Below the windows.
+    Bottom,
+    /// Above the windows: panels.
+    Top,
+    /// Above everything: notifications and launchers.
+    Overlay,
+}
+
+impl From<TestLayer> for Layer {
+    fn from(layer: TestLayer) -> Self {
+        match layer {
+            TestLayer::Background => Self::Background,
+            TestLayer::Bottom => Self::Bottom,
+            TestLayer::Top => Self::Top,
+            TestLayer::Overlay => Self::Overlay,
+        }
+    }
+}
 
 /// The size of every test window, in pixels: large enough for a titlebar
 /// with its title and buttons.
@@ -149,6 +177,9 @@ impl TestClient {
             compositor: CompositorState::bind(&globals, &handle)
                 .expect("vaht offers wl_compositor"),
             xdg_shell: XdgShell::bind(&globals, &handle).expect("vaht offers xdg_wm_base"),
+            layer_shell: LayerShell::bind(&globals, &handle).expect("vaht offers a layer shell"),
+            layers: Vec::new(),
+            layer_colors: Vec::new(),
             capture_sources: bind(
                 &globals,
                 &handle,
@@ -232,6 +263,73 @@ impl TestClient {
         self.pointer.motion_absolute(time, x, y, width, height);
         self.pointer.frame();
         self.roundtrip();
+    }
+
+    /// Opens a bar `thickness` pixels tall across the bottom of the output,
+    /// in `layer`, filled with `color`; with `is_exclusive`, windows are not
+    /// maximized over it. Waits until vaht has its first frame.
+    ///
+    /// # Panics
+    ///
+    /// Panics if vaht has no layer shell or the connection fails.
+    pub fn open_bar(
+        &mut self,
+        layer: TestLayer,
+        thickness: u32,
+        is_exclusive: bool,
+        color: [u8; 3],
+    ) {
+        let surface = self.open_layer(layer, color, |bar| {
+            bar.set_anchor(Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
+            bar.set_size(0, thickness);
+            if is_exclusive {
+                bar.set_exclusive_zone(i32::try_from(thickness).expect("bars are thin"));
+            }
+        });
+        self.state.layers.push(surface);
+    }
+
+    /// Opens a layer surface covering the whole output in `layer`, filled
+    /// with `color`, as a wallpaper is. Waits until vaht has its first
+    /// frame.
+    ///
+    /// # Panics
+    ///
+    /// Panics if vaht has no layer shell or the connection fails.
+    pub fn open_backdrop(&mut self, layer: TestLayer, color: [u8; 3]) {
+        let surface = self.open_layer(layer, color, |backdrop| {
+            backdrop.set_anchor(Anchor::all());
+            backdrop.set_exclusive_zone(-1);
+        });
+        self.state.layers.push(surface);
+    }
+
+    /// Creates a layer surface in `layer`, lets `arrange` set it up, and
+    /// waits until it has drawn and vaht has the frame.
+    fn open_layer(
+        &mut self,
+        layer: TestLayer,
+        color: [u8; 3],
+        arrange: impl FnOnce(&LayerSurface),
+    ) -> LayerSurface {
+        let handle = self.queue.handle();
+        let surface = self.state.compositor.create_surface(&handle);
+        let layer_surface = self.state.layer_shell.create_layer_surface(
+            &handle,
+            surface,
+            layer.into(),
+            Some("vaht.test"),
+            None,
+        );
+        arrange(&layer_surface);
+        layer_surface.commit();
+        self.state
+            .layer_colors
+            .push((layer_surface.wl_surface().clone(), color));
+        let expected = self.state.first_draws + 1;
+        self.dispatch_until(|state| state.first_draws >= expected);
+        self.roundtrip();
+        layer_surface
     }
 
     /// Returns the interface names of the globals vaht advertises, sorted.
@@ -492,6 +590,12 @@ struct ClientState {
     pool: SlotPool,
     /// The open windows.
     windows: Vec<Window>,
+    /// Makes layer surfaces.
+    layer_shell: LayerShell,
+    /// The open layer surfaces.
+    layers: Vec<LayerSurface>,
+    /// Each layer surface's color.
+    layer_colors: Vec<(wl_surface::WlSurface, [u8; 3])>,
     /// How many windows have drawn for the first time.
     first_draws: usize,
     /// The surfaces of the windows that have drawn.
@@ -508,6 +612,17 @@ impl ClientState {
     /// Fills `window`, `size` pixels large, with [`WINDOW_COLOR`] and asks
     /// to hear when it is shown.
     fn draw(&mut self, window: &Window, handle: &QueueHandle<Self>, size: (u32, u32)) {
+        self.fill(window.wl_surface(), handle, size, WINDOW_COLOR);
+    }
+
+    /// Fills `surface` with `color` at `size`, and commits it.
+    fn fill(
+        &mut self,
+        surface: &wl_surface::WlSurface,
+        handle: &QueueHandle<Self>,
+        size: (u32, u32),
+        color: [u8; 3],
+    ) {
         let width = i32::try_from(size.0).expect("window sizes fit in i32");
         let height = i32::try_from(size.1).expect("window sizes fit in i32");
         let stride = width * i32::try_from(BYTES_PER_PIXEL).expect("4 fits in i32");
@@ -515,16 +630,15 @@ impl ClientState {
             .pool
             .create_buffer(width, height, stride, wl_shm::Format::Argb8888)
             .expect("the pool has room");
-        let [red, green, blue] = WINDOW_COLOR;
+        let [red, green, blue] = color;
         let (pixels, _) = canvas.as_chunks_mut::<4>();
         for pixel in pixels {
             *pixel = [blue, green, red, u8::MAX];
         }
-        let surface = window.wl_surface();
         surface.frame(handle, FrameCallbackData(surface.clone()));
         buffer.attach_to(surface).expect("a fresh buffer attaches");
         surface.damage_buffer(0, 0, width, height);
-        window.commit();
+        surface.commit();
     }
 }
 
@@ -699,6 +813,32 @@ impl ProvidesRegistryState for ClientState {
     }
 
     registry_handlers![OutputState];
+}
+
+impl LayerShellHandler for ClientState {
+    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &LayerSurface) {}
+
+    fn configure(
+        &mut self,
+        _: &Connection,
+        handle: &QueueHandle<Self>,
+        layer: &LayerSurface,
+        configure: LayerSurfaceConfigure,
+        _: u32,
+    ) {
+        let surface = layer.wl_surface().clone();
+        if !self.drawn.contains(&surface) {
+            self.drawn.push(surface.clone());
+            self.first_draws += 1;
+        }
+        let color = self
+            .layer_colors
+            .iter()
+            .find(|(known, _)| *known == surface)
+            .map_or(WINDOW_COLOR, |(_, color)| *color);
+        let (width, height) = configure.new_size;
+        self.fill(&surface, handle, (width.max(1), height.max(1)), color);
+    }
 }
 
 delegate_registry!(ClientState);

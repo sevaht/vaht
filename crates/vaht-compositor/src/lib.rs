@@ -21,6 +21,7 @@ mod focus;
 mod grab;
 mod input;
 mod launcher;
+mod layers;
 mod placement_strategy;
 mod protocols;
 pub mod resources;

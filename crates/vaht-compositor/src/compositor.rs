@@ -44,6 +44,7 @@ use crate::event_source::{EventSource, Timer};
 use crate::focus::Focus;
 use crate::input::InputState;
 use crate::launcher::Launcher;
+use crate::layers::{Layers, OutputLayers};
 use crate::placement_strategy::Room;
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceLedger};
@@ -106,6 +107,8 @@ pub struct Compositor {
     pub(crate) snap_minimized: Option<WindowId>,
     /// The workspaces, and which one is shown.
     pub(crate) workspaces: Workspaces,
+    /// The mapped layer surfaces.
+    pub(crate) layers: Layers,
     /// When vaht started; frame times are measured from it.
     pub(crate) start_time: Instant,
     /// False once vaht has been asked to stop.
@@ -263,6 +266,7 @@ impl Compositor {
             focus: Focus::default(),
             snap_minimized: None,
             workspaces,
+            layers: Layers::default(),
             start_time: Instant::now(),
             is_running: true,
             socket_name,
@@ -365,17 +369,42 @@ impl Compositor {
             &self.windows,
             self.theme.metrics(),
             self.workspaces.current(),
+            self.output_layers(),
         )
     }
 
-    /// Returns the parts of the output windows can be placed in.
+    /// Returns the output's layer surfaces.
+    pub(crate) fn output_layers(&self) -> OutputLayers<'_> {
+        OutputLayers::new(self.backend.output(), self.backend.output_geometry())
+    }
+
+    /// Returns the parts of the output windows can be placed in: all of
+    /// it, and what panels leave free.
     pub(crate) fn output_area(&self) -> OutputArea {
-        let whole = self.backend.output_geometry();
-        // The taskbar will take its part of `usable`.
         OutputArea {
-            whole,
-            usable: whole,
+            whole: self.backend.output_geometry(),
+            usable: self.output_layers().usable_area(),
         }
+    }
+
+    /// Gives the keyboard to a layer surface that wants it to itself, or
+    /// back to the focused window when none does any more.
+    pub(crate) fn refresh_layer_keyboard(&mut self) {
+        let exclusive = self.output_layers().exclusive_keyboard_surface();
+        if self.layers.set_keyboard(exclusive) {
+            self.focus_window(self.focused(), smithay::utils::SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    /// Gives the keyboard to the layer surface `surface`, clicked, if it
+    /// takes the keyboard on a click; returns whether it did.
+    pub(crate) fn focus_layer(&mut self, surface: &WlSurface) -> bool {
+        if !self.layers.takes_keyboard_on_click(surface) {
+            return false;
+        }
+        self.layers.set_keyboard(Some(surface.clone()));
+        self.focus_window(self.focused(), smithay::utils::SERIAL_COUNTER.next_serial());
+        true
     }
 
     /// Lets go of everything still referencing what clients released, if
@@ -409,10 +438,12 @@ impl Compositor {
     /// Draws a frame, then tells the windows in it that they were shown.
     pub(crate) fn render(&mut self) {
         self.prepare_panels();
+        let output = self.backend.output().clone();
         let scene = Scene::new(
             &self.windows,
             self.theme.metrics(),
             self.workspaces.current(),
+            OutputLayers::new(&output, self.backend.output_geometry()),
         );
         if let Err(error) = self.backend.render(&scene) {
             tracing::warn!(error = &error as &dyn std::error::Error, "frame skipped");
@@ -420,7 +451,12 @@ impl Compositor {
         // Hidden windows get no frame callbacks, so they stop drawing.
         let time = self.start_time.elapsed();
         for window in scene.windows() {
-            window.toplevel().send_frame(self.backend.output(), time);
+            window.toplevel().send_frame(&output, time);
+        }
+        for layer in self.layers.iter() {
+            layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+                Some(output.clone())
+            });
         }
         tracing::trace!("frame drawn");
     }
@@ -594,6 +630,8 @@ impl Compositor {
             .seat
             .get_keyboard()
             .expect("the seat gets a keyboard at startup");
+        // A layer surface holding the keyboard (a launcher) keeps it.
+        let surface = self.layers.keyboard().cloned().or(surface);
         // Smithay clears the focus of a destroyed surface without telling
         // SeatHandler::focus_changed, so the clipboard focus is set here too:
         // otherwise it keeps the last focused client's state alive after
@@ -629,6 +667,9 @@ impl Compositor {
                     }
                 }
             }
+        }
+        if self.output_layers().commit(surface) {
+            self.refresh_layer_keyboard();
         }
         self.popups.commit(surface);
         if let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(surface)
