@@ -1,11 +1,14 @@
 //! The outline an outline resize shows: where the window's frame will go.
 //!
-//! Four lines, white at 80%, two pixels wide, as fluxland draws its
-//! wireframe; drawn over everything but the menus.
+//! Four lines in the theme's `wireframe` border (white at 80%, two pixels
+//! wide, as fluxland draws it, in the built-in theme); drawn over
+//! everything but the menus.
 
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::utils::{Logical, Rectangle, Scale};
+
+use vaht_ui::{Theme, ThemeElement, WidgetState};
 
 use super::SceneElement;
 use crate::window_manager::Area;
@@ -21,16 +24,20 @@ pub(crate) struct Outline {
 }
 
 impl Outline {
-    /// How wide the lines are, in pixels.
-    const WIDTH: i32 = 2;
-
-    /// The lines' color: white, mostly opaque.
-    const COLOR: [f32; 4] = [0.8, 0.8, 0.8, 0.8];
-
-    /// Shows the outline of `area`, or none.
-    pub(crate) fn update(&mut self, area: Option<Area>) {
+    /// Shows the outline of `area`, or none, in `theme`'s wireframe.
+    pub(crate) fn update(&mut self, area: Option<Area>, theme: &Theme) {
+        let border = theme
+            .style(ThemeElement::Wireframe, WidgetState::Focused)
+            .border;
+        let width = i32::try_from(border.width).unwrap_or(i32::MAX);
+        // Premultiplied, as solid buffers take colors.
+        let color = border.color;
+        let alpha = f32::from(color.alpha) / 255.0;
+        let [red, green, blue] =
+            [color.red, color.green, color.blue].map(|channel| f32::from(channel) / 255.0 * alpha);
+        let render_color = [red, green, blue, alpha];
         self.lines = area.map(|area| {
-            let thickness = Self::WIDTH.min(area.size.w).min(area.size.h);
+            let thickness = width.min(area.size.w).min(area.size.h);
             let (left, top) = (area.loc.x, area.loc.y);
             let (width, height) = (area.size.w, area.size.h);
             let line = |left, top, width, height| {
@@ -51,7 +58,7 @@ impl Outline {
         });
         if let Some(lines) = &self.lines {
             for (buffer, line) in self.buffers.iter_mut().zip(lines) {
-                buffer.update(line.size, Self::COLOR);
+                buffer.update(line.size, render_color);
             }
         }
     }

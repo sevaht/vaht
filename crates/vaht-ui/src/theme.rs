@@ -59,6 +59,9 @@ pub enum ThemeElement {
     MenuItem,
     /// The line of text a dialog edits, such as the run dialog's command.
     DialogField,
+    /// The outline a resize shows while the window keeps its size: its
+    /// `border` is the lines' width and color.
+    Wireframe,
 }
 
 impl ThemeElement {
@@ -82,6 +85,7 @@ impl ThemeElement {
             Self::MenuFrame => "menu.frame",
             Self::MenuItem => "menu.item",
             Self::DialogField => "dialog.field",
+            Self::Wireframe => "wireframe",
         }
     }
 

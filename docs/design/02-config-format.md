@@ -180,7 +180,8 @@ rest by name, so a setting never silently does nothing:
 - `[windows]`: `edge_snap_distance`, `double_click_ms`, `focused_alpha`
   and `unfocused_alpha` (0 to 255; `set-alpha` changes one window's),
   `opaque_resize`
-  (false shows a 2-pixel outline of the new frame while resizing, and the
+  (false shows an outline of the new frame, in the theme's `wireframe`,
+  while resizing, and the
   window takes the size when the drag ends; from Fluxbox's
   `opaqueResize`), and `[windows.frame]`
   with `titlebar_left` and `titlebar_right` (buttons `shade`, `stick`,
@@ -692,8 +693,9 @@ exactly what each element gets.
   watched like the others: editing it restyles every open window.
 - Elements: the window's six, and `taskbar`, `taskbar.button`,
   `taskbar.workspace`, `taskbar.clock`, `taskbar.window-list.entry`,
-  `taskbar.window-list.empty`, `menu.title`, `menu.frame`, `menu.item` and
-  `dialog.field`. States: `focused`, `unfocused`, `pressed`, `hovered`,
+  `taskbar.window-list.empty`, `menu.title`, `menu.frame`, `menu.item`,
+  `dialog.field` and `wireframe` (a resize's outline, drawn in its
+  `border`). States: `focused`, `unfocused`, `pressed`, `hovered`,
   `disabled`.
 - Properties: `texture` (solid or gradient, with a bevel), `font`,
   `text_color`, `text_effect`, `justify`, `glyph_color`, `padding`,

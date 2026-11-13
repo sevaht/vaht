@@ -456,7 +456,8 @@ impl Compositor {
         self.menus.prepare(&self.config.theme, &mut self.typesetter);
         self.backdrop
             .prepare(self.backend.output_geometry(), &self.window_manager);
-        self.outline.update(self.window_manager.outline());
+        self.outline
+            .update(self.window_manager.outline(), &self.config.theme);
     }
 
     /// Starts managing the window of a new xdg-shell toplevel.

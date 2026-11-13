@@ -340,7 +340,7 @@ impl Sources {
             ThemeElement::MenuTitle | ThemeElement::MenuFrame | ThemeElement::MenuItem => {
                 Self::of_menu(element, state)
             }
-            ThemeElement::DialogField => Self {
+            ThemeElement::DialogField | ThemeElement::Wireframe => Self {
                 is_built_in: true,
                 ..Self::texture(&[])
             },
@@ -401,7 +401,8 @@ impl Sources {
             | ThemeElement::TaskbarClock
             | ThemeElement::WindowListEntry
             | ThemeElement::WindowListEmpty
-            | ThemeElement::DialogField => Self {
+            | ThemeElement::DialogField
+            | ThemeElement::Wireframe => Self {
                 font: Some(&["menu.frame.font"]),
                 text_color: Some(&["menu.frame.textColor"]),
                 justify: Some(&["menu.frame.justify"]),
@@ -578,7 +579,8 @@ impl StyleFile {
             | ThemeElement::TaskbarClock
             | ThemeElement::WindowListEntry
             | ThemeElement::WindowListEmpty
-            | ThemeElement::DialogField => None,
+            | ThemeElement::DialogField
+            | ThemeElement::Wireframe => None,
         };
         if let Some(height) = height {
             cell.insert(Property::Height, Written(Value::from(i64::from(height))));
@@ -624,7 +626,8 @@ impl StyleFile {
             | ThemeElement::WindowListEmpty
             | ThemeElement::MenuTitle
             | ThemeElement::MenuItem
-            | ThemeElement::DialogField => {}
+            | ThemeElement::DialogField
+            | ThemeElement::Wireframe => {}
         }
     }
 
@@ -1290,6 +1293,12 @@ menu.bullet:\tsquare
         assert_eq!(got.texture, want.texture);
         assert_eq!(got.text, want.text);
         assert_eq!(got.padding, want.padding);
+        let wireframe = |theme: &Theme| {
+            theme
+                .style(ThemeElement::Wireframe, WidgetState::Focused)
+                .border
+        };
+        assert_eq!(wireframe(&theme), wireframe(&built_in));
     }
 
     #[test]

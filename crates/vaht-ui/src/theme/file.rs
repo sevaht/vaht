@@ -37,7 +37,7 @@ const ROUNDED_ELEMENTS: [ThemeElement; 2] = [ThemeElement::Border, ThemeElement:
 const PLANNED_STATES: [&str; 1] = ["active"];
 
 /// Elements of 02 §10.1 that vaht does not have yet.
-const PLANNED_ELEMENTS: [&str; 4] = ["taskbar.tray", "tooltip", "snap-picker", "wireframe"];
+const PLANNED_ELEMENTS: [&str; 3] = ["taskbar.tray", "tooltip", "snap-picker"];
 
 impl ThemeLayers {
     /// Reads a theme file's text.

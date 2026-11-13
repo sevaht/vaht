@@ -8,7 +8,7 @@
 # taskbar.button, taskbar.workspace, taskbar.clock,
 # taskbar.window-list.entry, taskbar.window-list.empty (the tray shows on
 # the taskbar's own background), menu.title, menu.frame, menu.item,
-# dialog.field. States:
+# dialog.field, wireframe (a resize's outline: its border). States:
 # focused, unfocused, pressed, hovered (a menu's highlighted item) and
 # disabled (a menu item that does nothing).
 
@@ -111,3 +111,8 @@ text_effect = "none"
 text_color = "black"
 justify = "left"
 padding = [0, 2, 0, 2]
+
+[wireframe]
+# The outline of a window being resized: white at 80%, two pixels wide, as
+# fluxland draws it. Fluxbox styles say nothing of it either.
+border = { width = 2, color = "#ffffffcc" }
