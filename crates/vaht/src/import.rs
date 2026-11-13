@@ -3,11 +3,13 @@
 //! It runs without logging, writing to the terminal: the files written,
 //! then every line not converted and why.
 
-use std::io::Write as _;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use vaht_import::FluxboxSetup;
+
+use crate::terminal;
 
 /// Converts the Fluxbox setup in `from` (or `~/.fluxbox`) into `to`,
 /// replacing existing files only with `replace`.
@@ -17,27 +19,29 @@ pub fn fluxbox(from: Option<&Path>, to: &Path, replace: bool) -> ExitCode {
     let conversion = match FluxboxSetup::read(&from) {
         Ok(setup) => setup.convert(),
         Err(error) => {
-            report(&anyhow::Error::new(error));
+            terminal::report_error(&anyhow::Error::new(error));
             return ExitCode::FAILURE;
         }
     };
     if let Err(error) = conversion.write(to, replace) {
-        report(&anyhow::Error::new(error));
+        terminal::report_error(&anyhow::Error::new(error));
         return ExitCode::FAILURE;
     }
-    let mut output = std::io::stdout().lock();
-    // Nothing useful can be done if the reader went away.
+    let mut output = String::new();
     for file in conversion.files() {
-        let _ = writeln!(output, "Wrote {}", to.join(file.name).display());
+        writeln!(output, "Wrote {}", to.join(file.name).display())
+            .expect("writing to a String cannot fail");
     }
     let notes = conversion.report().notes().len();
     if notes > 0 {
-        let _ = write!(
+        write!(
             output,
             "\nNot converted ({notes}):\n{}",
             conversion.report()
-        );
+        )
+        .expect("writing to a String cannot fail");
     }
+    terminal::print(&output);
     ExitCode::SUCCESS
 }
 
@@ -47,13 +51,4 @@ fn default_fluxbox_directory() -> PathBuf {
         || PathBuf::from(".fluxbox"),
         |home| Path::new(&home).join(".fluxbox"),
     )
-}
-
-/// Reports `error` and its causes on standard error.
-#[expect(
-    clippy::print_stderr,
-    reason = "vaht import reports to the terminal, not to the log"
-)]
-fn report(error: &anyhow::Error) {
-    eprintln!("{error:#}");
 }

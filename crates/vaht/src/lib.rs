@@ -10,6 +10,7 @@ pub mod arguments;
 pub mod check;
 pub mod import;
 pub mod logging;
+pub mod terminal;
 
 pub use arguments::{Arguments, ImportSource, Subcommand};
 pub use logging::Logging;

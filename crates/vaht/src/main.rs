@@ -31,7 +31,9 @@ fn main() -> ExitCode {
     let signals = match vaht_compositor::ProcessSignals::block() {
         Ok(signals) => signals,
         Err(error) => {
-            report_without_logging(&anyhow::Error::new(error).context("could not block signals"));
+            vaht::terminal::report_error(
+                &anyhow::Error::new(error).context("could not block signals"),
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -39,7 +41,7 @@ fn main() -> ExitCode {
     let logging = match arguments.logging.install() {
         Ok(logging) => logging,
         Err(error) => {
-            report_without_logging(&error.into());
+            vaht::terminal::report_error(&error.into());
             return ExitCode::FAILURE;
         }
     };
@@ -50,14 +52,4 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-/// Prints `error` and its causes directly, for failures that happen before
-/// logging exists.
-#[expect(
-    clippy::print_stderr,
-    reason = "logging is not installed, so it cannot report this"
-)]
-fn report_without_logging(error: &anyhow::Error) {
-    eprintln!("ERROR: {error:#}");
 }
