@@ -17,6 +17,7 @@ nix.workspace = true
 smithay-client-toolkit.workspace = true
 tempfile.workspace = true
 tiny-skia.workspace = true
+vaht-ipc.workspace = true
 
 [dev-dependencies]
 vaht-ui.workspace = true

@@ -24,7 +24,7 @@
 
 use std::fmt;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use jiff::Zoned;
@@ -63,6 +63,7 @@ use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
 use crate::grab::{GrabKind, WindowGrab};
 use crate::input::{self, AfterClick, ButtonPress, Input, KeyPress, PressOutcome};
+use crate::ipc::IpcServer;
 use crate::launcher::Launcher;
 use crate::layers::{Layers, OutputLayers};
 use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack};
@@ -136,6 +137,8 @@ pub struct Compositor {
     is_running: bool,
     /// The socket clients connect to.
     listener: ClientListener,
+    /// The IPC socket, unless it could not be opened.
+    pub(crate) ipc: Option<IpcServer>,
     /// The signals vaht handles, registered with the event loop.
     _signals: EventSource<Self>,
 }
@@ -161,6 +164,9 @@ impl Compositor {
             event_loop
                 .dispatch(None, &mut compositor)
                 .map_err(RunError::WaitForEvents)?;
+            if let Some(ipc) = &mut compositor.ipc {
+                ipc.release_ended();
+            }
             compositor.settle();
             display
                 .dispatch_clients(&mut compositor)
@@ -229,7 +235,14 @@ impl Compositor {
             },
             config.theme.metrics(),
         );
-        let launcher = Launcher::new(listener.socket_name().to_os_string(), &ledger);
+        let mut launcher = Launcher::new(listener.socket_name().to_os_string(), &ledger);
+        let ipc = Self::open_ipc(handle, &listener, &ledger);
+        if let Some(server) = &ipc {
+            launcher.set_environment(
+                vaht_ipc::SOCKET_VARIABLE.to_owned(),
+                server.path().to_string_lossy().into_owned(),
+            );
+        }
         let mut compositor = Self {
             display_handle,
             ledger,
@@ -257,6 +270,7 @@ impl Compositor {
             start_time: Instant::now(),
             is_running: true,
             listener,
+            ipc,
             _signals: signals,
         };
         compositor
@@ -267,6 +281,27 @@ impl Compositor {
             compositor.launcher.run(command_line);
         }
         Ok(compositor)
+    }
+
+    /// Opens the IPC socket beside the Wayland one `listener` opened; none,
+    /// with a warning, if it cannot be: vaht works without it.
+    fn open_ipc(
+        handle: &LoopHandle<'static, Self>,
+        listener: &ClientListener,
+        ledger: &ResourceLedger,
+    ) -> Option<IpcServer> {
+        let runtime = std::env::var_os("XDG_RUNTIME_DIR")?;
+        let path = vaht_ipc::socket_path(Path::new(&runtime), listener.socket_name());
+        match IpcServer::open(path.clone(), handle, ledger) {
+            Ok(server) => {
+                tracing::info!(socket = %path.display(), "accepting IPC clients");
+                Some(server)
+            }
+            Err(error) => {
+                tracing::warn!(%error, socket = %path.display(), "no IPC: could not open its socket");
+                None
+            }
+        }
     }
 
     /// Returns what the output shows now.

@@ -23,6 +23,7 @@ pub mod event_source;
 mod execution;
 mod grab;
 mod input;
+mod ipc;
 mod launcher;
 mod layers;
 mod menu;

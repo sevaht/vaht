@@ -1,0 +1,119 @@
+//! IPC tests: `vaht msg` asking a running vaht, and programs vaht starts
+//! finding its socket.
+
+use std::path::Path;
+use std::process::{Command, Output};
+
+use vaht_ipc::{Reply, WindowInfo};
+use vaht_test_support::{HeadlessVaht, TestClient, wait_for_file};
+
+/// The executable cargo built for these tests.
+const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
+
+/// Runs `vaht msg` with `arguments` against `vaht`.
+fn message(vaht: &HeadlessVaht, arguments: &[&str]) -> Output {
+    Command::new(EXECUTABLE)
+        .arg("msg")
+        .args(arguments)
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .output()
+        .expect("vaht msg runs")
+}
+
+/// Runs `vaht msg --json` with `arguments` and returns the reply.
+fn ask(vaht: &HeadlessVaht, arguments: &[&str]) -> Reply {
+    let output = message(vaht, &[&["--json"], arguments].concat());
+    serde_json::from_slice(&output.stdout).expect("one JSON reply")
+}
+
+/// Returns the windows vaht lists.
+fn windows(vaht: &HeadlessVaht) -> Vec<WindowInfo> {
+    match ask(vaht, &["windows"]) {
+        Reply::Windows { windows } => windows,
+        other @ (Reply::Version { .. }
+        | Reply::Done {}
+        | Reply::Workspaces { .. }
+        | Reply::Error { .. }) => panic!("not a window list: {other:?}"),
+    }
+}
+
+#[test]
+fn windows_are_listed_topmost_first_with_the_focused_one_marked() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(2);
+    let listed = windows(&vaht);
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    assert!(listed[0].is_focused, "the newest window is on top, focused");
+    assert!(!listed[1].is_focused);
+    assert_eq!(listed[0].workspace, Some(1));
+    let readable = message(&vaht, &["windows"]);
+    assert!(readable.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&readable.stdout).lines().count(),
+        2,
+        "a line per window"
+    );
+}
+
+#[test]
+fn a_command_runs_on_the_window_named() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(2);
+    let below = windows(&vaht)[1].id.to_string();
+    let output = message(&vaht, &["run", "--window", &below, "shade"]);
+    assert!(output.status.success(), "{output:?}");
+    let shaded: Vec<bool> = windows(&vaht)
+        .iter()
+        .map(|window| window.is_shaded)
+        .collect();
+    assert_eq!(shaded, [false, true], "only the window named");
+}
+
+#[test]
+fn a_command_changes_the_workspace_shown() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let output = message(&vaht, &["run", "workspace", "2"]);
+    assert!(output.status.success(), "{output:?}");
+    let listed = String::from_utf8(message(&vaht, &["workspaces"]).stdout).expect("UTF-8");
+    assert!(listed.contains("* 2\tWorkspace 2"), "{listed}");
+}
+
+#[test]
+fn a_command_vaht_does_not_know_fails_with_its_reason() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let output = message(&vaht, &["run", "dance"]);
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("dance"), "{error}");
+    let output = message(&vaht, &["run", "--window", "999", "close"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no window 999"));
+}
+
+#[test]
+fn programs_vaht_starts_are_told_where_its_socket_is() {
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let marker = files.path().join("socket");
+    let settings = format!(
+        "[session]\nautostart = [\"printf %s \\\"$VAHT_SOCKET\\\" > '{}'\"]\n",
+        marker.display()
+    );
+    let vaht =
+        HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("settings.toml", &settings)]);
+    let told = wait_for_file(&marker, |contents| !contents.is_empty());
+    assert_eq!(Path::new(&told), vaht.ipc_socket());
+}
+
+#[test]
+fn connections_leave_nothing_behind() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    for _ in 0..3 {
+        assert!(matches!(ask(&vaht, &["version"]), Reply::Version { .. }));
+    }
+    let socket = vaht.ipc_socket();
+    let report = vaht.stop();
+    report.assert_nothing_left_behind();
+    assert!(!socket.exists(), "the socket is removed as vaht stops");
+}

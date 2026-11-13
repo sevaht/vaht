@@ -828,7 +828,37 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
 
 ---
 
-## 12. Resolved questions
+## 12. IPC
+
+vaht listens on a Unix socket beside its Wayland one:
+`$XDG_RUNTIME_DIR/<WAYLAND_DISPLAY>.vaht.sock`. Every program it starts
+finds the path in `VAHT_SOCKET`. The protocol is one JSON object per line
+in each direction. A client writes a request and reads one reply for it,
+in order. The types live in the `vaht-ipc` crate, which `vaht msg` and the
+dialogs use too.
+
+| Request | Fields | Reply |
+|---|---|---|
+| `{"request":"version"}` | | `{"reply":"version","version":"0.1.0"}` |
+| `{"request":"run","command":"workspace 2"}` | `command`: as a binding writes it (§4, one action); `window`: an id, the focused window by default | `{"reply":"done"}` |
+| `{"request":"windows"}` | | `{"reply":"windows","windows":[{"id":1,"title":"…","app_id":"kitty","workspace":1,"is_focused":true,"is_minimized":false,"is_shaded":false}]}`, topmost first; `workspace` is `null` for a window on every workspace |
+| `{"request":"workspaces"}` | | `{"reply":"workspaces","workspaces":[{"number":1,"name":"…","is_current":true}]}` |
+
+- **Errors are replies:** `{"reply":"error","message":"…"}` for a request
+  that is not understood, names an unknown field, or cannot be carried out.
+- **Nothing is held for a client:** a line longer than 64 KiB, or replies
+  left unread past 1 MiB, drop the connection.
+- **`vaht msg`** asks from the command line: `vaht msg run workspace 2`,
+  `vaht msg windows`, `vaht msg workspaces`, `vaht msg version`; `--json`
+  prints the reply as sent.
+- **Not built yet:** event subscriptions, the JSON Schema export, and
+  `[ipc] allow_commands`. For now every client may run commands, as any
+  program of the user's can already do through the Wayland socket's
+  virtual keyboard.
+
+---
+
+## 13. Resolved questions
 
 1. **Reload on change:** yes, with inotify, debounced, all or nothing (§2).
 2. **Colors:** hex or X11 names (§10.1).

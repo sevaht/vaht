@@ -72,6 +72,55 @@ pub enum Subcommand {
         #[command(subcommand)]
         source: ImportSource,
     },
+    /// Asks the running vaht something, or tells it what to do, over its
+    /// IPC socket (`$VAHT_SOCKET`, or the one beside `$WAYLAND_DISPLAY`).
+    Msg {
+        /// Prints vaht's reply as the JSON it sent, on one line.
+        #[arg(long)]
+        json: bool,
+        /// What to ask.
+        #[command(subcommand)]
+        request: MessageRequest,
+    },
+}
+
+/// What `vaht msg` asks.
+#[derive(Debug, clap::Subcommand)]
+pub enum MessageRequest {
+    /// Prints the running vaht's version.
+    Version,
+    /// Runs a command, written as a binding writes one: `vaht msg run
+    /// workspace 2`.
+    Run {
+        /// The window it acts on, by id (see `vaht msg windows`); the
+        /// focused window by default.
+        #[arg(long)]
+        window: Option<u64>,
+        /// The command and its arguments.
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// Lists the windows, topmost first: id, workspace (`*` for every
+    /// one), state, application id and title.
+    Windows,
+    /// Lists the workspaces, the shown one marked `*`.
+    Workspaces,
+}
+
+impl MessageRequest {
+    /// Returns the request as the protocol writes it.
+    #[must_use]
+    pub fn to_request(&self) -> vaht_ipc::Request {
+        match self {
+            Self::Version => vaht_ipc::Request::Version {},
+            Self::Run { window, command } => vaht_ipc::Request::Run {
+                command: command.join(" "),
+                window: *window,
+            },
+            Self::Windows => vaht_ipc::Request::Windows {},
+            Self::Workspaces => vaht_ipc::Request::Workspaces {},
+        }
+    }
 }
 
 /// The configurations `vaht import` converts.

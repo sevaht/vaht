@@ -15,8 +15,9 @@ use crate::wait::{self, PATIENCE};
 
 /// The resource kinds that exist only on behalf of clients; all must be gone
 /// once the clients are.
-const CLIENT_RESOURCES: [&str; 7] = [
+const CLIENT_RESOURCES: [&str; 8] = [
     "client",
+    "ipc-connection",
     "window",
     "toplevel",
     "frame",
@@ -164,6 +165,17 @@ impl HeadlessVaht {
     #[must_use]
     pub fn socket(&self) -> &Path {
         &self.socket
+    }
+
+    /// Returns vaht's IPC socket.
+    ///
+    /// # Panics
+    ///
+    /// Never: a running vaht's socket has a name.
+    #[must_use]
+    pub fn ipc_socket(&self) -> PathBuf {
+        let display = self.socket.file_name().expect("the socket has a name");
+        vaht_ipc::socket_path(self.runtime.path(), display)
     }
 
     /// Returns vaht's configuration directory, where a test can change the
