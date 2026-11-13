@@ -930,6 +930,14 @@ impl Compositor {
 
     /// Moves the pointer to `location`, telling the surface under it.
     fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
+        let whole = self.backend.output_geometry();
+        if let Some(taskbar) = &mut self.taskbar
+            && taskbar.follow_pointer(location, whole, (&self.loop_handle, &self.ledger))
+        {
+            // It showed: its clock ticks again, and the output shows it.
+            self.schedule_clock();
+            self.schedule_render();
+        }
         let target = self.scene().target_at(location);
         let pointer = self
             .seat

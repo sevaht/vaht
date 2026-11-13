@@ -256,9 +256,11 @@ impl<'state> Scene<'state> {
         }
     }
 
-    /// Returns the taskbar, unless a fullscreen window covers it.
+    /// Returns the taskbar, unless it is auto-hidden or a fullscreen window
+    /// covers it.
     fn shown_taskbar(&self) -> Option<&'state Taskbar> {
-        self.taskbar.filter(|_| !self.is_fullscreen_on_top())
+        self.taskbar
+            .filter(|taskbar| taskbar.is_shown() && !self.is_fullscreen_on_top())
     }
 
     /// Returns the topmost shown window's client surface or frame at

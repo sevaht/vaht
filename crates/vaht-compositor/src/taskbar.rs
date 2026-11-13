@@ -12,9 +12,16 @@
 //! An entry shows its window's icon ([`IconStore`]): the one the window
 //! names, else its application's, found by app id.
 //!
+//! It spans its edge, or a share of it ([`TaskbarSettings`]). An
+//! auto-hiding taskbar stays hidden until the pointer touches its edge, and
+//! hides again a while after the pointer leaves it; while hidden, its clock
+//! does not wake vaht.
+//!
 //! The clock wakes vaht when its text changes: at each minute, or each
 //! second if its format shows seconds, as the time of day has them, and
 //! whenever the time of day jumps ([`WallClock`]).
+
+use std::time::Duration;
 
 use jiff::{RoundMode, Timestamp, ToSpan, Unit, Zoned, ZonedRound};
 use smithay::backend::renderer::{ImportMem, Renderer};
@@ -26,7 +33,8 @@ use vaht_ui::{
 };
 
 use crate::Compositor;
-use crate::config::{TaskbarEdge, TaskbarSettings, TaskbarWidget};
+use crate::config::{TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent};
+use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
 use crate::scene::{PanelTexture, SceneElement};
 use crate::wall_clock::{ClockHooks, WallClock, ZoneSources};
@@ -75,8 +83,19 @@ pub(crate) struct Taskbar {
     panel: Panel<TaskbarContent>,
     /// The edge it runs along.
     edge: TaskbarEdge,
+    /// How much of the edge it spans.
+    width_percent: WidthPercent,
+    /// Where along the edge it sits.
+    align: TaskbarAlign,
     /// Whether maximized windows leave it uncovered.
     reserves_space: bool,
+    /// How long after the pointer leaves it it hides; none if it never
+    /// hides.
+    hide_delay: Option<Duration>,
+    /// Whether it is hidden, waiting for the pointer at its edge.
+    is_hidden: bool,
+    /// Hides it, once the pointer has been away long enough.
+    hide_timer: Option<Timer<Compositor>>,
     /// Where it is, in global coordinates; set as frames are prepared.
     area: Area,
     /// Its pixels, as the renderer takes them.
@@ -104,7 +123,13 @@ impl Taskbar {
                 vaht_ui::Size::default(),
             ),
             edge: settings.edge,
-            reserves_space: settings.reserve_space,
+            width_percent: settings.width_percent,
+            align: settings.align,
+            reserves_space: settings.reserve_space && !settings.auto_hide,
+            hide_delay: settings.hide_delay(),
+            // An auto-hiding taskbar starts hidden, as Fluxbox's does.
+            is_hidden: settings.auto_hide,
+            hide_timer: None,
             area: Area::default(),
             texture: PanelTexture::new(),
             clock_shows_seconds: settings.clock.format.shows_seconds()
@@ -124,7 +149,68 @@ impl Taskbar {
             TaskbarEdge::Top => whole.loc.y,
             TaskbarEdge::Bottom => whole.loc.y + whole.size.h - height,
         };
-        Rectangle::new((whole.loc.x, top).into(), (whole.size.w, height).into())
+        let width = self.width_percent.of(whole.size.w);
+        let left = self.align.start(whole.loc.x, whole.size.w, width);
+        Rectangle::new((left, top).into(), (width, height).into())
+    }
+
+    /// Returns whether the taskbar shows: not while auto-hidden.
+    pub(crate) const fn is_shown(&self) -> bool {
+        !self.is_hidden
+    }
+
+    /// Follows the pointer, now at global `point` on an output covering
+    /// `whole`: an auto-hiding taskbar shows when the pointer touches its
+    /// edge, and hides a while after the pointer leaves it. Returns whether
+    /// it showed, so the output is drawn again.
+    pub(crate) fn follow_pointer(
+        &mut self,
+        point: Point<f64, Logical>,
+        whole: Area,
+        event_loop: (&LoopHandle<'static, Compositor>, &ResourceLedger),
+    ) -> bool {
+        let Some(delay) = self.hide_delay else {
+            return false;
+        };
+        let pixel = point.to_i32_floor();
+        let edge_row = match self.edge {
+            TaskbarEdge::Top => whole.loc.y,
+            TaskbarEdge::Bottom => whole.loc.y + whole.size.h - 1,
+        };
+        let is_at_edge =
+            pixel.y == edge_row && pixel.x >= whole.loc.x && pixel.x < whole.loc.x + whole.size.w;
+        if self.is_hidden {
+            if is_at_edge {
+                self.is_hidden = false;
+                self.hide_timer = None;
+                return true;
+            }
+            return false;
+        }
+        if is_at_edge || self.area.contains(pixel) {
+            self.hide_timer = None;
+        } else if self.hide_timer.as_ref().is_none_or(Timer::has_fired) {
+            let (handle, ledger) = event_loop;
+            let timer = Timer::once(handle, ledger, delay, |compositor: &mut Compositor| {
+                if let Some(taskbar) = &mut compositor.taskbar {
+                    taskbar.is_hidden = true;
+                    // Its clock rests while it cannot be seen.
+                    taskbar.schedule_clock(
+                        &Zoned::now(),
+                        (&compositor.loop_handle, &compositor.ledger),
+                    );
+                }
+                compositor.schedule_render();
+            });
+            match timer {
+                Ok(timer) => self.hide_timer = Some(timer),
+                Err(error) => tracing::warn!(
+                    error = &error as &dyn std::error::Error,
+                    "the taskbar cannot hide"
+                ),
+            }
+        }
+        false
     }
 
     /// Returns `usable` less the taskbar's area, if it reserves its space,
@@ -257,10 +343,15 @@ impl Taskbar {
                 }
             }
         }
-        let next = Self::next_clock_change(now, self.clock_shows_seconds);
-        if let Some(wall_clock) = &self.wall_clock
-            && let Err(error) = wall_clock.ring_at(next)
-        {
+        let Some(wall_clock) = &self.wall_clock else {
+            return;
+        };
+        let armed = if self.is_hidden {
+            wall_clock.disarm()
+        } else {
+            wall_clock.ring_at(Self::next_clock_change(now, self.clock_shows_seconds))
+        };
+        if let Err(error) = armed {
             tracing::warn!(
                 error = &error as &dyn std::error::Error,
                 "could not schedule the clock"
@@ -504,6 +595,56 @@ mod tests {
         };
         let bar = Taskbar::new(&settings).expect("enabled");
         assert_eq!(bar.reserve(whole(), whole(), 20), whole());
+    }
+
+    #[rstest]
+    #[case::left(TaskbarAlign::Left, 0)]
+    #[case::center(TaskbarAlign::Center, 480)]
+    #[case::right(TaskbarAlign::Right, 960)]
+    fn a_narrower_taskbar_sits_where_it_is_aligned(#[case] align: TaskbarAlign, #[case] left: i32) {
+        let settings = TaskbarSettings {
+            width_percent: WidthPercent::new(50).expect("a width"),
+            align,
+            ..TaskbarSettings::default()
+        };
+        let bar = Taskbar::new(&settings).expect("enabled");
+        let area = bar.area_in(whole(), 20);
+        assert_eq!((area.loc.x, area.size.w), (left, 960));
+    }
+
+    #[test]
+    fn an_auto_hiding_taskbar_starts_hidden_and_reserves_nothing() {
+        let settings = TaskbarSettings {
+            auto_hide: true,
+            ..TaskbarSettings::default()
+        };
+        let bar = Taskbar::new(&settings).expect("enabled");
+        assert!(!bar.is_shown());
+        assert_eq!(bar.reserve(whole(), whole(), 20), whole());
+    }
+
+    #[test]
+    fn touching_its_edge_shows_an_auto_hiding_taskbar() {
+        let event_loop: calloop::EventLoop<'static, Compositor> =
+            calloop::EventLoop::try_new().expect("a loop");
+        let ledger = ResourceLedger::new();
+        let settings = TaskbarSettings {
+            auto_hide: true,
+            ..TaskbarSettings::default()
+        };
+        let mut bar = Taskbar::new(&settings).expect("enabled");
+        let handle = event_loop.handle();
+        assert!(!bar.follow_pointer((500.0, 1070.0).into(), whole(), (&handle, &ledger)));
+        assert!(!bar.is_shown(), "near the edge is not at it");
+        assert!(bar.follow_pointer((500.0, 1079.5).into(), whole(), (&handle, &ledger)));
+        assert!(bar.is_shown());
+    }
+
+    #[test]
+    fn widths_outside_one_to_a_hundred_percent_are_refused() {
+        assert!(WidthPercent::new(0).is_none());
+        assert!(WidthPercent::new(101).is_none());
+        assert_eq!(WidthPercent::new(1).expect("a width").of(1920), 19);
     }
 
     #[test]

@@ -2,6 +2,7 @@
 //! what it shows (02 §3.1).
 
 use std::fmt;
+use std::time::Duration;
 
 use jiff::Zoned;
 use jiff::civil::date;
@@ -18,8 +19,17 @@ pub(crate) struct TaskbarSettings {
     pub(crate) enabled: bool,
     /// The output edge it runs along.
     pub(crate) edge: TaskbarEdge,
-    /// Whether maximized and tiled windows leave it uncovered.
+    /// How much of the edge it spans.
+    pub(crate) width_percent: WidthPercent,
+    /// Where along the edge it sits, when narrower than the edge.
+    pub(crate) align: TaskbarAlign,
+    /// Whether maximized and tiled windows leave it uncovered; an
+    /// auto-hiding taskbar never reserves its space.
     pub(crate) reserve_space: bool,
+    /// Whether it hides until the pointer touches its edge.
+    pub(crate) auto_hide: bool,
+    /// How long after the pointer leaves it an auto-hiding taskbar hides.
+    pub(crate) auto_hide_delay_ms: u64,
     /// What it shows, left to right.
     pub(crate) widgets: Vec<TaskbarWidget>,
     /// The window list.
@@ -33,7 +43,11 @@ impl Default for TaskbarSettings {
         Self {
             enabled: true,
             edge: TaskbarEdge::Bottom,
+            width_percent: WidthPercent::WHOLE,
+            align: TaskbarAlign::Center,
             reserve_space: true,
+            auto_hide: false,
+            auto_hide_delay_ms: 500,
             widgets: vec![
                 TaskbarWidget::WorkspacePrevious,
                 TaskbarWidget::WorkspaceName,
@@ -43,6 +57,77 @@ impl Default for TaskbarSettings {
             ],
             window_list: WindowListSettings::default(),
             clock: ClockSettings::default(),
+        }
+    }
+}
+
+impl TaskbarSettings {
+    /// Returns how long after the pointer leaves it an auto-hiding taskbar
+    /// hides; none when it does not hide.
+    pub(crate) const fn hide_delay(&self) -> Option<Duration> {
+        if self.auto_hide {
+            Some(Duration::from_millis(self.auto_hide_delay_ms))
+        } else {
+            None
+        }
+    }
+}
+
+/// How much of its edge the taskbar spans, as a whole percentage from 1 to
+/// 100.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct WidthPercent(u32);
+
+impl WidthPercent {
+    /// The whole edge.
+    pub(crate) const WHOLE: Self = Self(100);
+
+    /// Returns the percentage, or `None` outside 1 to 100.
+    pub(crate) const fn new(percent: u32) -> Option<Self> {
+        if percent >= 1 && percent <= Self::WHOLE.0 {
+            Some(Self(percent))
+        } else {
+            None
+        }
+    }
+
+    /// Returns this share of `length`, at least 1.
+    pub(crate) fn of(self, length: i32) -> i32 {
+        let share = i64::from(length) * i64::from(self.0) / i64::from(Self::WHOLE.0);
+        i32::try_from(share).unwrap_or(length).max(1)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for WidthPercent {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let percent = u32::deserialize(deserializer)?;
+        Self::new(percent).ok_or_else(|| {
+            de::Error::custom(format!("{percent} is no width: it is 1 to 100 percent"))
+        })
+    }
+}
+
+/// Where along its edge a taskbar narrower than the edge sits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum TaskbarAlign {
+    /// At the left end.
+    Left,
+    /// In the middle.
+    #[default]
+    Center,
+    /// At the right end.
+    Right,
+}
+
+impl TaskbarAlign {
+    /// Returns where a taskbar `width` wide starts along an edge from
+    /// `start`, `length` long.
+    pub(crate) const fn start(self, start: i32, length: i32, width: i32) -> i32 {
+        match self {
+            Self::Left => start,
+            Self::Center => start + (length - width) / 2,
+            Self::Right => start + length - width,
         }
     }
 }

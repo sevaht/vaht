@@ -32,7 +32,8 @@ pub(crate) use self::command::{Action, Command, ResizeFrom, WindowManagerAction}
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::rules::Rules;
 pub(crate) use self::settings::{
-    FocusModel, FrameSettings, Settings, TaskbarEdge, TaskbarSettings, TaskbarWidget,
+    FocusModel, FrameSettings, Settings, TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget,
+    WidthPercent,
 };
 pub(crate) use self::source::ConfigSource;
 pub(crate) use self::theme::ThemeFile;

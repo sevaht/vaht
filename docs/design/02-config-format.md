@@ -188,7 +188,12 @@ rest by name, so a setting never silently does nothing:
 - `[session]`: `autostart`.
 - `theme`: the name of a theme in `themes/` (§10); without it, the built-in
   theme.
-- `[taskbar]`: `enabled`, `edge` (`top` or `bottom`), `reserve_space`,
+- `[taskbar]`: `enabled`, `edge` (`top` or `bottom`), `width_percent`
+  (1 to 100) and `align` (`left`, `center`, `right`; from `placement`'s
+  second half), `auto_hide` and `auto_hide_delay_ms` (hidden until the
+  pointer touches the edge, hidden again that long after it leaves; an
+  auto-hiding taskbar reserves nothing, and its clock rests while hidden),
+  `reserve_space`,
   `widgets` (`workspace-previous`, `workspace-name`, `workspace-next`,
   `window-list`, `clock`; `tray` is refused until it exists),
   `[taskbar.window_list]` with `show` (a matcher),

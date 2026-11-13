@@ -13,7 +13,9 @@ use std::time::Duration;
 use smithay::utils::{Logical, Point, Size};
 use vaht_ui::theme::Metrics;
 
-pub(crate) use self::taskbar::{TaskbarEdge, TaskbarSettings, TaskbarWidget};
+pub(crate) use self::taskbar::{
+    TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent,
+};
 use crate::window_manager::{
     ColumnDirection, PlacementStrategy, Room, RowDirection, TitlebarButton, TitlebarLayout,
 };

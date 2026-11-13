@@ -296,6 +296,16 @@ impl<State: 'static> WallClock<State> {
             .map_err(WallClockError::Arm)
     }
 
+    /// Stops ringing at the moment armed: what shows the time is hidden.
+    /// The clock being set or the zone changing still calls back.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the kernel refuses.
+    pub(crate) fn disarm(&self) -> Result<(), WallClockError> {
+        self.alarm.unset().map_err(WallClockError::Arm)
+    }
+
     /// Watches the zone file while timedated does not speak for the zone.
     fn hear(&mut self, news: ZoneNews) {
         match news {

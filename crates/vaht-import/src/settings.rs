@@ -311,13 +311,11 @@ impl InitFile {
             match edge {
                 Some(edge) => {
                     self.set(&["taskbar", "edge"], Value::from(edge));
-                    if !value.ends_with("center") {
-                        self.note(
-                            report,
-                            placement.line,
-                            format!("a taskbar placed {}", placement.value),
-                        );
-                    }
+                    let align = ["left", "center", "right"]
+                        .into_iter()
+                        .find(|align| value.ends_with(align))
+                        .unwrap_or("center");
+                    self.set(&["taskbar", "align"], Value::from(align));
                 }
                 None => self.note(
                     report,
@@ -329,6 +327,22 @@ impl InitFile {
         if let Some(covers) = self.resources.value(&toolbar("maxOver")) {
             let reserves = !covers.eq_ignore_ascii_case("true");
             self.set(&["taskbar", "reserve_space"], Value::from(reserves));
+        }
+        if let Some(width) = self.resources.get(&toolbar("widthPercent")).cloned() {
+            match width.value.parse::<i64>() {
+                Ok(percent @ 1..=100) => {
+                    self.set(&["taskbar", "width_percent"], Value::from(percent));
+                }
+                Ok(_) | Err(_) => self.note(
+                    report,
+                    width.line,
+                    format!("the toolbar width {}", width.value),
+                ),
+            }
+        }
+        self.convert_flag("toolbar.autoHide", &["taskbar", "auto_hide"]);
+        if let Some(delay) = self.number(&toolbar("autoHideDelay")) {
+            self.set(&["taskbar", "auto_hide_delay_ms"], Value::from(delay));
         }
         if let Some(tools) = self.resources.get(&toolbar("tools")).cloned() {
             let mut widgets = Array::new();
@@ -356,10 +370,8 @@ impl InitFile {
         self.convert_clock(report);
         self.convert_window_list(report);
         for (name, default) in [
-            ("widthPercent", "100"),
             ("height", "0"),
             ("onhead", "1"),
-            ("autoHide", "false"),
             ("autoRaise", "false"),
             ("layer", "Dock"),
         ] {
@@ -538,7 +550,8 @@ session.screen0.toolbar.widthPercent:\t80
         assert_eq!(
             document.to_string(),
             "[placement]\nstrategy = \"row-min-overlap\"\n\n[windows.frame]\n\
-             titlebar_right = [\"shade\", \"minimize\", \"maximize\", \"close\"]\n"
+             titlebar_right = [\"shade\", \"minimize\", \"maximize\", \"close\"]\n\n\
+             [taskbar]\nwidth_percent = 80\n"
         );
         let reasons: Vec<_> = report
             .notes()
@@ -547,12 +560,8 @@ session.screen0.toolbar.widthPercent:\t80
             .collect();
         assert_eq!(
             reasons,
-            [
-                (7, Reason::Dropped),
-                (8, Reason::Dropped),
-                (9, Reason::NotYetInVaht)
-            ],
-            "a width other than the default is not in vaht yet"
+            [(7, Reason::Dropped), (8, Reason::Dropped)],
+            "the tabs and the opaque alpha"
         );
     }
 
@@ -580,7 +589,7 @@ session.screen0.toolbar.widthPercent:\t80
 
     #[test]
     fn the_toolbar_becomes_the_taskbar() {
-        let init = "session.screen0.toolbar.placement:\tTopCenter
+        let init = "session.screen0.toolbar.placement:\tTopLeft
 session.screen0.toolbar.tools:\tprevworkspace, iconbar, systemtray, clock
 session.screen0.toolbar.maxOver:\ttrue
 session.screen0.strftimeFormat:\t%H:%M:%S
@@ -594,7 +603,7 @@ session.screen0.toolbar.widthPercent:\t100
             InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
         assert_eq!(
             document.to_string(),
-            "[taskbar]\nedge = \"top\"\nreserve_space = false\n\
+            "[taskbar]\nedge = \"top\"\nalign = \"left\"\nreserve_space = false\n\
              widgets = [\"workspace-previous\", \"window-list\", \"clock\"]\n\n\
              [taskbar.clock]\nformat = \"%H:%M:%S\"\n\n\
              [taskbar.window_list]\nshow = { workspace = \"current\", minimized = false }\n\

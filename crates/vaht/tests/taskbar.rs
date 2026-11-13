@@ -253,3 +253,46 @@ fn the_icon_a_window_names_comes_before_its_application_s() {
         NAMED_ICON
     );
 }
+
+#[test]
+fn an_auto_hiding_taskbar_shows_at_its_edge_and_hides_when_left() {
+    let (_vaht, mut client) = start("[\"window-list\"]\nauto_hide = true\nauto_hide_delay_ms = 50");
+    let bottom_middle = |screenshot: &Screenshot| {
+        screenshot.rgb(screenshot.width() / 2, screenshot.height() - HEIGHT / 2)
+    };
+    let hidden = client.screenshot();
+    assert_ne!(bottom_middle(&hidden), BACKGROUND, "hidden at first");
+    let (width, height) = (hidden.width(), hidden.height());
+    client.move_pointer_to(width / 2, height - 1);
+    assert_eq!(
+        bottom_middle(&client.screenshot()),
+        BACKGROUND,
+        "shown at the edge"
+    );
+    client.move_pointer_to(width / 2, height / 2);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert_ne!(
+        bottom_middle(&client.screenshot()),
+        BACKGROUND,
+        "hidden again once the pointer left"
+    );
+}
+
+#[test]
+fn a_narrower_taskbar_sits_where_it_is_aligned() {
+    let (_vaht, mut client) = start("[\"window-list\"]\nwidth_percent = 50\nalign = \"right\"");
+    let screenshot = client.screenshot();
+    let row = screenshot.height() - HEIGHT / 2;
+    let half = screenshot.width() / 2;
+    assert_ne!(
+        screenshot.rgb(half - 1, row),
+        BACKGROUND,
+        "the left half is free"
+    );
+    assert_eq!(
+        screenshot.rgb(half, row),
+        BACKGROUND,
+        "the bar starts halfway"
+    );
+    assert_eq!(screenshot.rgb(screenshot.width() - 1, row), BACKGROUND);
+}
