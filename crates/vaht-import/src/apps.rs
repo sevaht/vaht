@@ -55,6 +55,63 @@ impl<'text> AppsFile<'text> {
         ("pseudotransparent", "pseudo_transparent"),
     ];
 
+    /// Fluxbox's settings (lowercase) whose value is a name vaht writes in
+    /// its own words: the rule key, and how the value translates (none for
+    /// one vaht lacks).
+    #[expect(
+        clippy::type_complexity,
+        reason = "a table of names, keys and translations reads best inline"
+    )]
+    const NAMED_VALUES: [(&str, &str, fn(&str) -> Option<&'static str>); 2] = [
+        ("layer", "layer", FluxboxCommand::layer),
+        ("focusprotection", "focus_stealing", Self::focus_stealing),
+    ];
+
+    /// Returns the `position` `[Position] (argument) {value}` gives: an
+    /// anchor, and an offset unless it is none; none if vaht cannot say it.
+    fn position(argument: &str, value: &str) -> Option<Value> {
+        // Without an anchor, Fluxbox measures from the top left.
+        let argument = if argument.is_empty() {
+            "topleft"
+        } else {
+            argument
+        };
+        let anchor = Self::ANCHORS
+            .iter()
+            .find(|(fluxbox, _)| argument.eq_ignore_ascii_case(fluxbox))
+            .map(|(_, vaht)| *vaht)?;
+        let (x, y) = Self::pair(value)?;
+        let mut position = InlineTable::new();
+        position.insert("anchor", Value::from(anchor));
+        if (x, y) != (0, 0) {
+            position.insert("offset", Value::Array([x, y].into_iter().collect()));
+        }
+        Some(Value::InlineTable(position))
+    }
+
+    /// Returns the `focus_stealing` `[FocusProtection]`'s `value` asks for:
+    /// `Gain` lets the window take focus, `Deny` and `Refuse` keep it from
+    /// doing so, `None` is the default; none for `Lock`, which vaht lacks.
+    fn focus_stealing(value: &str) -> Option<&'static str> {
+        let words: Vec<String> = value
+            .split([',', ' ', '\t'])
+            .filter(|word| !word.is_empty())
+            .map(str::to_ascii_lowercase)
+            .collect();
+        let has = |word: &str| words.iter().any(|given| given == word);
+        if has("lock") {
+            None
+        } else if has("gain") {
+            Some("allow")
+        } else if has("deny") || has("refuse") {
+            Some("deny")
+        } else if has("none") {
+            Some("default")
+        } else {
+            None
+        }
+    }
+
     /// Fluxbox's `[Position]` anchors and vaht's.
     const ANCHORS: [(&str, &str); 18] = [
         ("topleft", "top-left"),
@@ -202,37 +259,24 @@ impl<'text> AppsFile<'text> {
                         .insert("placement", Item::Value(Value::from(placement)));
                 }
             }
-            "position" => {
-                // Without an anchor, Fluxbox measures from the top left.
-                let argument = if argument.is_empty() {
-                    "topleft"
-                } else {
-                    argument
-                };
-                let anchor = Self::ANCHORS
-                    .iter()
-                    .find(|(fluxbox, _)| argument.eq_ignore_ascii_case(fluxbox))
-                    .map(|(_, vaht)| *vaht);
-                match (anchor, Self::pair(value)) {
-                    (Some(anchor), Some((x, y))) => {
-                        let mut position = InlineTable::new();
-                        position.insert("anchor", Value::from(anchor));
-                        if (x, y) != (0, 0) {
-                            position.insert("offset", Value::Array([x, y].into_iter().collect()));
-                        }
-                        block
-                            .rule
-                            .insert("position", Item::Value(Value::InlineTable(position)));
-                    }
-                    _ => not_yet(),
-                }
-            }
-            "layer" => match FluxboxCommand::layer(value) {
-                Some(layer) => {
-                    block.rule.insert("layer", Item::Value(Value::from(layer)));
+            "position" => match Self::position(argument, value) {
+                Some(position) => {
+                    block.rule.insert("position", Item::Value(position));
                 }
                 None => not_yet(),
             },
+            named
+                if let Some((_, key, translate)) = Self::NAMED_VALUES
+                    .iter()
+                    .find(|(name, _, _)| *name == named) =>
+            {
+                match translate(value) {
+                    Some(vaht) => {
+                        block.rule.insert(key, Item::Value(Value::from(vaht)));
+                    }
+                    None => not_yet(),
+                }
+            }
             "dimensions" => match Self::pair(value) {
                 Some((width, height)) if width > 0 && height > 0 => {
                     block.rule.insert(
@@ -307,13 +351,8 @@ mod tests {
             document.to_string(),
             "[[rule]]\nmatch = { app_id = \"kitty\" }\npseudo_transparent = true\n\n\
              [[rule]]\nmatch = { app_id = \"vaht-run\" }\nposition = { anchor = \"center\" }\n\n\
-             [[rule]]\nmatch = { app_id = \"steam\" }\nworkspace = 2\n"
+             [[rule]]\nmatch = { app_id = \"steam\" }\nfocus_stealing = \"allow\"\nworkspace = 2\n"
         );
-        let notes: Vec<_> = report
-            .notes()
-            .iter()
-            .map(|note| (note.line, note.reason))
-            .collect();
-        assert_eq!(notes, [(8, Reason::NotYetInVaht)], "{report}");
+        assert!(report.notes().is_empty(), "{report}");
     }
 }

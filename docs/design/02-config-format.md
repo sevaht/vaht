@@ -499,7 +499,12 @@ focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
   (`above-dock`, `dock`, `top`, `normal`, `bottom`, `desktop`: Fluxbox's
   layers; a window is always above those of lower layers, raising and
   lowering stay within its own, and `above-dock` windows are over the
-  taskbar; `set-layer` moves one). They apply when the window first
+  taskbar; `set-layer` moves one), and `focus_stealing` (`allow`: the
+  window comes forward whenever its program asks, as Steam's tray menu
+  needs, from `[FocusProtection] {Gain}`; `deny`: never by its program's
+  asking; `default`: when the focused program made the token, recently;
+  a new window's first focus is the settings' either way). They apply
+  when the window first
   gets its place. The other keys are refused until their features exist.
   `vaht import fluxbox` converts `apps` (workspaces counted from 0 there)
   and reports the rest.

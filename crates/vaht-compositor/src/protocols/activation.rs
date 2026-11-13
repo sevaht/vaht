@@ -4,7 +4,9 @@
 //! vaht honors a token made by the client that had keyboard focus, used
 //! within [`ACTIVATION_PATIENCE`]: the window is restored, its workspace
 //! shown, and it is raised and focused. Any other request is refused and
-//! logged, so a program in the background cannot take focus by itself.
+//! logged, so a program in the background cannot take focus by itself,
+//! unless a rule says the window may (`focus_stealing = "allow"`); one
+//! saying `"deny"` refuses even a good token.
 
 use std::time::Duration;
 
@@ -15,6 +17,8 @@ use smithay::wayland::xdg_activation::{
 };
 
 use crate::Compositor;
+use crate::config::FocusStealing;
+use crate::window_manager::Window;
 
 /// How long after its making a token still activates a window.
 const ACTIVATION_PATIENCE: Duration = Duration::from_secs(10);
@@ -44,7 +48,12 @@ impl XdgActivationHandler for Compositor {
             })
             .map(|client| client.id());
         let is_from_focus = focused_client.is_some() && token_data.client_id == focused_client;
-        if is_from_focus && token_data.timestamp.elapsed() < ACTIVATION_PATIENCE {
+        let is_asked_for = is_from_focus && token_data.timestamp.elapsed() < ACTIVATION_PATIENCE;
+        let policy = self
+            .window_manager
+            .window(window)
+            .map_or(FocusStealing::Default, Window::focus_stealing);
+        if policy.honors(is_asked_for) {
             tracing::debug!(window = %window, "activation honored");
             self.window_manager.activate(window);
         } else {

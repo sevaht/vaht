@@ -70,6 +70,37 @@ struct Rule {
     /// The stacking layer they open in.
     #[serde(default, deserialize_with = "deserialize_layer")]
     layer: Option<StackLayer>,
+    /// Whether they may come forward when their program asks.
+    focus_stealing: Option<FocusStealing>,
+}
+
+/// Whether a window may come forward, with focus, when its program asks
+/// (xdg-activation), not only when the user does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum FocusStealing {
+    /// Whenever it asks, even without a token from the focused program
+    /// (Fluxbox's `[FocusProtection] {Gain}`): Steam, whose tray menu
+    /// cannot pass one.
+    Allow,
+    /// Never by its own asking, even with a token (`{Deny}`).
+    Deny,
+    /// When the focused program made the token it asks with, recently.
+    #[default]
+    Default,
+}
+
+impl FocusStealing {
+    /// Returns whether a window under this policy comes forward when its
+    /// program asks, `is_asked_for` saying whether the token is from the
+    /// focused program, recently.
+    pub(crate) const fn honors(self, is_asked_for: bool) -> bool {
+        match self {
+            Self::Allow => true,
+            Self::Deny => false,
+            Self::Default => is_asked_for,
+        }
+    }
 }
 
 /// Reads a layer's name.
@@ -92,6 +123,7 @@ impl Rule {
             size: self.size,
             pseudo_transparent: self.pseudo_transparent,
             layer: self.layer,
+            focus_stealing: self.focus_stealing,
         }
     }
 }
@@ -115,6 +147,8 @@ pub(crate) struct RuleSettings {
     pub(crate) pseudo_transparent: Option<bool>,
     /// The stacking layer it opens in.
     pub(crate) layer: Option<StackLayer>,
+    /// Whether it may come forward when its program asks.
+    pub(crate) focus_stealing: Option<FocusStealing>,
 }
 
 impl RuleSettings {
@@ -136,6 +170,7 @@ impl RuleSettings {
             size: later.size.or(self.size),
             pseudo_transparent: later.pseudo_transparent.or(self.pseudo_transparent),
             layer: later.layer.or(self.layer),
+            focus_stealing: later.focus_stealing.or(self.focus_stealing),
         }
     }
 }
@@ -325,11 +360,23 @@ mod tests {
 
     #[rstest]
     #[case::no_match("[[rule]]\nworkspace = 2\n", "missing field `match`")]
-    #[case::not_yet("[[rule]]\nmatch = {}\nfocus_stealing = \"allow\"\n", "unknown field")]
+    #[case::not_yet("[[rule]]\nmatch = {}\noutput = 2\n", "unknown field")]
     #[case::bad_placement("[[rule]]\nmatch = {}\nplacement = \"huge\"\n", "placement is")]
     #[case::workspace_zero("[[rule]]\nmatch = {}\nworkspace = 0\n", "nonzero")]
     fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {
         let error = rules(text).expect_err(text);
         assert!(error.contains(expected), "{error}");
+    }
+
+    #[test]
+    fn a_policy_decides_whether_a_program_may_bring_its_window_forward() {
+        for is_asked_for in [false, true] {
+            assert!(FocusStealing::Allow.honors(is_asked_for));
+            assert!(!FocusStealing::Deny.honors(is_asked_for));
+            assert_eq!(FocusStealing::Default.honors(is_asked_for), is_asked_for);
+        }
+        let rules: Rules =
+            toml::from_str("[[rule]]\nmatch = {}\nfocus_stealing = \"allow\"\n").expect("valid");
+        assert_eq!(rules.rule[0].focus_stealing, Some(FocusStealing::Allow));
     }
 }

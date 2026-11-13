@@ -36,6 +36,7 @@ pub(crate) use placement::{Area, Axes, Direction, OutputArea, Placement, SnapSte
 pub(crate) use resize::{HorizontalEdge, ResizeAnchor, ResizeEdges, SizeLimits, VerticalEdge};
 
 use super::workspaces::Workspace;
+use crate::config::FocusStealing;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 
 /// Identifies a window for as long as vaht runs; never reused.
@@ -147,6 +148,8 @@ pub(crate) struct Window {
     alpha: Option<WindowAlpha>,
     /// Its title, as `set-title` set it; its client's when none.
     title: Option<String>,
+    /// Whether it may come forward when its program asks, as a rule says.
+    focus_stealing: FocusStealing,
     /// Counts the window while it exists.
     _tracked: Tracked,
 }
@@ -175,6 +178,7 @@ impl Window {
             is_pseudo_transparent: false,
             alpha: None,
             title: None,
+            focus_stealing: FocusStealing::Default,
             _tracked: ledger.track(ResourceKind::Window),
         }
     }
@@ -235,6 +239,16 @@ impl Window {
     /// Returns whether the window has had its first place.
     pub(crate) const fn is_placed(&self) -> bool {
         !self.awaits_placement
+    }
+
+    /// Returns whether the window may come forward when its program asks.
+    pub(crate) const fn focus_stealing(&self) -> FocusStealing {
+        self.focus_stealing
+    }
+
+    /// Says whether the window may come forward when its program asks.
+    pub(crate) const fn set_focus_stealing(&mut self, focus_stealing: FocusStealing) {
+        self.focus_stealing = focus_stealing;
     }
 
     /// Returns how opaque the window is drawn, 0.0 to 1.0: as `set-alpha`

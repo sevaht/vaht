@@ -717,6 +717,11 @@ impl WindowManager {
         if let Some(layer) = rule.layer {
             self.windows.set_layer(id, layer);
         }
+        if let Some(focus_stealing) = rule.focus_stealing
+            && let Some(window) = self.window_mut(id)
+        {
+            window.set_focus_stealing(focus_stealing);
+        }
         // A rule may have sent the new window out of sight.
         self.focus_most_recent();
     }
