@@ -57,7 +57,7 @@ use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::{
     Action, Command, Config, ConfigSource, FocusModel, KeyChord, MenuGenerator, MenuRequest, Menus,
-    Modifiers, ResizeFrom, WindowManagerAction,
+    Modifiers, ResizeFrom, ThemeFile, WindowManagerAction,
 };
 use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
@@ -905,6 +905,14 @@ impl Compositor {
             Action::CommandDialog => self
                 .launcher
                 .show_dialog("command", self.config_source.directory()),
+            Action::SetTheme(name) => {
+                if let Err(error) = self.config_source.choose_theme(name) {
+                    tracing::warn!(
+                        error = &error as &dyn std::error::Error,
+                        "could not change the theme"
+                    );
+                }
+            }
             Action::SetTitleDialog => {
                 if let Some(window) = context.window {
                     self.launcher.show_window_dialog(
@@ -930,7 +938,11 @@ impl Compositor {
     /// `window` (the window menu's; the focused window when none).
     fn open_menu(&mut self, request: &MenuRequest, window: Option<WindowId>) {
         let window = window.or_else(|| self.window_manager.focused());
-        let builder = MenuBuilder::new(&self.config.menus, &self.window_manager, window);
+        let builder = MenuBuilder::new(&self.config.menus, &self.window_manager, window)
+            .with_themes(
+                ThemeFile::available(self.config_source.directory()),
+                self.config.settings.theme.as_deref(),
+            );
         let model = match request {
             MenuRequest::Root => builder.build(Menus::ROOT),
             MenuRequest::Window => window.and_then(|_| builder.build(Menus::WINDOW)),

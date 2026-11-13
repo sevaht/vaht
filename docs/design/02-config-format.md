@@ -559,8 +559,8 @@ items = [
   - `icon` (optional on any item).
 - **Built so far:** `command`, `submenu`, `toggle` (`shade`, `stick`,
   `maximize`, `minimize`, `fullscreen`), `generate` (`workspaces`,
-  `send-to-workspace`, `window-list`, `alpha`, `layer`; `inline = true`
-  lists in place),
+  `send-to-workspace`, `window-list`, `alpha`, `layer`, `themes`; `inline =
+  true` lists in place),
   `separator`, and a bare `label` (drawn disabled). The actions
   `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`,
   `custom-menu <name>` and `hide-menus`, bound as Fluxbox binds them by
@@ -828,6 +828,11 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
   unique, and `[include]` files are read in place. A submenu with nothing
   vaht can show is left out. Vaht's own window and workspace menus are
   written where the source has none.
+- **The styles menu converts:** `[stylesdir]` and `[stylesmenu]` become
+  the `themes` list, which shows vaht's themes (the directory is reported).
+  Choosing one runs `set-theme <name>`, which writes `theme = "<name>"`
+  into `settings.toml`, keeping the rest of the file, and the reload that
+  follows applies it, as Fluxbox's style menu writes `init`.
 - **The title dialog converts:** `SetTitleDialog` and the window menu's
   `[settitledialog]` become `set-title-dialog`, which shows the window's
   title to change (`vaht dialog title --window <id>`); `SetTitle` becomes

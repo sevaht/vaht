@@ -266,20 +266,24 @@ pub(crate) enum MenuGenerator {
     /// The stacking layers, the menu's window's own checked: choosing one
     /// moves the window there.
     Layer,
+    /// The themes there are, the one in use checked: choosing one makes it
+    /// the theme.
+    Themes,
 }
 
 impl MenuGenerator {
     /// The generators by name.
-    const NAMES: [(&str, Self); 5] = [
+    const NAMES: [(&str, Self); 6] = [
         ("workspaces", Self::Workspaces),
         ("send-to-workspace", Self::SendToWorkspace),
         ("window-list", Self::WindowList),
         ("alpha", Self::Alpha),
         ("layer", Self::Layer),
+        ("themes", Self::Themes),
     ];
 
     /// Generators of 02 §8 that vaht does not have yet.
-    const PLANNED: [&str; 3] = ["themes", "outputs", "profiles"];
+    const PLANNED: [&str; 2] = ["outputs", "profiles"];
 
     /// Returns what the item says when its label is not given.
     pub(crate) const fn label(self) -> &'static str {
@@ -289,6 +293,7 @@ impl MenuGenerator {
             Self::WindowList => "Windows",
             Self::Alpha => "Transparency",
             Self::Layer => "Layer",
+            Self::Themes => "Themes",
         }
     }
 }
@@ -307,7 +312,7 @@ impl<'de> serde::Deserialize<'de> for MenuGenerator {
             .map(|&(_, generator)| generator)
             .ok_or_else(|| {
                 de::Error::custom(format!(
-                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list, alpha and layer"
+                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list, alpha, layer and themes"
                 ))
             })
     }
@@ -399,7 +404,7 @@ mod tests {
         "[menu.root]\nitems = [{ command = \"reload\", submenu = \"root\" }]\n",
         "one of command"
     )]
-    #[case::planned_list("[menu.root]\nitems = [{ generate = \"themes\" }]\n", "not available")]
+    #[case::planned_list("[menu.root]\nitems = [{ generate = \"outputs\" }]\n", "not available")]
     #[case::unknown_list("[menu.root]\nitems = [{ generate = \"pets\" }]\n", "no list")]
     #[case::empty_item("[menu.root]\nitems = [{}]\n", "needs a label")]
     fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {

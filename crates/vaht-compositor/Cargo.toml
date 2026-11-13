@@ -26,6 +26,7 @@ strum.workspace = true
 thiserror.workspace = true
 tiny-skia.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 tracing.workspace = true
 vaht-ipc.workspace = true
 vaht-ui.workspace = true

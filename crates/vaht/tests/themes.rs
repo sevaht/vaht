@@ -95,3 +95,27 @@ fn without_a_theme_named_the_built_in_one_applies() {
     let (_, height) = titlebar_above_content(&client.screenshot(), BUILT_IN_BORDER);
     assert_eq!(height, 20, "the built-in titlebar is 20 pixels tall");
 }
+
+#[test]
+fn set_theme_names_the_theme_in_the_settings_and_vaht_takes_it() {
+    let settings = "# My settings.\n[focus]\nmodel = \"click\"\n";
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[
+            ("settings.toml", settings),
+            ("themes/mine.toml", &theme("red", 20, 1)),
+        ],
+    );
+    let output = std::process::Command::new(EXECUTABLE)
+        .args(["msg", "run", "set-theme", "mine"])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .output()
+        .expect("vaht msg runs");
+    assert!(output.status.success(), "{output:?}");
+    vaht.wait_for_logged("configuration reloaded", 1);
+    let written = std::fs::read_to_string(vaht.config_directory().join("settings.toml"))
+        .expect("the settings are there");
+    assert!(written.starts_with("# My settings.\n"), "{written}");
+    assert!(written.contains("theme = \"mine\"\n"), "{written}");
+    assert!(written.contains("model = \"click\""), "{written}");
+}

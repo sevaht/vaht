@@ -84,7 +84,7 @@ pub(crate) enum MenuChoice {
 }
 
 /// Makes menus from `menus.toml` and the window manager's state.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct MenuBuilder<'state> {
     /// The menus as written.
     menus: &'state Menus,
@@ -92,6 +92,10 @@ pub(crate) struct MenuBuilder<'state> {
     window_manager: &'state WindowManager,
     /// The window the menu is about (the window menu's), if any.
     window: Option<WindowId>,
+    /// The themes there are, for the `themes` list.
+    themes: Vec<String>,
+    /// The theme in use, if not the built-in one.
+    current_theme: Option<&'state str>,
 }
 
 impl<'state> MenuBuilder<'state> {
@@ -119,7 +123,18 @@ impl<'state> MenuBuilder<'state> {
             menus,
             window_manager,
             window,
+            themes: Vec::new(),
+            current_theme: None,
         }
+    }
+
+    /// Returns the builder listing `themes` in the `themes` list, `current`
+    /// checked.
+    #[must_use]
+    pub(crate) fn with_themes(mut self, themes: Vec<String>, current: Option<&'state str>) -> Self {
+        self.themes = themes;
+        self.current_theme = current;
+        self
     }
 
     /// Returns the menu named `name`, if `menus.toml` has one.
@@ -279,6 +294,18 @@ impl<'state> MenuBuilder<'state> {
                     })
                     .collect()
             }
+            MenuGenerator::Themes => self
+                .themes
+                .iter()
+                .map(|name| MenuItem::Choice {
+                    label: name.clone(),
+                    choice: MenuChoice::Run {
+                        command: Command::Run(Action::SetTheme(name.clone())),
+                        window: None,
+                    },
+                    mark: Some(self.current_theme == Some(name.as_str())),
+                })
+                .collect(),
             MenuGenerator::Layer => {
                 let current = self.window.and_then(|window| manager.layer_of(window));
                 StackLayer::ALL

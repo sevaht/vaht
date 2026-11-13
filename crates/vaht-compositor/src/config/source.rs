@@ -10,7 +10,7 @@ use std::time::Duration;
 use smithay::reexports::calloop::LoopHandle;
 
 use super::watch::ConfigWatch;
-use super::{Config, ConfigError};
+use super::{Config, ConfigError, ThemeFile};
 use crate::Compositor;
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
@@ -47,6 +47,82 @@ impl ConfigSource {
     /// Returns where the configuration files are.
     pub(crate) fn directory(&self) -> &Path {
         &self.directory
+    }
+
+    /// Makes the theme `name` the one `settings.toml` names, keeping the rest
+    /// of the file as it is; the watch then reloads the configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there is no such theme, or `settings.toml`
+    /// cannot be read, parsed or written.
+    pub(crate) fn choose_theme(&self, name: &str) -> Result<(), ConfigError> {
+        ThemeFile::find(&self.directory, name)?;
+        let path = self.directory.join("settings.toml");
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(ConfigError::Read { path, error }),
+        };
+        let mut document: toml_edit::DocumentMut =
+            text.parse().map_err(|error: toml_edit::TomlError| {
+                let (line, column) = error
+                    .span()
+                    .map_or((1, 1), |span| Self::line_and_column(&text, span.start));
+                ConfigError::Invalid {
+                    path: path.clone(),
+                    line,
+                    column,
+                    message: error.message().to_owned(),
+                }
+            })?;
+        let is_new = !document.contains_key("theme");
+        document.insert("theme", toml_edit::value(name));
+        if is_new {
+            Self::keep_leading_comment_first(&mut document);
+        }
+        // Written beside and renamed over, so a reader never sees half.
+        let temporary = path.with_extension("toml.vaht-new");
+        std::fs::write(&temporary, document.to_string())
+            .and_then(|()| std::fs::rename(&temporary, &path))
+            .map_err(|error| ConfigError::Write { path, error })
+    }
+
+    /// Moves the file's opening comment, which belongs to its first table,
+    /// onto the `theme` key just added: a key is written above every table,
+    /// and the comment would otherwise follow it.
+    fn keep_leading_comment_first(document: &mut toml_edit::DocumentMut) {
+        let first_table = document
+            .iter_mut()
+            .filter_map(|(_, item)| item.as_table_mut())
+            .min_by_key(|table| table.position().unwrap_or(isize::MAX));
+        let Some(table) = first_table else {
+            return;
+        };
+        let leading = table
+            .decor()
+            .prefix()
+            .and_then(|prefix| prefix.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        if !leading.trim_start().starts_with('#') {
+            return;
+        }
+        table.decor_mut().set_prefix("\n");
+        if let Some(mut key) = document.key_mut("theme") {
+            key.leaf_decor_mut().set_prefix(leading);
+        }
+    }
+
+    /// Returns the line and column, from 1, of byte `offset` in `text`.
+    fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
+        let before = &text[..offset.min(text.len())];
+        let line = before.matches('\n').count() + 1;
+        let column = before
+            .rfind('\n')
+            .map_or(before.len(), |newline| before.len() - newline - 1)
+            + 1;
+        (line, column)
     }
 
     /// Reads and validates the configuration.

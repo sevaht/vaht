@@ -183,6 +183,16 @@ pub enum ConfigError {
         message: String,
     },
 
+    /// A file could not be written.
+    #[error("could not write {}", path.display())]
+    Write {
+        /// The file.
+        path: PathBuf,
+        /// Why.
+        #[source]
+        error: io::Error,
+    },
+
     /// The settings name a theme by something other than a plain name.
     #[error("not a theme name: {name:?} (a theme is themes/<name>.toml)")]
     ThemeName {

@@ -306,6 +306,12 @@ impl MenuFiles {
             "sendto" => item(&[("generate", Value::from("send-to-workspace"))]),
             "alpha" => item(&[("generate", Value::from("alpha"))]),
             "layer" => item(&[("generate", Value::from("layer"))]),
+            // vaht lists its own themes, wherever the styles were.
+            "stylesdir" | "stylesmenu" => note(
+                Reason::Dropped,
+                "the styles directory: vaht's themes list shows vaht's themes",
+            )
+            .or_else(|| item(&[("generate", Value::from("themes"))])),
             "encoding" | "endencoding" => {
                 note(Reason::Dropped, "the encoding: menus.toml is UTF-8")
             }

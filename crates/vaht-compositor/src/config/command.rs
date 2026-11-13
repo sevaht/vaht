@@ -38,7 +38,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "save-settings",
     "send-to-output",
     "set-setting",
-    "set-theme",
     "taskbar-to-output",
     "toggle-frame",
     "toggle-taskbar",
@@ -218,6 +217,9 @@ pub(crate) enum Action {
     CommandDialog,
     /// Shows the title dialog for the window: its title, to change.
     SetTitleDialog,
+    /// Makes a theme the one `settings.toml` names (`set-theme <name>`),
+    /// which the reload that follows applies.
+    SetTheme(String),
     /// Stops vaht.
     Exit,
     /// Sets an environment variable for programs vaht starts from now on.
@@ -341,6 +343,10 @@ impl Action {
             "run-dialog" => without_arguments(Self::RunDialog),
             "command-dialog" => without_arguments(Self::CommandDialog),
             "set-title-dialog" => without_arguments(Self::SetTitleDialog),
+            "set-theme" if arguments.is_empty() => {
+                Err("`set-theme` needs a theme's name".to_owned())
+            }
+            "set-theme" => Ok(Self::SetTheme(arguments.to_owned())),
             "root-menu" => without_arguments(Self::OpenMenu(MenuRequest::Root)),
             "window-menu" => without_arguments(Self::OpenMenu(MenuRequest::Window)),
             "workspace-menu" => without_arguments(Self::OpenMenu(MenuRequest::Workspace)),
@@ -438,6 +444,7 @@ impl fmt::Display for Action {
             Self::RunDialog => formatter.write_str("run-dialog"),
             Self::CommandDialog => formatter.write_str("command-dialog"),
             Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
+            Self::SetTheme(name) => write!(formatter, "set-theme {name}"),
             Self::Exit => formatter.write_str("exit"),
             Self::SetEnvironment { name, value } => {
                 write!(formatter, "set-environment {name} {value}")
@@ -786,7 +793,7 @@ mod tests {
 
     #[rstest]
     #[case::unknown_action("\"explode\"", "unknown action `explode`")]
-    #[case::planned_action("\"set-theme dark\"", "not available in vaht yet")]
+    #[case::planned_action("\"reload-theme\"", "not available in vaht yet")]
     #[case::maximize_both_by_name("\"maximize both\"", "nothing, horizontal or vertical")]
     #[case::one_number("\"move 10\"", "two whole numbers")]
     #[case::cell_outside("\"tile 600 0 500 1000\"", "within 0 to 1000")]

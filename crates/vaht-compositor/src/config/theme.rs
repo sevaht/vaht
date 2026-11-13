@@ -56,6 +56,31 @@ impl ThemeFile {
             })
     }
 
+    /// Returns the names of the themes there are, sorted, each once: the
+    /// user's, in the configuration `directory`, and the system's.
+    pub(crate) fn available(directory: &Path) -> Vec<String> {
+        let directories = [
+            directory.join(Self::DIRECTORY),
+            PathBuf::from(Self::SYSTEM_DIRECTORY),
+        ];
+        let mut names: Vec<String> = directories
+            .iter()
+            .filter_map(|directory| std::fs::read_dir(directory).ok())
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                let is_theme = path
+                    .extension()
+                    .is_some_and(|extension| extension == "toml");
+                is_theme.then(|| path.file_stem()?.to_str().map(ToOwned::to_owned))?
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
     /// Reads and resolves the theme.
     ///
     /// # Errors
