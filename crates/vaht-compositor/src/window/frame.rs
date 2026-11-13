@@ -26,6 +26,7 @@ use vaht_ui::{
 };
 
 use super::resize::ResizeEdges;
+use crate::config::Action;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 use crate::scene::SceneElement;
 
@@ -46,6 +47,13 @@ pub(crate) enum TitlebarButton {
 }
 
 impl TitlebarButton {
+    /// Returns what clicking the button does.
+    pub(crate) const fn action(self) -> Action {
+        match self {
+            Self::Close => Action::Close,
+        }
+    }
+
     /// Returns the button's picture.
     const fn glyph(self) -> Glyph {
         match self {
@@ -156,9 +164,23 @@ impl Frame {
         }
     }
 
-    /// Returns the titlebar, to press and release its buttons.
-    pub(crate) const fn titlebar_mut(&mut self) -> &mut Panel<Titlebar> {
-        &mut self.titlebar
+    /// Holds down the titlebar button at `point` (in the titlebar's own
+    /// pixels), if there is one there; returns whether there was.
+    pub(crate) fn press_button(&mut self, point: vaht_ui::Point) -> bool {
+        let is_button = matches!(self.titlebar.hit_at(point), Some(TitlebarHit::Button(_)));
+        if is_button {
+            self.titlebar.press(point);
+        }
+        is_button
+    }
+
+    /// Lets go of the held titlebar button with the pointer at `point`;
+    /// returns the button if the pointer is still on it, which clicks it.
+    pub(crate) fn release_button(&mut self, point: vaht_ui::Point) -> Option<TitlebarButton> {
+        match self.titlebar.release(point)? {
+            TitlebarHit::Button(button) => Some(button),
+            TitlebarHit::Label => None,
+        }
     }
 
     /// Shows `title`; returns whether it changed.

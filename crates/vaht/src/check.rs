@@ -12,7 +12,7 @@ use vaht_compositor::Config;
 
 /// Checks the configuration in `directory`, printing the result.
 #[must_use]
-pub fn check(directory: &Path) -> ExitCode {
+pub fn run(directory: &Path) -> ExitCode {
     match Config::load(directory) {
         Ok(_) => {
             print(&format!(

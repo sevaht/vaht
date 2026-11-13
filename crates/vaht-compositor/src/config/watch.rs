@@ -5,13 +5,13 @@
 //! editors save by writing a new file and renaming it over the old one,
 //! which a watch on the old file would never see.
 
-use std::ffi::OsStr;
 use std::path::Path;
 
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
 
+use super::ConfigFile;
 use crate::Compositor;
 use crate::event_source::EventSource;
 use crate::resources::ResourceLedger;
@@ -71,7 +71,7 @@ impl ConfigWatch {
                 });
                 let file_changed = events
                     .iter()
-                    .any(|event| event.name.as_deref().is_some_and(is_configuration_file));
+                    .any(|event| event.name.as_deref().is_some_and(ConfigFile::is_named));
                 if directory_gone || file_changed {
                     compositor.configuration_changed(directory_gone);
                 }
@@ -81,14 +81,6 @@ impl ConfigWatch {
         .map_err(|error| WatchError::Register(error.error))?;
         Ok(Self { _source: source })
     }
-}
-
-/// Returns whether `name` is a configuration file's name, as opposed to an
-/// editor's temporary or backup file.
-fn is_configuration_file(name: &OsStr) -> bool {
-    Path::new(name)
-        .extension()
-        .is_some_and(|extension| extension == "toml")
 }
 
 /// Why the configuration directory cannot be watched.
@@ -103,17 +95,4 @@ pub(crate) enum WatchError {
     /// The watch could not be registered with the event loop.
     #[error("could not register the watch with the event loop")]
     Register(#[source] calloop::Error),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_toml_files_count() {
-        assert!(is_configuration_file(OsStr::new("bindings.toml")));
-        assert!(!is_configuration_file(OsStr::new("bindings.toml~")));
-        assert!(!is_configuration_file(OsStr::new(".bindings.toml.swp")));
-        assert!(!is_configuration_file(OsStr::new("4913")));
-    }
 }

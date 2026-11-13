@@ -134,6 +134,22 @@ impl Rect {
             height: self.height.saturating_sub(insets.top + insets.bottom),
         }
     }
+
+    /// Converts the rectangle for tiny-skia; `None` when it covers no
+    /// pixels.
+    pub(crate) fn to_skia(self) -> Option<tiny_skia::Rect> {
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "panel coordinates are far below 2^24"
+        )]
+        let rect = tiny_skia::Rect::from_xywh(
+            self.x as f32,
+            self.y as f32,
+            self.width as f32,
+            self.height as f32,
+        );
+        rect
+    }
 }
 
 #[cfg(test)]

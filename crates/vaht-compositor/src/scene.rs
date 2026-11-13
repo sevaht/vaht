@@ -29,30 +29,41 @@ smithay::backend::renderer::element::render_elements! {
     Solid = SolidColorRenderElement,
 }
 
-/// Returns the elements of a frame of `windows`, topmost first, as damage
-/// tracking expects; window frames are sized by `metrics`.
-pub(crate) fn compose<R>(
-    renderer: &mut R,
-    windows: &Windows,
+/// What an output shows: the windows, and how their frames are sized.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Scene<'windows> {
+    /// The windows, in stacking order.
+    windows: &'windows Windows,
+    /// The theme's sizes, which frames are drawn with.
     metrics: Metrics,
-    scale: Scale<f64>,
-) -> Vec<SceneElement<R>>
-where
-    R: Renderer + ImportAll + ImportMem,
-    R::TextureId: Send + Clone + 'static,
-{
-    let mut elements = Vec::new();
-    for window in windows.top_down() {
-        let origin = window.surface_origin().to_physical_precise_round(scale);
-        elements.extend(
-            window
-                .toplevel()
-                .render_elements(renderer, origin, scale)
-                .into_iter()
-                .map(SceneElement::Surface),
-        );
-        let geometry = window.frame_geometry(metrics);
-        elements.extend(window.frame().render_elements(renderer, &geometry, scale));
+}
+
+impl<'windows> Scene<'windows> {
+    /// Creates the scene of `windows`, their frames sized by `metrics`.
+    pub(crate) const fn new(windows: &'windows Windows, metrics: Metrics) -> Self {
+        Self { windows, metrics }
     }
-    elements
+
+    /// Returns the elements to draw at `scale`, topmost first, as damage
+    /// tracking expects.
+    pub(crate) fn elements<R>(&self, renderer: &mut R, scale: Scale<f64>) -> Vec<SceneElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let mut elements = Vec::new();
+        for window in self.windows.top_down() {
+            let origin = window.surface_origin().to_physical_precise_round(scale);
+            elements.extend(
+                window
+                    .toplevel()
+                    .render_elements(renderer, origin, scale)
+                    .into_iter()
+                    .map(SceneElement::Surface),
+            );
+            let geometry = window.frame_geometry(self.metrics);
+            elements.extend(window.frame().render_elements(renderer, &geometry, scale));
+        }
+        elements
+    }
 }

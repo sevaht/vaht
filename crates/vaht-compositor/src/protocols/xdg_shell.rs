@@ -12,8 +12,7 @@ use smithay::wayland::shell::xdg::{
 };
 
 use crate::Compositor;
-use crate::grab::GrabKind;
-use crate::window::{HorizontalEdge, ResizeEdges, VerticalEdge, Window, WindowId};
+use crate::window::{HorizontalEdge, ResizeEdges, VerticalEdge, Window, WindowDrag, WindowId};
 
 impl XdgShellHandler for Compositor {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -63,7 +62,7 @@ impl XdgShellHandler for Compositor {
         let Some(initial_location) = self.windows.get(window).map(Window::location) else {
             return;
         };
-        self.start_window_grab(window, GrabKind::Move { initial_location }, start, serial);
+        self.start_window_grab(window, WindowDrag::Move { initial_location }, start, serial);
     }
 
     fn resize_request(
@@ -77,7 +76,7 @@ impl XdgShellHandler for Compositor {
             return;
         };
         if let Some((window, start)) = self.client_drag(&surface, &seat, serial) {
-            self.start_window_grab(window, GrabKind::Resize { edges }, start, serial);
+            self.start_window_grab(window, WindowDrag::Resize { edges }, start, serial);
         }
     }
 }

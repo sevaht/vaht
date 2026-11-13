@@ -24,11 +24,11 @@ use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
 use smithay::wayland::virtual_keyboard::VirtualKeyboardKeyEvent;
 
 use crate::Compositor;
-use crate::config::{Command, KeyChord, Modifiers, MouseButton, MouseContext};
+use crate::config::{Bindings, Command, KeyChord, Modifiers, MouseButton, MouseContext};
 use crate::event_source::RepeatingTimer;
 use crate::execute::{ExecutionContext, Press};
-use crate::grab::GrabKind;
-use crate::window::{FramePart, TitlebarButton, TitlebarHit, WindowId};
+
+use crate::window::{FramePart, WindowDrag, WindowId};
 use crate::windows::WindowTarget;
 
 /// Scroll distance per wheel notch, in the 120ths that high-resolution
@@ -158,41 +158,10 @@ impl Compositor {
         modifiers: &ModifiersState,
         keysym: &KeysymHandle<'_>,
     ) -> FilterResult<Option<Command>> {
-        match state {
-            KeyState::Pressed => {
-                // Any new press ends a repeat, as with ordinary key repeat.
-                self.input.key_repeat = None;
-                // A fresh press of a key whose release was never seen.
-                self.input.suppressed_keys.remove(&keycode);
-                let Some(key) = keysym.raw_latin_sym_or_raw_current_sym() else {
-                    return FilterResult::Forward;
-                };
-                let chord = KeyChord::new(Modifiers::held(modifiers), key);
-                match self.config.bindings.key(chord) {
-                    Some(command) => {
-                        tracing::debug!(%chord, "key binding");
-                        self.input.suppressed_keys.insert(keycode);
-                        FilterResult::Intercept(Some(command.clone()))
-                    }
-                    None => FilterResult::Forward,
-                }
-            }
-            KeyState::Released => {
-                if self
-                    .input
-                    .key_repeat
-                    .as_ref()
-                    .is_some_and(|repeat| repeat.keycode == keycode)
-                {
-                    self.input.key_repeat = None;
-                }
-                if self.input.suppressed_keys.remove(&keycode) {
-                    FilterResult::Intercept(None)
-                } else {
-                    FilterResult::Forward
-                }
-            }
-        }
+        let chord = keysym
+            .raw_latin_sym_or_raw_current_sym()
+            .map(|key| KeyChord::new(Modifiers::held(modifiers), key));
+        self.input.key(keycode, state, chord, &self.config.bindings)
     }
 
     /// Runs a bound key's `command` for the focused window, and starts
@@ -330,17 +299,17 @@ impl Compositor {
         let modifiers = self.held_modifiers();
         if let Some(WindowTarget::Frame {
             window,
-            part: FramePart::Titlebar(point),
+            part: FramePart::Titlebar(_),
         }) = target
             && modifiers == Modifiers::default()
-            && self.press_titlebar_button(window, point)
+            && self.press_titlebar_button(window, location)
         {
             return;
         }
         let is_double = self.input.is_double_click(button, clicked);
         let bound = MouseButton::from_code(button).and_then(|mouse_button| {
             let bindings = self.config.bindings.button(
-                contexts_of(target.as_ref()),
+                MouseContext::search_order(target.as_ref()),
                 modifiers,
                 mouse_button,
                 is_double,
@@ -377,46 +346,40 @@ impl Compositor {
                     window,
                     part: FramePart::Border(edges),
                 }),
-            ) => self.start_window_grab(window, GrabKind::Resize { edges }, press.start, serial),
+            ) => self.start_window_grab(window, WindowDrag::Resize { edges }, press.start, serial),
             (None, Some(WindowTarget::Frame { .. } | WindowTarget::Surface { .. }) | None) => {}
         }
     }
 
-    /// Holds down the titlebar button of `window` at `point`, if there is
-    /// one; returns whether there was.
-    fn press_titlebar_button(&mut self, window: WindowId, point: vaht_ui::Point) -> bool {
-        let Some(target) = self.windows.get_mut(window) else {
-            return false;
-        };
-        let titlebar = target.frame_mut().titlebar_mut();
-        if !matches!(titlebar.hit_at(point), Some(TitlebarHit::Button(_))) {
-            return false;
+    /// Holds down the titlebar button of `window` at `location`, if there
+    /// is one; returns whether there was.
+    fn press_titlebar_button(&mut self, window: WindowId, location: Point<f64, Logical>) -> bool {
+        let metrics = self.theme.metrics();
+        let is_pressed = self
+            .windows
+            .get_mut(window)
+            .is_some_and(|target| target.press_titlebar_button(location, metrics));
+        if is_pressed {
+            self.held_titlebar = Some(window);
+            self.schedule_render();
         }
-        titlebar.press(point);
-        self.held_titlebar = Some(window);
-        self.schedule_render();
-        true
+        is_pressed
     }
 
-    /// Lets go of a held titlebar widget at global `location`, acting on it
+    /// Lets go of a held titlebar button at global `location`, clicking it
     /// if the pointer is still on it.
     fn release_titlebar(&mut self, location: Point<f64, Logical>) {
         let Some(id) = self.held_titlebar.take() else {
             return;
         };
         let metrics = self.theme.metrics();
-        let Some(window) = self.windows.get_mut(id) else {
-            return;
-        };
-        let titlebar = window.frame_geometry(metrics).titlebar;
-        let inside = location.to_i32_floor() - titlebar.loc;
-        let clicked = window
-            .frame_mut()
-            .titlebar_mut()
-            .release(vaht_ui::Point::new(inside.x, inside.y));
-        match clicked {
-            Some(TitlebarHit::Button(TitlebarButton::Close)) => window.toplevel().close(),
-            Some(TitlebarHit::Label) | None => {}
+        let clicked = self
+            .windows
+            .get_mut(id)
+            .and_then(|window| window.release_titlebar_button(location, metrics));
+        if let Some(button) = clicked {
+            let command = Command::Run(button.action());
+            self.execute(&command, &mut ExecutionContext::for_window(Some(id)));
         }
         self.schedule_render();
     }
@@ -458,9 +421,7 @@ impl Compositor {
         pointer.axis(self, frame);
         pointer.frame(self);
     }
-}
 
-impl Compositor {
     /// Runs what a wheel turn of `steps` (in 120ths of a notch, positive
     /// down) is bound to where the pointer is; returns whether it was bound.
     fn run_scroll_binding(&mut self, steps: Option<f64>) -> bool {
@@ -481,7 +442,7 @@ impl Compositor {
             .config
             .bindings
             .button(
-                contexts_of(target.as_ref()),
+                MouseContext::search_order(target.as_ref()),
                 self.held_modifiers(),
                 button,
                 false,
@@ -493,23 +454,6 @@ impl Compositor {
         let window = target.as_ref().map(WindowTarget::window);
         self.execute(&command, &mut ExecutionContext::for_window(window));
         true
-    }
-}
-
-/// Returns the mouse binding contexts a press on `target` looks in, most
-/// specific first.
-const fn contexts_of(target: Option<&WindowTarget>) -> &'static [MouseContext] {
-    match target {
-        Some(WindowTarget::Frame {
-            part: FramePart::Titlebar(_),
-            ..
-        }) => &[MouseContext::Titlebar, MouseContext::Window],
-        Some(WindowTarget::Frame {
-            part: FramePart::Border(_),
-            ..
-        }) => &[MouseContext::Border, MouseContext::Window],
-        Some(WindowTarget::Surface { .. }) => &[MouseContext::Window],
-        None => &[MouseContext::Desktop],
     }
 }
 
@@ -527,6 +471,48 @@ pub(crate) struct InputState {
 impl InputState {
     /// The longest time between the presses of a double click.
     const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
+
+    /// Decides whose a key event is: the client's, or vaht's, with the
+    /// command a bound press runs. `chord` is the press
+    /// with its modifiers, if the key has a keysym. A bound press's release
+    /// is vaht's too, and any press or that key's release ends a repeat.
+    fn key(
+        &mut self,
+        keycode: Keycode,
+        state: KeyState,
+        chord: Option<KeyChord>,
+        bindings: &Bindings,
+    ) -> FilterResult<Option<Command>> {
+        match state {
+            KeyState::Pressed => {
+                self.key_repeat = None;
+                // A fresh press of a key whose release was never seen.
+                self.suppressed_keys.remove(&keycode);
+                let Some((chord, command)) =
+                    chord.and_then(|chord| Some((chord, bindings.key(chord)?)))
+                else {
+                    return FilterResult::Forward;
+                };
+                tracing::debug!(%chord, "key binding");
+                self.suppressed_keys.insert(keycode);
+                FilterResult::Intercept(Some(command.clone()))
+            }
+            KeyState::Released => {
+                if self
+                    .key_repeat
+                    .as_ref()
+                    .is_some_and(|repeat| repeat.keycode == keycode)
+                {
+                    self.key_repeat = None;
+                }
+                if self.suppressed_keys.remove(&keycode) {
+                    FilterResult::Intercept(None)
+                } else {
+                    FilterResult::Forward
+                }
+            }
+        }
+    }
 
     /// Records a press of `button` on `window` (or the desktop); returns
     /// whether it completes a double click. A third quick press starts a

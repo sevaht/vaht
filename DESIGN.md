@@ -52,6 +52,24 @@ developer's session, so tests can drag and click freely.
 run `vaht --backend headless` with `XDG_RUNTIME_DIR` set to a short private
 directory.
 
+## Where behavior lives
+
+The coding standards' modeling rules apply throughout (General M1–M16,
+RUST.md §4). Behavior lives with the data it governs: `Window` moves and
+resizes itself (`WindowDrag`), `Frame` presses its buttons, `InputState`
+decides whose a key is, `MouseContext` knows where a press looks for
+bindings, `Scene` composes what an output shows, `ConfigFile` reads itself.
+
+**One deliberate exception to R-M2 (one `impl` block per type):**
+`Compositor` is Smithay's state type, and Smithay's seat, grab and protocol
+calls all need `&mut Compositor`, so the use cases that make those calls
+cannot be methods of the subsystems. They are `Compositor` methods, in one
+`impl Compositor` block per concern: `compositor.rs` (lifecycle, focus,
+windows coming and going), `input.rs`, `grab.rs`, `execute.rs`,
+`capture.rs`, `protocols/xdg_shell.rs` and `backend/winit.rs`. Those blocks
+only coordinate: each decision they need is asked of the type that owns it.
+A method that needs no Smithay call does not belong in them.
+
 ## Invariants that are easy to break
 
 - Only `Windows` owns a `Window`; everything else holds a `WindowId` (01 §1).

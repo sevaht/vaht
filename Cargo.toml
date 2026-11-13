@@ -28,6 +28,8 @@ cosmic-text = "0.19"
 file-rotate = "0.8"
 nix = { version = "0.31", features = ["inotify", "process", "signal"] }
 procfs = "0.18"
+regex = "1"
+rstest = { version = "0.28", default-features = false }
 serde = { version = "1", features = ["derive"] }
 # Pinned to a reviewed master revision (Smithay's releases lag far behind);
 # bump deliberately, one bump per commit (docs/design/04 §5).

@@ -9,7 +9,7 @@
 
 use tiny_skia::Pixmap;
 
-use crate::canvas;
+use crate::canvas::Canvas;
 use crate::geometry::{Point, Rect, Size};
 use crate::layout::Layout;
 use crate::text::Typesetter;
@@ -145,7 +145,7 @@ impl<Content: PanelContent> Panel<Content> {
         if let Some(pixels) = &mut self.pixels {
             let base = self.content.state();
             let pressed = self.pressed;
-            canvas::paint(pixels, &layout, theme, typesetter, |placed| {
+            Canvas::new(pixels).paint(&layout, theme, typesetter, |placed| {
                 if placed.is_button && placed.hit.is_some() && placed.hit == pressed {
                     WidgetState::Pressed
                 } else {

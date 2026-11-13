@@ -18,6 +18,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+pub(crate) use process::log_process_usage;
 pub use process::{DescriptorCensus, DescriptorKind, ProcessUsage, ProcessUsageError};
 
 /// A kind of resource whose live instances are counted.

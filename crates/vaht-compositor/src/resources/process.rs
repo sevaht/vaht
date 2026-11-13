@@ -155,6 +155,25 @@ impl fmt::Display for DescriptorKind {
 #[error("could not read this process's usage from /proc/self")]
 pub struct ProcessUsageError(#[source] procfs::ProcError);
 
+/// Logs the process's open descriptors and memory, `moment` saying when.
+///
+/// The counts at start and at exit match when nothing leaked; the tests
+/// compare them.
+pub(crate) fn log_process_usage(moment: &str) {
+    match ProcessUsage::read() {
+        Ok(usage) => tracing::debug!(
+            descriptors = usage.descriptors.total(),
+            resident_bytes = ?usage.resident_bytes,
+            census = %usage.descriptors,
+            "process usage {moment}"
+        ),
+        Err(error) => tracing::warn!(
+            error = &error as &dyn std::error::Error,
+            "could not read process usage {moment}"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::pipe;

@@ -7,6 +7,8 @@
 
 use std::time::Duration;
 
+use nix::sys::signal::{self, Signal};
+use nix::unistd::Pid;
 use smithay::backend::renderer::element::AsRenderElements;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::{ImportAll, Renderer};
@@ -14,6 +16,7 @@ use smithay::desktop::{Window as SurfaceWindow, WindowSurface, WindowSurfaceType
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::reexports::wayland_server::{DisplayHandle, Resource as _};
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
@@ -136,6 +139,30 @@ impl Toplevel {
             }
         });
         self.send_configure_if_ready();
+    }
+
+    /// Ends the client's program at once (SIGKILL), as Fluxbox's `Kill`
+    /// does: the program is the one the kernel says is at the other end of
+    /// the client's socket. A window of vaht's own is never killed.
+    pub(crate) fn kill_program(&self, display: &DisplayHandle) {
+        let Ok(client) = display.get_client(self.wl_surface().id()) else {
+            return;
+        };
+        let pid = match client.get_credentials(display) {
+            Ok(credentials) => credentials.pid,
+            Err(error) => {
+                tracing::warn!(%error, "could not learn which program owns a window");
+                return;
+            }
+        };
+        if pid <= 0 || u32::try_from(pid).is_ok_and(|pid| pid == std::process::id()) {
+            tracing::warn!(pid, "not killing the program of a window of vaht's own");
+            return;
+        }
+        tracing::info!(pid, "killing a window's program");
+        if let Err(error) = signal::kill(Pid::from_raw(pid), Signal::SIGKILL) {
+            tracing::warn!(%error, pid, "could not kill a window's program");
+        }
     }
 
     /// Asks the client to close the window.

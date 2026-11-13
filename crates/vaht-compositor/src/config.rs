@@ -12,8 +12,10 @@
 
 mod bindings;
 mod command;
+mod unique_map;
 mod watch;
 
+use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -28,6 +30,29 @@ pub struct ConfigFile {
     pub name: &'static str,
     /// Its built-in contents, used when the file does not exist.
     pub defaults: &'static str,
+}
+
+impl ConfigFile {
+    /// Returns whether `name` is the name of one of vaht's configuration
+    /// files, as opposed to an editor's temporary or backup file.
+    pub(crate) fn is_named(name: &OsStr) -> bool {
+        Config::FILES.iter().any(|file| name == file.name)
+    }
+
+    /// Reads this file from `directory`, or its built-in version if it is
+    /// missing, and parses it.
+    fn read<T: serde::de::DeserializeOwned>(self, directory: &Path) -> Result<T, ConfigError> {
+        let path = directory.join(self.name);
+        let (text, source) = match std::fs::read_to_string(&path) {
+            Ok(text) => (text, path),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (
+                self.defaults.to_owned(),
+                PathBuf::from(format!("(built-in) {}", self.name)),
+            ),
+            Err(error) => return Err(ConfigError::Read { path, error }),
+        };
+        toml::from_str(&text).map_err(|error| ConfigError::invalid(source, &text, &error))
+    }
 }
 
 /// The validated configuration.
@@ -54,7 +79,7 @@ impl Config {
     pub fn load(directory: &Path) -> Result<Self, ConfigError> {
         let [bindings] = Self::FILES;
         Ok(Self {
-            bindings: parse(directory, bindings)?,
+            bindings: bindings.read(directory)?,
         })
     }
 
@@ -71,24 +96,6 @@ impl Config {
                 .expect("the built-in bindings are valid (tested)"),
         }
     }
-}
-
-/// Reads `file` from `directory`, or its built-in version if it is missing,
-/// and parses it.
-fn parse<T: serde::de::DeserializeOwned>(
-    directory: &Path,
-    file: ConfigFile,
-) -> Result<T, ConfigError> {
-    let path = directory.join(file.name);
-    let (text, source) = match std::fs::read_to_string(&path) {
-        Ok(text) => (text, path),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => (
-            file.defaults.to_owned(),
-            PathBuf::from(format!("(built-in) {}", file.name)),
-        ),
-        Err(error) => return Err(ConfigError::Read { path, error }),
-    };
-    toml::from_str(&text).map_err(|error| ConfigError::invalid(source, &text, &error))
 }
 
 /// Why the configuration could not be loaded.
@@ -141,6 +148,8 @@ impl ConfigError {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     #[test]
@@ -165,5 +174,15 @@ mod tests {
         };
         assert_eq!((line, column), (3, 12));
         assert!(message.contains("explode"), "{message}");
+    }
+
+    #[rstest]
+    #[case::configuration_file("bindings.toml", true)]
+    #[case::editor_backup("bindings.toml~", false)]
+    #[case::editor_swap_file(".bindings.toml.swp", false)]
+    #[case::vim_write_test("4913", false)]
+    #[case::other_toml("notes.toml", false)]
+    fn only_configuration_file_names_count(#[case] name: &str, #[case] is_named: bool) {
+        assert_eq!(ConfigFile::is_named(OsStr::new(name)), is_named);
     }
 }

@@ -11,6 +11,7 @@ use std::fmt;
 use std::num::NonZeroU32;
 
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
+use smithay::utils::{Logical, Point, Rectangle};
 
 use crate::window::{HorizontalEdge, ResizeEdges, VerticalEdge};
 
@@ -100,6 +101,52 @@ impl Command {
     pub(crate) const fn repeats(&self) -> bool {
         matches!(self, Self::Repeat { .. })
     }
+
+    /// Builds a command from a table's `entries`: a structured form, or an
+    /// action written as `{ name = arguments }`.
+    fn from_table(entries: Vec<(String, toml::Value)>) -> Result<Self, String> {
+        if let Some((_, repeated)) = entries.iter().find(|(key, _)| key == "repeat") {
+            let mut rate = None;
+            for (key, value) in &entries {
+                match key.as_str() {
+                    "repeat" => {}
+                    "rate" => rate = Some(Self::repeat_rate(value)?),
+                    other => return Err(format!("a repeat has no `{other}`; it takes `rate`")),
+                }
+            }
+            let command: Self = repeated
+                .clone()
+                .try_into()
+                .map_err(|error: toml::de::Error| error.message().to_owned())?;
+            if command.repeats() {
+                return Err("a repeat inside a repeat".to_owned());
+            }
+            return Ok(Self::Repeat {
+                command: Box::new(command),
+                rate,
+            });
+        }
+        let mut entries = entries.into_iter();
+        let (Some((name, value)), None) = (entries.next(), entries.next()) else {
+            return Err(
+                "an action table holds exactly one action, such as { exec = \"kitty\" }".to_owned(),
+            );
+        };
+        if PLANNED_FORMS.contains(&name.as_str()) {
+            return Err(format!("`{name}` is not available in vaht yet"));
+        }
+        let arguments = Action::arguments_from_value(&name, &value)?;
+        Action::from_parts(&name, &arguments).map(Self::Run)
+    }
+
+    /// Reads a repeat's `rate`: a whole number of repeats per second.
+    fn repeat_rate(value: &toml::Value) -> Result<NonZeroU32, String> {
+        value
+            .as_integer()
+            .and_then(|rate| u32::try_from(rate).ok())
+            .and_then(NonZeroU32::new)
+            .ok_or_else(|| "a repeat's `rate` is a whole number of repeats per second".to_owned())
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for Command {
@@ -138,81 +185,7 @@ impl<'de> Visitor<'de> for CommandVisitor {
         while let Some(entry) = map.next_entry()? {
             entries.push(entry);
         }
-        command_from_table(entries).map_err(de::Error::custom)
-    }
-}
-
-/// Builds a command from a table's `entries`: a structured form, or an
-/// action written as `{ name = arguments }`.
-fn command_from_table(entries: Vec<(String, toml::Value)>) -> Result<Command, String> {
-    if let Some((_, repeated)) = entries.iter().find(|(key, _)| key == "repeat") {
-        let mut rate = None;
-        for (key, value) in &entries {
-            match key.as_str() {
-                "repeat" => {}
-                "rate" => rate = Some(repeat_rate(value)?),
-                other => return Err(format!("a repeat has no `{other}`; it takes `rate`")),
-            }
-        }
-        let command: Command = repeated
-            .clone()
-            .try_into()
-            .map_err(|error: toml::de::Error| error.message().to_owned())?;
-        if command.repeats() {
-            return Err("a repeat inside a repeat".to_owned());
-        }
-        return Ok(Command::Repeat {
-            command: Box::new(command),
-            rate,
-        });
-    }
-    let mut entries = entries.into_iter();
-    let (Some((name, value)), None) = (entries.next(), entries.next()) else {
-        return Err(
-            "an action table holds exactly one action, such as { exec = \"kitty\" }".to_owned(),
-        );
-    };
-    if PLANNED_FORMS.contains(&name.as_str()) {
-        return Err(format!("`{name}` is not available in vaht yet"));
-    }
-    let arguments = arguments_from_value(&name, &value)?;
-    Action::from_parts(&name, &arguments).map(Command::Run)
-}
-
-/// Reads a repeat's `rate`: a whole number of repeats per second.
-fn repeat_rate(value: &toml::Value) -> Result<NonZeroU32, String> {
-    value
-        .as_integer()
-        .and_then(|rate| u32::try_from(rate).ok())
-        .and_then(NonZeroU32::new)
-        .ok_or_else(|| "a repeat's `rate` is a whole number of repeats per second".to_owned())
-}
-
-/// Returns the arguments an action table's `value` gives action `name`, as
-/// the string form would write them.
-fn arguments_from_value(name: &str, value: &toml::Value) -> Result<String, String> {
-    match value {
-        toml::Value::String(text) => Ok(text.clone()),
-        toml::Value::Integer(number) => Ok(number.to_string()),
-        toml::Value::Table(table) if table.is_empty() => Ok(String::new()),
-        toml::Value::Table(table) if name == "set-environment" => {
-            let field = |key: &str| {
-                table.get(key).and_then(toml::Value::as_str).ok_or_else(|| {
-                    "set-environment takes { name = \"NAME\", value = \"value\" }".to_owned()
-                })
-            };
-            if table.len() != 2 {
-                return Err("set-environment takes only `name` and `value`".to_owned());
-            }
-            Ok(format!("{} {}", field("name")?, field("value")?))
-        }
-        toml::Value::Table(_)
-        | toml::Value::Float(_)
-        | toml::Value::Boolean(_)
-        | toml::Value::Datetime(_)
-        | toml::Value::Array(_) => Err(format!(
-            "the arguments of `{name}` are a string, a number, or {{}} for none"
-        )),
+        Command::from_table(entries).map_err(de::Error::custom)
     }
 }
 
@@ -304,6 +277,34 @@ impl Action {
             _ => Err(format!("unknown action `{name}`")),
         }
     }
+
+    /// Returns the arguments an action table's `value` gives action `name`, as
+    /// the string form would write them.
+    fn arguments_from_value(name: &str, value: &toml::Value) -> Result<String, String> {
+        match value {
+            toml::Value::String(text) => Ok(text.clone()),
+            toml::Value::Integer(number) => Ok(number.to_string()),
+            toml::Value::Table(table) if table.is_empty() => Ok(String::new()),
+            toml::Value::Table(table) if name == "set-environment" => {
+                let field = |key: &str| {
+                    table.get(key).and_then(toml::Value::as_str).ok_or_else(|| {
+                        "set-environment takes { name = \"NAME\", value = \"value\" }".to_owned()
+                    })
+                };
+                if table.len() != 2 {
+                    return Err("set-environment takes only `name` and `value`".to_owned());
+                }
+                Ok(format!("{} {}", field("name")?, field("value")?))
+            }
+            toml::Value::Table(_)
+            | toml::Value::Float(_)
+            | toml::Value::Boolean(_)
+            | toml::Value::Datetime(_)
+            | toml::Value::Array(_) => Err(format!(
+                "the arguments of `{name}` are a string, a number, or {{}} for none"
+            )),
+        }
+    }
 }
 
 /// The string form, which is what vaht writes (02 §4).
@@ -349,6 +350,19 @@ impl ResizeFrom {
         ("bottom-right", HorizontalEdge::Right, VerticalEdge::Bottom),
     ];
 
+    /// Returns the edges a resize of a window whose frame covers `outer`
+    /// drags, with the pointer at `pointer`.
+    pub(crate) fn edges(
+        self,
+        outer: Rectangle<i32, Logical>,
+        pointer: Point<f64, Logical>,
+    ) -> ResizeEdges {
+        match self {
+            Self::NearestCorner => ResizeEdges::nearest_corner(outer, pointer),
+            Self::Edges(edges) => edges,
+        }
+    }
+
     /// Parses `start-resizing`'s argument; none means the nearest corner.
     fn parse(argument: &str) -> Result<Self, String> {
         if argument.is_empty() || argument == "nearest-corner" {
@@ -389,6 +403,8 @@ impl fmt::Display for ResizeFrom {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     /// Parses `text` as the value of a TOML key.
@@ -437,24 +453,20 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_string_and_table_forms_agree() {
-        let pairs = [
-            ("\"close\"", "{ close = {} }"),
-            ("\"exec kitty\"", "{ exec = \"kitty\" }"),
-            (
-                "\"start-resizing bottom-left\"",
-                "{ start-resizing = \"bottom-left\" }",
-            ),
-            (
-                "\"set-environment GDK_SCALE 2\"",
-                "{ set-environment = { name = \"GDK_SCALE\", value = \"2\" } }",
-            ),
-        ];
-        for (string, table) in pairs {
-            assert_eq!(command(string), command(table), "{string} and {table}");
-            assert!(command(string).is_ok(), "{string}");
-        }
+    #[rstest]
+    #[case::without_arguments("\"close\"", "{ close = {} }")]
+    #[case::with_a_string("\"exec kitty\"", "{ exec = \"kitty\" }")]
+    #[case::with_a_word(
+        "\"start-resizing bottom-left\"",
+        "{ start-resizing = \"bottom-left\" }"
+    )]
+    #[case::with_a_table(
+        "\"set-environment GDK_SCALE 2\"",
+        "{ set-environment = { name = \"GDK_SCALE\", value = \"2\" } }"
+    )]
+    fn the_string_and_table_forms_agree(#[case] string: &str, #[case] table: &str) {
+        assert!(command(string).is_ok(), "{string}");
+        assert_eq!(command(string), command(table));
     }
 
     #[test]
@@ -477,22 +489,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mistakes_are_explained() {
-        let cases = [
-            ("\"explode\"", "unknown action `explode`"),
-            ("\"maximize\"", "not available in vaht yet"),
-            ("{ toggle = [\"shade\"] }", "not available in vaht yet"),
-            ("\"close now\"", "takes no arguments"),
-            ("\"exec\"", "needs a command line"),
-            ("[]", "does nothing"),
-            ("{ close = {}, raise = {} }", "exactly one action"),
-            ("{ repeat = \"raise\", rate = 0 }", "whole number"),
-            ("\"start-resizing middle\"", "not `middle`"),
-        ];
-        for (text, expected) in cases {
-            let error = command(text).expect_err(text);
-            assert!(error.contains(expected), "{text}: {error}");
-        }
+    #[rstest]
+    #[case::unknown_action("\"explode\"", "unknown action `explode`")]
+    #[case::planned_action("\"maximize\"", "not available in vaht yet")]
+    #[case::planned_form("{ toggle = [\"shade\"] }", "not available in vaht yet")]
+    #[case::unwanted_arguments("\"close now\"", "takes no arguments")]
+    #[case::missing_command_line("\"exec\"", "needs a command line")]
+    #[case::empty_sequence("[]", "does nothing")]
+    #[case::two_actions_in_a_table("{ close = {}, raise = {} }", "exactly one action")]
+    #[case::zero_rate("{ repeat = \"raise\", rate = 0 }", "whole number")]
+    #[case::unknown_corner("\"start-resizing middle\"", "not `middle`")]
+    fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {
+        let error = command(text).expect_err(text);
+        assert!(error.contains(expected), "{error}");
     }
 }

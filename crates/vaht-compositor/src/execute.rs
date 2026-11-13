@@ -5,13 +5,12 @@
 //! lives with the subsystem it changes, so the match below only delegates.
 
 use smithay::input::pointer::GrabStartData;
-use smithay::reexports::wayland_server::Resource as _;
 use smithay::utils::{SERIAL_COUNTER, Serial};
 
 use crate::Compositor;
 use crate::config::{Action, Command, ResizeFrom};
 use crate::grab::GrabKind;
-use crate::window::{ResizeEdges, WindowId};
+use crate::window::{WindowDrag, WindowId};
 
 /// The mouse button press a command runs for.
 #[derive(Debug, Clone)]
@@ -122,50 +121,26 @@ impl Compositor {
         let Some(target) = self.windows.get(window) else {
             return;
         };
-        let kind = match resize {
-            None => GrabKind::Move {
+        let drag = match resize {
+            None => WindowDrag::Move {
                 initial_location: target.location(),
             },
-            Some(ResizeFrom::NearestCorner) => GrabKind::Resize {
-                edges: ResizeEdges::nearest_corner(
-                    target.frame_geometry(metrics).outer,
-                    press.start.location,
-                ),
+            Some(from) => WindowDrag::Resize {
+                edges: from.edges(target.frame_geometry(metrics).outer, press.start.location),
             },
-            Some(ResizeFrom::Edges(edges)) => GrabKind::Resize { edges },
         };
         if let Some(grab) = context.grab.as_deref_mut() {
-            self.turn_grab_into(window, grab, kind);
+            self.turn_grab_into(window, grab, drag);
         } else {
             let (start, serial) = (press.start.clone(), press.serial);
-            self.start_window_grab(window, kind, start, serial);
+            self.start_window_grab(window, drag, start, serial);
         }
     }
 
     /// Ends the program that owns `window`, as Fluxbox's `Kill` does.
     fn kill_program_of(&self, window: Option<WindowId>) {
-        let Some(window) = window.and_then(|id| self.windows.get(id)) else {
-            return;
-        };
-        let surface = window.toplevel().wl_surface();
-        let Ok(client) = self.display_handle.get_client(surface.id()) else {
-            return;
-        };
-        let pid = match client.get_credentials(&self.display_handle) {
-            Ok(credentials) => credentials.pid,
-            Err(error) => {
-                tracing::warn!(%error, "could not learn which program owns the window");
-                return;
-            }
-        };
-        if u32::try_from(pid).is_ok_and(|pid| pid == std::process::id()) || pid <= 0 {
-            tracing::warn!(pid, "not killing: the window is vaht's own");
-            return;
-        }
-        tracing::info!(pid, "killing a window's program");
-        let signal = nix::sys::signal::Signal::SIGKILL;
-        if let Err(error) = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), signal) {
-            tracing::warn!(%error, pid, "could not kill a window's program");
+        if let Some(window) = window.and_then(|id| self.windows.get(id)) {
+            window.toplevel().kill_program(&self.display_handle);
         }
     }
 }

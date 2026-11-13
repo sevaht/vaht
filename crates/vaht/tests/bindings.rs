@@ -20,9 +20,9 @@ const PATIENCE: Duration = Duration::from_secs(10);
 const SUPER_T: [u32; 2] = [keys::LEFT_SUPER, keys::LETTER_T];
 
 /// A directory for the files the bound programs write.
-struct Outputs(tempfile::TempDir);
+struct WrittenFiles(tempfile::TempDir);
 
-impl Outputs {
+impl WrittenFiles {
     /// Creates the directory.
     fn new() -> Self {
         Self(tempfile::tempdir().expect("a temporary directory"))
@@ -64,22 +64,22 @@ fn super_t_writes(path: &Path, text: &str) -> String {
 
 #[test]
 fn a_key_binding_starts_a_program_that_vaht_reaps() {
-    let outputs = Outputs::new();
+    let files = WrittenFiles::new();
     // `ls` lists its own descriptors: 0, 1 and 2, plus the one it reads the
     // directory with. Anything more would be inherited from vaht.
     let bindings = format!(
         "[keys]\n\"Super+T\" = \"exec ls /proc/self/fd > '{}'; \
          grep -E 'SigBlk|SigIgn' /proc/self/status > '{}'\"\n",
-        outputs.path("descriptors").display(),
-        outputs.path("mask").display()
+        files.path("descriptors").display(),
+        files.path("mask").display()
     );
     let vaht =
         HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("bindings.toml", &bindings)]);
     let mut client = TestClient::connect(vaht.socket());
     client.type_chord(&SUPER_T);
-    let mask = outputs.wait_for("mask");
+    let mask = files.wait_for("mask");
     assert_eq!(
-        outputs.wait_for("descriptors"),
+        files.wait_for("descriptors"),
         "0\n1\n2\n3\n",
         "programs must inherit no descriptors from vaht"
     );
@@ -99,27 +99,27 @@ fn a_key_binding_starts_a_program_that_vaht_reaps() {
 
 #[test]
 fn changing_the_bindings_file_takes_effect_and_a_broken_one_is_rejected() {
-    let outputs = Outputs::new();
-    let first = super_t_writes(&outputs.path("result"), "first");
+    let files = WrittenFiles::new();
+    let first = super_t_writes(&files.path("result"), "first");
     let vaht = HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("bindings.toml", &first)]);
     let mut client = TestClient::connect(vaht.socket());
     let bindings_file = vaht.config_directory().join("bindings.toml");
 
     // Saved the way editors save: written beside, then renamed over.
-    let second = super_t_writes(&outputs.path("result"), "second");
+    let second = super_t_writes(&files.path("result"), "second");
     let temporary = vaht.config_directory().join(".bindings.toml.swp");
     std::fs::write(&temporary, second).expect("the file is written");
     std::fs::rename(&temporary, &bindings_file).expect("the file is renamed");
     vaht.wait_for_logged("configuration reloaded", 1);
     client.type_chord(&SUPER_T);
-    assert_eq!(outputs.wait_for("result").trim(), "second");
+    assert_eq!(files.wait_for("result").trim(), "second");
 
-    std::fs::remove_file(outputs.path("result")).expect("the output is removed");
+    std::fs::remove_file(files.path("result")).expect("the output is removed");
     std::fs::write(&bindings_file, "[keys]\n\"Super+T\" = \"explode\"\n").expect("written");
     vaht.wait_for_logged("configuration rejected", 1);
     client.type_chord(&SUPER_T);
     assert_eq!(
-        outputs.wait_for("result").trim(),
+        files.wait_for("result").trim(),
         "second",
         "the last valid bindings stay in effect"
     );
@@ -151,10 +151,10 @@ fn a_repeating_binding_repeats_while_its_key_is_held_and_stops_on_release() {
 
 #[test]
 fn double_clicking_the_titlebar_runs_its_binding() {
-    let outputs = Outputs::new();
+    let files = WrittenFiles::new();
     let bindings = format!(
         "[mouse.titlebar]\n\"Double+Left\" = \"exec touch '{}'\"\n\"Drag+Left\" = \"start-moving\"\n",
-        outputs.path("double").display()
+        files.path("double").display()
     );
     let vaht =
         HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("bindings.toml", &bindings)]);
@@ -164,11 +164,13 @@ fn double_clicking_the_titlebar_runs_its_binding() {
         .screenshot()
         .bounds_of(WINDOW_COLOR)
         .expect("the window is on screen");
+    // On the title: a little into the titlebar, which is directly above the
+    // content.
     let title = (content.left + 20, content.top - 10);
     client.click(title.0, title.1, BUTTON_LEFT);
     client.click(title.0, title.1, BUTTON_LEFT);
     vaht.wait_for_logged("program exited", 1);
-    assert!(outputs.path("double").exists());
+    assert!(files.path("double").exists());
 }
 
 #[test]

@@ -14,23 +14,24 @@
 //! does, so what it says is everything that is bound.
 
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::fmt;
 use std::hash::Hash;
-use std::marker::PhantomData;
 
-use serde::de::{self, Deserializer, MapAccess, Visitor};
+use serde::de::{self, Deserializer};
 use smithay::input::keyboard::ModifiersState;
 use smithay::input::keyboard::{Keysym, xkb};
 
 use super::command::Command;
+use super::unique_map;
+use crate::window::FramePart;
+use crate::windows::WindowTarget;
 
 /// Every binding.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Bindings {
     /// Key chords and what they do.
-    #[serde(default, deserialize_with = "unique_map")]
+    #[serde(default, deserialize_with = "unique_map::deserialize")]
     keys: HashMap<KeyChord, Command>,
     /// Mouse triggers and what they do, by where the pointer is.
     #[serde(default)]
@@ -124,6 +125,37 @@ impl Modifiers {
             .map(|&(.., modifier)| modifier)
     }
 
+    /// Splits a binding's text at `+` into modifiers and the remaining words,
+    /// the last of which names the key or button.
+    fn split_from(text: &str) -> Result<(Self, Vec<&str>), String> {
+        if text.trim() != text || text.contains(char::is_whitespace) {
+            return Err(format!(
+                "`{text}`: key chains (several chords) are not available in vaht yet, and names \
+                 have no spaces"
+            ));
+        }
+        let mut modifiers = Self::default();
+        let mut rest = Vec::new();
+        let words: Vec<&str> = text.split('+').collect();
+        let Some((last, before)) = words.split_last() else {
+            return Err("a binding needs a key or button".to_owned());
+        };
+        for word in before {
+            if word.is_empty() {
+                return Err(format!("`{text}` has an empty name between `+`s"));
+            }
+            if let Some(modifier) = Self::named(word) {
+                if !modifiers.insert(modifier) {
+                    return Err(format!("`{text}` names a modifier twice"));
+                }
+            } else {
+                rest.push(*word);
+            }
+        }
+        rest.push(last);
+        Ok((modifiers, rest))
+    }
+
     /// Adds `other`, unless it is already there; returns whether it was new.
     const fn insert(&mut self, other: Self) -> bool {
         let is_new = self.0 & other.0 == 0;
@@ -144,37 +176,6 @@ impl fmt::Display for Modifiers {
     }
 }
 
-/// Splits a binding's text at `+` into modifiers and the remaining words,
-/// the last of which names the key or button.
-fn split_modifiers(text: &str) -> Result<(Modifiers, Vec<&str>), String> {
-    if text.trim() != text || text.contains(char::is_whitespace) {
-        return Err(format!(
-            "`{text}`: key chains (several chords) are not available in vaht yet, and names \
-             have no spaces"
-        ));
-    }
-    let mut modifiers = Modifiers::default();
-    let mut rest = Vec::new();
-    let words: Vec<&str> = text.split('+').collect();
-    let Some((last, before)) = words.split_last() else {
-        return Err("a binding needs a key or button".to_owned());
-    };
-    for word in before {
-        if word.is_empty() {
-            return Err(format!("`{text}` has an empty name between `+`s"));
-        }
-        if let Some(modifier) = Modifiers::named(word) {
-            if !modifiers.insert(modifier) {
-                return Err(format!("`{text}` names a modifier twice"));
-            }
-        } else {
-            rest.push(*word);
-        }
-    }
-    rest.push(last);
-    Ok((modifiers, rest))
-}
-
 /// A key with modifiers, such as `Super+T`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct KeyChord {
@@ -193,7 +194,7 @@ impl KeyChord {
 
     /// Parses `Super+T`.
     fn parse(text: &str) -> Result<Self, String> {
-        let (modifiers, words) = split_modifiers(text)?;
+        let (modifiers, words) = Modifiers::split_from(text)?;
         let [key] = words.as_slice() else {
             return Err(format!(
                 "`{text}`: modifiers are Super, Ctrl, Alt and Shift; `{}` is not one",
@@ -257,6 +258,25 @@ pub(crate) enum MouseContext {
     GripRight,
     /// A window's handle.
     Handle,
+}
+
+impl MouseContext {
+    /// Returns the contexts a press on `target` (none: the desktop) looks
+    /// in, most specific first: a frame part's own, then `window`.
+    pub(crate) const fn search_order(target: Option<&WindowTarget>) -> &'static [Self] {
+        match target {
+            Some(WindowTarget::Frame {
+                part: FramePart::Titlebar(_),
+                ..
+            }) => &[Self::Titlebar, Self::Window],
+            Some(WindowTarget::Frame {
+                part: FramePart::Border(_),
+                ..
+            }) => &[Self::Border, Self::Window],
+            Some(WindowTarget::Surface { .. }) => &[Self::Window],
+            None => &[Self::Desktop],
+        }
+    }
 }
 
 /// A mouse button, or a scroll wheel direction.
@@ -348,7 +368,7 @@ struct MouseTrigger {
 impl MouseTrigger {
     /// Parses `Alt+Drag+Left`.
     fn parse(text: &str) -> Result<Self, String> {
-        let (modifiers, words) = split_modifiers(text)?;
+        let (modifiers, words) = Modifiers::split_from(text)?;
         let (button_name, gestures) = words
             .split_last()
             .ok_or_else(|| "a mouse binding needs a button".to_owned())?;
@@ -406,7 +426,7 @@ struct MouseBindings(HashMap<MouseTrigger, Command>);
 
 impl<'de> serde::Deserialize<'de> for MouseBindings {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let bindings: HashMap<MouseTrigger, Command> = unique_map(deserializer)?;
+        let bindings: HashMap<MouseTrigger, Command> = unique_map::deserialize(deserializer)?;
         if let Some((trigger, _)) = bindings.iter().find(|(_, command)| command.repeats()) {
             return Err(de::Error::custom(format!(
                 "`{trigger}`: only key bindings repeat"
@@ -416,52 +436,10 @@ impl<'de> serde::Deserialize<'de> for MouseBindings {
     }
 }
 
-/// Reads a table into a map, refusing two keys that mean the same (such as
-/// `Super+T` and `Mod4+t`), which a plain map would silently merge.
-fn unique_map<'de, D, Key, Value>(deserializer: D) -> Result<HashMap<Key, Value>, D::Error>
-where
-    D: Deserializer<'de>,
-    Key: serde::Deserialize<'de> + Eq + Hash + fmt::Display,
-    Value: serde::Deserialize<'de>,
-{
-    /// Reads the map.
-    struct UniqueMap<Key, Value>(PhantomData<(Key, Value)>);
-
-    impl<'de, Key, Value> Visitor<'de> for UniqueMap<Key, Value>
-    where
-        Key: serde::Deserialize<'de> + Eq + Hash + fmt::Display,
-        Value: serde::Deserialize<'de>,
-    {
-        type Value = HashMap<Key, Value>;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("a table of bindings")
-        }
-
-        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-            let mut bindings = HashMap::new();
-            while let Some((key, value)) = map.next_entry::<Key, Value>()? {
-                match bindings.entry(key) {
-                    Entry::Occupied(occupied) => {
-                        return Err(de::Error::custom(format!(
-                            "`{}` is bound twice",
-                            occupied.key()
-                        )));
-                    }
-                    Entry::Vacant(vacant) => {
-                        vacant.insert(value);
-                    }
-                }
-            }
-            Ok(bindings)
-        }
-    }
-
-    deserializer.deserialize_map(UniqueMap(PhantomData))
-}
-
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use crate::config::command::Action;
 
@@ -527,45 +505,35 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mistakes_are_explained() {
-        let cases = [
-            (
-                "[keys]\n\"Super+Banana\" = \"close\"",
-                "not an xkb key name",
-            ),
-            ("[keys]\n\"Hyper+T\" = \"close\"", "is not one"),
-            (
-                "[keys]\n\"Super+T\" = \"close\"\n\"Mod4+t\" = \"kill\"",
-                "bound twice",
-            ),
-            ("[keys]\n\"Super+A Super+B\" = \"close\"", "key chains"),
-            ("[keys]\n\"Alt+Alt+T\" = \"close\"", "twice"),
-            ("[mouse.titlebar]\n\"Triple+Left\" = \"close\"", "neither"),
-            ("[mouse.desktop]\n\"Drag+ScrollUp\" = \"close\"", "wheel"),
-            (
-                "[mouse.desktop]\n\"Left\" = { repeat = \"close\" }",
-                "only key bindings",
-            ),
-            ("[mouse.dock]\n\"Left\" = \"close\"", "unknown variant"),
-            ("[keyz]", "unknown field"),
-        ];
-        for (text, expected) in cases {
-            let error = bindings(text).expect_err(text);
-            assert!(error.contains(expected), "{text}: {error}");
-        }
+    #[rstest]
+    #[case::unknown_key("[keys]\n\"Super+Banana\" = \"close\"", "not an xkb key name")]
+    #[case::unknown_modifier("[keys]\n\"Hyper+T\" = \"close\"", "is not one")]
+    #[case::same_chord_twice(
+        "[keys]\n\"Super+T\" = \"close\"\n\"Mod4+t\" = \"kill\"",
+        "bound twice"
+    )]
+    #[case::key_chain("[keys]\n\"Super+A Super+B\" = \"close\"", "key chains")]
+    #[case::modifier_twice("[keys]\n\"Alt+Alt+T\" = \"close\"", "twice")]
+    #[case::unknown_gesture("[mouse.titlebar]\n\"Triple+Left\" = \"close\"", "neither")]
+    #[case::dragged_wheel("[mouse.desktop]\n\"Drag+ScrollUp\" = \"close\"", "wheel")]
+    #[case::repeating_button(
+        "[mouse.desktop]\n\"Left\" = { repeat = \"close\" }",
+        "only key bindings"
+    )]
+    #[case::unknown_context("[mouse.dock]\n\"Left\" = \"close\"", "unknown variant")]
+    #[case::unknown_table("[keyz]", "unknown field")]
+    fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {
+        let error = bindings(text).expect_err(text);
+        assert!(error.contains(expected), "{error}");
     }
 
-    #[test]
-    fn triggers_write_what_they_read() {
-        for text in [
-            "Left",
-            "Super+Alt+Double+Right",
-            "Ctrl+Drag+Middle",
-            "ScrollDown",
-        ] {
-            let trigger = MouseTrigger::parse(text).expect(text);
-            assert_eq!(trigger.to_string(), text);
-        }
+    #[rstest]
+    #[case::plain("Left")]
+    #[case::modified_double("Super+Alt+Double+Right")]
+    #[case::modified_drag("Ctrl+Drag+Middle")]
+    #[case::wheel("ScrollDown")]
+    fn triggers_write_what_they_read(#[case] text: &str) {
+        let trigger = MouseTrigger::parse(text).expect(text);
+        assert_eq!(trigger.to_string(), text);
     }
 }

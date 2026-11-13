@@ -43,7 +43,8 @@ use crate::event_source::{EventSource, Timer};
 use crate::input::InputState;
 use crate::launcher::Launcher;
 use crate::protocols::ProtocolStates;
-use crate::resources::{ProcessUsage, ResourceLedger};
+use crate::resources::{self, ResourceLedger};
+use crate::scene::Scene;
 use crate::signals::{ProcessSignals, SignalRequest};
 use crate::window::{FrameGeometry, Toplevel, WindowId};
 use crate::windows::Windows;
@@ -142,7 +143,7 @@ impl Compositor {
             socket = %compositor.socket_name.to_string_lossy(),
             "accepting clients; start them with WAYLAND_DISPLAY set to the socket"
         );
-        log_process_usage("at start");
+        resources::log_process_usage("at start");
         while compositor.is_running {
             event_loop
                 .dispatch(None, &mut compositor)
@@ -161,7 +162,7 @@ impl Compositor {
         }
         tracing::info!("stopping");
         tracing::debug!(resources = %compositor.ledger, "resources at exit");
-        log_process_usage("at exit");
+        resources::log_process_usage("at exit");
         Ok(())
     }
 
@@ -354,7 +355,7 @@ impl Compositor {
     pub(crate) fn render(&mut self) {
         self.prepare_panels();
         let metrics = self.theme.metrics();
-        if let Err(error) = self.backend.render(&self.windows, metrics) {
+        if let Err(error) = self.backend.render(&Scene::new(&self.windows, metrics)) {
             tracing::warn!(error = &error as &dyn std::error::Error, "frame skipped");
         }
         let time = self.start_time.elapsed();
@@ -548,25 +549,6 @@ pub struct RunOptions {
     pub backend: BackendChoice,
     /// Where the configuration files are (normally `~/.config/vaht`).
     pub config_directory: PathBuf,
-}
-
-/// Logs the process's open descriptors and memory, `moment` saying when.
-///
-/// The counts at start and at exit match when nothing leaked; the tests
-/// compare them.
-fn log_process_usage(moment: &str) {
-    match ProcessUsage::read() {
-        Ok(usage) => tracing::debug!(
-            descriptors = usage.descriptors.total(),
-            resident_bytes = ?usage.resident_bytes,
-            census = %usage.descriptors,
-            "process usage {moment}"
-        ),
-        Err(error) => tracing::warn!(
-            error = &error as &dyn std::error::Error,
-            "could not read process usage {moment}"
-        ),
-    }
 }
 
 /// Why vaht could not start or keep running.

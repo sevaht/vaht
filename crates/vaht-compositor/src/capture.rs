@@ -25,13 +25,11 @@ use smithay::wayland::image_copy_capture::{
     BufferConstraints, CaptureFailureReason, Frame, ImageCopyCaptureHandler, ImageCopyCaptureState,
     Session, SessionRef,
 };
-use vaht_ui::theme::Metrics;
 
 use crate::Compositor;
 use crate::resources::{ResourceKind, Tracked};
-use crate::scene;
+use crate::scene::{self, Scene};
 use crate::shared_memory::{self, SharedMemoryError};
-use crate::windows::Windows;
 
 /// Draws captures; separate from the backend's renderer, so captures look
 /// the same on every backend.
@@ -66,7 +64,7 @@ impl ScreenCapture {
         }
     }
 
-    /// Returns the scene of `windows` as packed 32-bit BGRA rows (ARGB8888
+    /// Returns `scene` as packed 32-bit BGRA rows (ARGB8888
     /// in memory) of `size`.
     ///
     /// # Errors
@@ -74,8 +72,7 @@ impl ScreenCapture {
     /// Returns an error if the scene could not be drawn or read back.
     fn render(
         &mut self,
-        windows: &Windows,
-        metrics: Metrics,
+        scene: &Scene<'_>,
         size: Size<i32, Physical>,
         scale: Scale<f64>,
     ) -> Result<Vec<u8>, CaptureError> {
@@ -88,7 +85,7 @@ impl ScreenCapture {
             .bind(&mut image)
             .map_err(CaptureError::Renderer)?;
         let mut framebuffer = framebuffer;
-        let elements = scene::compose(&mut self.renderer, windows, metrics, scale);
+        let elements = scene.elements(&mut self.renderer, scale);
         OutputDamageTracker::new(size, scale, Transform::Normal)
             .render_output(
                 &mut self.renderer,
@@ -134,7 +131,7 @@ impl Compositor {
         let size = mode.size;
         let result = self
             .capture
-            .render(&self.windows, metrics, size, scale)
+            .render(&Scene::new(&self.windows, metrics), size, scale)
             .and_then(|pixels| {
                 let (width, height) = (
                     usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?,

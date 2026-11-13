@@ -16,9 +16,7 @@ use super::{BackendError, RenderError};
 use crate::Compositor;
 use crate::event_source::EventSource;
 use crate::resources::ResourceLedger;
-use crate::scene;
-use crate::windows::Windows;
-use vaht_ui::theme::Metrics;
+use crate::scene::{self, Scene};
 
 /// A window in a host compositor, shown to vaht's clients as one output.
 pub(crate) struct WinitBackend {
@@ -102,23 +100,17 @@ impl WinitBackend {
         self.graphics.window().request_redraw();
     }
 
-    /// Draws `windows` into the host window, redrawing only what changed.
+    /// Draws `scene` into the host window, redrawing only what changed.
     ///
     /// # Errors
     ///
     /// Returns an error if the frame could not be drawn or shown.
-    pub(crate) fn render(
-        &mut self,
-        windows: &Windows,
-        metrics: Metrics,
-    ) -> Result<(), RenderError> {
+    pub(crate) fn render(&mut self, scene: &Scene<'_>) -> Result<(), RenderError> {
         let age = self.graphics.buffer_age().unwrap_or(0);
         let damage = {
             let (renderer, mut framebuffer) = self.graphics.bind().map_err(RenderError::Bind)?;
-            let elements = scene::compose(
+            let elements = scene.elements(
                 renderer,
-                windows,
-                metrics,
                 self.output.current_scale().fractional_scale().into(),
             );
             self.damage_tracker

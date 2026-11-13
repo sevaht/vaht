@@ -21,9 +21,7 @@ use super::{BackendError, RenderError};
 use crate::Compositor;
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
-use crate::scene;
-use crate::windows::Windows;
-use vaht_ui::theme::Metrics;
+use crate::scene::{self, Scene};
 
 /// An output that exists only in memory.
 pub(crate) struct HeadlessBackend {
@@ -168,22 +166,18 @@ impl HeadlessBackend {
         }
     }
 
-    /// Draws `windows` into the in-memory image.
+    /// Draws `scene` into the in-memory image.
     ///
     /// # Errors
     ///
     /// Returns an error if the frame could not be drawn.
-    pub(crate) fn render(
-        &mut self,
-        windows: &Windows,
-        metrics: Metrics,
-    ) -> Result<(), RenderError> {
+    pub(crate) fn render(&mut self, scene: &Scene<'_>) -> Result<(), RenderError> {
         let mut framebuffer = self
             .renderer
             .bind(&mut self.target)
             .map_err(RenderError::BindSoftware)?;
         let scale = self.output.current_scale().fractional_scale().into();
-        let elements = scene::compose(&mut self.renderer, windows, metrics, scale);
+        let elements = scene.elements(&mut self.renderer, scale);
         self.damage_tracker
             .render_output(
                 &mut self.renderer,

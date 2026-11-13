@@ -24,5 +24,8 @@ toml.workspace = true
 tracing.workspace = true
 vaht-ui.workspace = true
 
+[dev-dependencies]
+rstest.workspace = true
+
 [lints]
 workspace = true

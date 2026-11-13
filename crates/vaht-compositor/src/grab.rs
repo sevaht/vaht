@@ -23,26 +23,18 @@ use smithay::utils::{Logical, Point, Serial};
 use crate::Compositor;
 use crate::config::Command;
 use crate::execute::{ExecutionContext, Press};
-use crate::window::{ResizeEdges, WindowId};
+use crate::window::{WindowDrag, WindowId};
 
 /// How far the pointer moves, in pixels, before a held press is a drag.
 const DRAG_DISTANCE: f64 = 3.0;
 
-/// What a drag does to its window.
+/// What the pointer does while a grab holds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GrabKind {
     /// Nothing yet: the press is held, and may become a drag.
     Hold,
-    /// Moves it; the content started at `initial_location`.
-    Move {
-        /// Where the content's top-left corner was when the drag began.
-        initial_location: Point<i32, Logical>,
-    },
-    /// Resizes it by dragging `edges`.
-    Resize {
-        /// The edges that follow the pointer.
-        edges: ResizeEdges,
-    },
+    /// Drags a window.
+    Drag(WindowDrag),
 }
 
 /// A drag in progress.
@@ -71,23 +63,22 @@ impl std::fmt::Debug for WindowGrab {
 }
 
 impl Compositor {
-    /// Starts dragging `window` with the pointer button held since `start`;
-    /// `kind` says whether the drag moves or resizes it.
+    /// Starts `drag` on `window` with the pointer button held since `start`.
     pub(crate) fn start_window_grab(
         &mut self,
         window: WindowId,
-        kind: GrabKind,
+        drag: WindowDrag,
         start: GrabStartData<Self>,
         serial: Serial,
     ) {
-        if !self.prepare_drag(window, kind) {
+        if !self.begin_drag(window, drag) {
             return;
         }
         self.set_grab(WindowGrab {
             start,
             serial,
             window: Some(window),
-            kind,
+            kind: GrabKind::Drag(drag),
             drag: None,
         });
     }
@@ -109,22 +100,25 @@ impl Compositor {
         });
     }
 
-    /// Makes the held press `grab` on `window` a drag of `kind`.
-    pub(crate) fn turn_grab_into(&mut self, window: WindowId, grab: &mut GrabKind, kind: GrabKind) {
-        if *grab == GrabKind::Hold && self.prepare_drag(window, kind) {
-            *grab = kind;
+    /// Makes the held press `grab` on `window` into `drag`.
+    pub(crate) fn turn_grab_into(
+        &mut self,
+        window: WindowId,
+        grab: &mut GrabKind,
+        drag: WindowDrag,
+    ) {
+        if *grab == GrabKind::Hold && self.begin_drag(window, drag) {
+            *grab = GrabKind::Drag(drag);
         }
     }
 
-    /// Readies `window` for a drag of `kind`; returns whether it exists.
-    fn prepare_drag(&mut self, window: WindowId, kind: GrabKind) -> bool {
+    /// Starts `drag` on `window`; returns whether the window exists.
+    fn begin_drag(&mut self, window: WindowId, drag: WindowDrag) -> bool {
         let Some(target) = self.windows.get_mut(window) else {
             return false;
         };
-        if let GrabKind::Resize { edges } = kind {
-            target.begin_resize(edges);
-        }
-        tracing::debug!(window = %window, ?kind, "drag started");
+        target.begin_drag(drag);
+        tracing::debug!(window = %window, ?drag, "drag started");
         true
     }
 
@@ -136,33 +130,6 @@ impl Compositor {
             .get_pointer()
             .expect("the seat gets a pointer at startup");
         pointer.set_grab(self, grab, serial, Focus::Clear);
-    }
-
-    /// Applies a drag's pointer movement of `delta` since it began.
-    fn drag_window(&mut self, window: WindowId, kind: GrabKind, delta: Point<f64, Logical>) {
-        let Some(target) = self.windows.get_mut(window) else {
-            return;
-        };
-        let delta = delta.to_i32_round();
-        match kind {
-            GrabKind::Hold => return,
-            GrabKind::Move { initial_location } => target.set_location(initial_location + delta),
-            GrabKind::Resize { .. } => target.resize_by(delta),
-        }
-        self.schedule_render();
-    }
-
-    /// Ends a drag.
-    fn end_window_grab(&mut self, window: Option<WindowId>, kind: GrabKind) {
-        if kind == GrabKind::Hold {
-            return;
-        }
-        if let (GrabKind::Resize { .. }, Some(target)) =
-            (kind, window.and_then(|window| self.windows.get_mut(window)))
-        {
-            target.finish_resize();
-        }
-        tracing::debug!(window = ?window, ?kind, "drag ended");
     }
 }
 
@@ -200,8 +167,11 @@ impl PointerGrab<Compositor> for WindowGrab {
         handle.motion(compositor, None, event);
         let delta = event.location - self.start.location;
         self.begin_drag_if_moved(compositor, delta);
-        if let Some(window) = self.window {
-            compositor.drag_window(window, self.kind, delta);
+        if let (GrabKind::Drag(drag), Some(window)) = (self.kind, self.window)
+            && let Some(target) = compositor.windows.get_mut(window)
+        {
+            target.follow_drag(drag, delta.to_i32_round());
+            compositor.schedule_render();
         }
     }
 
@@ -322,6 +292,11 @@ impl PointerGrab<Compositor> for WindowGrab {
     }
 
     fn unset(&mut self, compositor: &mut Compositor) {
-        compositor.end_window_grab(self.window, self.kind);
+        if let (GrabKind::Drag(drag), Some(window)) = (self.kind, self.window)
+            && let Some(target) = compositor.windows.get_mut(window)
+        {
+            target.end_drag(drag);
+            tracing::debug!(window = %window, ?drag, "drag ended");
+        }
     }
 }

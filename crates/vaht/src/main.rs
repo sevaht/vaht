@@ -18,7 +18,7 @@ fn main() -> ExitCode {
         }) => return vaht::check::print_defaults(),
         Some(Subcommand::Check {
             print_defaults: false,
-        }) => return vaht::check::check(&arguments.config_directory()),
+        }) => return vaht::check::run(&arguments.config_directory()),
         None => {}
     }
     // Before any thread starts: logging starts the first one.
