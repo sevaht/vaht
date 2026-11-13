@@ -20,6 +20,7 @@ pub mod panel;
 pub mod text;
 pub mod texture;
 pub mod theme;
+pub mod wallpaper;
 pub mod widget;
 
 #[doc(inline)]
@@ -38,5 +39,7 @@ pub use text::Typesetter;
 pub use theme::{Theme, ThemeElement, WidgetState};
 /// The pixels panels and corner arcs are painted into.
 pub use tiny_skia::Pixmap;
+#[doc(inline)]
+pub use wallpaper::{Wallpaper, WallpaperError, WallpaperFit};
 #[doc(inline)]
 pub use widget::{Glyph, SizePolicy, TextField, Widget};

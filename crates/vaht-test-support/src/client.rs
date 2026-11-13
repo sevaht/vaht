@@ -153,6 +153,20 @@ impl TestClient {
         self.roundtrip();
     }
 
+    /// Redraws window `index` (in opening order) fully transparent, and
+    /// waits until vaht has the commit: what is beneath it shows through.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, or the connection to vaht fails.
+    pub fn clear_window(&mut self, index: usize) {
+        let handle = self.queue.handle();
+        let surface = self.state.windows[index].wl_surface().clone();
+        self.state
+            .fill_pixels(&surface, &handle, WINDOW_SIZE, [0; 4]);
+        self.roundtrip();
+    }
+
     /// Has every window name `icon` as its icon (xdg-toplevel-icon), and
     /// waits until vaht has the commits.
     ///

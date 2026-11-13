@@ -64,6 +64,9 @@ struct Rule {
     position: Option<Position>,
     /// Their frame's size, in pixels.
     size: Option<[u16; 2]>,
+    /// Whether what shows through them, where they are translucent, is
+    /// only the wallpaper, not the windows below.
+    pseudo_transparent: Option<bool>,
 }
 
 impl Rule {
@@ -76,6 +79,7 @@ impl Rule {
             placement: self.placement,
             position: self.position,
             size: self.size,
+            pseudo_transparent: self.pseudo_transparent,
         }
     }
 }
@@ -95,6 +99,8 @@ pub(crate) struct RuleSettings {
     pub(crate) position: Option<Position>,
     /// Its frame's size.
     size: Option<[u16; 2]>,
+    /// Whether only the wallpaper shows through it.
+    pub(crate) pseudo_transparent: Option<bool>,
 }
 
 impl RuleSettings {
@@ -114,6 +120,7 @@ impl RuleSettings {
             placement: later.placement.or(self.placement),
             position: later.position.or(self.position),
             size: later.size.or(self.size),
+            pseudo_transparent: later.pseudo_transparent.or(self.pseudo_transparent),
         }
     }
 }
@@ -303,7 +310,7 @@ mod tests {
 
     #[rstest]
     #[case::no_match("[[rule]]\nworkspace = 2\n", "missing field `match`")]
-    #[case::not_yet("[[rule]]\nmatch = {}\npseudo_transparent = true\n", "unknown field")]
+    #[case::not_yet("[[rule]]\nmatch = {}\nfocus_stealing = \"allow\"\n", "unknown field")]
     #[case::bad_placement("[[rule]]\nmatch = {}\nplacement = \"huge\"\n", "placement is")]
     #[case::workspace_zero("[[rule]]\nmatch = {}\nworkspace = 0\n", "nonzero")]
     fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {

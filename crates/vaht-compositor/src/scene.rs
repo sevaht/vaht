@@ -4,14 +4,15 @@
 //! elements, and hit-testing ([`Scene::target_at`]) walks the same layers
 //! and windows in the same order, so what is clicked is always what is seen
 //! (01 §9). From the top: the overlay and top layers, the taskbar, the
-//! windows, then the bottom and background layers. Each window contributes
-//! its client surfaces, then the frame vaht draws beneath them; menus and
-//! the wallpaper will join as further [`SceneElement`] variants.
+//! windows, then the bottom and background layers, then the wallpaper. Each
+//! window contributes its client surfaces, then, if it is pseudo-transparent,
+//! the piece of wallpaper beneath them, then the frame vaht draws.
 //!
 //! The scene joins four sources: the window manager says which windows are
 //! shown and where, the [`Toplevels`] draw and hit-test their surfaces,
 //! [`FrameTextures`] draws their frames, and the [`Taskbar`] itself.
 
+mod backdrop;
 mod corner_texture;
 mod frame_textures;
 mod menu_texture;
@@ -26,6 +27,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
 
+pub(crate) use self::backdrop::Backdrop;
 pub(crate) use self::corner_texture::CornerTexture;
 pub(crate) use self::frame_textures::FrameTextures;
 pub(crate) use self::menu_texture::MenuTexture;
@@ -36,7 +38,8 @@ use crate::taskbar::{Taskbar, TaskbarHit};
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::window_manager::{FramePart, Window, WindowId, WindowManager};
 
-/// What is drawn where nothing else is: a dark grey, until wallpapers exist.
+/// What is drawn where nothing else is, the wallpaper included: a dark
+/// grey, [`Backdrop`]'s own background.
 pub(crate) const BACKGROUND_COLOR: [f32; 4] = [0.1, 0.1, 0.1, 1.0];
 
 smithay::backend::renderer::element::render_elements! {
@@ -142,42 +145,40 @@ pub(crate) struct Scene<'state> {
     window_manager: &'state WindowManager,
     /// The windows' surfaces.
     toplevels: &'state Toplevels,
-    /// The windows' frames, as the renderer takes them.
-    frame_textures: &'state FrameTextures,
-    /// The taskbar, if there is one.
-    taskbar: Option<&'state Taskbar>,
-    /// The menus open.
-    menus: &'state MenuStack,
+    /// What vaht draws itself.
+    drawn: Drawn<'state>,
     /// The output's layer surfaces.
     layers: OutputLayers<'state>,
 }
 
-/// What vaht draws itself, over the windows: the taskbar and the menus.
+/// What vaht draws itself: the windows' frames, the taskbar and the menus
+/// over the windows, and the wallpaper beneath them.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Panels<'state> {
+pub(crate) struct Drawn<'state> {
+    /// The windows' frames, as the renderer takes them.
+    pub(crate) frames: &'state FrameTextures,
     /// The taskbar, if there is one.
     pub(crate) taskbar: Option<&'state Taskbar>,
     /// The menus open.
     pub(crate) menus: &'state MenuStack,
+    /// The wallpaper.
+    pub(crate) backdrop: &'state Backdrop,
 }
 
 impl<'state> Scene<'state> {
     /// Creates the scene of the windows `window_manager` shows, drawn from
-    /// their `toplevels` and `frame_textures`, under vaht's `panels`, between
-    /// the output's `layers`.
+    /// their `toplevels`, with what vaht has `drawn` itself, between the
+    /// output's `layers`.
     pub(crate) const fn new(
         window_manager: &'state WindowManager,
         toplevels: &'state Toplevels,
-        frame_textures: &'state FrameTextures,
-        panels: Panels<'state>,
+        drawn: Drawn<'state>,
         layers: OutputLayers<'state>,
     ) -> Self {
         Self {
             window_manager,
             toplevels,
-            frame_textures,
-            taskbar: panels.taskbar,
-            menus: panels.menus,
+            drawn,
             layers,
         }
     }
@@ -223,7 +224,7 @@ impl<'state> Scene<'state> {
         R::TextureId: Send + Clone + 'static,
     {
         // Menus are above everything, even the overlay layer.
-        let mut elements = self.menus.render_elements(renderer, scale);
+        let mut elements = self.drawn.menus.render_elements(renderer, scale);
         self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
         elements.extend(
             self.shown_taskbar()
@@ -239,10 +240,15 @@ impl<'state> Scene<'state> {
                         .into_iter()
                         .map(SceneElement::Surface),
                 );
+                elements.extend(
+                    self.drawn
+                        .backdrop
+                        .piece_element(window.id(), renderer, scale),
+                );
             }
             if window.has_frame() {
                 let geometry = window.frame_geometry(metrics);
-                elements.extend(self.frame_textures.render_elements(
+                elements.extend(self.drawn.frames.render_elements(
                     window.id(),
                     &geometry,
                     renderer,
@@ -251,6 +257,7 @@ impl<'state> Scene<'state> {
             }
         }
         self.push_layers(&mut elements, renderer, &BELOW_WINDOWS, scale);
+        elements.extend(self.drawn.backdrop.render_element(renderer, scale));
         elements
     }
 
@@ -277,7 +284,8 @@ impl<'state> Scene<'state> {
     /// Returns the taskbar, unless it is auto-hidden or a fullscreen window
     /// covers it.
     fn shown_taskbar(&self) -> Option<&'state Taskbar> {
-        self.taskbar
+        self.drawn
+            .taskbar
             .filter(|taskbar| taskbar.is_shown() && !self.is_fullscreen_on_top())
     }
 

@@ -35,7 +35,7 @@ pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, Wi
 pub(crate) use self::rules::Rules;
 pub(crate) use self::settings::{
     FocusModel, FrameSettings, Settings, TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget,
-    WidthPercent,
+    WallpaperSettings, WidthPercent,
 };
 pub(crate) use self::source::ConfigSource;
 pub(crate) use self::theme::ThemeFile;

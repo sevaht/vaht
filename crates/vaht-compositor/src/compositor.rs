@@ -69,7 +69,7 @@ use crate::layers::{Layers, OutputLayers};
 use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack};
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceKind, ResourceLedger};
-use crate::scene::{FrameTextures, Panels, PointerTarget, Scene, WindowTarget};
+use crate::scene::{Backdrop, Drawn, FrameTextures, PointerTarget, Scene, WindowTarget};
 use crate::signals::ProcessSignals;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
 use crate::toplevels::{Toplevel, Toplevels};
@@ -105,6 +105,8 @@ pub struct Compositor {
     pub(crate) taskbar: Option<Taskbar>,
     /// The menus open.
     pub(crate) menus: MenuStack,
+    /// The wallpaper.
+    pub(crate) backdrop: Backdrop,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
     /// Draws screenshots for capture clients.
@@ -260,6 +262,7 @@ impl Compositor {
             layers: Layers::default(),
             taskbar: Taskbar::new(&config.settings.taskbar),
             menus: MenuStack::default(),
+            backdrop: Backdrop::new(&config.settings.wallpaper, config_source.directory()),
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
             physical_keymap,
@@ -313,10 +316,11 @@ impl Compositor {
         Scene::new(
             &self.window_manager,
             &self.toplevels,
-            &self.frame_textures,
-            Panels {
+            Drawn {
+                frames: &self.frame_textures,
                 taskbar: self.taskbar.as_ref(),
                 menus: &self.menus,
+                backdrop: &self.backdrop,
             },
             self.output_layers(),
         )
@@ -350,6 +354,7 @@ impl Compositor {
                         taskbar.invalidate();
                     }
                 }
+                self.backdrop.apply(&config.settings.wallpaper);
                 // A reload is when icons installed or changed since show.
                 if let Some(taskbar) = &mut self.taskbar {
                     taskbar.forget_icons();
@@ -382,10 +387,11 @@ impl Compositor {
         let scene = Scene::new(
             &self.window_manager,
             &self.toplevels,
-            &self.frame_textures,
-            Panels {
+            Drawn {
+                frames: &self.frame_textures,
                 taskbar: self.taskbar.as_ref(),
                 menus: &self.menus,
+                backdrop: &self.backdrop,
             },
             OutputLayers::new(&output, self.backend.output_geometry()),
         );
@@ -423,6 +429,8 @@ impl Compositor {
             taskbar.prepare(view, &self.config.theme, &mut self.typesetter);
         }
         self.menus.prepare(&self.config.theme, &mut self.typesetter);
+        self.backdrop
+            .prepare(self.backend.output_geometry(), &self.window_manager);
     }
 
     /// Starts managing the window of a new xdg-shell toplevel.

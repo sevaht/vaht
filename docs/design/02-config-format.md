@@ -186,6 +186,12 @@ rest by name, so a setting never silently does nothing:
   `defaultDeco`'s preset or mask.
 - `[workspaces]`: `names`, at least one.
 - `[session]`: `autostart`.
+- `[wallpaper]`: `image` (a PNG; `~/` is the home directory, a relative
+  path is from the configuration directory) and `fit` (`fill`, `fit`,
+  `center`, `tile`, `stretch`). It is decoded once, painted once per output
+  size, and drawn beneath everything; where it does not reach, and with no
+  image, the desktop is dark grey. `per_workspace` is not built, and JPEG
+  is not read yet.
 - `theme`: the name of a theme in `themes/` (§10); without it, the built-in
   theme.
 - `[taskbar]`: `enabled`, `edge` (`top` or `bottom`), `width_percent`
@@ -481,8 +487,11 @@ focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
   key by key.
 - **Built so far:** `workspace`, `sticky`, `minimized`, `placement`
   (`maximized`, `maximized horizontal|vertical`, `fullscreen`, `tile <x> <y>
-  <width> <height>`), `position = { anchor, offset }` and `size` (the frame's
-  size, as fluxland's `[Dimensions]` was). They apply when the window first
+  <width> <height>`), `position = { anchor, offset }`, `size` (the frame's
+  size, as fluxland's `[Dimensions]` was) and `pseudo_transparent` (where
+  the window is translucent, only the wallpaper shows through: a copy of
+  the wallpaper under its content hides the windows below). They apply
+  when the window first
   gets its place. The other keys are refused until their features exist.
   `vaht import fluxbox` converts `apps` (workspaces counted from 0 there)
   and reports the rest.
@@ -797,7 +806,9 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
   or a directory with `theme.cfg`) to `themes/<name>.toml`, which the
   converted `settings.toml` chooses.
   Every setting, binding or pattern vaht lacks is reported as "not in vaht
-  yet", so importing again as features arrive picks them up. `startup` is
+  yet", so importing again as features arrive picks them up. The first
+  wallpaper `startup` sets with `swaybg`, `feh --bg-*` or `fbsetbg` becomes
+  `[wallpaper]` (`$HOME` written `~`). The rest of `startup` is
   reported, to be added to `session.autostart` by hand. Commands are translated by
   `FluxboxCommand`. A sequence loses the parts vaht drops on purpose
   (`ActivateTab`), but a part vaht lacks for now leaves the whole binding

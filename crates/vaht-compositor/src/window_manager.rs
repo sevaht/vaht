@@ -635,6 +635,9 @@ impl WindowManager {
         if let Some(placement) = rule.placement {
             window.place(placement.placement(outer), output, metrics);
         }
+        if let Some(is_pseudo_transparent) = rule.pseudo_transparent {
+            window.set_pseudo_transparent(is_pseudo_transparent);
+        }
         // A rule may have sent the new window out of sight.
         self.focus_most_recent();
     }

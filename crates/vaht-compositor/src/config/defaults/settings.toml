@@ -80,6 +80,15 @@ format = "%k:%M"
 # How long the pointer rests on a submenu's item before it opens.
 submenu_delay_ms = 200
 
+[wallpaper]
+# A PNG image drawn under everything, such as "~/Pictures/sky.png" ("~/" is
+# the home directory; a relative path is from this directory). Without one,
+# the desktop is dark grey.
+# image = "~/Pictures/sky.png"
+# fill (cover the output, cutting off what overflows), fit (all of it,
+# with grey beside), center or tile (at its own size), or stretch.
+fit = "fill"
+
 [session]
 # Command lines run once when vaht starts, as exec runs them.
 autostart = []

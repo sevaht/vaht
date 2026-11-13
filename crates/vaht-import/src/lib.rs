@@ -10,8 +10,8 @@
 //! Converted today: `init` to `settings.toml`, `keys` to `bindings.toml`,
 //! `apps` to `rules.toml`, `menu` and `windowmenu` to `menus.toml`, and the
 //! style `init` names to `themes/<name>.toml`, which `settings.toml` then
-//! chooses. `startup` is reported: its commands belong in
-//! `session.autostart`.
+//! chooses. The wallpaper `startup` sets becomes `[wallpaper]`; the rest of
+//! `startup` is reported: its commands belong in `session.autostart`.
 
 mod apps;
 mod command;
@@ -22,6 +22,7 @@ mod report;
 mod resources;
 mod settings;
 mod style;
+mod wallpaper;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -35,6 +36,7 @@ use crate::menu::MenuFiles;
 use crate::resources::Resources;
 use crate::settings::InitFile;
 use crate::style::StyleFile;
+use crate::wallpaper::StartupWallpaper;
 
 /// A Fluxbox configuration directory, read.
 #[derive(Debug)]
@@ -53,8 +55,8 @@ pub struct FluxboxSetup {
     menu: Option<(PathBuf, String)>,
     /// The window menu: where, and what it says.
     window_menu: Option<(PathBuf, String)>,
-    /// The other files vaht cannot convert yet, if they exist.
-    unconverted: Vec<(PathBuf, &'static str)>,
+    /// The `startup` script: where, and what it says.
+    startup: Option<(PathBuf, String)>,
 }
 
 impl FluxboxSetup {
@@ -92,13 +94,6 @@ impl FluxboxSetup {
         let apps_path = file("session.appsFile", "apps");
         let menu_path = file("session.menuFile", "menu");
         let window_menu_path = file("session.screen0.windowMenu", "windowmenu");
-        let unconverted = [(
-            directory.join("startup"),
-            "the startup script: add it to session.autostart if vaht should run it",
-        )]
-        .into_iter()
-        .filter(|(path, _)| path.exists())
-        .collect();
         Ok(Self {
             directory: directory.to_path_buf(),
             init,
@@ -107,7 +102,7 @@ impl FluxboxSetup {
             style: style_path.map(Self::read_optional).transpose()?.flatten(),
             menu: Self::read_optional(menu_path)?,
             window_menu: Self::read_optional(window_menu_path)?,
-            unconverted,
+            startup: Self::read_optional(directory.join("startup"))?,
         })
     }
 
@@ -142,6 +137,17 @@ impl FluxboxSetup {
                 text: header(path) + &theme.to_string(),
             });
         }
+        if let Some((path, text)) = &self.startup {
+            let why = match StartupWallpaper::find(text) {
+                Some(wallpaper) => {
+                    settings.insert("wallpaper", wallpaper.settings());
+                    "the startup script, but for its wallpaper: add the rest to \
+                     session.autostart if vaht should run it"
+                }
+                None => "the startup script: add it to session.autostart if vaht should run it",
+            };
+            report.note(path, 1, Reason::NotYetInVaht, why);
+        }
         files.insert(
             0,
             OutputFile {
@@ -173,9 +179,6 @@ impl FluxboxSetup {
                 name: "rules.toml".to_owned(),
                 text: header(path) + &rules.to_string(),
             });
-        }
-        for (path, why) in &self.unconverted {
-            report.note(path, 1, Reason::NotYetInVaht, *why);
         }
         Conversion {
             source: self.directory,
@@ -381,5 +384,26 @@ mod tests {
             "{}",
             conversion.report()
         );
+    }
+
+    #[test]
+    fn the_wallpaper_startup_sets_becomes_the_wallpaper_setting() {
+        let source = tempfile::tempdir().expect("a temporary directory");
+        std::fs::write(source.path().join("init"), "").expect("written");
+        std::fs::write(
+            source.path().join("startup"),
+            "swaybg -m tile -i ~/sky.png &\nexec fluxbox\n",
+        )
+        .expect("written");
+        let conversion = FluxboxSetup::read(source.path())
+            .expect("readable")
+            .convert();
+        let settings = &conversion.files()[0].text;
+        assert!(
+            settings.contains("[wallpaper]\nimage = \"~/sky.png\"\nfit = \"tile\"\n"),
+            "{settings}"
+        );
+        let target = tempfile::tempdir().expect("a temporary directory");
+        conversion.write(target.path(), false).expect("valid");
     }
 }

@@ -159,6 +159,19 @@ impl ClientState {
         size: (u32, u32),
         color: [u8; 3],
     ) {
+        let [red, green, blue] = color;
+        self.fill_pixels(surface, handle, size, [blue, green, red, u8::MAX]);
+    }
+
+    /// Fills `surface` with `pixel` (premultiplied BGRA, as ARGB8888 is in
+    /// memory) at `size`, and commits it.
+    pub(super) fn fill_pixels(
+        &mut self,
+        surface: &wl_surface::WlSurface,
+        handle: &QueueHandle<Self>,
+        size: (u32, u32),
+        pixel: [u8; 4],
+    ) {
         let width = i32::try_from(size.0).expect("window sizes fit in i32");
         let height = i32::try_from(size.1).expect("window sizes fit in i32");
         let stride = width * i32::try_from(BYTES_PER_PIXEL).expect("4 fits in i32");
@@ -166,11 +179,8 @@ impl ClientState {
             .pool
             .create_buffer(width, height, stride, wl_shm::Format::Argb8888)
             .expect("the pool has room");
-        let [red, green, blue] = color;
         let (pixels, _) = canvas.as_chunks_mut::<4>();
-        for pixel in pixels {
-            *pixel = [blue, green, red, u8::MAX];
-        }
+        pixels.fill(pixel);
         surface.frame(handle, FrameCallbackData(surface.clone()));
         buffer.attach_to(surface).expect("a fresh buffer attaches");
         surface.damage_buffer(0, 0, width, height);

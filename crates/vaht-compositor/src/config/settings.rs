@@ -8,9 +8,11 @@
 
 mod taskbar;
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use smithay::utils::{Logical, Point, Size};
+use vaht_ui::WallpaperFit;
 use vaht_ui::theme::Metrics;
 
 pub(crate) use self::taskbar::{
@@ -38,6 +40,8 @@ pub(crate) struct Settings {
     pub(crate) taskbar: TaskbarSettings,
     /// Menus.
     pub(crate) menus: MenuSettings,
+    /// The wallpaper.
+    pub(crate) wallpaper: WallpaperSettings,
     /// Starting the session.
     pub(crate) session: SessionSettings,
 }
@@ -254,6 +258,31 @@ impl Default for MenuSettings {
     }
 }
 
+/// The wallpaper.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct WallpaperSettings {
+    /// The PNG image, as written: `~/` is the home directory, and a
+    /// relative path is from the configuration directory. None for no
+    /// wallpaper.
+    image: Option<String>,
+    /// How it fills the output.
+    pub(crate) fit: WallpaperFit,
+}
+
+impl WallpaperSettings {
+    /// Returns the image's path, `~/` read as the home directory and a
+    /// relative path taken from `config_directory`; none without an image,
+    /// or with `~/` and no home.
+    pub(crate) fn image_path(&self, config_directory: &Path) -> Option<PathBuf> {
+        let image = self.image.as_deref()?;
+        match image.strip_prefix("~/") {
+            Some(rest) => Some(PathBuf::from(std::env::var_os("HOME")?).join(rest)),
+            None => Some(config_directory.join(image)),
+        }
+    }
+}
+
 /// Starting the session.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -284,6 +313,25 @@ mod tests {
         assert_eq!(parsed.focus.model, FocusModel::Sloppy);
         assert!(parsed.focus.raise_on_click, "the rest stays default");
         assert_eq!(parsed.windows, WindowSettings::default());
+    }
+
+    #[test]
+    fn a_wallpaper_is_found_from_home_or_the_configuration_directory() {
+        let parsed: Settings =
+            toml::from_str("[wallpaper]\nimage = \"~/sky.png\"\nfit = \"tile\"\n").expect("valid");
+        let home = std::env::var_os("HOME").expect("tests run with a home");
+        let config = Path::new("/etc/vaht");
+        assert_eq!(
+            parsed.wallpaper.image_path(config),
+            Some(PathBuf::from(home).join("sky.png"))
+        );
+        let relative: Settings =
+            toml::from_str("[wallpaper]\nimage = \"sky.png\"\n").expect("valid");
+        assert_eq!(
+            relative.wallpaper.image_path(config),
+            Some(PathBuf::from("/etc/vaht/sky.png"))
+        );
+        assert_eq!(parsed.wallpaper.fit, WallpaperFit::Tile);
     }
 
     #[test]

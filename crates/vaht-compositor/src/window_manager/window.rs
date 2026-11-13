@@ -120,6 +120,9 @@ pub(crate) struct Window {
     workspace: Workspace,
     /// Whether it still waits for its first place, which needs its size.
     awaits_placement: bool,
+    /// Whether only the wallpaper shows through it where it is
+    /// translucent, as a rule says.
+    is_pseudo_transparent: bool,
     /// Counts the window while it exists.
     _tracked: Tracked,
 }
@@ -145,6 +148,7 @@ impl Window {
             state: WindowState::default(),
             workspace,
             awaits_placement: true,
+            is_pseudo_transparent: false,
             _tracked: ledger.track(ResourceKind::Window),
         }
     }
@@ -197,6 +201,12 @@ impl Window {
     /// Returns whether the window has had its first place.
     pub(crate) const fn is_placed(&self) -> bool {
         !self.awaits_placement
+    }
+
+    /// Returns whether only the wallpaper shows through the window where it
+    /// is translucent, not the windows below it.
+    pub(crate) const fn is_pseudo_transparent(&self) -> bool {
+        self.is_pseudo_transparent
     }
 
     /// Returns whether the window still waits for its first place and has
@@ -372,6 +382,12 @@ impl Window {
     /// Shows the window on every workspace, or only its own.
     pub(crate) const fn set_sticky(&mut self, is_sticky: bool) {
         self.state.is_sticky = is_sticky;
+    }
+
+    /// Lets only the wallpaper show through the window where it is
+    /// translucent, or the windows below it too.
+    pub(crate) const fn set_pseudo_transparent(&mut self, is_pseudo_transparent: bool) {
+        self.is_pseudo_transparent = is_pseudo_transparent;
     }
 
     /// Rolls the window up into its titlebar, or down again.

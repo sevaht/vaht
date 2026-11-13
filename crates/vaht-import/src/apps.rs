@@ -46,6 +46,14 @@ struct Block {
 }
 
 impl<'text> AppsFile<'text> {
+    /// Fluxbox's yes-or-no settings (lowercase) and the rule keys vaht
+    /// writes them as.
+    const FLAGS: [(&str, &str); 3] = [
+        ("sticky", "sticky"),
+        ("minimized", "minimized"),
+        ("pseudotransparent", "pseudo_transparent"),
+    ];
+
     /// Fluxbox's `[Position]` anchors and vaht's.
     const ANCHORS: [(&str, &str); 18] = [
         ("topleft", "top-left"),
@@ -172,15 +180,8 @@ impl<'text> AppsFile<'text> {
                 }
                 Err(_) => not_yet(),
             },
-            "sticky" => {
-                block
-                    .rule
-                    .insert("sticky", Item::Value(Value::from(is_yes)));
-            }
-            "minimized" => {
-                block
-                    .rule
-                    .insert("minimized", Item::Value(Value::from(is_yes)));
+            flag if let Some((_, key)) = Self::FLAGS.iter().find(|(name, _)| *name == flag) => {
+                block.rule.insert(key, Item::Value(Value::from(is_yes)));
             }
             "fullscreen" if is_yes => {
                 block
@@ -297,7 +298,8 @@ mod tests {
         let document = AppsFile::new(Path::new("apps"), APPS).convert(&mut report);
         assert_eq!(
             document.to_string(),
-            "[[rule]]\nmatch = { app_id = \"vaht-run\" }\nposition = { anchor = \"center\" }\n\n\
+            "[[rule]]\nmatch = { app_id = \"kitty\" }\npseudo_transparent = true\n\n\
+             [[rule]]\nmatch = { app_id = \"vaht-run\" }\nposition = { anchor = \"center\" }\n\n\
              [[rule]]\nmatch = { app_id = \"steam\" }\nworkspace = 2\n"
         );
         let notes: Vec<_> = report
@@ -305,14 +307,6 @@ mod tests {
             .iter()
             .map(|note| (note.line, note.reason))
             .collect();
-        assert_eq!(
-            notes,
-            [
-                (2, Reason::NotYetInVaht),
-                (1, Reason::NotYetInVaht),
-                (8, Reason::NotYetInVaht),
-            ],
-            "{report}"
-        );
+        assert_eq!(notes, [(8, Reason::NotYetInVaht)], "{report}");
     }
 }
