@@ -841,9 +841,10 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
   reported.
 - **The styles menu converts:** `[stylesdir]` and `[stylesmenu]` become
   the `themes` list, which shows vaht's themes (the directory is reported).
-  Choosing one runs `set-theme <name>`, which writes `theme = "<name>"`
-  into `settings.toml`, keeping the rest of the file, and the reload that
-  follows applies it, as Fluxbox's style menu writes `init`.
+  Choosing one runs `set-theme <name>`, which uses the theme at once
+  without writing anything. The change outlasts reloads, until
+  `settings.toml` is edited to name a theme itself; `save-settings` writes
+  it there (`theme = "<name>"`, the rest of the file kept as it was).
 - **The title dialog converts:** `SetTitleDialog` and the window menu's
   `[settitledialog]` become `set-title-dialog`, which shows the window's
   title to change (`vaht dialog title --window <id>`); `SetTitle` becomes

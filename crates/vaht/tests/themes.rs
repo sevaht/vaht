@@ -97,25 +97,37 @@ fn without_a_theme_named_the_built_in_one_applies() {
 }
 
 #[test]
-fn set_theme_names_the_theme_in_the_settings_and_vaht_takes_it() {
+fn set_theme_applies_in_place_and_save_settings_writes_it() {
     let settings = "# My settings.\n[focus]\nmodel = \"click\"\n";
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),
         &[
             ("settings.toml", settings),
-            ("themes/mine.toml", &theme("red", 20, 1)),
+            ("themes/mine.toml", &theme("#ff00ff", 30, 2)),
         ],
     );
-    let output = std::process::Command::new(EXECUTABLE)
-        .args(["msg", "run", "set-theme", "mine"])
-        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
-        .output()
-        .expect("vaht msg runs");
-    assert!(output.status.success(), "{output:?}");
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let run = |command: &str| {
+        let output = std::process::Command::new(EXECUTABLE)
+            .args(["msg", "run", command])
+            .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+            .output()
+            .expect("vaht msg runs");
+        assert!(output.status.success(), "{output:?}");
+    };
+    run("set-theme mine");
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(color, [255, 0, 255], "the theme is in use at once");
+    let file = vaht.config_directory().join("settings.toml");
+    let read = || std::fs::read_to_string(&file).expect("the settings are there");
+    assert_eq!(read(), settings, "nothing is written yet");
+    run("save-settings");
     vaht.wait_for_logged("configuration reloaded", 1);
-    let written = std::fs::read_to_string(vaht.config_directory().join("settings.toml"))
-        .expect("the settings are there");
+    let written = read();
     assert!(written.starts_with("# My settings.\n"), "{written}");
     assert!(written.contains("theme = \"mine\"\n"), "{written}");
     assert!(written.contains("model = \"click\""), "{written}");
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(color, [255, 0, 255], "and still after the reload");
 }

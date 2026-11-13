@@ -57,7 +57,7 @@ use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::{
     Action, Command, Config, ConfigSource, FocusModel, KeyChord, MenuGenerator, MenuRequest, Menus,
-    Modifiers, ResizeFrom, ThemeFile, WindowManagerAction,
+    Modifiers, ResizeFrom, SettingOverrides, ThemeFile, WindowManagerAction,
 };
 use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
@@ -131,6 +131,8 @@ pub struct Compositor {
     pub(crate) config: Config,
     /// Where the configuration comes from, and when it is read again.
     pub(crate) config_source: ConfigSource,
+    /// Settings changed in place, not yet saved.
+    overrides: SettingOverrides,
     /// Starts programs and reaps them.
     pub(crate) launcher: Launcher,
     /// Registers timers and other sources with the event loop.
@@ -275,6 +277,7 @@ impl Compositor {
             connected_clients: 0,
             config,
             config_source,
+            overrides: SettingOverrides::default(),
             launcher,
             loop_handle: handle.clone(),
             start_time: Instant::now(),
@@ -345,27 +348,17 @@ impl Compositor {
     pub(crate) fn reload_configuration(&mut self) {
         self.config_source.watch(&self.loop_handle, &self.ledger);
         match self.config_source.load() {
-            Ok(config) => {
-                // Menus are made from the configuration being replaced.
-                self.menus.close();
-                self.menus.set_search(config.settings.menus.search);
-                self.window_manager.apply_settings(&config.settings);
-                if config.settings.taskbar != self.config.settings.taskbar {
-                    self.taskbar = Taskbar::new(&config.settings.taskbar);
+            Ok(mut config) => {
+                if let Err(error) = self
+                    .overrides
+                    .apply(&mut config, self.config_source.directory())
+                {
+                    tracing::warn!(
+                        error = &error as &dyn std::error::Error,
+                        "a setting changed in place no longer applies"
+                    );
                 }
-                if config.theme != self.config.theme {
-                    self.window_manager.restyle(config.theme.metrics());
-                    if let Some(taskbar) = &mut self.taskbar {
-                        taskbar.invalidate();
-                    }
-                }
-                self.backdrop.apply(&config.settings.wallpaper);
-                // A reload is when icons installed or changed since show.
-                if let Some(taskbar) = &mut self.taskbar {
-                    taskbar.forget_icons();
-                }
-                self.config = config;
-                self.start_taskbar_services();
+                self.apply_config(config);
                 tracing::info!(
                     directory = %self.config_source.directory().display(),
                     "configuration reloaded"
@@ -376,6 +369,30 @@ impl Compositor {
                 "configuration rejected; the previous one stays in effect"
             ),
         }
+    }
+
+    /// Makes `config` the configuration in effect, changing what differs.
+    fn apply_config(&mut self, config: Config) {
+        // Menus are made from the configuration being replaced.
+        self.menus.close();
+        self.menus.set_search(config.settings.menus.search);
+        self.window_manager.apply_settings(&config.settings);
+        if config.settings.taskbar != self.config.settings.taskbar {
+            self.taskbar = Taskbar::new(&config.settings.taskbar);
+        }
+        if config.theme != self.config.theme {
+            self.window_manager.restyle(config.theme.metrics());
+            if let Some(taskbar) = &mut self.taskbar {
+                taskbar.invalidate();
+            }
+        }
+        self.backdrop.apply(&config.settings.wallpaper);
+        // A reload is when icons installed or changed since show.
+        if let Some(taskbar) = &mut self.taskbar {
+            taskbar.forget_icons();
+        }
+        self.config = config;
+        self.start_taskbar_services();
     }
 
     /// Asks for a frame to be drawn soon.
@@ -907,10 +924,23 @@ impl Compositor {
                 .launcher
                 .show_dialog("command", self.config_source.directory()),
             Action::SetTheme(name) => {
-                if let Err(error) = self.config_source.choose_theme(name) {
-                    tracing::warn!(
+                let mut config = self.config.clone();
+                match self
+                    .overrides
+                    .set_theme(name, &mut config, self.config_source.directory())
+                {
+                    Ok(()) => self.apply_config(config),
+                    Err(error) => tracing::warn!(
                         error = &error as &dyn std::error::Error,
                         "could not change the theme"
+                    ),
+                }
+            }
+            Action::SaveSettings => {
+                if let Err(error) = self.overrides.save(&self.config_source) {
+                    tracing::warn!(
+                        error = &error as &dyn std::error::Error,
+                        "could not save the settings"
                     );
                 }
             }

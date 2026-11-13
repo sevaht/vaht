@@ -35,7 +35,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "reload-theme",
     "rename-workspace",
     "restart",
-    "save-settings",
     "send-to-output",
     "set-setting",
     "taskbar-to-output",
@@ -256,9 +255,11 @@ pub(crate) enum Action {
     CommandDialog,
     /// Shows the title dialog for the window: its title, to change.
     SetTitleDialog,
-    /// Makes a theme the one `settings.toml` names (`set-theme <name>`),
-    /// which the reload that follows applies.
+    /// Uses a theme in place of the settings' (`set-theme <name>`), until
+    /// `save-settings` writes it to `settings.toml`.
     SetTheme(String),
+    /// Writes the settings changed in place into the files.
+    SaveSettings,
     /// Stops vaht.
     Exit,
     /// Sets an environment variable for programs vaht starts from now on.
@@ -386,6 +387,7 @@ impl Action {
                 Err("`set-theme` needs a theme's name".to_owned())
             }
             "set-theme" => Ok(Self::SetTheme(arguments.to_owned())),
+            "save-settings" => without_arguments(Self::SaveSettings),
             "root-menu" => without_arguments(Self::OpenMenu(MenuRequest::Root)),
             "window-menu" => without_arguments(Self::OpenMenu(MenuRequest::Window)),
             "workspace-menu" => without_arguments(Self::OpenMenu(MenuRequest::Workspace)),
@@ -492,6 +494,7 @@ impl fmt::Display for Action {
             Self::CommandDialog => formatter.write_str("command-dialog"),
             Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
             Self::SetTheme(name) => write!(formatter, "set-theme {name}"),
+            Self::SaveSettings => formatter.write_str("save-settings"),
             Self::Exit => formatter.write_str("exit"),
             Self::SetEnvironment { name, value } => {
                 write!(formatter, "set-environment {name} {value}")

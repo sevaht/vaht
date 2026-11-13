@@ -10,7 +10,7 @@ use std::time::Duration;
 use smithay::reexports::calloop::LoopHandle;
 
 use super::watch::ConfigWatch;
-use super::{Config, ConfigError, ThemeFile};
+use super::{Config, ConfigError};
 use crate::Compositor;
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
@@ -49,15 +49,14 @@ impl ConfigSource {
         &self.directory
     }
 
-    /// Makes the theme `name` the one `settings.toml` names, keeping the rest
-    /// of the file as it is; the watch then reloads the configuration.
+    /// Writes `theme = "<name>"` into `settings.toml`, keeping the rest of
+    /// the file as it is; the watch then reloads the configuration.
     ///
     /// # Errors
     ///
-    /// Returns an error if there is no such theme, or `settings.toml`
-    /// cannot be read, parsed or written.
-    pub(crate) fn choose_theme(&self, name: &str) -> Result<(), ConfigError> {
-        ThemeFile::find(&self.directory, name)?;
+    /// Returns an error if `settings.toml` cannot be read, parsed or
+    /// written.
+    pub(crate) fn write_theme(&self, name: &str) -> Result<(), ConfigError> {
         let path = self.directory.join("settings.toml");
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,

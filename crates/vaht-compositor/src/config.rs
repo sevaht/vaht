@@ -15,6 +15,7 @@ mod bindings;
 mod command;
 mod matcher;
 mod menus;
+mod overrides;
 mod rules;
 mod settings;
 mod source;
@@ -34,6 +35,7 @@ pub(crate) use self::command::{
 };
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};
+pub(crate) use self::overrides::SettingOverrides;
 pub(crate) use self::rules::{FocusStealing, Rules};
 pub(crate) use self::settings::{
     FocusModel, FrameSettings, MenuSearch, Settings, TaskbarAlign, TaskbarEdge, TaskbarSettings,
