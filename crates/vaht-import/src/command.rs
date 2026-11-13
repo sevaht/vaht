@@ -129,6 +129,9 @@ impl FluxboxCommand<'_> {
             "resize" => with("resize"),
             "resizeto" => with("resize-to"),
             "reconfigure" | "reconfig" => plain("reload"),
+            // fluxland's Restart reloads; with a command it would start
+            // another window manager instead.
+            "restart" if arguments.is_empty() => plain("reload"),
             "exit" | "quit" => plain("exit"),
             "setalpha" => with("set-alpha"),
             "settitle" => with("set-title"),
@@ -351,6 +354,7 @@ mod tests {
     #[case::set_alpha("SetAlpha 200 +10", r#""set-alpha 200 +10""#)]
     #[case::set_layer("SetLayer AboveDock", r#""set-layer above-dock""#)]
     #[case::set_title_dialog("SetTitleDialog", r#""set-title-dialog""#)]
+    #[case::restart("Restart", r#""reload""#)]
     #[case::set_layer_by_number("SetLayer 10", r#""set-layer bottom""#)]
     #[case::command_dialog("CommandDialog", r#""command-dialog""#)]
     #[case::fbrun("Exec fbrun", r#""run-dialog""#)]

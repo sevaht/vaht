@@ -297,6 +297,9 @@ impl MenuFiles {
             "nop" => line.label.as_ref().and_then(|_| item(&[])),
             "workspaces" => item(&[("generate", Value::from("workspaces"))]),
             "reconfig" => command("reload"),
+            // fluxland's [restart] reloads; one naming another window
+            // manager to start is not converted.
+            "restart" if line.command.is_none() => command("reload"),
             "exit" => command("exit"),
             "commanddialog" => command("command-dialog"),
             "settitledialog" => command("set-title-dialog"),
@@ -465,10 +468,9 @@ mod tests {
                 (2, Reason::Dropped),
                 (5, Reason::NotYetInVaht),
                 (8, Reason::Dropped),
-                (11, Reason::NotYetInVaht),
                 (15, Reason::Dropped),
             ],
-            "encoding, the icon, config, restart, endencoding"
+            "encoding, the icon, config, endencoding ([restart] reloads)"
         );
     }
 

@@ -828,6 +828,9 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
   unique, and `[include]` files are read in place. A submenu with nothing
   vaht can show is left out. Vaht's own window and workspace menus are
   written where the source has none.
+- **Restart converts to `reload`:** fluxland's `Restart` and `[restart]`
+  reload the configuration; one naming another window manager to start is
+  reported.
 - **The styles menu converts:** `[stylesdir]` and `[stylesmenu]` become
   the `themes` list, which shows vaht's themes (the directory is reported).
   Choosing one runs `set-theme <name>`, which writes `theme = "<name>"`
