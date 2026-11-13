@@ -95,6 +95,16 @@ impl Launcher {
         }
     }
 
+    /// Starts `command_line` with the shell, given `argument` as its
+    /// first argument (`$1`), as hooks are.
+    pub(crate) fn run_hook(&mut self, command_line: &str, argument: &str) {
+        let script = format!("{command_line} \"$1\"");
+        let arguments = ["sh", "-c", &script, "sh", argument].map(OsStr::new);
+        if let Err(error) = self.start(Path::new(Self::SHELL), &arguments, command_line, None) {
+            Self::warn_not_started(&error, command_line);
+        }
+    }
+
     /// Returns whether the process `pid` is one of vaht's dialogs, still
     /// running.
     pub(crate) fn is_dialog(&self, pid: i32) -> bool {

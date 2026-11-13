@@ -107,6 +107,19 @@ pub(crate) struct MenuBuilder<'state> {
     current_theme: Option<&'state str>,
     /// Each window's icon, for lists of windows that show them.
     window_icons: HashMap<WindowId, vaht_ui::Icon>,
+    /// The profiles and outputs, for the `profiles` and `outputs` lists.
+    outputs: OutputChoices,
+}
+
+/// The display profiles and outputs there are to choose from.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OutputChoices {
+    /// The profiles' names, in the order written.
+    pub(crate) profiles: Vec<String>,
+    /// The profile applied, if one is.
+    pub(crate) profile: Option<String>,
+    /// The outputs on, by connector, the primary one first.
+    pub(crate) outputs: Vec<String>,
 }
 
 impl<'state> MenuBuilder<'state> {
@@ -137,7 +150,15 @@ impl<'state> MenuBuilder<'state> {
             themes: Vec::new(),
             current_theme: None,
             window_icons: HashMap::new(),
+            outputs: OutputChoices::default(),
         }
+    }
+
+    /// Returns the builder listing the profiles and outputs of `choices`.
+    #[must_use]
+    pub(crate) fn with_outputs(mut self, choices: OutputChoices) -> Self {
+        self.outputs = choices;
+        self
     }
 
     /// Returns the builder showing `icons` beside the windows they belong
@@ -259,6 +280,43 @@ impl<'state> MenuBuilder<'state> {
         })
     }
 
+    /// Returns the `profiles` list: each display profile, the one applied
+    /// checked.
+    fn profile_items(&self) -> Vec<MenuItem> {
+        self.outputs
+            .profiles
+            .iter()
+            .map(|name| MenuItem::Choice {
+                label: name.clone(),
+                choice: MenuChoice::Run {
+                    command: Command::Run(Action::ApplyProfile(name.clone())),
+                    window: None,
+                },
+                mark: Some(self.outputs.profile.as_ref() == Some(name)),
+                icon: None,
+            })
+            .collect()
+    }
+
+    /// Returns the `outputs` list: each output on, the primary one
+    /// checked.
+    fn output_items(&self) -> Vec<MenuItem> {
+        self.outputs
+            .outputs
+            .iter()
+            .enumerate()
+            .map(|(index, connector)| MenuItem::Choice {
+                label: connector.clone(),
+                choice: MenuChoice::Run {
+                    command: Command::Run(Action::SetPrimaryOutput(connector.clone())),
+                    window: None,
+                },
+                mark: Some(index == 0),
+                icon: None,
+            })
+            .collect()
+    }
+
     /// Returns the placed windows, in the order they opened, a minimized
     /// one's title in parentheses; choosing one brings it forward.
     fn window_list(&self) -> Vec<MenuItem> {
@@ -336,6 +394,8 @@ impl<'state> MenuBuilder<'state> {
                     icon: None,
                 })
                 .collect(),
+            MenuGenerator::Profiles => self.profile_items(),
+            MenuGenerator::Outputs => self.output_items(),
             MenuGenerator::Layer => {
                 let current = self.window.and_then(|window| manager.layer_of(window));
                 StackLayer::ALL

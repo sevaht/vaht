@@ -78,7 +78,10 @@ fn readable(reply: &Reply) -> String {
                 let _ = writeln!(text, "{mark} {}\t{}", workspace.number, workspace.name);
             }
         }
-        Reply::Outputs { outputs } => {
+        Reply::Outputs { outputs, profile } => {
+            if let Some(profile) = profile {
+                let _ = writeln!(text, "profile {profile}");
+            }
             for output in outputs {
                 output_lines(&mut text, output);
             }
@@ -207,10 +210,12 @@ mod tests {
                     scale: 1.0,
                 },
             ],
+            profile: Some("desk".to_owned()),
         };
         assert_eq!(
             readable(&reply),
-            "* HDMI-A-1\t1920x1080@60\t0,0\tscale 1\tAcer XB271HU\n    \
+            "profile desk\n\
+             * HDMI-A-1\t1920x1080@60\t0,0\tscale 1\tAcer XB271HU\n    \
              match = { connector = \"HDMI-A-1\" }\n    \
              match = { make = \"Acer\", model = \"XB271HU\" }\n\
              - eDP-1\toff\n    \

@@ -37,7 +37,8 @@ pub(crate) use self::command::{
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};
 pub(crate) use self::outputs::{
-    OutputEntry, OutputIdentity, OutputMode, OutputScale, OutputSettings, OutputTransform,
+    OutputEntry, OutputIdentity, OutputMode, OutputPlan, OutputProfile, OutputScale,
+    OutputSettings, OutputTransform,
 };
 pub(crate) use self::overrides::SettingOverrides;
 pub(crate) use self::rules::{FocusStealing, Rules};

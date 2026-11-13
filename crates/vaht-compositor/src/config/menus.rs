@@ -283,21 +283,26 @@ pub(crate) enum MenuGenerator {
     /// The themes there are, the one in use checked: choosing one makes it
     /// the theme.
     Themes,
+    /// The display profiles, the one applied checked: choosing one
+    /// applies it.
+    Profiles,
+    /// The outputs on, the primary one checked: choosing one makes it
+    /// primary.
+    Outputs,
 }
 
 impl MenuGenerator {
     /// The generators by name.
-    const NAMES: [(&str, Self); 6] = [
+    const NAMES: [(&str, Self); 8] = [
         ("workspaces", Self::Workspaces),
         ("send-to-workspace", Self::SendToWorkspace),
         ("window-list", Self::WindowList),
         ("alpha", Self::Alpha),
         ("layer", Self::Layer),
         ("themes", Self::Themes),
+        ("profiles", Self::Profiles),
+        ("outputs", Self::Outputs),
     ];
-
-    /// Generators of 02 §8 that vaht does not have yet.
-    const PLANNED: [&str; 2] = ["outputs", "profiles"];
 
     /// Returns what the item says when its label is not given.
     pub(crate) const fn label(self) -> &'static str {
@@ -308,6 +313,8 @@ impl MenuGenerator {
             Self::Alpha => "Transparency",
             Self::Layer => "Layer",
             Self::Themes => "Themes",
+            Self::Profiles => "Display Profiles",
+            Self::Outputs => "Primary Output",
         }
     }
 }
@@ -315,18 +322,13 @@ impl MenuGenerator {
 impl<'de> serde::Deserialize<'de> for MenuGenerator {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let name = String::deserialize(deserializer)?;
-        if Self::PLANNED.contains(&name.as_str()) {
-            return Err(de::Error::custom(format!(
-                "the `{name}` list is not available in vaht yet"
-            )));
-        }
         Self::NAMES
             .iter()
             .find(|(known, _)| *known == name)
             .map(|&(_, generator)| generator)
             .ok_or_else(|| {
                 de::Error::custom(format!(
-                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list, alpha, layer and themes"
+                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list, alpha, layer, themes, profiles and outputs"
                 ))
             })
     }
@@ -418,7 +420,6 @@ mod tests {
         "[menu.root]\nitems = [{ command = \"reload\", submenu = \"root\" }]\n",
         "one of command"
     )]
-    #[case::planned_list("[menu.root]\nitems = [{ generate = \"outputs\" }]\n", "not available")]
     #[case::unknown_list("[menu.root]\nitems = [{ generate = \"pets\" }]\n", "no list")]
     #[case::empty_item("[menu.root]\nitems = [{}]\n", "needs a label")]
     fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {

@@ -271,6 +271,14 @@ pub(crate) enum Action {
     SetTheme(String),
     /// Writes the settings changed in place into the files.
     SaveSettings,
+    /// Applies the display profile with this name (`outputs.toml`).
+    ApplyProfile(String),
+    /// Applies the next display profile whose outputs are connected.
+    CycleProfile,
+    /// Makes the next output primary.
+    CyclePrimaryOutput,
+    /// Makes the output on this connector primary.
+    SetPrimaryOutput(String),
     /// Stops vaht.
     Exit,
     /// Sets an environment variable for programs vaht starts from now on.
@@ -399,6 +407,16 @@ impl Action {
             }
             "set-theme" => Ok(Self::SetTheme(arguments.to_owned())),
             "save-settings" => without_arguments(Self::SaveSettings),
+            "apply-profile" if arguments.is_empty() => {
+                Err("`apply-profile` needs a profile's name".to_owned())
+            }
+            "apply-profile" => Ok(Self::ApplyProfile(arguments.to_owned())),
+            "cycle-profile" => without_arguments(Self::CycleProfile),
+            "cycle-primary-output" => without_arguments(Self::CyclePrimaryOutput),
+            "set-primary-output" if arguments.is_empty() => {
+                Err("`set-primary-output` needs an output's connector, such as HDMI-A-1".to_owned())
+            }
+            "set-primary-output" => Ok(Self::SetPrimaryOutput(arguments.to_owned())),
             "root-menu" => without_arguments(Self::OpenMenu(MenuRequest::Root)),
             "window-menu" => without_arguments(Self::OpenMenu(MenuRequest::Window)),
             "workspace-menu" => without_arguments(Self::OpenMenu(MenuRequest::Workspace)),
@@ -506,6 +524,12 @@ impl fmt::Display for Action {
             Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
             Self::SetTheme(name) => write!(formatter, "set-theme {name}"),
             Self::SaveSettings => formatter.write_str("save-settings"),
+            Self::ApplyProfile(name) => write!(formatter, "apply-profile {name}"),
+            Self::CycleProfile => formatter.write_str("cycle-profile"),
+            Self::CyclePrimaryOutput => formatter.write_str("cycle-primary-output"),
+            Self::SetPrimaryOutput(connector) => {
+                write!(formatter, "set-primary-output {connector}")
+            }
             Self::Exit => formatter.write_str("exit"),
             Self::SetEnvironment { name, value } => {
                 write!(formatter, "set-environment {name} {value}")

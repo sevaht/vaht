@@ -79,40 +79,39 @@ impl IpcHandler for Compositor {
                 Reply::Workspaces { workspaces }
             }
             Request::Outputs {} => Reply::Outputs {
-                outputs: self.output_infos(),
+                outputs: output_infos(&self.outputs),
+                profile: self.outputs.profile().map(str::to_owned),
             },
         }
     }
 }
 
-impl Compositor {
-    /// Describes every output, on or off, for IPC.
-    fn output_infos(&self) -> Vec<OutputInfo> {
-        self.outputs
-            .connected()
-            .map(|output| {
-                let identity = Outputs::identity(output);
-                let is_enabled = self.outputs.iter().any(|on| on == output);
-                let location = output.current_location();
-                OutputInfo {
-                    connector: identity.connector,
-                    make: identity.make,
-                    model: identity.model,
-                    serial: identity.serial,
-                    is_enabled,
-                    is_primary: output == self.outputs.primary(),
-                    mode: output
-                        .current_mode()
-                        .filter(|_| is_enabled)
-                        .map(|mode| ModeInfo {
-                            width: mode.size.w,
-                            height: mode.size.h,
-                            refresh_millihertz: mode.refresh,
-                        }),
-                    position: [location.x, location.y],
-                    scale: output.current_scale().fractional_scale(),
-                }
-            })
-            .collect()
-    }
+/// Describes each of `outputs`, on or off, for IPC.
+fn output_infos(outputs: &Outputs) -> Vec<OutputInfo> {
+    outputs
+        .connected()
+        .map(|output| {
+            let identity = Outputs::identity(output);
+            let is_enabled = outputs.iter().any(|on| on == output);
+            let location = output.current_location();
+            OutputInfo {
+                connector: identity.connector,
+                make: identity.make,
+                model: identity.model,
+                serial: identity.serial,
+                is_enabled,
+                is_primary: output == outputs.primary(),
+                mode: output
+                    .current_mode()
+                    .filter(|_| is_enabled)
+                    .map(|mode| ModeInfo {
+                        width: mode.size.w,
+                        height: mode.size.h,
+                        refresh_millihertz: mode.refresh,
+                    }),
+                position: [location.x, location.y],
+                scale: output.current_scale().fractional_scale(),
+            }
+        })
+        .collect()
 }

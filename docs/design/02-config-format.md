@@ -39,7 +39,7 @@ Everything lives under `$XDG_CONFIG_HOME/vaht/` (normally `~/.config/vaht/`):
 | `bindings.toml` | Key and mouse bindings, key modes | `keys` |
 | `rules.toml` | Per-window rules | `apps` |
 | `menus.toml` | Root menu, window menu, custom menus | `menu`, `windowmenu` |
-| `outputs.toml` | Per-output settings, display profiles, profile hooks | `session.output.*` in `init`, av-output-switcher's `profiles.json` (video part) |
+| `outputs.toml` | Per-output settings, display profiles, profile hooks | `session.output.*` in `init`; av-output-switcher's `profiles.json` (video part), converted by hand |
 | `themes/<name>.toml` | Themes; also read from `/usr/share/vaht/themes/` | `styles/*`, `overlay` |
 
 - **`overlay` disappears.** My overlay existed only to stop styles from
@@ -600,8 +600,9 @@ items = [
   `off`, from Fluxbox's `menuSearch`) highlights the first item found by
   what was typed, a letter finding nothing is not kept, and Backspace takes
   one back. `[menus] window_icons` (from `clientMenu.usePixmap`) shows
-  each window's icon in lists of windows. Not yet: `pipe`, `icon`, the
-  `outputs` and `profiles` lists,
+  each window's icon in lists of windows. `generate` also lists the
+  display profiles (`profiles`, the one applied checked) and the outputs
+  (`outputs`, choosing one makes it primary). Not yet: `pipe`, `icon`,
   and the GTK presenter.
 - **Dropped:**
   - Fluxbox's `[config]` editor menu: settings are reached through
@@ -645,8 +646,8 @@ outputs = [
 # outputs not listed are turned off while this profile is applied
 
 [hooks]
-profile_applied = "~/bin/on-profile"           # JSON on stdin, VAHT_PROFILE in the environment
-primary_output_changed = "~/bin/on-primary"
+profile_applied = "~/bin/on-profile"           # the profile's name as $1
+primary_output_changed = "~/bin/on-primary"    # the output's connector as $1
 ```
 
 - **Built so far:** `[[output]]`, applied at start and on every reload:
@@ -658,8 +659,22 @@ primary_output_changed = "~/bin/on-primary"
   every output would be off, the first stays on. Windows on an output
   turned off move to the primary one. The nested backend's one output
   is the host window: it cannot be turned off, and its size is its mode.
-  `vrr` is read; only the DRM backend will act on it. Not yet: profiles
-  and hooks.
+  `vrr` is read; only the DRM backend will act on it.
+- **Profiles (built).** A profile applies itself at start, on reload and
+  when outputs come and go, if every output its `when_connected` lists is
+  there (the one listing most wins, the first written on a tie); a
+  profile applied stays while its outputs are connected. `apply-profile
+  <name>`, `cycle-profile` (the next one written whose outputs are all
+  connected) and `cycle-primary-output` (through the profile's `primary`
+  candidates, else the outputs on, left to right) act at once;
+  `set-primary-output <connector>` picks one. A primary output chosen so
+  stays while it is on. Menus list them with `generate = "profiles"` and
+  `generate = "outputs"`.
+- **Hooks (built).** Each runs with the shell, given the profile's name
+  or the primary output's connector as its one argument (`$1`), as
+  av-output-switcher's hooks are: `profile_applied` after a profile is
+  applied, `primary_output_changed` after the primary output changes,
+  and both at start. `vaht msg outputs --json` gives the whole layout.
 - **How the two sections combine.** `[[output]]` entries are the baseline.
   When `when_connected` selects a profile, that profile overrides the baseline
   for the outputs it lists. With no profiles, the baseline is everything.
@@ -669,9 +684,10 @@ primary_output_changed = "~/bin/on-primary"
     (`adaptiveSync` becomes `vrr` `on` or `off`). `toolbar.onoutput`
     becomes `[taskbar] output`, and so does `toolbar.onhead` past 1 when
     the positions in `init` say which output that head is.
-  - It converts av-output-switcher's `profiles.json` into `[[profile]]`
-    entries. Its `pactl_sink_option_regexes` are written out as a commented
-    example hook script, not as config.
+- **av-output-switcher gets no importer (decided).** It has one user, so
+  my `profiles.json` was converted to `[[profile]]` entries by hand. Its
+  audio half (`pactl_sink_option_regexes`, `--cycle-pactl-sink`) stays
+  with av-output-switcher.
 
 ---
 
@@ -853,7 +869,6 @@ corner_radius = 5
 ```
 vaht import fluxbox  [--from ~/.fluxbox] [--to ~/.config/vaht] [--force]
 vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/themes/<name>.toml
-vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profiles.json]
 ```
 
 - **There is one importer, for the Fluxbox format (decided).** fluxland was

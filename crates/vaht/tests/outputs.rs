@@ -8,7 +8,7 @@ use std::process::Command;
 use vaht_ipc::{OutputInfo, Reply};
 use vaht_test_support::{
     BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, TestClient, TestLayer, WINDOW_COLOR, keys,
-    solid_png,
+    solid_png, wait_for_file,
 };
 
 /// The executable cargo built for these tests.
@@ -63,13 +63,38 @@ fn listed_outputs(vaht: &HeadlessVaht) -> Vec<OutputInfo> {
         .output()
         .expect("vaht msg runs");
     match serde_json::from_slice(&output.stdout).expect("one JSON reply") {
-        Reply::Outputs { outputs } => outputs,
+        Reply::Outputs { outputs, .. } => outputs,
         other @ (Reply::Version { .. }
         | Reply::Done {}
         | Reply::Windows { .. }
         | Reply::Workspaces { .. }
         | Reply::Error { .. }) => panic!("not an output list: {other:?}"),
     }
+}
+
+/// Runs the command `command` in `vaht`, as `vaht msg run` does, and
+/// waits until it is carried out.
+fn run(vaht: &HeadlessVaht, command: &[&str]) {
+    let output = Command::new(EXECUTABLE)
+        .args(["msg", "run"])
+        .args(command)
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .output()
+        .expect("vaht msg runs");
+    assert!(output.status.success(), "{command:?}: {output:?}");
+}
+
+/// Returns which outputs `vaht msg outputs` lists as on, by connector,
+/// the primary one marked with `*`.
+fn outputs_on(vaht: &HeadlessVaht) -> Vec<String> {
+    listed_outputs(vaht)
+        .into_iter()
+        .filter(|output| output.is_enabled)
+        .map(|output| {
+            let mark = if output.is_primary { "*" } else { "" };
+            format!("{mark}{}", output.connector)
+        })
+        .collect()
 }
 
 /// Rewrites `vaht`'s `outputs.toml` with `outputs` and waits until it
@@ -246,4 +271,51 @@ fn turning_an_output_off_brings_its_windows_to_the_primary_one() {
             .is_some(),
         "the window came to the first output"
     );
+}
+
+/// Two profiles, the first applying itself when HEADLESS-2 is there, and
+/// hooks writing what they are told into `results`.
+fn profiles(results: &Path) -> String {
+    let hook = |name: &str| format!("printf '%s\\n' >> {}", results.join(name).display());
+    format!(
+        "[[profile]]\nname = \"right\"\nwhen_connected = [{{ connector = \"HEADLESS-2\" }}]\n\
+         outputs = [{{ match = {{ connector = \"HEADLESS-2\" }}, position = [0, 0] }}]\n\n\
+         [[profile]]\nname = \"both\"\n\
+         primary = [{{ connector = \"HEADLESS-1\" }}, {{ connector = \"HEADLESS-2\" }}]\n\
+         outputs = [\n  {{ match = {{ connector = \"HEADLESS-1\" }} }},\n  \
+         {{ match = {{ connector = \"HEADLESS-2\" }} }},\n]\n\n\
+         [hooks]\nprofile_applied = \"{}\"\nprimary_output_changed = \"{}\"\n",
+        hook("profile"),
+        hook("primary")
+    )
+}
+
+#[test]
+fn a_profile_applies_itself_and_cycling_moves_through_profiles_and_primaries() {
+    let results = tempfile::tempdir().expect("a directory for the hooks");
+    let (vaht, _client) = with_files("", &profiles(results.path()));
+    let profile_file = results.path().join("profile");
+    let primary_file = results.path().join("primary");
+    assert_eq!(
+        outputs_on(&vaht),
+        ["*HEADLESS-2"],
+        "the right profile applied itself"
+    );
+    // At start, the hooks hear of the profile and the primary output.
+    wait_for_file(&profile_file, |text| text == "right\n");
+    wait_for_file(&primary_file, |text| text == "HEADLESS-2\n");
+
+    run(&vaht, &["cycle-profile"]);
+    assert_eq!(outputs_on(&vaht), ["*HEADLESS-1", "HEADLESS-2"]);
+    wait_for_file(&profile_file, |text| text == "right\nboth\n");
+    wait_for_file(&primary_file, |text| text == "HEADLESS-2\nHEADLESS-1\n");
+
+    run(&vaht, &["cycle-primary-output"]);
+    assert_eq!(outputs_on(&vaht), ["HEADLESS-1", "*HEADLESS-2"]);
+    wait_for_file(&primary_file, |text| {
+        text == "HEADLESS-2\nHEADLESS-1\nHEADLESS-2\n"
+    });
+
+    run(&vaht, &["apply-profile", "right"]);
+    assert_eq!(outputs_on(&vaht), ["*HEADLESS-2"]);
 }

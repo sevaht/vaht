@@ -110,9 +110,7 @@ impl ScreenCapture {
             .map_err(CaptureError::Renderer)?;
         Ok(pixels.to_vec())
     }
-}
 
-impl ScreenCapture {
     /// Fills `frame` with the image `scene` makes of `output`, or fails it;
     /// `time` is when the image was made, from vaht's start.
     fn capture(&mut self, frame: Frame, scene: &Scene<'_>, output: &Output, time: Duration) {

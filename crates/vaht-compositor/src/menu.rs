@@ -26,7 +26,7 @@ use smithay::utils::{Logical, Point, Scale};
 use vaht_ui::{Panel, Theme, Typesetter};
 
 pub(crate) use self::content::{MenuContent, MenuGeometry};
-pub(crate) use self::model::{MenuBuilder, MenuChoice, MenuItem, MenuModel};
+pub(crate) use self::model::{MenuBuilder, MenuChoice, MenuItem, MenuModel, OutputChoices};
 use crate::Compositor;
 use crate::config::{MenuRequest, MenuSearch};
 use crate::event_source::Timer;

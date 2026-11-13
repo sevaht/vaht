@@ -67,8 +67,8 @@ use crate::input::{self, AfterClick, ButtonPress, Input, KeyPress, PressOutcome}
 use crate::ipc::IpcServer;
 use crate::launcher::Launcher;
 use crate::layers::{LayerMaps, Layers, OutputLayers};
-use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack};
-use crate::outputs::Outputs;
+use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack, OutputChoices};
+use crate::outputs::{OutputChanges, Outputs};
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::{
@@ -250,7 +250,9 @@ impl Compositor {
         });
 
         let mut outputs = backend.outputs();
-        outputs.configure(&config.outputs, &mut backend);
+        let mut output_changes = outputs.configure(&config.outputs, &mut backend);
+        // At start, the primary output is news to the hooks whatever it is.
+        output_changes.primary = Some(outputs.primary().name());
         let window_manager = WindowManager::new(
             &config.settings,
             Self::bare_output_areas(&outputs),
@@ -314,6 +316,7 @@ impl Compositor {
         for command_line in &compositor.config.settings.session.autostart {
             compositor.launcher.run(command_line);
         }
+        compositor.follow_output_changes(&output_changes);
         Ok(compositor)
     }
 
@@ -409,12 +412,8 @@ impl Compositor {
                 taskbar.invalidate();
             }
         }
-        if config.outputs != self.config.outputs {
-            self.outputs.configure(&config.outputs, &mut self.backend);
-            if let Some(taskbar) = &mut self.taskbar {
-                taskbar.invalidate();
-            }
-        }
+        let output_changes = (config.outputs != self.config.outputs)
+            .then(|| self.outputs.configure(&config.outputs, &mut self.backend));
         self.backdrop.apply(&config.settings.wallpaper);
         // A reload is when icons installed or changed since show.
         self.icons.forget();
@@ -423,6 +422,30 @@ impl Compositor {
         }
         self.config = config;
         self.start_taskbar_services();
+        if let Some(changes) = output_changes {
+            self.follow_output_changes(&changes);
+        }
+    }
+
+    /// Follows the outputs being set up again: the taskbar is laid out
+    /// anew, and the hooks are told of `changes`.
+    fn follow_output_changes(&mut self, changes: &OutputChanges) {
+        if let Some(taskbar) = &mut self.taskbar {
+            taskbar.invalidate();
+        }
+        let hooks = &self.config.outputs.hooks;
+        if let Some(profile) = &changes.applied_profile {
+            tracing::info!(profile, "output profile applied");
+            if let Some(hook) = &hooks.profile_applied {
+                self.launcher.run_hook(hook, profile);
+            }
+        }
+        if let Some(output) = &changes.primary
+            && let Some(hook) = &hooks.primary_output_changed
+        {
+            self.launcher.run_hook(hook, output);
+        }
+        self.schedule_render();
     }
 
     /// Asks for a frame to be drawn soon.
@@ -1018,6 +1041,35 @@ impl Compositor {
                     ),
                 }
             }
+            Action::ApplyProfile(name) => {
+                match self
+                    .outputs
+                    .apply_profile(name, &self.config.outputs, &mut self.backend)
+                {
+                    Ok(changes) => self.follow_output_changes(&changes),
+                    Err(message) => tracing::warn!(message, "the profile was not applied"),
+                }
+            }
+            Action::CycleProfile => {
+                if let Some(changes) = self
+                    .outputs
+                    .cycle_profile(&self.config.outputs, &mut self.backend)
+                {
+                    self.follow_output_changes(&changes);
+                } else {
+                    tracing::info!("no other profile fits the outputs connected");
+                }
+            }
+            Action::CyclePrimaryOutput => {
+                if let Some(changes) = self.outputs.cycle_primary(&self.config.outputs) {
+                    self.follow_output_changes(&changes);
+                }
+            }
+            Action::SetPrimaryOutput(connector) => {
+                if let Some(changes) = self.outputs.choose_primary(connector) {
+                    self.follow_output_changes(&changes);
+                }
+            }
             Action::SaveSettings => {
                 if let Err(error) = self.overrides.save(&self.config_source) {
                     tracing::warn!(
@@ -1063,7 +1115,17 @@ impl Compositor {
                 ThemeFile::available(self.config_source.directory()),
                 self.config.settings.theme.as_deref(),
             )
-            .with_window_icons(icons);
+            .with_window_icons(icons)
+            .with_outputs(OutputChoices {
+                profiles: self
+                    .config
+                    .outputs
+                    .profile_names()
+                    .map(str::to_owned)
+                    .collect(),
+                profile: self.outputs.profile().map(str::to_owned),
+                outputs: self.outputs.iter().map(Output::name).collect(),
+            });
         let model = match request {
             MenuRequest::Root => builder.build(Menus::ROOT),
             MenuRequest::Window => window.and_then(|_| builder.build(Menus::WINDOW)),

@@ -3,17 +3,19 @@
 //! The backend finds the outputs and draws into them; [`Outputs`] knows
 //! their layout: which are on, which one is primary, where each is, and
 //! which one a point or an area belongs to. It sets them up as
-//! `outputs.toml` says ([`Outputs::configure`]), asking the backend
-//! ([`OutputControl`]) for what only it can do. An output's position lives
-//! in its own state, which the backend reads when it draws, so the layout
-//! has one owner and the backend never keeps a copy.
+//! `outputs.toml` says, profiles included ([`Outputs::configure`],
+//! [`Outputs::apply_profile`]), asking the backend ([`OutputControl`]) for
+//! what only it can do. An output's position lives in its own state,
+//! which the backend reads when it draws, so the layout has one owner and
+//! the backend never keeps a copy.
 
-use smithay::output::{Output, Scale};
+mod arrangement;
+
+use smithay::output::Output;
 use smithay::utils::{Logical, Point, Rectangle, Transform};
 
-use crate::config::{
-    OutputEntry, OutputIdentity, OutputMode, OutputScale, OutputSettings, OutputTransform,
-};
+use self::arrangement::Arrangement;
+use crate::config::{OutputIdentity, OutputMode, OutputProfile, OutputSettings};
 
 /// What only the backend can do to an output.
 pub(crate) trait OutputControl {
@@ -29,6 +31,15 @@ pub(crate) trait OutputControl {
     fn set_transform(&mut self, output: &Output, transform: Transform);
 }
 
+/// What changed when the outputs were set up again, for the hooks.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct OutputChanges {
+    /// The profile just applied, if one was.
+    pub(crate) applied_profile: Option<String>,
+    /// The new primary output's connector, if it changed.
+    pub(crate) primary: Option<String>,
+}
+
 /// The outputs on, the primary one first, and those off.
 #[derive(Debug, Clone)]
 pub(crate) struct Outputs {
@@ -39,6 +50,11 @@ pub(crate) struct Outputs {
     /// Every output the backend has, on or off, in the order it found
     /// them.
     connected: Vec<Output>,
+    /// The name of the profile applied, if one is.
+    profile: Option<String>,
+    /// The connector `cycle-primary-output` made primary, which stays so
+    /// while it is on.
+    chosen_primary: Option<String>,
 }
 
 impl Outputs {
@@ -52,101 +68,180 @@ impl Outputs {
             primary: first,
             others: rest,
             connected,
+            profile: None,
+            chosen_primary: None,
         };
         Self::lay_out_in_a_row(0, outputs.iter());
         outputs
     }
 
+    /// Returns the name of the profile applied, if one is.
+    pub(crate) fn profile(&self) -> Option<&str> {
+        self.profile.as_deref()
+    }
+
     /// Sets the outputs up as `settings` say, with `backend` doing what
-    /// only it can: each output follows the first entry matching it. If
-    /// the settings would turn every output off, the first stays on.
+    /// only it can. The profile applied stays while its outputs are all
+    /// connected; otherwise the one the connected outputs call for applies
+    /// itself, if any does.
     pub(crate) fn configure(
         &mut self,
         settings: &OutputSettings,
         backend: &mut impl OutputControl,
-    ) {
-        let mut on: Vec<(Output, Option<&OutputEntry>)> = Vec::new();
-        for output in &self.connected {
-            let entry = settings.entry_for(Self::identity(output).as_identity());
-            if entry.is_some_and(|entry| !entry.enabled) {
-                backend.set_enabled(output, false);
-            } else {
-                on.push((output.clone(), entry));
-            }
+    ) -> OutputChanges {
+        let identities = self.connected_identities();
+        let connected: Vec<_> = identities.iter().map(OwnedIdentity::as_identity).collect();
+        let kept = self
+            .profile
+            .as_deref()
+            .and_then(|name| settings.profile(name))
+            .filter(|profile| profile.fits(&connected));
+        let profile = kept.or_else(|| settings.automatic_profile(&connected));
+        let is_new = profile.map(OutputProfile::name) != self.profile.as_deref();
+        self.arrange(settings, profile, backend, is_new)
+    }
+
+    /// Applies the profile called `name`.
+    ///
+    /// # Errors
+    ///
+    /// Returns why not, for a person: there is no such profile, or an
+    /// output it lists is not connected.
+    pub(crate) fn apply_profile(
+        &mut self,
+        name: &str,
+        settings: &OutputSettings,
+        backend: &mut impl OutputControl,
+    ) -> Result<OutputChanges, String> {
+        let profile = settings
+            .profile(name)
+            .ok_or_else(|| format!("outputs.toml has no profile called {name}"))?;
+        let identities = self.connected_identities();
+        let connected: Vec<_> = identities.iter().map(OwnedIdentity::as_identity).collect();
+        if !profile.fits(&connected) {
+            return Err(format!(
+                "the profile {name} lists an output that is not connected"
+            ));
         }
-        if on.is_empty() {
-            tracing::warn!("outputs.toml turns every output off; the first stays on");
-            let first = self
-                .connected
-                .first()
-                .cloned()
-                .unwrap_or_else(|| self.primary.clone());
-            on.push((first, None));
-        }
-        for (output, entry) in &on {
-            backend.set_enabled(output, true);
-            backend.set_mode(output, entry.and_then(|entry| entry.mode));
-            let transform = entry.map_or(OutputTransform::Normal, |entry| entry.transform);
-            backend.set_transform(output, Self::turned(transform));
-            let scale = entry
-                .and_then(|entry| entry.scale)
-                .map_or(1.0, OutputScale::get);
-            output.change_current_state(None, None, Some(Scale::Fractional(scale)), None);
-        }
-        // Those placed by hand first; the rest go to their right.
-        let mut right = 0;
-        for (output, entry) in &on {
-            if let Some([x, y]) = entry.and_then(|entry| entry.position) {
-                output.change_current_state(None, None, None, Some((x, y).into()));
-                let area = Self::geometry(output);
-                right = right.max(area.loc.x + area.size.w);
-            }
-        }
-        let unplaced = on
-            .iter()
-            .filter(|(_, entry)| entry.and_then(|entry| entry.position).is_none())
-            .map(|(output, _)| output);
-        Self::lay_out_in_a_row(right, unplaced);
-        // Without an entry saying, Fluxbox's head 1: the leftmost, then
-        // topmost, output.
-        let primary_index = on
-            .iter()
-            .position(|(_, entry)| entry.is_some_and(|entry| entry.primary))
-            .or_else(|| {
-                on.iter()
-                    .enumerate()
-                    .min_by_key(|(_, (output, _))| {
-                        let corner = output.current_location();
-                        (corner.x, corner.y, output.name())
-                    })
-                    .map(|(index, _)| index)
+        Ok(self.arrange(settings, Some(profile), backend, true))
+    }
+
+    /// Applies the next profile after the one applied whose outputs are
+    /// all connected, if there is one.
+    pub(crate) fn cycle_profile(
+        &mut self,
+        settings: &OutputSettings,
+        backend: &mut impl OutputControl,
+    ) -> Option<OutputChanges> {
+        let identities = self.connected_identities();
+        let connected: Vec<_> = identities.iter().map(OwnedIdentity::as_identity).collect();
+        let next = settings.profile_after(self.profile.as_deref(), &connected)?;
+        Some(self.arrange(settings, Some(next), backend, true))
+    }
+
+    /// Makes the next output primary: among the applied profile's primary
+    /// candidates if it names any, else among the outputs on, left to
+    /// right. None if no other output can be.
+    pub(crate) fn cycle_primary(&mut self, settings: &OutputSettings) -> Option<OutputChanges> {
+        let mut on: Vec<&Output> = self.iter().collect();
+        on.sort_by_key(|output| Self::head_order(output));
+        let identities: Vec<_> = on.iter().map(|output| Self::identity(output)).collect();
+        let borrowed: Vec<_> = identities.iter().map(OwnedIdentity::as_identity).collect();
+        let named: Vec<String> = self
+            .profile
+            .as_deref()
+            .and_then(|name| settings.profile(name))
+            .map(|profile| {
+                profile
+                    .primary_candidates(&borrowed)
+                    .iter()
+                    .map(|identity| identity.connector.to_owned())
+                    .collect()
             })
-            .unwrap_or(0);
-        let mut on: Vec<Output> = on.into_iter().map(|(output, _)| output).collect();
-        self.primary = on.remove(primary_index);
+            .unwrap_or_default();
+        let candidates = if named.is_empty() {
+            on.iter().map(|output| output.name()).collect()
+        } else {
+            named
+        };
+        let current = self.primary.name();
+        let next = candidates
+            .iter()
+            .position(|name| *name == current)
+            .map_or(0, |index| index + 1);
+        let chosen = candidates.get(next % candidates.len().max(1))?.clone();
+        self.choose_primary(&chosen)
+    }
+
+    /// Makes the output on `connector` primary, if it is on and is not
+    /// already; it stays so while it is on.
+    pub(crate) fn choose_primary(&mut self, connector: &str) -> Option<OutputChanges> {
+        if self.primary.name() == connector {
+            return None;
+        }
+        let mut on: Vec<Output> = self.iter().cloned().collect();
+        on.sort_by_key(|output| self.found_index(output));
+        let index = on.iter().position(|output| output.name() == connector)?;
+        self.primary = on.remove(index);
         self.others = on;
+        self.chosen_primary = Some(connector.to_owned());
+        tracing::info!(output = connector, "primary output chosen");
+        Some(OutputChanges {
+            applied_profile: None,
+            primary: Some(connector.to_owned()),
+        })
+    }
+
+    /// Sets the outputs up as `settings` say with `profile` applied, or
+    /// none; `is_announced` says the profile counts as just applied.
+    fn arrange(
+        &mut self,
+        settings: &OutputSettings,
+        profile: Option<&OutputProfile>,
+        backend: &mut impl OutputControl,
+        is_announced: bool,
+    ) -> OutputChanges {
+        let before = self.primary.name();
+        let arrangement = Arrangement::plan(&self.connected, settings, profile);
+        arrangement.apply(backend);
+        let (primary, others) = arrangement.into_layout(self.chosen_primary.as_deref(), profile);
+        self.primary = primary;
+        self.others = others;
+        self.profile = profile.map(|profile| profile.name().to_owned());
         for output in self.iter() {
             tracing::info!(
                 output = output.name(),
                 area = ?Self::geometry(output),
                 is_primary = (*output == self.primary),
+                profile = self.profile.as_deref(),
                 "output arranged"
             );
         }
+        let primary = self.primary.name();
+        OutputChanges {
+            applied_profile: self.profile.clone().filter(|_| is_announced),
+            primary: (primary != before).then_some(primary),
+        }
     }
 
-    /// Returns Smithay's transform for `transform`.
-    const fn turned(transform: OutputTransform) -> Transform {
-        match transform {
-            OutputTransform::Normal => Transform::Normal,
-            OutputTransform::Turned90 => Transform::_90,
-            OutputTransform::Turned180 => Transform::_180,
-            OutputTransform::Turned270 => Transform::_270,
-            OutputTransform::Flipped => Transform::Flipped,
-            OutputTransform::Flipped90 => Transform::Flipped90,
-            OutputTransform::Flipped180 => Transform::Flipped180,
-            OutputTransform::Flipped270 => Transform::Flipped270,
-        }
+    /// Returns what identifies each connected output.
+    fn connected_identities(&self) -> Vec<OwnedIdentity> {
+        self.connected.iter().map(Self::identity).collect()
+    }
+
+    /// Returns where `output` is in the order the backend found them.
+    fn found_index(&self, output: &Output) -> usize {
+        self.connected
+            .iter()
+            .position(|found| found == output)
+            .unwrap_or(usize::MAX)
+    }
+
+    /// Returns what orders `output` among Fluxbox's heads: left to right,
+    /// then top to bottom, then by connector.
+    fn head_order(output: &Output) -> (i32, i32, String) {
+        let corner = output.current_location();
+        (corner.x, corner.y, output.name())
     }
 
     /// Lays `outputs` out side by side from `left`, their tops at 0.

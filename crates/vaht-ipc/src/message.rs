@@ -62,6 +62,8 @@ pub enum Reply {
     Outputs {
         /// Each output, in the order vaht found them.
         outputs: Vec<OutputInfo>,
+        /// The display profile applied, if one is.
+        profile: Option<String>,
     },
     /// The request could not be carried out, or was not understood.
     Error {

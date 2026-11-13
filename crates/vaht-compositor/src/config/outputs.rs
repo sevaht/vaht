@@ -4,19 +4,52 @@
 //! and serial, and says what mode, position and scale they take, whether
 //! they are on, and whether one is primary. The first entry that matches
 //! an output is the one it follows; an output no entry matches keeps its
-//! preferred mode and goes to the right of the others.
+//! preferred mode and goes to the right of the others. A profile
+//! ([`OutputProfile`]), while applied, takes the entries' place.
+
+mod profile;
 
 use std::fmt;
 
 use serde::de::{self, Deserializer};
 
+pub(crate) use self::profile::{OutputHooks, OutputProfile};
+
 /// `outputs.toml`.
 #[derive(Debug, Clone, PartialEq, Default, serde::Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(try_from = "RawOutputSettings")]
 pub(crate) struct OutputSettings {
     /// The entries, in the order written.
+    entries: Vec<OutputEntry>,
+    /// The profiles, in the order written; no two share a name.
+    profiles: Vec<OutputProfile>,
+    /// The commands run when outputs change.
+    pub(crate) hooks: OutputHooks,
+}
+
+/// [`OutputSettings`] as written, before the profiles' names are checked.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawOutputSettings {
+    /// See [`OutputSettings::entries`].
     #[serde(rename = "output")]
     entries: Vec<OutputEntry>,
+    /// See [`OutputSettings::profiles`].
+    #[serde(rename = "profile")]
+    profiles: Vec<OutputProfile>,
+    /// See [`OutputSettings::hooks`].
+    hooks: OutputHooks,
+}
+
+/// What an output does under the settings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum OutputPlan<'settings> {
+    /// It follows this entry.
+    Follows(&'settings OutputEntry),
+    /// No entry is for it: it is on, as it prefers.
+    Unlisted,
+    /// The profile applied leaves it out, so it is off.
+    Off,
 }
 
 /// One `[[output]]` entry.
@@ -159,6 +192,100 @@ impl OutputSettings {
         self.entries
             .iter()
             .find(|entry| entry.matcher.matches(output))
+    }
+
+    /// Returns what `output` does with `profile` applied, or with only the
+    /// `[[output]]` entries without one.
+    pub(crate) fn plan<'settings>(
+        &'settings self,
+        profile: Option<&'settings OutputProfile>,
+        output: OutputIdentity<'_>,
+    ) -> OutputPlan<'settings> {
+        match profile {
+            Some(profile) => profile
+                .entry_for(output)
+                .map_or(OutputPlan::Off, OutputPlan::Follows),
+            None => self
+                .entry_for(output)
+                .map_or(OutputPlan::Unlisted, OutputPlan::Follows),
+        }
+    }
+
+    /// Returns the profiles' names, in the order written.
+    pub(crate) fn profile_names(&self) -> impl Iterator<Item = &str> {
+        self.profiles.iter().map(OutputProfile::name)
+    }
+
+    /// Returns the profile called `name`, if there is one.
+    pub(crate) fn profile(&self, name: &str) -> Option<&OutputProfile> {
+        self.profiles.iter().find(|profile| profile.name() == name)
+    }
+
+    /// Returns the profile that applies by itself with `connected`: of
+    /// those whose `when_connected` outputs are all there, the one listing
+    /// the most, the first written on a tie.
+    pub(crate) fn automatic_profile(
+        &self,
+        connected: &[OutputIdentity<'_>],
+    ) -> Option<&OutputProfile> {
+        self.profiles
+            .iter()
+            .filter_map(|profile| Some((profile, profile.connected_match(connected)?)))
+            .fold(
+                None,
+                |best: Option<(&OutputProfile, usize)>, (profile, listed)| match best {
+                    Some((_, most)) if most >= listed => best,
+                    Some(_) | None => Some((profile, listed)),
+                },
+            )
+            .map(|(profile, _)| profile)
+    }
+
+    /// Returns the profile `cycle-profile` goes to from `current`: the next
+    /// written after it, round to the start, whose outputs are all among
+    /// `connected`; from none, the first such.
+    pub(crate) fn profile_after(
+        &self,
+        current: Option<&str>,
+        connected: &[OutputIdentity<'_>],
+    ) -> Option<&OutputProfile> {
+        let start = current
+            .and_then(|name| {
+                self.profiles
+                    .iter()
+                    .position(|profile| profile.name() == name)
+            })
+            .map_or(0, |index| index + 1);
+        let count = self.profiles.len();
+        (0..count)
+            .map(|step| &self.profiles[(start + step) % count])
+            .filter(|profile| Some(profile.name()) != current)
+            .find(|profile| profile.fits(connected))
+    }
+}
+
+impl TryFrom<RawOutputSettings> for OutputSettings {
+    type Error = String;
+
+    fn try_from(raw: RawOutputSettings) -> Result<Self, Self::Error> {
+        let RawOutputSettings {
+            entries,
+            profiles,
+            hooks,
+        } = raw;
+        for (index, profile) in profiles.iter().enumerate() {
+            if profiles[..index]
+                .iter()
+                .any(|earlier| earlier.name() == profile.name())
+            {
+                return Err(format!("two profiles are called \"{}\"", profile.name()));
+            }
+        }
+        Ok(Self {
+            entries,
+            profiles,
+            hooks,
+        })
     }
 }
 
@@ -359,6 +486,99 @@ enabled = false
                 .entry_for(identity("DP-3", "Dell", "P2419H"))
                 .is_none()
         );
+    }
+
+    /// Returns `profile`'s name, if there is one.
+    fn profile_name(profile: Option<&OutputProfile>) -> Option<&str> {
+        profile.map(OutputProfile::name)
+    }
+
+    /// av-output-switcher's two profiles, as vaht writes them.
+    const PROFILES: &str = r#"
+[[profile]]
+name = "single"
+when_connected = [{ connector = "DP-2" }]
+outputs = [{ match = { connector = "DP-2" }, mode = "1920x1080@60", position = [0, 0] }]
+
+[[profile]]
+name = "office"
+when_connected = [{ connector = "HDMI-A-1" }, { connector = "DP-2" }]
+primary = [{ connector = "HDMI-A-1" }, { connector = "DP-2" }]
+outputs = [
+    { match = { connector = "HDMI-A-1" }, position = [0, 0] },
+    { match = { connector = "DP-2" }, position = [1920, 0] },
+]
+
+[hooks]
+profile_applied = "~/bin/on-profile"
+"#;
+
+    #[test]
+    fn the_profile_naming_the_most_connected_outputs_applies_itself() {
+        let settings: OutputSettings = toml::from_str(PROFILES).expect("valid");
+        let dp = identity("DP-2", "", "");
+        let hdmi = identity("HDMI-A-1", "", "");
+        assert_eq!(
+            profile_name(settings.automatic_profile(&[dp])),
+            Some("single")
+        );
+        assert_eq!(
+            profile_name(settings.automatic_profile(&[dp, hdmi])),
+            Some("office")
+        );
+        assert_eq!(profile_name(settings.automatic_profile(&[hdmi])), None);
+        assert_eq!(
+            settings.hooks.profile_applied.as_deref(),
+            Some("~/bin/on-profile")
+        );
+    }
+
+    #[test]
+    fn a_profile_turns_off_what_it_does_not_list() {
+        let settings: OutputSettings = toml::from_str(PROFILES).expect("valid");
+        let single = settings.profile("single");
+        assert!(matches!(
+            settings.plan(single, identity("DP-2", "", "")),
+            OutputPlan::Follows(_)
+        ));
+        assert_eq!(
+            settings.plan(single, identity("HDMI-A-1", "", "")),
+            OutputPlan::Off
+        );
+        assert_eq!(
+            settings.plan(None, identity("HDMI-A-1", "", "")),
+            OutputPlan::Unlisted
+        );
+    }
+
+    #[test]
+    fn cycling_skips_profiles_whose_outputs_are_missing() {
+        let settings: OutputSettings = toml::from_str(PROFILES).expect("valid");
+        let both = [identity("DP-2", "", ""), identity("HDMI-A-1", "", "")];
+        assert_eq!(
+            profile_name(settings.profile_after(Some("single"), &both)),
+            Some("office")
+        );
+        assert_eq!(
+            profile_name(settings.profile_after(Some("office"), &both)),
+            Some("single")
+        );
+        assert_eq!(
+            profile_name(settings.profile_after(None, &both)),
+            Some("single")
+        );
+        assert_eq!(
+            profile_name(settings.profile_after(Some("single"), &both[..1])),
+            None,
+            "office needs HDMI-A-1"
+        );
+    }
+
+    #[test]
+    fn profile_names_are_unique() {
+        let twice = format!("{PROFILES}\n[[profile]]\nname = \"single\"\noutputs = []\n");
+        let error = toml::from_str::<OutputSettings>(&twice).expect_err("refused");
+        assert!(error.to_string().contains("two profiles"), "{error}");
     }
 
     #[test]
