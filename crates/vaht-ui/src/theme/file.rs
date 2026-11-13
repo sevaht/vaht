@@ -7,6 +7,9 @@
 //! the elements under it), so the tables are walked by hand: each key is a
 //! property, a state or a deeper path. Every unknown name is an error that
 //! says where it is, and names vaht plans but lacks say so.
+//!
+//! Rounded corners (`corner_radius`, `corners`) shape a window's frame, so
+//! only `[window.border]`, the frame's outline, takes them yet.
 
 use std::fmt;
 
@@ -14,18 +17,19 @@ use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 
 use super::{BorderStyle, StylePatch, ThemeElement, ThemeLayers, WidgetState};
 use crate::color::Color;
+use crate::corner::{Corner, CornerSet};
 use crate::geometry::Insets;
 use crate::text::{Font, FontWeight, Justify, TextEffect};
 use crate::texture::{Bevel, GradientDirection, Texture};
 
 /// Style properties of 02 §10.1 that vaht does not have yet.
-const PLANNED_PROPERTIES: [&str; 5] = [
-    "corner_radius",
-    "corners",
-    "alpha",
-    "submenu_indicator",
-    "interlaced",
-];
+const PLANNED_PROPERTIES: [&str; 3] = ["alpha", "submenu_indicator", "interlaced"];
+
+/// The properties only the element that may be rounded takes.
+const CORNER_PROPERTIES: [&str; 2] = ["corner_radius", "corners"];
+
+/// The element whose corners may be rounded: the frame's outline.
+const ROUNDED_ELEMENT: ThemeElement = ThemeElement::Border;
 
 /// States of 02 §10.1 that vaht does not have yet.
 const PLANNED_STATES: [&str; 3] = ["hovered", "active", "disabled"];
@@ -116,7 +120,7 @@ impl<'de> Visitor<'de> for Table<'_> {
             }
             if let Some(element) = element {
                 let patch = self.layers.by_element.entry(element).or_default();
-                if patch.read_property(&key, &mut map)? {
+                if patch.read_property(&key, &mut map, Some(element))? {
                     continue;
                 }
                 match state_named(&key) {
@@ -234,13 +238,24 @@ impl<'de> DeserializeSeed<'de> for Refusal {
 }
 
 impl StylePatch {
-    /// Reads the property `key` from `map` into this patch; returns whether
-    /// `key` is a property at all.
+    /// Reads the property `key` from `map` into this patch, for `element`
+    /// alone (none: for several, as the default and states are); returns
+    /// whether `key` is a property at all.
     fn read_property<'de, A: MapAccess<'de>>(
         &mut self,
         key: &str,
         map: &mut A,
+        element: Option<ThemeElement>,
     ) -> Result<bool, A::Error> {
+        if CORNER_PROPERTIES.contains(&key) && element != Some(ROUNDED_ELEMENT) {
+            return Err(refuse(
+                map,
+                format!(
+                    "`{key}` goes in [{}] alone: only frames are rounded yet",
+                    ROUNDED_ELEMENT.path()
+                ),
+            ));
+        }
         match key {
             "texture" => self.texture = Some(map.next_value::<TextureValue>()?.0),
             "font" => self.font = Some(map.next_value::<FontFile>()?.into_font()),
@@ -259,6 +274,8 @@ impl StylePatch {
             }
             "border" => self.border = Some(map.next_value::<BorderFile>()?.into_border()),
             "height" => self.height = Some(map.next_value()?),
+            "corner_radius" => self.corner_radius = Some(map.next_value()?),
+            "corners" => self.rounded_corners = Some(map.next_value::<CornersFile>()?.0),
             planned if PLANNED_PROPERTIES.contains(&planned) => {
                 return Err(refuse(
                     map,
@@ -286,7 +303,7 @@ impl<'de> serde::Deserialize<'de> for StylePatch {
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<StylePatch, A::Error> {
                 let mut patch = StylePatch::default();
                 while let Some(key) = map.next_key::<String>()? {
-                    if !patch.read_property(&key, &mut map)? {
+                    if !patch.read_property(&key, &mut map, None)? {
                         return Err(de::Error::custom(format!("`{key}` is no style property")));
                     }
                 }
@@ -484,6 +501,27 @@ impl JustifyFile {
     }
 }
 
+/// Rounded corners as written: a list of names such as `"top-left"`.
+struct CornersFile(CornerSet);
+
+impl<'de> serde::Deserialize<'de> for CornersFile {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let names = Vec::<String>::deserialize(deserializer)?;
+        names
+            .iter()
+            .map(|name| {
+                Corner::named(name).ok_or_else(|| {
+                    de::Error::custom(format!(
+                        "`{name}` is no corner; the corners are top-left, top-right, \
+                         bottom-left and bottom-right"
+                    ))
+                })
+            })
+            .collect::<Result<CornerSet, D::Error>>()
+            .map(Self)
+    }
+}
+
 /// A border as written: `{ width, color }`.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -577,6 +615,19 @@ mod tests {
     }
 
     #[test]
+    fn the_frame_s_outline_takes_rounded_corners() {
+        let layers = ThemeLayers::from_toml(
+            "[window.border]\ncorner_radius = 8\ncorners = [\"top-left\", \"top-right\"]\n",
+        )
+        .expect("a valid theme");
+        let theme = crate::Theme::resolve(&layers);
+        assert_eq!(
+            theme.metrics().frame_corners,
+            crate::CornerRadii::of(8, [Corner::TopLeft, Corner::TopRight])
+        );
+    }
+
+    #[test]
     fn tables_become_the_four_layers() {
         let layers = ThemeLayers::from_toml(
             "[default]\ntext_color = \"red\"\n\
@@ -610,7 +661,22 @@ mod tests {
     #[rstest]
     #[case::unknown_element("[window.lable]\nheight = 1\n", "`window.lable` is no element", 1)]
     #[case::unknown_property("[window.label]\ncolour = \"red\"\n", "`colour` in [window.label]", 2)]
-    #[case::planned_property("[window.label]\ncorner_radius = 4\n", "not available in vaht yet", 2)]
+    #[case::planned_property("[window.label]\nalpha = 4\n", "not available in vaht yet", 2)]
+    #[case::corners_off_the_frame(
+        "[window.label]\ncorner_radius = 4\n",
+        "goes in [window.border] alone",
+        2
+    )]
+    #[case::corners_for_every_element(
+        "[default]\ncorner_radius = 4\n",
+        "goes in [window.border]",
+        2
+    )]
+    #[case::unknown_corner(
+        "[window.border]\ncorners = [\"top-left\", \"middle\"]\n",
+        "`middle` is no corner",
+        2
+    )]
     #[case::planned_state(
         "[state.hovered]\ntext_color = \"red\"\n",
         "not available in vaht yet",

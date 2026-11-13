@@ -8,6 +8,14 @@
 //! show (01 §4.3). The lines are plain colored rectangles, which cost no
 //! pixel buffers. The frame is never one big buffer around the window,
 //! which would cost megabytes per window.
+//!
+//! A theme can round the frame's corners (`window.border`'s
+//! `corner_radius`). A top corner is rounded within the titlebar and a
+//! bottom one within the handle, so the window's content is never cut, as
+//! Fluxbox rounds bottom corners only when there is a handle. The lines
+//! stop short of a rounded corner, a small arc joins them there, and the
+//! panels' corners are cut away beneath it; the pointer passes through
+//! what was cut.
 //! Nothing here knows a renderer: the scene turns the pixels and the
 //! geometry into render elements.
 //!
@@ -18,7 +26,8 @@
 use smithay::utils::{Logical, Point, Rectangle};
 use vaht_ui::theme::Metrics;
 use vaht_ui::{
-    Glyph, Panel, PanelContent, SizePolicy, Theme, ThemeElement, Typesetter, Widget, WidgetState,
+    Corner, CornerRadii, Glyph, Panel, PanelContent, SizePolicy, Theme, ThemeElement, Typesetter,
+    Widget, WidgetState,
 };
 
 use super::placement::Axes;
@@ -147,6 +156,10 @@ pub(crate) struct FrameGeometry {
     /// How wide each grip is: none when the handle is too narrow for them,
     /// and is all handle.
     pub(crate) grip_width: Option<u32>,
+    /// How wide the lines are.
+    pub(crate) line_width: u32,
+    /// How round the frame's corners are.
+    pub(crate) corners: CornerRadii,
     /// The lines, in [`Self::LINES`]' order; a line the frame lacks is empty.
     pub(crate) borders: [Rectangle<i32, Logical>; 8],
 }
@@ -187,6 +200,14 @@ impl FrameGeometry {
         let outer_height = height + titlebar_height + handle_span + 3 * border;
         let handle_top = y + height + border;
         let rectangle = |x, y, width, height| Rectangle::new((x, y).into(), (width, height).into());
+        let corners = Self::corner_radii(
+            metrics.frame_corners,
+            (titlebar_height + border, handle_span),
+            outer_width,
+        );
+        let radius = |corner| to_i32(corners.radius(corner));
+        let (top_left, top_right) = (radius(Corner::TopLeft), radius(Corner::TopRight));
+        let (bottom_left, bottom_right) = (radius(Corner::BottomLeft), radius(Corner::BottomRight));
         let handle = rectangle(x, handle_top, width, handle_height);
         let grip_width = Self::grip_width(handle, metrics.border_width);
         let grip_lines = grip_width.map_or([Rectangle::default(); 2], |grip| {
@@ -201,8 +222,17 @@ impl FrameGeometry {
             titlebar: rectangle(x, y - border - titlebar_height, width, titlebar_height),
             handle,
             grip_width,
+            line_width: metrics.border_width,
+            corners,
+            // The outer lines stop short of rounded corners, where arcs join
+            // them.
             borders: [
-                rectangle(outer_left, outer_top, outer_width, border),
+                rectangle(
+                    outer_left + top_left,
+                    outer_top,
+                    outer_width - top_left - top_right,
+                    border,
+                ),
                 rectangle(outer_left, y - border, outer_width, border),
                 rectangle(
                     x,
@@ -210,9 +240,24 @@ impl FrameGeometry {
                     width,
                     if handle_height > 0 { border } else { 0 },
                 ),
-                rectangle(outer_left, y + height + handle_span, outer_width, border),
-                rectangle(outer_left, outer_top, border, outer_height),
-                rectangle(x + width, outer_top, border, outer_height),
+                rectangle(
+                    outer_left + bottom_left,
+                    y + height + handle_span,
+                    outer_width - bottom_left - bottom_right,
+                    border,
+                ),
+                rectangle(
+                    outer_left,
+                    outer_top + top_left,
+                    border,
+                    outer_height - top_left - bottom_left,
+                ),
+                rectangle(
+                    x + width,
+                    outer_top + top_right,
+                    border,
+                    outer_height - top_right - bottom_right,
+                ),
                 grip_lines[0],
                 grip_lines[1],
             ],
@@ -247,9 +292,54 @@ impl FrameGeometry {
         )
     }
 
-    /// Returns the part of the frame at `point`, if any.
+    /// Returns where the corner square of `corner` is: as wide as its
+    /// radius, in that corner of the frame; empty for a square corner.
+    pub(crate) fn corner_square(&self, corner: Corner) -> Rectangle<i32, Logical> {
+        let radius = to_i32(self.corners.radius(corner));
+        let outer = self.outer;
+        let x = if corner.is_left() {
+            outer.loc.x
+        } else {
+            outer.loc.x + outer.size.w - radius
+        };
+        let y = if corner.is_top() {
+            outer.loc.y
+        } else {
+            outer.loc.y + outer.size.h - radius
+        };
+        Rectangle::new((x, y).into(), (radius, radius).into())
+    }
+
+    /// Returns how round the titlebar's corners are: the frame's top ones,
+    /// just inside the lines.
+    pub(crate) fn titlebar_corners(&self) -> CornerRadii {
+        let inner = self.corners.inset(self.line_width);
+        CornerRadii::SQUARE
+            .with(Corner::TopLeft, inner.radius(Corner::TopLeft))
+            .with(Corner::TopRight, inner.radius(Corner::TopRight))
+    }
+
+    /// Returns how round the handle's corners are: the frame's bottom ones,
+    /// just inside the lines.
+    pub(crate) fn handle_corners(&self) -> CornerRadii {
+        let inner = self.corners.inset(self.line_width);
+        CornerRadii::SQUARE
+            .with(Corner::BottomLeft, inner.radius(Corner::BottomLeft))
+            .with(Corner::BottomRight, inner.radius(Corner::BottomRight))
+    }
+
+    /// Returns the part of the frame at `point`, if any: none where a
+    /// rounded corner was cut away.
     pub(crate) fn part_at(&self, point: Point<f64, Logical>) -> Option<FramePart> {
         let pixel = point.to_i32_floor();
+        let inside = pixel - self.outer.loc;
+        let size = vaht_ui::Size::new(to_u32(self.outer.size.w), to_u32(self.outer.size.h));
+        if self
+            .corners
+            .cuts(size, vaht_ui::Point::new(inside.x, inside.y))
+        {
+            return None;
+        }
         if self.titlebar.contains(pixel) {
             let inside = pixel - self.titlebar.loc;
             return Some(FramePart::Titlebar(vaht_ui::Point::new(inside.x, inside.y)));
@@ -289,6 +379,20 @@ impl FrameGeometry {
             FramePart::Grip(GripSide::Right)
         } else {
             FramePart::Handle
+        })
+    }
+
+    /// Returns the theme's corner radii as a frame `width` wide takes
+    /// them: a top corner no rounder than `room`'s first part (the
+    /// titlebar and the line above it) is tall, a bottom one than its
+    /// second (the handle and the line below it; nothing without a handle),
+    /// and none rounder than half the width.
+    fn corner_radii(theme: CornerRadii, room: (i32, i32), width: i32) -> CornerRadii {
+        let (top, bottom) = room;
+        <Corner as strum::IntoEnumIterator>::iter().fold(theme, |radii, corner| {
+            let room = if corner.is_top() { top } else { bottom };
+            let most = to_u32(room.min(width / 2));
+            radii.with(corner, theme.radius(corner).min(most))
         })
     }
 
@@ -424,9 +528,11 @@ impl Frame {
         self.titlebar
             .resize(vaht_ui::Size::new(to_u32(size.w), to_u32(size.h)));
         self.titlebar.paint(theme, typesetter);
+        self.titlebar.set_corners(geometry.titlebar_corners());
+        self.handle.set_corners(geometry.handle_corners());
         let grips = geometry.grip_width.map(|width| GripLayout {
             width,
-            line_width: to_u32(geometry.borders[2].size.h),
+            line_width: geometry.line_width,
         });
         if self.handle.content().grips != grips {
             self.handle.update(|content| content.grips = grips);
@@ -549,6 +655,7 @@ mod tests {
         border_width: 1,
         handle_height: 1,
         taskbar_height: 20,
+        frame_corners: CornerRadii::SQUARE,
     };
 
     /// The frame around a 100 by 50 window whose content is at (10, 40).
@@ -670,6 +777,63 @@ mod tests {
             frame.part_at((100.0, 90.0).into()),
             Some(FramePart::Grip(GripSide::Right)),
             "the line above a grip is the grip's"
+        );
+    }
+
+    /// The test frame, its theme rounding every corner by 8 pixels.
+    fn rounded(shape: FrameShape) -> FrameGeometry {
+        let metrics = Metrics {
+            frame_corners: CornerRadii::of(8, <Corner as strum::IntoEnumIterator>::iter()),
+            ..METRICS
+        };
+        FrameGeometry::around(
+            Rectangle::new((10, 40).into(), (100, 50).into()),
+            metrics,
+            shape,
+        )
+    }
+
+    #[test]
+    fn corners_round_within_the_titlebar_and_the_handle() {
+        let frame = rounded(FrameShape::Open);
+        assert_eq!(frame.corners.radius(Corner::TopLeft), 8);
+        assert_eq!(
+            frame.corners.radius(Corner::BottomRight),
+            2,
+            "no rounder than the handle and its line"
+        );
+        let shaded = rounded(FrameShape::Shaded);
+        assert_eq!(
+            shaded.corners.radius(Corner::BottomLeft),
+            0,
+            "no handle, no round bottom"
+        );
+    }
+
+    #[test]
+    fn lines_stop_short_of_rounded_corners() {
+        let [top, _, _, bottom, left, ..] = rounded(FrameShape::Open).borders;
+        assert_eq!(top, Rectangle::new((17, 18).into(), (86, 1).into()));
+        assert_eq!(bottom, Rectangle::new((11, 92).into(), (98, 1).into()));
+        assert_eq!(
+            left,
+            Rectangle::new((9, 26).into(), (1, 65).into()),
+            "75 tall, less 8 above and 2 below"
+        );
+    }
+
+    #[test]
+    fn the_cut_corner_is_no_part_of_the_frame() {
+        let frame = rounded(FrameShape::Open);
+        assert_eq!(frame.part_at((9.0, 18.0).into()), None, "cut away");
+        assert!(matches!(
+            frame.part_at((17.0, 18.0).into()),
+            Some(FramePart::Border(_))
+        ));
+        assert_eq!(
+            frame.titlebar_corners(),
+            CornerRadii::of(7, [Corner::TopLeft, Corner::TopRight]),
+            "just inside the line"
         );
     }
 

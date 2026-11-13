@@ -416,3 +416,64 @@ fn dragging_the_right_grip_resizes_from_the_bottom_right_corner() {
 fn dragging_the_left_grip_resizes_from_the_bottom_left_corner() {
     check_grip_drag(Grip::Left, -25, 20);
 }
+
+#[test]
+fn a_rounded_corner_is_cut_away_with_the_line_following_it() {
+    const LINE: [u8; 3] = [0, 0, 255];
+    const TITLEBAR: [u8; 3] = [255, 0, 0];
+    let theme = "\
+[default]
+text_effect = \"none\"
+[window.titlebar]
+texture = { solid = \"#ff0000\" }
+[window.label]
+texture = { solid = \"#ff0000\" }
+text_color = \"#ff0000\"
+[window.border]
+border = { width = 1, color = \"#0000ff\" }
+corner_radius = 8
+corners = [\"top-left\", \"top-right\"]
+";
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[
+            (
+                "settings.toml",
+                "theme = \"test\"\n[placement]\nstrategy = \"cascade\"\n",
+            ),
+            ("themes/test.toml", theme),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let screenshot = client.screenshot();
+    let content = screenshot.bounds_of(WINDOW_COLOR).expect("shown");
+    let (left, top) = (
+        content.left - BUILT_IN_METRICS.border_width,
+        content.top - BUILT_IN_METRICS.above_content(),
+    );
+    let right = content.right + BUILT_IN_METRICS.border_width;
+    let desktop = screenshot.rgb(left - 4, top + 4);
+    assert_eq!(screenshot.rgb(left, top), desktop, "the corner is cut away");
+    assert_eq!(screenshot.rgb(right, top), desktop, "both top corners");
+    assert_eq!(
+        screenshot.rgb(left + 10, top),
+        LINE,
+        "the top line, past the corner"
+    );
+    assert_eq!(
+        screenshot.rgb(left, top + 10),
+        LINE,
+        "the left line, below it"
+    );
+    assert_eq!(
+        screenshot.rgb(left + 4, top + 4),
+        TITLEBAR,
+        "inside the arc"
+    );
+    let arc = screenshot.rgb(left + 2, top + 2);
+    assert!(
+        arc[2] > arc[0] && arc != desktop,
+        "the arc is drawn in the line's color: {arc:?}"
+    );
+}

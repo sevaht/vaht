@@ -2,7 +2,8 @@
 //!
 //! A [`Panel`] paints into its own pixmap; [`PanelTexture`] copies the
 //! pixels into a buffer the renderer draws, only when the panel painted
-//! anew, and makes the render element that draws it.
+//! anew, and makes the render element that draws it. Any other pixmap vaht
+//! paints (a frame's corner arc) goes through it the same way.
 
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::Kind;
@@ -13,7 +14,7 @@ use smithay::backend::renderer::{ImportMem, Renderer};
 use smithay::utils::{
     Buffer as BufferCoordinates, Logical, Physical, Point, Rectangle, Scale, Size, Transform,
 };
-use vaht_ui::{Panel, PanelContent};
+use vaht_ui::{Panel, PanelContent, Pixmap};
 
 use super::SceneElement;
 
@@ -37,10 +38,14 @@ impl PanelTexture {
 
     /// Copies `panel`'s pixels if they are newer than the last copy.
     pub(crate) fn upload<Content: PanelContent>(&mut self, panel: &Panel<Content>) {
-        let Some(pixels) = panel.pixels() else {
-            return;
-        };
-        let generation = panel.generation();
+        if let Some(pixels) = panel.pixels() {
+            self.upload_pixels(pixels, panel.generation());
+        }
+    }
+
+    /// Copies `pixels`, of `generation`, unless that generation is the last
+    /// one copied.
+    pub(crate) fn upload_pixels(&mut self, pixels: &Pixmap, generation: u64) {
         if self.uploaded_generation == Some(generation) {
             return;
         }

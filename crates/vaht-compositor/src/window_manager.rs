@@ -838,6 +838,7 @@ mod tests {
         border_width: 1,
         handle_height: 1,
         taskbar_height: 20,
+        frame_corners: vaht_ui::CornerRadii::SQUARE,
     };
 
     /// A 1920 × 1080 output, `panel` pixels of it at the bottom taken by a

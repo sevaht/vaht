@@ -19,6 +19,7 @@ mod file;
 use std::collections::HashMap;
 
 use crate::color::Color;
+use crate::corner::{CornerRadii, CornerSet};
 use crate::geometry::Insets;
 use crate::text::{Font, FontWeight, Justify, TextEffect, TextStyle};
 use crate::texture::Texture;
@@ -133,9 +134,19 @@ pub struct Style {
     /// The height of a bar, in pixels; `None` where the element is not a
     /// bar, or the bar takes the default.
     pub height: Option<u32>,
+    /// How round its rounded corners are, in pixels; 0 for square.
+    pub corner_radius: u32,
+    /// Which corners are rounded.
+    pub rounded_corners: CornerSet,
 }
 
 impl Style {
+    /// Returns how round each corner is.
+    #[must_use]
+    pub fn corner_radii(&self) -> CornerRadii {
+        CornerRadii::of(self.corner_radius, self.rounded_corners.iter())
+    }
+
     /// The style of an element nothing in the theme mentions.
     fn fallback() -> Self {
         Self {
@@ -155,6 +166,8 @@ impl Style {
             padding: Insets::default(),
             border: BorderStyle::default(),
             height: None,
+            corner_radius: 0,
+            rounded_corners: CornerSet::ALL,
         }
     }
 }
@@ -180,6 +193,10 @@ pub struct StylePatch {
     pub border: Option<BorderStyle>,
     /// The bar height, if this layer sets it.
     pub height: Option<u32>,
+    /// The corner radius, if this layer sets it.
+    pub corner_radius: Option<u32>,
+    /// Which corners are rounded, if this layer says.
+    pub rounded_corners: Option<CornerSet>,
 }
 
 impl StylePatch {
@@ -212,6 +229,12 @@ impl StylePatch {
         if let Some(height) = self.height {
             style.height = Some(height);
         }
+        if let Some(radius) = self.corner_radius {
+            style.corner_radius = radius;
+        }
+        if let Some(corners) = self.rounded_corners {
+            style.rounded_corners = corners;
+        }
     }
 }
 
@@ -226,6 +249,8 @@ pub struct Metrics {
     pub handle_height: u32,
     /// The height of the taskbar.
     pub taskbar_height: u32,
+    /// How round a window frame's corners are.
+    pub frame_corners: CornerRadii,
 }
 
 /// A theme as written: four layers of patches, not yet resolved.
@@ -314,6 +339,7 @@ impl Theme {
             border_width: focused(ThemeElement::Border).border.width,
             handle_height: focused(ThemeElement::Handle).height.unwrap_or(0),
             taskbar_height: bar(ThemeElement::Taskbar),
+            frame_corners: focused(ThemeElement::Border).corner_radii(),
         }
     }
 }
@@ -426,6 +452,7 @@ mod tests {
                 border_width: 1,
                 handle_height: 1,
                 taskbar_height: 20,
+                frame_corners: CornerRadii::SQUARE,
             }
         );
     }

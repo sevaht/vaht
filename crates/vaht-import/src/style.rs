@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value};
-use vaht_ui::{Color, ThemeElement, WidgetState};
+use vaht_ui::{Color, Corner, ThemeElement, WidgetState};
 
 use self::database::StyleDatabase;
 use crate::report::{Reason, Report};
@@ -45,6 +45,10 @@ enum Property {
     Border,
     /// `height`.
     Height,
+    /// `corner_radius`.
+    CornerRadius,
+    /// `corners`.
+    Corners,
 }
 
 impl Property {
@@ -52,7 +56,10 @@ impl Property {
     /// padding, border and bar height), written only for the element, never
     /// as a default or for a state, so no other element takes it on.
     const fn is_own_geometry(self) -> bool {
-        matches!(self, Self::Padding | Self::Border | Self::Height)
+        matches!(
+            self,
+            Self::Padding | Self::Border | Self::Height | Self::CornerRadius | Self::Corners
+        )
     }
 
     /// Returns the property's key in theme files.
@@ -67,6 +74,8 @@ impl Property {
             Self::Padding => "padding",
             Self::Border => "border",
             Self::Height => "height",
+            Self::CornerRadius => "corner_radius",
+            Self::Corners => "corners",
         }
     }
 }
@@ -318,7 +327,7 @@ impl Sources {
 
 /// The style's lines that vaht leaves out on purpose or cannot use yet, by
 /// how their names start, with why.
-const UNUSED_REASONS: [(&str, Reason, &str); 8] = [
+const UNUSED_REASONS: [(&str, Reason, &str); 7] = [
     ("menu", Reason::NotYetInVaht, "menus: vaht has no menus yet"),
     (
         "systray",
@@ -338,11 +347,10 @@ const UNUSED_REASONS: [(&str, Reason, &str); 8] = [
         "themes cannot set the wallpaper",
     ),
     (
-        "window.roundcorners",
+        "toolbar.shaped",
         Reason::NotYetInVaht,
-        "rounded corners",
+        "a taskbar narrower than its edge, whose corners could be rounded",
     ),
-    ("toolbar.shaped", Reason::NotYetInVaht, "rounded corners"),
 ];
 
 /// A Fluxbox style being converted.
@@ -353,6 +361,11 @@ pub(crate) struct StyleFile {
 }
 
 impl StyleFile {
+    /// The radius that rounds a corner as Fluxbox's corner cut does: its
+    /// 8-by-8 shape cuts 14 pixels away, as much as a circle of radius 8
+    /// leaves outside it (8² · (1 − π/4) ≈ 13.7).
+    const FLUXBOX_CORNER_RADIUS: u32 = 8;
+
     /// Converts the style `text`, read from `path`.
     pub(crate) fn new(path: &Path, text: &str) -> Self {
         Self {
@@ -484,6 +497,34 @@ impl StyleFile {
             border.insert("width", Value::from(i64::from(width)));
             border.insert("color", Value::from(color));
             cell.insert(Property::Border, Written(Value::InlineTable(border)));
+        }
+        if element == ThemeElement::Border {
+            self.add_round_corners(cell);
+        }
+    }
+
+    /// Adds `window.roundCorners` to the frame outline's `cell`: Fluxbox's
+    /// cut, as a radius, and the corners it names when not all four.
+    fn add_round_corners(&mut self, cell: &mut Cell) {
+        let Some(names) = self.database.get("window.roundCorners") else {
+            return;
+        };
+        // Fluxbox finds each corner's name anywhere in the value, in any
+        // case (fluxland's parse_round_corners).
+        let names = names.to_ascii_lowercase();
+        let corners: Vec<Corner> = <Corner as strum::IntoEnumIterator>::iter()
+            .filter(|corner| names.contains(&corner.name().replace('-', "")))
+            .collect();
+        if corners.is_empty() {
+            return;
+        }
+        cell.insert(
+            Property::CornerRadius,
+            Written(Value::from(i64::from(Self::FLUXBOX_CORNER_RADIUS))),
+        );
+        if corners.len() < 4 {
+            let names: Array = corners.iter().map(|corner| corner.name()).collect();
+            cell.insert(Property::Corners, Written(Value::Array(names)));
         }
     }
 
@@ -1046,12 +1087,12 @@ menu.frame.color:\tblack
         (cells, theme, report)
     }
 
-    /// Returns `cell`'s properties as a theme file's `[default]`.
-    fn as_default(cell: &Cell) -> String {
-        cell.iter()
-            .fold("[default]\n".to_owned(), |text, (property, value)| {
-                format!("{text}{} = {}\n", property.key(), value.text())
-            })
+    /// Returns `cell`'s properties as a theme file's table for `element`.
+    fn as_element_table(element: ThemeElement, cell: &Cell) -> String {
+        cell.iter().fold(
+            format!("[{}]\n", element.path()),
+            |text, (property, value)| format!("{text}{} = {}\n", property.key(), value.text()),
+        )
     }
 
     #[test]
@@ -1059,8 +1100,9 @@ menu.frame.color:\tblack
         let (cells, theme, _) = convert(STYLE);
         let theme = Theme::resolve(&ThemeLayers::from_toml(&theme).expect("a valid theme"));
         for (element, state, cell) in &cells {
-            let expected =
-                Theme::resolve(&ThemeLayers::from_toml(&as_default(cell)).expect("a valid cell"));
+            let expected = Theme::resolve(
+                &ThemeLayers::from_toml(&as_element_table(*element, cell)).expect("a valid cell"),
+            );
             let (got, want) = (
                 theme.style(*element, *state),
                 expected.style(*element, *state),
@@ -1076,6 +1118,8 @@ menu.frame.color:\tblack
                     Property::Padding => got.padding == want.padding,
                     Property::Border => got.border == want.border,
                     Property::Height => got.height == want.height,
+                    Property::CornerRadius => got.corner_radius == want.corner_radius,
+                    Property::Corners => got.rounded_corners == want.rounded_corners,
                 };
                 assert!(
                     matches,
@@ -1157,6 +1201,46 @@ menu.frame.color:\tblack
             "{notes}"
         );
         assert!(notes.contains("menu.frame.color: menus"), "{notes}");
+    }
+
+    #[rstest]
+    #[case::top_corners("TopLeft TopRight", Some("[\"top-left\", \"top-right\"]"))]
+    #[case::every_corner("TopLeft TopRight BottomLeft BottomRight", None)]
+    fn round_corners_round_the_frame_s_outline(
+        #[case] corners: &str,
+        #[case] expected_corners: Option<&str>,
+    ) {
+        let style = format!("window.borderWidth: 1\nwindow.roundCorners: {corners}\n");
+        let (cells, theme, report) = convert(&style);
+        let border = cells
+            .iter()
+            .find(|(element, state, _)| {
+                *element == ThemeElement::Border && *state == WidgetState::Focused
+            })
+            .map(|(.., cell)| cell)
+            .expect("the outline converts");
+        assert_eq!(
+            border.get(&Property::CornerRadius).map(Written::text),
+            Some("8".to_owned())
+        );
+        assert_eq!(
+            border.get(&Property::Corners).map(Written::text),
+            expected_corners.map(str::to_owned),
+            "all four go without saying"
+        );
+        let resolved = Theme::resolve(&ThemeLayers::from_toml(&theme).expect("a valid theme"));
+        assert!(!resolved.metrics().frame_corners.is_square(), "{theme}");
+        assert!(!report.to_string().contains("roundCorners"), "{report}");
+    }
+
+    #[test]
+    fn square_corners_add_nothing() {
+        let (cells, _, _) = convert("window.roundCorners: none\n");
+        assert!(
+            cells
+                .iter()
+                .all(|(.., cell)| !cell.contains_key(&Property::CornerRadius))
+        );
     }
 
     #[rstest]

@@ -1,5 +1,6 @@
 //! Every window's frame, as the renderer takes it: the titlebar's and the
-//! handle's pixels ([`PanelTexture`]), and one colored buffer per line.
+//! handle's pixels ([`PanelTexture`]), one colored buffer per line, and an
+//! arc at each rounded corner.
 //!
 //! The window manager paints each titlebar and handle ([`Frame`]); [`FrameTextures`]
 //! copies new pixels into buffers the renderer can draw and turns frames
@@ -11,8 +12,8 @@ use std::collections::HashMap;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::backend::renderer::{ImportMem, Renderer};
-use smithay::utils::Scale;
-use vaht_ui::{Theme, ThemeElement, WidgetState};
+use smithay::utils::{Logical, Rectangle, Scale};
+use vaht_ui::{Color, Corner, CornerArc, Theme, ThemeElement};
 
 use super::{PanelTexture, SceneElement};
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
@@ -74,6 +75,8 @@ struct FrameTexture {
     handle: PanelTexture,
     /// One colored buffer per line, in [`FrameGeometry::borders`]' order.
     borders: [SolidColorBuffer; FrameGeometry::LINES],
+    /// Each corner's arc, in [`Corner`]'s order.
+    corners: [CornerTexture; 4],
     /// Counts the buffers while they exist.
     _tracked: Tracked,
 }
@@ -84,6 +87,7 @@ impl FrameTexture {
         Self {
             titlebar: PanelTexture::new(),
             handle: PanelTexture::new(),
+            corners: std::array::from_fn(|_| CornerTexture::new()),
             borders: std::array::from_fn(|_| SolidColorBuffer::default()),
             _tracked: ledger.track(ResourceKind::FrameTexture),
         }
@@ -94,9 +98,24 @@ impl FrameTexture {
     fn update(&mut self, frame: &Frame, geometry: &FrameGeometry, theme: &Theme) {
         self.titlebar.upload(frame.titlebar());
         self.handle.upload(frame.handle());
-        let color = Self::border_color(theme, frame.state());
+        let color = theme
+            .style(ThemeElement::Border, frame.state())
+            .border
+            .color;
         for (buffer, rectangle) in self.borders.iter_mut().zip(geometry.borders) {
-            buffer.update(rectangle.size, color);
+            buffer.update(rectangle.size, Self::to_render_color(color));
+        }
+        for (texture, corner) in self
+            .corners
+            .iter_mut()
+            .zip(<Corner as strum::IntoEnumIterator>::iter())
+        {
+            texture.update(CornerArc {
+                corner,
+                radius: geometry.corners.radius(corner),
+                line_width: geometry.line_width,
+                color,
+            });
         }
     }
 
@@ -112,7 +131,14 @@ impl FrameTexture {
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
-        let mut elements: Vec<SceneElement<R>> = Vec::new();
+        let mut elements: Vec<SceneElement<R>> = self
+            .corners
+            .iter()
+            .zip(<Corner as strum::IntoEnumIterator>::iter())
+            .filter_map(|(texture, corner)| {
+                texture.render_element(renderer, geometry.corner_square(corner), scale)
+            })
+            .collect();
         for (buffer, rectangle) in self.borders.iter().zip(geometry.borders) {
             if !rectangle.is_empty() {
                 elements.push(SceneElement::Solid(SolidColorRenderElement::from_buffer(
@@ -138,9 +164,60 @@ impl FrameTexture {
         elements
     }
 
-    /// Returns the border color the theme gives windows in `state`.
-    fn border_color(theme: &Theme, state: WidgetState) -> [f32; 4] {
-        let color = theme.style(ThemeElement::Border, state).border.color;
+    /// Returns `color` as solid buffers take it.
+    fn to_render_color(color: Color) -> [f32; 4] {
         [color.red, color.green, color.blue, color.alpha].map(|channel| f32::from(channel) / 255.0)
+    }
+}
+
+/// One corner's arc, painted when it changes.
+#[derive(Debug)]
+struct CornerTexture {
+    /// The arc last painted; none before the first.
+    arc: Option<CornerArc>,
+    /// Its pixels; empty for a square corner.
+    texture: PanelTexture,
+    /// Counts the arcs painted, so the texture knows new pixels.
+    generation: u64,
+}
+
+impl CornerTexture {
+    /// Creates a corner with no arc yet.
+    fn new() -> Self {
+        Self {
+            arc: None,
+            texture: PanelTexture::new(),
+            generation: 0,
+        }
+    }
+
+    /// Paints `arc`, if it is not the one painted already.
+    fn update(&mut self, arc: CornerArc) {
+        if self.arc == Some(arc) {
+            return;
+        }
+        self.arc = Some(arc);
+        if let Some(pixels) = arc.paint() {
+            self.generation += 1;
+            self.texture.upload_pixels(&pixels, self.generation);
+        }
+    }
+
+    /// Returns the element that draws the arc in `square`; none for a
+    /// square corner.
+    fn render_element<R>(
+        &self,
+        renderer: &mut R,
+        square: Rectangle<i32, Logical>,
+        scale: Scale<f64>,
+    ) -> Option<SceneElement<R>>
+    where
+        R: Renderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        if square.is_empty() {
+            return None;
+        }
+        self.texture.render_element(renderer, square.loc, scale)
     }
 }

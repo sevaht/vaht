@@ -5,11 +5,13 @@
 //! under a point, and tracks which one the pointer holds down. Content types
 //! only describe what they show (01 §6). The panel repaints only when
 //! something changed; [`Panel::generation`] tells a compositor when the
-//! pixels are new.
+//! pixels are new. A panel's corners can be rounded ([`Panel::set_corners`]):
+//! what lies outside them is clear.
 
 use tiny_skia::Pixmap;
 
 use crate::canvas::Canvas;
+use crate::corner::CornerRadii;
 use crate::geometry::{Point, Rect, Size};
 use crate::layout::Layout;
 use crate::text::Typesetter;
@@ -35,6 +37,8 @@ pub struct Panel<Content: PanelContent> {
     content: Content,
     /// Its size in pixels.
     size: Size,
+    /// How round its corners are.
+    corners: CornerRadii,
     /// Where each widget is; `None` until the next paint lays it out.
     layout: Option<Layout<Content::Hit>>,
     /// The painted pixels; `None` while the panel has no area.
@@ -53,6 +57,7 @@ impl<Content: PanelContent> Panel<Content> {
         Self {
             content,
             size,
+            corners: CornerRadii::SQUARE,
             layout: None,
             pixels: None,
             pressed: None,
@@ -106,6 +111,14 @@ impl<Content: PanelContent> Panel<Content> {
         }
     }
 
+    /// Rounds the panel's corners by `corners`.
+    pub fn set_corners(&mut self, corners: CornerRadii) {
+        if corners != self.corners {
+            self.corners = corners;
+            self.invalidate();
+        }
+    }
+
     /// Holds down the widget at `point`, if it can be clicked; returns it.
     pub fn press(&mut self, point: Point) -> Option<Content::Hit> {
         let hit = self.hit_at(point);
@@ -152,6 +165,7 @@ impl<Content: PanelContent> Panel<Content> {
                     placed.state.unwrap_or(base)
                 }
             });
+            self.corners.cut(pixels);
         }
         self.layout = Some(layout);
         self.generation += 1;

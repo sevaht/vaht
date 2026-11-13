@@ -12,6 +12,7 @@
 
 mod canvas;
 pub mod color;
+pub mod corner;
 pub mod geometry;
 pub mod layout;
 pub mod panel;
@@ -23,6 +24,8 @@ pub mod widget;
 #[doc(inline)]
 pub use color::Color;
 #[doc(inline)]
+pub use corner::{Corner, CornerArc, CornerRadii};
+#[doc(inline)]
 pub use geometry::{Insets, Point, Rect, Size};
 #[doc(inline)]
 pub use panel::{Panel, PanelContent};
@@ -30,5 +33,7 @@ pub use panel::{Panel, PanelContent};
 pub use text::Typesetter;
 #[doc(inline)]
 pub use theme::{Theme, ThemeElement, WidgetState};
+/// The pixels panels and corner arcs are painted into.
+pub use tiny_skia::Pixmap;
 #[doc(inline)]
 pub use widget::{Glyph, SizePolicy, Widget};

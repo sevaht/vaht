@@ -638,6 +638,13 @@ exactly what each element gets.
   `text_color`, `text_effect`, `justify`, `glyph_color`, `padding`,
   `border` and `height`. Window borders take their color and width from
   `window.border`'s `border`.
+- Rounded corners: `corner_radius` (pixels) and `corners` (which of
+  `top-left`, `top-right`, `bottom-left`, `bottom-right`; all four when
+  left out), on `window.border` alone so far: they round the frame. A top
+  corner rounds within the titlebar and a bottom one within the handle,
+  so window content is never cut; without a handle the bottom stays
+  square, as in Fluxbox. The importer turns `window.roundCorners` into
+  radius 8, which cuts as much as Fluxbox's fixed 8-pixel shape.
 - Properties, states and elements still to come are refused by name, at
   their line in the file.
 - The built-in theme is itself a theme file (`vaht-ui`'s
