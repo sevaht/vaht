@@ -170,6 +170,8 @@ fn a_clock_showing_seconds_ticks_each_second() {
     let mut last = before;
     // Three ticks: each re-arms the clock from the tick before it.
     for _ in 0..3 {
+        // Time passing is what is tested: this waits for a moment, it does
+        // not look for a change (General F9).
         std::thread::sleep(std::time::Duration::from_millis(1_100));
         let now = client.screenshot();
         if now.differs_within(&last, taskbar) {
@@ -256,7 +258,7 @@ fn the_icon_a_window_names_comes_before_its_application_s() {
 
 #[test]
 fn an_auto_hiding_taskbar_shows_at_its_edge_and_hides_when_left() {
-    let (_vaht, mut client) = start("[\"window-list\"]\nauto_hide = true\nauto_hide_delay_ms = 50");
+    let (vaht, mut client) = start("[\"window-list\"]\nauto_hide = true\nauto_hide_delay_ms = 50");
     let bottom_middle = |screenshot: &Screenshot| {
         screenshot.rgb(screenshot.width() / 2, screenshot.height() - HEIGHT / 2)
     };
@@ -270,7 +272,7 @@ fn an_auto_hiding_taskbar_shows_at_its_edge_and_hides_when_left() {
         "shown at the edge"
     );
     client.move_pointer_to(width / 2, height / 2);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    vaht.wait_for_logged("taskbar hidden", 1);
     assert_ne!(
         bottom_middle(&client.screenshot()),
         BACKGROUND,

@@ -2,11 +2,10 @@
 //! around the windows, checked by screenshots.
 
 use std::path::Path;
-use std::time::{Duration, Instant};
 
 use vaht_test_support::{
     BUILT_IN_METRICS, BUTTON_LEFT, HeadlessVaht, KeyboardFocus, TestClient, TestLayer,
-    WINDOW_COLOR, keys,
+    WINDOW_COLOR, keys, wait_for_file,
 };
 
 /// The executable cargo built for these tests.
@@ -20,9 +19,6 @@ const WALLPAPER_COLOR: [u8; 3] = [0x30, 0xa0, 0x40];
 
 /// A panel's height, in pixels.
 const PANEL_HEIGHT: u32 = 30;
-
-/// How long to wait for a program vaht started to leave its mark.
-const PATIENCE: Duration = Duration::from_secs(10);
 
 /// Starts vaht with `files` as its configuration, and a client.
 fn start(files: &[(&str, &str)]) -> (HeadlessVaht, TestClient) {
@@ -104,11 +100,7 @@ fn desktop_bindings_work_over_a_wallpaper() {
     let (_vaht, mut client) = start(&[("bindings.toml", &bindings)]);
     client.open_backdrop(TestLayer::Background, WALLPAPER_COLOR);
     client.click(5, 5, BUTTON_LEFT);
-    let deadline = Instant::now() + PATIENCE;
-    while !marker.exists() {
-        assert!(Instant::now() < deadline, "the desktop binding never ran");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    wait_for_file(&marker, |_| true);
 }
 
 #[test]

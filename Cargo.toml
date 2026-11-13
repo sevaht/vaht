@@ -29,7 +29,7 @@ file-rotate = "0.8"
 # `StreamExt`, to read D-Bus signal streams; zbus already depends on it.
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 jiff = "0.2"
-nix = { version = "0.31", features = ["inotify", "process", "signal", "time"] }
+nix = { version = "0.31", features = ["inotify", "poll", "process", "signal", "time"] }
 procfs = "0.18"
 proptest = "1"
 regex = "1"

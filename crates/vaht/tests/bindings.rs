@@ -6,15 +6,12 @@
 //! command did: usually a program it started wrote a file.
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use vaht_test_support::{BUTTON_LEFT, HeadlessVaht, TestClient, WINDOW_COLOR, keys};
+use vaht_test_support::{BUTTON_LEFT, HeadlessVaht, TestClient, WINDOW_COLOR, keys, wait_for_file};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
-
-/// How long to wait for a program vaht started to leave its mark.
-const PATIENCE: Duration = Duration::from_secs(10);
 
 /// Super+T, as typed.
 const SUPER_T: [u32; 2] = [keys::LEFT_SUPER, keys::LETTER_T];
@@ -36,21 +33,7 @@ impl WrittenFiles {
     /// Waits until the output file `name` exists with something in it, and
     /// returns its contents.
     fn wait_for(&self, name: &str) -> String {
-        let path = self.path(name);
-        let deadline = Instant::now() + PATIENCE;
-        loop {
-            if let Ok(contents) = std::fs::read_to_string(&path)
-                && !contents.is_empty()
-            {
-                return contents;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "{} never appeared",
-                path.display()
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        wait_for_file(&self.path(name), |contents| !contents.is_empty())
     }
 }
 

@@ -2,18 +2,14 @@
 //! and starts, checked by screenshots and by the files programs write.
 
 use std::path::Path;
-use std::time::{Duration, Instant};
 
 use vaht_test_support::{
     BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR,
-    WINDOW_SIZE,
+    WINDOW_SIZE, wait_for_file,
 };
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
-
-/// How long to wait for a program vaht started to leave its mark.
-const PATIENCE: Duration = Duration::from_secs(10);
 
 /// Starts vaht with `settings` as its `settings.toml`, and a client.
 fn start(settings: &str) -> (HeadlessVaht, TestClient) {
@@ -116,11 +112,7 @@ fn autostart_runs_its_commands_once_vaht_starts() {
         "[session]\nautostart = [\"echo started > '{}'\"]\n",
         marker.display()
     ));
-    let deadline = Instant::now() + PATIENCE;
-    while !std::fs::read_to_string(&marker).is_ok_and(|text| text.trim() == "started") {
-        assert!(Instant::now() < deadline, "the autostart command never ran");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    wait_for_file(&marker, |text| text.trim() == "started");
     vaht.wait_for_logged("program exited", 1);
 }
 

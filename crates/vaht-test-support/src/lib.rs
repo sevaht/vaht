@@ -15,6 +15,7 @@ mod headless;
 mod metrics;
 mod picture;
 mod screenshot;
+mod wait;
 
 pub use client::{
     BUTTON_LEFT, BUTTON_RIGHT, KeyboardFocus, TestClient, TestLayer, WINDOW_COLOR, WINDOW_SIZE,
@@ -24,3 +25,4 @@ pub use headless::{ExitReport, HeadlessVaht};
 pub use metrics::{BUILT_IN_METRICS, ThemeMetrics};
 pub use picture::solid_png;
 pub use screenshot::{Bounds, Screenshot};
+pub use wait::wait_for_file;

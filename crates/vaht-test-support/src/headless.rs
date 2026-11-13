@@ -1,17 +1,17 @@
 //! A `vaht --backend headless` process, and what it reports as it stops.
+//!
+//! Waiting is event-driven (General F9): vaht writing its log wakes a test
+//! waiting for a line ([`crate::wait`]); vaht exiting wakes a thread
+//! blocked in `wait`. Neither looks on a timer.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
 
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 
-/// How long to wait for vaht to reach a state before failing the test.
-const PATIENCE: Duration = Duration::from_secs(10);
-
-/// How often to look at the log while waiting.
-const POLL_INTERVAL: Duration = Duration::from_millis(20);
+use crate::wait::{self, PATIENCE};
 
 /// The resource kinds that exist only on behalf of clients; all must be gone
 /// once the clients are.
@@ -231,18 +231,29 @@ impl HeadlessVaht {
     /// Panics if vaht does not exit cleanly in time.
     #[must_use]
     pub fn wait_for_exit(mut self) -> ExitReport {
-        let deadline = Instant::now() + PATIENCE;
-        let status = loop {
-            if let Some(status) = self.process.try_wait().expect("vaht can be waited for") {
-                break status;
+        let pid =
+            Pid::from_raw(i32::try_from(self.process.id()).expect("a process id fits in i32"));
+        let process = &mut self.process;
+        let (has_exited, status) = std::thread::scope(|scope| {
+            let (exited, exit_news) = mpsc::channel();
+            let waiter = scope.spawn(move || {
+                let status = process.wait();
+                // The receiver is gone only once the scope is, after this.
+                let _ = exited.send(());
+                status
+            });
+            let has_exited = exit_news.recv_timeout(PATIENCE).is_ok();
+            if !has_exited {
+                // Ends the wait, so the waiter can be joined.
+                let _ = kill(pid, Signal::SIGKILL);
             }
-            assert!(
-                Instant::now() < deadline,
-                "vaht did not exit:\n{}",
-                self.read_log()
-            );
-            std::thread::sleep(POLL_INTERVAL);
-        };
+            let status = waiter
+                .join()
+                .expect("waiting does not panic")
+                .expect("vaht can be waited for");
+            (has_exited, status)
+        });
+        assert!(has_exited, "vaht did not exit:\n{}", self.read_log());
         assert!(status.success(), "vaht did not exit cleanly: {status}");
         ExitReport {
             log: self.read_log(),
@@ -260,20 +271,11 @@ impl HeadlessVaht {
         std::fs::read_to_string(self.logs.path().join("vaht.log")).unwrap_or_default()
     }
 
-    /// Polls the log until `found` finds what it looks for.
+    /// Waits until `found` finds what it looks for in the log, reading the
+    /// log again each time vaht writes to it.
     fn wait_for_log<T>(&self, found: impl Fn(&str) -> Option<T>) -> T {
-        let deadline = Instant::now() + PATIENCE;
-        loop {
-            let log = self.read_log();
-            if let Some(value) = found(&log) {
-                return value;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "vaht never got there; log:\n{log}"
-            );
-            std::thread::sleep(POLL_INTERVAL);
-        }
+        wait::until_written(self.logs.path(), || found(&self.read_log()))
+            .unwrap_or_else(|| panic!("vaht never got there; log:\n{}", self.read_log()))
     }
 }
 

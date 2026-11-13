@@ -207,6 +207,7 @@ impl Taskbar {
             let timer = Timer::once(handle, ledger, delay, |compositor: &mut Compositor| {
                 if let Some(taskbar) = &mut compositor.taskbar {
                     taskbar.is_hidden = true;
+                    tracing::debug!("taskbar hidden");
                     // Its clock rests while it cannot be seen.
                     taskbar.schedule_clock(
                         &Zoned::now(),
