@@ -260,6 +260,8 @@ impl MenuFiles {
                 "lower" => "Lower",
                 "close" => "Close",
                 "kill" => "Kill",
+                "settitledialog" => "Set Window Title",
+                "commanddialog" => "Command",
                 _ => return None,
             };
             Some(fluxbox.to_owned())
@@ -297,6 +299,7 @@ impl MenuFiles {
             "reconfig" => command("reload"),
             "exit" => command("exit"),
             "commanddialog" => command("command-dialog"),
+            "settitledialog" => command("set-title-dialog"),
             "shade" | "stick" | "maximize" => item(&[("toggle", Value::from(line.tag.as_str()))]),
             "iconify" => item(&[("toggle", Value::from("minimize"))]),
             "raise" | "lower" | "close" | "kill" => command(&line.tag),
@@ -485,11 +488,11 @@ mod tests {
             menus.contains("{ label = \"Close\", command = \"close\" }"),
             "{menus}"
         );
-        let lost: Vec<String> = report.notes().iter().map(ToString::to_string).collect();
         assert!(
-            lost.iter().any(|note| note.contains("[settitledialog]")),
-            "{lost:?}"
+            menus.contains("{ label = \"Set Window Title\", command = \"set-title-dialog\" }"),
+            "{menus}"
         );
+        assert!(report.notes().is_empty(), "{report}");
     }
 
     #[test]

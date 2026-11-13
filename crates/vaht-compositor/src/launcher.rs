@@ -28,6 +28,7 @@ use nix::sys::signal::{SigSet, Signal};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::Pid;
 
+use crate::WindowId;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 
 /// Starts programs and reaps them.
@@ -69,14 +70,37 @@ impl Launcher {
     /// Shows vaht's dialog `name` (`vaht dialog <name>`), styled by the
     /// configuration in `config_directory`.
     pub(crate) fn show_dialog(&mut self, name: &str, config_directory: &Path) {
+        self.start_dialog(name, &[], config_directory);
+    }
+
+    /// Shows vaht's dialog `name` for `window` (`vaht dialog <name>
+    /// --window <id>`), styled by the configuration in `config_directory`.
+    pub(crate) fn show_window_dialog(
+        &mut self,
+        name: &str,
+        window: WindowId,
+        config_directory: &Path,
+    ) {
+        let id = window.get().to_string();
+        self.start_dialog(
+            name,
+            &[OsStr::new("--window"), OsStr::new(&id)],
+            config_directory,
+        );
+    }
+
+    /// Starts `vaht dialog <name> <extra>`, styled by the configuration in
+    /// `config_directory`.
+    fn start_dialog(&mut self, name: &str, extra: &[&OsStr], config_directory: &Path) {
         let executable = self.executable.clone();
-        let arguments = [
+        let mut arguments = vec![
             OsStr::new("vaht"),
             OsStr::new("--config-directory"),
             config_directory.as_os_str(),
             OsStr::new("dialog"),
             OsStr::new(name),
         ];
+        arguments.extend_from_slice(extra);
         self.start(&executable, &arguments, &format!("the {name} dialog"));
     }
 

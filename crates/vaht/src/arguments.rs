@@ -102,6 +102,13 @@ pub enum DialogKind {
     Run,
     /// A vaht command to run, written as a binding writes one.
     Command,
+    /// A window's title, to change; left empty, the window's program's
+    /// title comes back.
+    Title {
+        /// The window, by id (see `vaht msg windows`).
+        #[arg(long)]
+        window: u64,
+    },
 }
 
 /// What `vaht msg` asks.

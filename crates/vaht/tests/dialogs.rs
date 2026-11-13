@@ -102,3 +102,30 @@ fn the_command_dialog_runs_a_vaht_command() {
     vaht.wait_for_logged("workspace shown", 1);
     vaht.wait_for_logged("window closed", 1);
 }
+
+#[test]
+fn the_title_dialog_retitles_the_window() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[(
+            "bindings.toml",
+            "[keys]\n\"Super+T\" = \"set-title-dialog\"\n",
+        )],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    client.type_chord(&SUPER_T);
+    vaht.wait_for_logged("placed first", 2);
+    // Ctrl+U clears the title shown; the new one replaces it.
+    client.type_chord(&[keys::LEFT_CONTROL, keys::typing('u').expect("a key").0]);
+    client.type_text("notes");
+    client.type_chord(&[keys::ENTER]);
+    vaht.wait_for_logged("window closed", 1);
+    let listed = std::process::Command::new(EXECUTABLE)
+        .args(["msg", "windows"])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .output()
+        .expect("vaht msg runs");
+    let listed = String::from_utf8(listed.stdout).expect("UTF-8");
+    assert!(listed.trim_end().ends_with("\tnotes"), "{listed}");
+}

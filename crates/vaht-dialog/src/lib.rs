@@ -7,8 +7,9 @@
 //! environment, and vaht reaps it.
 //!
 //! [`LineDialog`] is what a dialog is: a line, and what keys do to it.
-//! [`RunDialog`] runs a program, [`CommandDialog`] a vaht command; both
-//! ask vaht through a [`Commander`]. [`show`] puts a dialog in a window
+//! [`RunDialog`] runs a program, [`CommandDialog`] a vaht command, and
+//! [`TitleDialog`] retitles a window; each asks vaht through a
+//! [`Commander`]. [`show`] puts a dialog in a window
 //! drawn with vaht-ui in the theme's `dialog.field` style, and runs it
 //! until it closes.
 
@@ -17,12 +18,14 @@ mod commander;
 mod key;
 mod line;
 mod run;
+mod title;
 mod window;
 
 pub use command::CommandDialog;
 pub use commander::{CommandError, Commander, IpcCommander};
 pub use key::EditKey;
 pub use run::RunDialog;
+pub use title::TitleDialog;
 pub use window::{DialogError, show};
 
 /// A dialog: a line of text, edited by keys.

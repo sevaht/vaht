@@ -5,12 +5,13 @@ use vaht_ipc::{Client, Reply, Request};
 
 /// Carries out vaht commands.
 pub trait Commander {
-    /// Runs `command`, written as a binding writes one.
+    /// Runs `command`, written as a binding writes one, on `window` (by
+    /// id), or the focused window when none.
     ///
     /// # Errors
     ///
     /// Returns whether vaht refused the command, or could not be asked.
-    fn run(&mut self, command: &str) -> Result<(), CommandError>;
+    fn run(&mut self, command: &str, window: Option<u64>) -> Result<(), CommandError>;
 }
 
 /// Why a command was not carried out.
@@ -29,10 +30,10 @@ pub enum CommandError {
 pub struct IpcCommander;
 
 impl Commander for IpcCommander {
-    fn run(&mut self, command: &str) -> Result<(), CommandError> {
+    fn run(&mut self, command: &str, window: Option<u64>) -> Result<(), CommandError> {
         let request = Request::Run {
             command: command.to_owned(),
-            window: None,
+            window,
         };
         let reply = Client::connect_from_environment()
             .and_then(|mut client| client.request(&request))

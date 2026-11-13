@@ -47,7 +47,7 @@ impl CommandDialog {
         if command.is_empty() {
             return Ok(Outcome::Close);
         }
-        match self.commander.run(&command) {
+        match self.commander.run(&command, None) {
             Ok(()) => Ok(Outcome::Close),
             Err(CommandError::Refused(reason)) => {
                 self.title = format!("{}: {reason}", Self::TITLE);
@@ -115,7 +115,7 @@ mod tests {
     struct Picky;
 
     impl Commander for Picky {
-        fn run(&mut self, command: &str) -> Result<(), CommandError> {
+        fn run(&mut self, command: &str, _: Option<u64>) -> Result<(), CommandError> {
             if command == "dance" {
                 Err(CommandError::Refused("unknown action `dance`".to_owned()))
             } else {

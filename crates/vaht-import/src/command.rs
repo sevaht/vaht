@@ -131,6 +131,8 @@ impl FluxboxCommand<'_> {
             "reconfigure" | "reconfig" => plain("reload"),
             "exit" | "quit" => plain("exit"),
             "setalpha" => with("set-alpha"),
+            "settitle" => with("set-title"),
+            "settitledialog" => plain("set-title-dialog"),
             "setlayer" => Self::layer(arguments)
                 .map(|layer| format!("set-layer {layer}"))
                 .ok_or_else(|| Untranslated::not_yet(format!("SetLayer {arguments}"))),
@@ -348,6 +350,7 @@ mod tests {
     #[case::run_dialog("RunDialog", r#""run-dialog""#)]
     #[case::set_alpha("SetAlpha 200 +10", r#""set-alpha 200 +10""#)]
     #[case::set_layer("SetLayer AboveDock", r#""set-layer above-dock""#)]
+    #[case::set_title_dialog("SetTitleDialog", r#""set-title-dialog""#)]
     #[case::set_layer_by_number("SetLayer 10", r#""set-layer bottom""#)]
     #[case::command_dialog("CommandDialog", r#""command-dialog""#)]
     #[case::fbrun("Exec fbrun", r#""run-dialog""#)]

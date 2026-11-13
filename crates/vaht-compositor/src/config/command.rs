@@ -39,7 +39,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "send-to-output",
     "set-setting",
     "set-theme",
-    "set-title",
     "taskbar-to-output",
     "toggle-frame",
     "toggle-taskbar",
@@ -217,6 +216,8 @@ pub(crate) enum Action {
     RunDialog,
     /// Shows the command dialog: a vaht command to type and run.
     CommandDialog,
+    /// Shows the title dialog for the window: its title, to change.
+    SetTitleDialog,
     /// Stops vaht.
     Exit,
     /// Sets an environment variable for programs vaht starts from now on.
@@ -306,6 +307,9 @@ pub(crate) enum WindowManagerAction {
     /// Minimizes every window on the workspace, or restores them if they
     /// all are.
     ShowDesktop,
+    /// Gives the window a title of vaht's (`set-title <title>`), or its
+    /// program's again (`set-title`).
+    SetTitle(Option<String>),
     /// Moves the window to a stacking layer (`set-layer <layer>`:
     /// above-dock, dock, top, normal, bottom or desktop).
     SetLayer(StackLayer),
@@ -336,6 +340,7 @@ impl Action {
             "reload" => without_arguments(Self::Reload),
             "run-dialog" => without_arguments(Self::RunDialog),
             "command-dialog" => without_arguments(Self::CommandDialog),
+            "set-title-dialog" => without_arguments(Self::SetTitleDialog),
             "root-menu" => without_arguments(Self::OpenMenu(MenuRequest::Root)),
             "window-menu" => without_arguments(Self::OpenMenu(MenuRequest::Window)),
             "workspace-menu" => without_arguments(Self::OpenMenu(MenuRequest::Workspace)),
@@ -432,6 +437,7 @@ impl fmt::Display for Action {
             Self::Reload => formatter.write_str("reload"),
             Self::RunDialog => formatter.write_str("run-dialog"),
             Self::CommandDialog => formatter.write_str("command-dialog"),
+            Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
             Self::Exit => formatter.write_str("exit"),
             Self::SetEnvironment { name, value } => {
                 write!(formatter, "set-environment {name} {value}")
@@ -474,6 +480,9 @@ impl WindowManagerAction {
             "tile" => Self::cell(arguments).map(Self::Tile),
             "set-alpha" => AlphaChange::parse(arguments).map(Self::SetAlpha),
             "set-layer" => arguments.parse().map(Self::SetLayer),
+            "set-title" => Ok(Self::SetTitle(
+                (!arguments.is_empty()).then(|| arguments.to_owned()),
+            )),
             "move" => Self::pair(name, arguments).map(|(x, y)| Self::Move((x, y).into())),
             "move-to" => Self::pair(name, arguments).map(|(x, y)| Self::MoveTo((x, y).into())),
             "resize" => Self::pair(name, arguments).map(|(x, y)| Self::Resize((x, y).into())),
@@ -562,6 +571,8 @@ impl fmt::Display for WindowManagerAction {
             Self::ShowDesktop => formatter.write_str("show-desktop"),
             Self::SetAlpha(change) => write!(formatter, "{change}"),
             Self::SetLayer(layer) => write!(formatter, "set-layer {layer}"),
+            Self::SetTitle(None) => formatter.write_str("set-title"),
+            Self::SetTitle(Some(title)) => write!(formatter, "set-title {title}"),
         }
     }
 }

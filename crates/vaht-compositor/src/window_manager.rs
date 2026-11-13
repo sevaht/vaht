@@ -142,6 +142,33 @@ impl WindowManager {
         self.windows.layer_of(window)
     }
 
+    /// Gives `window` `title` in place of its client's, or its client's
+    /// again with none.
+    fn set_title(&mut self, window: Option<WindowId>, title: Option<String>) {
+        if let Some(target) = window.and_then(|window| self.window_mut(window)) {
+            target.set_title(title);
+            self.is_redraw_needed = true;
+        }
+    }
+
+    /// Moves `window` to the top of `layer`.
+    fn set_layer(&mut self, window: Option<WindowId>, layer: StackLayer) {
+        if let Some(window) = window
+            && self.windows.set_layer(window, layer)
+        {
+            self.is_redraw_needed = true;
+        }
+    }
+
+    /// Changes `window`'s opacity as `change` says.
+    fn change_alpha(&mut self, window: Option<WindowId>, change: AlphaChange) {
+        let defaults = self.default_alpha;
+        if let Some(target) = window.and_then(|window| self.window_mut(window)) {
+            target.change_alpha(change, defaults);
+            self.is_redraw_needed = true;
+        }
+    }
+
     /// Returns how opaque `window` is drawn, 0.0 to 1.0.
     pub(crate) fn opacity(&self, window: &Window) -> f32 {
         window.opacity(self.default_alpha)
@@ -423,20 +450,9 @@ impl WindowManager {
                 self.cycle_focus(windows, CycleDirection::Backward);
             }
             WindowManagerAction::ShowDesktop => self.show_desktop(),
-            WindowManagerAction::SetLayer(layer) => {
-                if let Some(window) = window
-                    && self.windows.set_layer(window, *layer)
-                {
-                    self.is_redraw_needed = true;
-                }
-            }
-            WindowManagerAction::SetAlpha(change) => {
-                let defaults = self.default_alpha;
-                if let Some(target) = window.and_then(|window| self.window_mut(window)) {
-                    target.change_alpha(*change, defaults);
-                    self.is_redraw_needed = true;
-                }
-            }
+            WindowManagerAction::SetTitle(title) => self.set_title(window, title.clone()),
+            WindowManagerAction::SetLayer(layer) => self.set_layer(window, *layer),
+            WindowManagerAction::SetAlpha(change) => self.change_alpha(window, *change),
         }
     }
 

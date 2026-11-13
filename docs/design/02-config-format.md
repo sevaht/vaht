@@ -288,7 +288,7 @@ A command is written in one of three forms:
 | Area | Actions |
 |---|---|
 | Programs and session | `exec <command line>`, `reload`, `exit`, `restart`, `set-environment NAME value`, `set-setting key value`, `save-settings` |
-| Window state | `close`, `kill`, `minimize`, `maximize [horizontal\|vertical]`, `fullscreen`, `shade`, `stick`, `raise`, `lower`, `set-layer <layer>`, `set-alpha <n>`, `toggle-frame`, `set-title`, `mark-window <key>`, `go-to-marked-window <key>` |
+| Window state | `close`, `kill`, `minimize`, `maximize [horizontal\|vertical]`, `fullscreen`, `shade`, `stick`, `raise`, `lower`, `set-layer <layer>`, `set-alpha <n>`, `toggle-frame`, `set-title [title]`, `set-title-dialog`, `mark-window <key>`, `go-to-marked-window <key>` |
 | Window placement | `move <dx> <dy>`, `move-to <x> <y>`, `resize <dw> <dh>`, `resize-to <w> <h>`, `snap-step <direction>`, `tile <cell>`, `send-to-output next\|previous\|<n>`, `arrange <style>` |
 | Grabs | `start-moving`, `start-resizing [nearest-corner\|<corner>]` |
 | Focus | `focus`, `next-window`, `previous-window`, `focus-direction <direction>`, `show-desktop` |
@@ -828,6 +828,10 @@ vaht import av-output-switcher [--from ~/.config/sevaht/av-output-switcher/profi
   unique, and `[include]` files are read in place. A submenu with nothing
   vaht can show is left out. Vaht's own window and workspace menus are
   written where the source has none.
+- **The title dialog converts:** `SetTitleDialog` and the window menu's
+  `[settitledialog]` become `set-title-dialog`, which shows the window's
+  title to change (`vaht dialog title --window <id>`); `SetTitle` becomes
+  `set-title`, and `set-title` alone gives the program's title back.
 - **The command dialog converts:** `CommandDialog` and the menu's
   `[commanddialog]` become `command-dialog`, a line for a vaht command.
   A command vaht refuses keeps the dialog open, with the reason in its

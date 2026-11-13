@@ -905,6 +905,15 @@ impl Compositor {
             Action::CommandDialog => self
                 .launcher
                 .show_dialog("command", self.config_source.directory()),
+            Action::SetTitleDialog => {
+                if let Some(window) = context.window {
+                    self.launcher.show_window_dialog(
+                        "title",
+                        window,
+                        self.config_source.directory(),
+                    );
+                }
+            }
             Action::Exit => self.stop(),
             Action::SetEnvironment { name, value } => {
                 self.launcher.set_environment(name.clone(), value.clone());

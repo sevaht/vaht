@@ -145,6 +145,8 @@ pub(crate) struct Window {
     is_pseudo_transparent: bool,
     /// Its opacity, as `set-alpha` set it; the settings' when none.
     alpha: Option<WindowAlpha>,
+    /// Its title, as `set-title` set it; its client's when none.
+    title: Option<String>,
     /// Counts the window while it exists.
     _tracked: Tracked,
 }
@@ -172,6 +174,7 @@ impl Window {
             awaits_placement: true,
             is_pseudo_transparent: false,
             alpha: None,
+            title: None,
             _tracked: ledger.track(ResourceKind::Window),
         }
     }
@@ -181,9 +184,17 @@ impl Window {
         self.id
     }
 
-    /// Returns the title its client set.
+    /// Returns its title: the one `set-title` gave it, else its client's.
     pub(crate) fn title(&self) -> &str {
-        &self.committed.title
+        self.title.as_deref().unwrap_or(&self.committed.title)
+    }
+
+    /// Gives the window `title` in place of its client's, or with none its
+    /// client's again.
+    pub(crate) fn set_title(&mut self, title: Option<String>) {
+        self.title = title;
+        let shown = self.title().to_owned();
+        self.frame.set_title(&shown);
     }
 
     /// Returns the application id its client set.
@@ -311,8 +322,9 @@ impl Window {
     /// Brings the window up to date with what its client committed: its
     /// title, its size, and its position while a resize keeps edges still.
     pub(crate) fn commit(&mut self, committed: CommittedState) {
-        self.frame.set_title(&committed.title);
         self.committed = committed;
+        let shown = self.title().to_owned();
+        self.frame.set_title(&shown);
         if let Some(DragProgress::Resize(anchor)) = self.drag {
             let size = self.committed.geometry.size;
             self.location = anchor.edges.anchored_location(anchor.initial, size);

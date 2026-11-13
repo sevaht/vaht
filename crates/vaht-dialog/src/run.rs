@@ -105,7 +105,7 @@ impl RunDialog {
             })
         });
         self.commander
-            .run(&format!("exec {line}"))
+            .run(&format!("exec {line}"), None)
             .map_err(|error| error.to_string())?;
         saved.map(|()| Outcome::Close)
     }
@@ -240,7 +240,7 @@ mod tests {
     struct Recorder(Rc<RefCell<Vec<String>>>);
 
     impl Commander for Recorder {
-        fn run(&mut self, command: &str) -> Result<(), CommandError> {
+        fn run(&mut self, command: &str, _: Option<u64>) -> Result<(), CommandError> {
             self.0.borrow_mut().push(command.to_owned());
             Ok(())
         }
@@ -355,7 +355,7 @@ mod tests {
         /// Reaches no vaht.
         struct Failing;
         impl Commander for Failing {
-            fn run(&mut self, _: &str) -> Result<(), CommandError> {
+            fn run(&mut self, _: &str, _: Option<u64>) -> Result<(), CommandError> {
                 Err(CommandError::Unreachable("no vaht".to_owned()))
             }
         }
