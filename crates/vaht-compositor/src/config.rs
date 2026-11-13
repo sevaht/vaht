@@ -16,6 +16,7 @@ mod command;
 mod matcher;
 mod rules;
 mod settings;
+mod source;
 mod unique_map;
 mod watch;
 
@@ -24,11 +25,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub(crate) use self::bindings::{Bindings, KeyChord, Modifiers, MouseButton, MouseContext};
-pub(crate) use self::command::{Action, Command, ResizeFrom};
+pub(crate) use self::command::{Action, Command, ResizeFrom, WindowManagerAction};
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::rules::Rules;
 pub(crate) use self::settings::{FocusModel, Settings};
-pub(crate) use self::watch::ConfigWatch;
+pub(crate) use self::source::ConfigSource;
 
 /// One configuration file and vaht's built-in version of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

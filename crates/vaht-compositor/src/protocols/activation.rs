@@ -30,22 +30,23 @@ impl XdgActivationHandler for Compositor {
         token_data: XdgActivationTokenData,
         surface: WlSurface,
     ) {
-        let Some(window) = self.windows.id_of(&surface) else {
+        let Some(window) = self.toplevels.window_of(&surface) else {
             return;
         };
         let focused_client = self
+            .window_manager
             .focused()
-            .and_then(|id| self.windows.get(id))
+            .and_then(|focused| self.toplevels.get(focused))
             .and_then(|focused| {
                 self.display_handle
-                    .get_client(focused.toplevel().wl_surface().id())
+                    .get_client(focused.wl_surface().id())
                     .ok()
             })
             .map(|client| client.id());
         let is_from_focus = focused_client.is_some() && token_data.client_id == focused_client;
         if is_from_focus && token_data.timestamp.elapsed() < ACTIVATION_PATIENCE {
             tracing::debug!(window = %window, "activation honored");
-            self.activate_window(window);
+            self.window_manager.activate(window);
         } else {
             tracing::debug!(window = %window, "activation refused: not asked for by the focused program");
         }

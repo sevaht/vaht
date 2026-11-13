@@ -8,8 +8,11 @@
 
 use std::time::Duration;
 
-use crate::placement_strategy::{ColumnDirection, PlacementStrategy, RowDirection};
-use crate::window::{TitlebarButton, TitlebarLayout};
+use smithay::utils::{Logical, Point, Size};
+
+use crate::window_manager::{
+    ColumnDirection, PlacementStrategy, Room, RowDirection, TitlebarButton, TitlebarLayout,
+};
 
 /// Every setting.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
@@ -85,6 +88,15 @@ pub(crate) struct PlacementSettings {
     pub(crate) row_direction: RowDirection,
     /// Which way columns are scanned.
     pub(crate) column_direction: ColumnDirection,
+}
+
+impl PlacementSettings {
+    /// Returns where the top-left corner of a new window of `size` (frame
+    /// included) goes in `room`.
+    pub(crate) fn place(self, size: Size<i32, Logical>, room: &Room) -> Point<i32, Logical> {
+        self.strategy
+            .place(size, room, self.row_direction, self.column_direction)
+    }
 }
 
 /// How windows behave and look.

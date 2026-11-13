@@ -1,10 +1,7 @@
 //! Application windows and their popups: `xdg_wm_base`.
 
-use smithay::desktop::{PopupKind, find_popup_root_surface, get_popup_toplevel_coords};
-use smithay::input::Seat;
-use smithay::input::pointer::GrabStartData;
+use smithay::desktop::PopupKind;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
-use smithay::reexports::wayland_server::Resource as _;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::utils::Serial;
@@ -13,9 +10,7 @@ use smithay::wayland::shell::xdg::{
 };
 
 use crate::Compositor;
-use crate::window::{
-    Area, Axes, HorizontalEdge, Placement, ResizeEdges, VerticalEdge, WindowDrag, WindowId,
-};
+use crate::window_manager::{ClientRequest, HorizontalEdge, ResizeEdges, VerticalEdge, WindowDrag};
 
 impl XdgShellHandler for Compositor {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -59,47 +54,27 @@ impl XdgShellHandler for Compositor {
     fn grab(&mut self, _surface: PopupSurface, _seat: WlSeat, _serial: Serial) {}
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
-        self.request_placement(
-            &surface,
-            |placement| !placement.is_fully_maximized(),
-            |placement, current| placement.with_maximized_toggled(Axes::Both, current),
-        );
+        self.honor_client_request(&surface, ClientRequest::Maximize);
     }
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
-        self.request_placement(
-            &surface,
-            Placement::is_fully_maximized,
-            |placement, current| placement.with_maximized_toggled(Axes::Both, current),
-        );
+        self.honor_client_request(&surface, ClientRequest::Unmaximize);
     }
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {
-        self.request_placement(
-            &surface,
-            |placement| !placement.is_fullscreen(),
-            Placement::with_fullscreen_toggled,
-        );
+        self.honor_client_request(&surface, ClientRequest::Fullscreen);
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        self.request_placement(
-            &surface,
-            Placement::is_fullscreen,
-            Placement::with_fullscreen_toggled,
-        );
+        self.honor_client_request(&surface, ClientRequest::Unfullscreen);
     }
 
     fn minimize_request(&mut self, surface: ToplevelSurface) {
-        let window = self.windows.id_of(surface.wl_surface());
-        self.set_minimized(window, true);
+        self.honor_client_request(&surface, ClientRequest::Minimize);
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
-        let Some((window, start)) = self.client_drag(&surface, &seat, serial) else {
-            return;
-        };
-        self.start_window_grab(window, WindowDrag::Move, start, serial);
+        self.start_requested_drag(&surface, &seat, serial, WindowDrag::Move);
     }
 
     fn resize_request(
@@ -109,11 +84,8 @@ impl XdgShellHandler for Compositor {
         serial: Serial,
         edges: xdg_toplevel::ResizeEdge,
     ) {
-        let Some(edges) = resize_edges(edges) else {
-            return;
-        };
-        if let Some((window, start)) = self.client_drag(&surface, &seat, serial) {
-            self.start_window_grab(window, WindowDrag::Resize { edges }, start, serial);
+        if let Some(edges) = resize_edges(edges) {
+            self.start_requested_drag(&surface, &seat, serial, WindowDrag::Resize { edges });
         }
     }
 }
@@ -136,69 +108,4 @@ const fn resize_edges(edge: xdg_toplevel::ResizeEdge) -> Option<ResizeEdges> {
         horizontal,
         vertical,
     })
-}
-
-impl Compositor {
-    /// Returns the window a client asks to drag, and where the drag starts,
-    /// if the request is genuine: the pointer button behind `serial` is
-    /// still held, on a surface of the same client. Anything else is a
-    /// stale or forged request, and is ignored.
-    fn client_drag(
-        &self,
-        surface: &ToplevelSurface,
-        seat: &WlSeat,
-        serial: Serial,
-    ) -> Option<(WindowId, GrabStartData<Self>)> {
-        let pointer = Seat::<Self>::from_resource(seat)?.get_pointer()?;
-        if !pointer.has_grab(serial) {
-            return None;
-        }
-        let start = pointer.grab_start_data()?;
-        let (focus, _) = start.focus.as_ref()?;
-        if !focus.id().same_client_as(&surface.wl_surface().id()) {
-            return None;
-        }
-        Some((self.windows.id_of(surface.wl_surface())?, start))
-    }
-
-    /// Places the window of `surface` as `change` says, if `applies` to its
-    /// placement; the client always hears back, as xdg-shell requires.
-    fn request_placement(
-        &mut self,
-        surface: &ToplevelSurface,
-        applies: impl FnOnce(&Placement) -> bool,
-        change: impl FnOnce(Placement, Area) -> Placement,
-    ) {
-        let window = self.windows.id_of(surface.wl_surface());
-        let changes = window
-            .and_then(|id| self.windows.get(id))
-            .is_some_and(|target| applies(target.placement()));
-        if changes {
-            self.change_placement(window, change);
-        } else if surface.is_initial_configure_sent() {
-            surface.send_pending_configure();
-        }
-    }
-
-    /// Keeps a popup within its window's output, flipping or sliding it as its
-    /// positioner allows.
-    fn unconstrain_popup(&self, popup: &PopupSurface) {
-        let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
-            return;
-        };
-        let Some(window) = self
-            .windows
-            .id_of(&root)
-            .and_then(|id| self.windows.get(id))
-        else {
-            return;
-        };
-        // The positioner works relative to the popup's parent.
-        let mut target = self.backend.output_geometry();
-        target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
-        target.loc -= window.location();
-        popup.with_pending_state(|state| {
-            state.geometry = state.positioner.get_unconstrained_geometry(target);
-        });
-    }
 }

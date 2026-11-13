@@ -9,11 +9,13 @@
 //! next to frames, so drawing it again in software costs nothing in normal
 //! use.
 
+use std::time::Duration;
+
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::pixman::{PixmanError, PixmanRenderer};
 use smithay::backend::renderer::{Bind as _, ExportMem as _, Renderer as _};
-use smithay::output::WeakOutput;
+use smithay::output::{Output, WeakOutput};
 use smithay::reexports::pixman::{FormatCode, Image};
 use smithay::reexports::wayland_server::protocol::wl_shm::Format;
 use smithay::utils::{Physical, Rectangle, Scale, Size, Transform};
@@ -109,49 +111,26 @@ impl ScreenCapture {
     }
 }
 
-impl std::fmt::Debug for ScreenCapture {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ScreenCapture")
-            .field("sessions", &self.sessions.len())
-            .finish_non_exhaustive()
-    }
-}
-
-impl Compositor {
-    /// Fills `frame` with the output's current image, or fails it.
-    fn capture_frame(&mut self, frame: Frame) {
-        self.prepare_panels();
-        let output = self.backend.output();
+impl ScreenCapture {
+    /// Fills `frame` with the image `scene` makes of `output`, or fails it;
+    /// `time` is when the image was made, from vaht's start.
+    fn capture(&mut self, frame: Frame, scene: &Scene<'_>, output: &Output, time: Duration) {
         let Some(mode) = output.current_mode() else {
             frame.fail(CaptureFailureReason::Stopped);
             return;
         };
         let scale = output.current_scale().fractional_scale().into();
-        let metrics = self.theme.metrics();
         let size = mode.size;
-        let result = self
-            .capture
-            .render(
-                &Scene::new(
-                    &self.windows,
-                    metrics,
-                    self.workspaces.current(),
-                    OutputLayers::new(output, self.backend.output_geometry()),
-                ),
-                size,
-                scale,
-            )
-            .and_then(|pixels| {
-                let (width, height) = (
-                    usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?,
-                    usize::try_from(size.h).map_err(|_negative| CaptureError::EmptyOutput)?,
-                );
-                shared_memory::write_frame(&frame.buffer(), &pixels, width, height)
-                    .map_err(CaptureError::Write)
-            });
+        let result = self.render(scene, size, scale).and_then(|pixels| {
+            let (width, height) = (
+                usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?,
+                usize::try_from(size.h).map_err(|_negative| CaptureError::EmptyOutput)?,
+            );
+            shared_memory::write_frame(&frame.buffer(), &pixels, width, height)
+                .map_err(CaptureError::Write)
+        });
         match result {
-            Ok(()) => frame.success(Transform::Normal, None, self.start_time.elapsed()),
+            Ok(()) => frame.success(Transform::Normal, None, time),
             Err(error) => {
                 tracing::warn!(error = &error as &dyn std::error::Error, "capture failed");
                 let reason = match error {
@@ -167,6 +146,15 @@ impl Compositor {
     }
 }
 
+impl std::fmt::Debug for ScreenCapture {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ScreenCapture")
+            .field("sessions", &self.sessions.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl ImageCaptureSourceHandler for Compositor {}
 
 impl OutputCaptureSourceHandler for Compositor {
@@ -174,11 +162,7 @@ impl OutputCaptureSourceHandler for Compositor {
         &mut self.protocols.output_capture_source
     }
 
-    fn output_source_created(
-        &mut self,
-        source: ImageCaptureSource,
-        output: &smithay::output::Output,
-    ) {
+    fn output_source_created(&mut self, source: ImageCaptureSource, output: &Output) {
         source.user_data().insert_if_missing(|| output.downgrade());
     }
 }
@@ -208,7 +192,16 @@ impl ImageCopyCaptureHandler for Compositor {
     }
 
     fn frame(&mut self, _session: &SessionRef, frame: Frame) {
-        self.capture_frame(frame);
+        self.prepare_frames();
+        let output = self.backend.output();
+        let scene = Scene::new(
+            &self.window_manager,
+            &self.toplevels,
+            &self.frame_textures,
+            OutputLayers::new(output, self.backend.output_geometry()),
+        );
+        self.capture
+            .capture(frame, &scene, output, self.start_time.elapsed());
     }
 }
 

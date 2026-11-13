@@ -7,7 +7,16 @@
 //! and again visits every window. When the cycle ends (the modifiers are
 //! let go), the window it stopped at becomes the most recent.
 
-use crate::window::WindowId;
+use super::window::WindowId;
+
+/// Which way a cycle step goes through windows ordered by recency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum CycleDirection {
+    /// Toward windows that had focus longer ago.
+    Forward,
+    /// Toward windows that had focus more recently.
+    Backward,
+}
 
 /// Which window has keyboard focus, and which had it before.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -48,10 +57,14 @@ impl Focus {
         ordered
     }
 
-    /// Returns the window a cycle step `forward` (or back) goes to, among
+    /// Returns the window a cycle step in `direction` goes to, among
     /// `windows` ordered by recency, and makes it the cycle's position. The
     /// first step starts a cycle at the focused window.
-    pub(crate) fn step(&mut self, windows: Vec<WindowId>, forward: bool) -> Option<WindowId> {
+    pub(crate) fn step(
+        &mut self,
+        windows: Vec<WindowId>,
+        direction: CycleDirection,
+    ) -> Option<WindowId> {
         let focused = self.focused;
         let cycle = self.cycle.get_or_insert_with(|| FocusCycle {
             position: focused.and_then(|focused| windows.iter().position(|id| *id == focused)),
@@ -61,11 +74,11 @@ impl Focus {
         if count == 0 {
             return None;
         }
-        let next = match (cycle.position, forward) {
-            (Some(position), true) => (position + 1) % count,
-            (Some(position), false) => (position + count - 1) % count,
-            (None, true) => 0,
-            (None, false) => count - 1,
+        let next = match (cycle.position, direction) {
+            (Some(position), CycleDirection::Forward) => (position + 1) % count,
+            (Some(position), CycleDirection::Backward) => (position + count - 1) % count,
+            (None, CycleDirection::Forward) => 0,
+            (None, CycleDirection::Backward) => count - 1,
         };
         cycle.position = Some(next);
         cycle.windows.get(next).copied()
@@ -138,12 +151,12 @@ mod tests {
         let mut focus = three_focused();
         let mut visited = Vec::new();
         for _ in 0..3 {
-            let window = focus.step(focus.by_recency(ids(&[1, 2, 3])), true);
+            let window = focus.step(focus.by_recency(ids(&[1, 2, 3])), CycleDirection::Forward);
             focus.set(window);
             visited.extend(window);
         }
         assert_eq!(visited, ids(&[2, 1, 3]), "and around to where it began");
-        let stopped_at = focus.step(focus.by_recency(ids(&[1, 2, 3])), true);
+        let stopped_at = focus.step(focus.by_recency(ids(&[1, 2, 3])), CycleDirection::Forward);
         assert_eq!(stopped_at, Some(WindowId::new(2)));
         focus.set(stopped_at);
         focus.finish_cycle();
@@ -154,7 +167,10 @@ mod tests {
     fn stepping_back_goes_to_the_least_recent() {
         let mut focus = three_focused();
         let windows = focus.by_recency(ids(&[1, 2, 3]));
-        assert_eq!(focus.step(windows, false), Some(WindowId::new(1)));
+        assert_eq!(
+            focus.step(windows, CycleDirection::Backward),
+            Some(WindowId::new(1))
+        );
     }
 
     #[test]

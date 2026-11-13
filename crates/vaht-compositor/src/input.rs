@@ -1,534 +1,64 @@
-//! Turning keyboard and pointer events into bindings and what clients
-//! receive.
+//! The input state that outlives a single event, and its decisions.
 //!
-//! A key press is first matched against the key bindings; a bound press,
-//! and its release, are vaht's and never reach the client. A button press
-//! focuses and raises the window under the pointer, then is matched against
-//! the mouse bindings of where it landed (01 §7): a bound press is held by a
-//! pointer grab, so the client never sees it either. Unbound input goes to
-//! the focused or hovered client.
+//! [`Input`] decides whose a key event is (a bound press, and its release,
+//! are vaht's and never reach the client), recognizes double clicks, and
+//! keeps the timers that repeat a held key binding and raise a window the
+//! pointer rests on. The compositor routes events through it and the seat
+//! (01 §7).
 
 use std::collections::HashSet;
+use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-    InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
-    PointerMotionEvent,
+    Axis, AxisSource, Event as _, InputBackend, KeyState, PointerAxisEvent as _,
 };
-use smithay::input::keyboard::{
-    FilterResult, KeyboardSource, Keycode, KeymapFile, KeysymHandle, ModifiersState,
-};
-use smithay::input::pointer::{AxisFrame, ButtonEvent, GrabStartData, MotionEvent};
-use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
-use smithay::wayland::virtual_keyboard::VirtualKeyboardKeyEvent;
+use smithay::input::keyboard::{FilterResult, Keycode};
+use smithay::input::pointer::AxisFrame;
+use smithay::reexports::calloop::LoopHandle;
 
 use crate::Compositor;
-use crate::config::{
-    Bindings, Command, FocusModel, KeyChord, Modifiers, MouseButton, MouseContext,
-};
+use crate::config::{Bindings, Command, KeyChord};
 use crate::event_source::{RepeatingTimer, Timer};
-use crate::execute::{ExecutionContext, Press};
-
-use crate::scene::PointerTarget;
-use crate::window::{FramePart, WindowDrag, WindowId};
-use crate::windows::WindowTarget;
+use crate::execution::ExecutionContext;
+use crate::resources::ResourceLedger;
+use crate::window_manager::WindowId;
 
 /// Scroll distance per wheel notch, in the 120ths that high-resolution
 /// wheels report: a notch is 120, and libinput maps it to 15 units.
 const SCROLL_UNITS_PER_V120: f64 = 15.0 / 120.0;
 
-impl Compositor {
-    /// Delivers one input event.
-    pub(crate) fn handle_input<B: InputBackend>(&mut self, event: InputEvent<B>) {
-        #[expect(
-            clippy::wildcard_enum_match_arm,
-            reason = "Smithay's input enum has many kinds vaht does not handle yet"
-        )]
-        match event {
-            InputEvent::Keyboard { event } => self.handle_key::<B>(&event),
-            InputEvent::PointerMotion { event } => self.handle_pointer_motion::<B>(&event),
-            InputEvent::PointerMotionAbsolute { event } => {
-                self.handle_pointer_position::<B>(&event);
-            }
-            InputEvent::PointerButton { event } => self.handle_pointer_button::<B>(&event),
-            InputEvent::PointerAxis { event } => self.handle_pointer_axis::<B>(&event),
-            _ => {}
-        }
-    }
-
-    /// Sends a key from a physical keyboard to the focused window.
-    fn handle_key<B: InputBackend>(&mut self, event: &B::KeyboardKeyEvent) {
-        self.activate_keymap(None);
-        self.press_key(
-            KeyboardSource::Physical,
-            event.key_code(),
-            event.state(),
-            event.time(),
-        );
-    }
-
-    /// Sends a key from a virtual keyboard, read with that keyboard's own
-    /// keymap (or the seat's, when it sent none).
-    pub(crate) fn handle_virtual_key(&mut self, event: &VirtualKeyboardKeyEvent) {
-        let device = event.device();
-        self.activate_keymap(device.keymap());
-        self.press_key(
-            device.source(),
-            event.key_code(),
-            event.state(),
-            event.time(),
-        );
-    }
-
-    /// Releases every key a virtual keyboard still holds; it is going away.
-    pub(crate) fn release_virtual_keys(&mut self, source: KeyboardSource) {
-        let keyboard = self
-            .seat
-            .get_keyboard()
-            .expect("the seat gets a keyboard at startup");
-        keyboard.release_source(self, source);
-    }
-
-    /// Sets the modifier state a virtual keyboard asks for: `masks` are its
-    /// depressed, latched and locked modifiers and its layout group, relative
-    /// to its `keymap` (or the seat's).
-    pub(crate) fn set_virtual_modifiers(&mut self, keymap: Option<KeymapFile>, masks: [u32; 4]) {
-        self.activate_keymap(keymap);
-        let [depressed, latched, locked, group] = masks;
-        let keyboard = self
-            .seat
-            .get_keyboard()
-            .expect("the seat gets a keyboard at startup");
-        keyboard.with_xkb_state(self, |mut context| {
-            context.set_modifier_mask(depressed, latched, locked, group);
-        });
-        if depressed == 0 {
-            self.modifiers_released();
-        }
-    }
-
-    /// Makes `keymap` the seat's keymap, or vaht's own for `None`, if it is
-    /// not already: a virtual keyboard's keycodes mean something only in its
-    /// own keymap.
-    fn activate_keymap(&mut self, keymap: Option<KeymapFile>) {
-        let wanted = keymap.unwrap_or_else(|| self.physical_keymap.clone());
-        let keyboard = self
-            .seat
-            .get_keyboard()
-            .expect("the seat gets a keyboard at startup");
-        if keyboard.keymap_file().id() != wanted.id()
-            && let Err(error) = keyboard.set_keymap_from_keymap_file(self, wanted)
-        {
-            tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                "could not switch keymaps"
-            );
-        }
-    }
-
-    /// Sends a key from `source` to the focused window, unless it is bound.
-    fn press_key(
-        &mut self,
-        source: KeyboardSource,
-        keycode: Keycode,
-        state: KeyState,
-        time: InputTime,
-    ) {
-        let keyboard = self
-            .seat
-            .get_keyboard()
-            .expect("the seat gets a keyboard at startup");
-        let bound = keyboard.input_from_source(
-            source,
-            self,
-            keycode,
-            state,
-            SERIAL_COUNTER.next_serial(),
-            time,
-            |compositor, modifiers, keysym| {
-                compositor.filter_key(keycode, state, modifiers, &keysym)
-            },
-        );
-        if let Some(Some(command)) = bound {
-            self.run_key_binding(keycode, command);
-        }
-    }
-
-    /// Decides whether a key event is vaht's: a bound press, or the release
-    /// of one. Returns the bound press's command.
-    fn filter_key(
-        &mut self,
-        keycode: Keycode,
-        state: KeyState,
-        modifiers: &ModifiersState,
-        keysym: &KeysymHandle<'_>,
-    ) -> FilterResult<Option<Command>> {
-        let held = Modifiers::held(modifiers);
-        if state == KeyState::Released && held == Modifiers::default() {
-            self.modifiers_released();
-        }
-        let chord = keysym
-            .raw_latin_sym_or_raw_current_sym()
-            .map(|key| KeyChord::new(held, key));
-        self.input.key(keycode, state, chord, &self.config.bindings)
-    }
-
-    /// Ends what lasts while modifiers are held, now that none is: window
-    /// cycling, and undoing a snap step's minimize.
-    fn modifiers_released(&mut self) {
-        self.focus.finish_cycle();
-        self.snap_minimized = None;
-    }
-
-    /// Runs a bound key's `command` for the focused window, and starts
-    /// repeating it while `keycode` is held if it repeats.
-    fn run_key_binding(&mut self, keycode: Keycode, command: Command) {
-        self.execute(&command, &mut ExecutionContext::for_window(self.focused()));
-        let Command::Repeat { rate, .. } = &command else {
-            return;
-        };
-        let rate = rate.unwrap_or(Self::KEY_REPEAT_RATE);
-        let interval = Duration::from_secs(1) / rate.get();
-        let started = RepeatingTimer::start(
-            &self.loop_handle,
-            &self.ledger,
-            Self::KEY_REPEAT_DELAY,
-            interval,
-            move |compositor: &mut Self| {
-                let window = compositor.focused();
-                compositor.execute(&command, &mut ExecutionContext::for_window(window));
-            },
-        );
-        match started {
-            Ok(timer) => {
-                self.input.key_repeat = Some(KeyRepeat {
-                    keycode,
-                    _timer: timer,
-                });
-            }
-            Err(error) => tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                "could not repeat a key binding"
-            ),
-        }
-    }
-
-    /// Returns the modifiers held now.
-    fn held_modifiers(&self) -> Modifiers {
-        let keyboard = self
-            .seat
-            .get_keyboard()
-            .expect("the seat gets a keyboard at startup");
-        Modifiers::held(&keyboard.modifier_state())
-    }
-
-    /// Moves the pointer by a relative distance, kept on the output.
-    fn handle_pointer_motion<B: InputBackend>(&mut self, event: &B::PointerMotionEvent) {
-        let pointer = self
-            .seat
-            .get_pointer()
-            .expect("the seat gets a pointer at startup");
-        let output = self.backend.output_geometry().to_f64();
-        let moved = pointer.current_location() + event.delta();
-        // The far edges are outside the output, so stop just short of them.
-        let location = Point::from((
-            moved
-                .x
-                .clamp(output.loc.x, output.loc.x + output.size.w - 1.0),
-            moved
-                .y
-                .clamp(output.loc.y, output.loc.y + output.size.h - 1.0),
-        ));
-        self.move_pointer_to(location, event.time());
-    }
-
-    /// Moves the pointer to an absolute position on the output.
-    fn handle_pointer_position<B: InputBackend>(&mut self, event: &B::PointerMotionAbsoluteEvent) {
-        let output = self.backend.output_geometry();
-        let location = event.position_transformed(output.size) + output.loc.to_f64();
-        self.move_pointer_to(location, event.time());
-    }
-
-    /// Moves the pointer to `location`, telling the surface under it.
-    fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
-        let target = self.scene().target_at(location);
-        let pointer = self
-            .seat
-            .get_pointer()
-            .expect("the seat gets a pointer at startup");
-        if let Some(window) = target.as_ref().and_then(PointerTarget::window)
-            && !pointer.is_grabbed()
-        {
-            self.pointer_entered(window);
-        }
-        // Over a frame, no client has the pointer: the frame is vaht's.
-        let under = target.as_ref().and_then(PointerTarget::client_surface);
-        pointer.motion(
-            self,
-            under,
-            &MotionEvent {
-                location,
-                serial: SERIAL_COUNTER.next_serial(),
-                time,
-            },
-        );
-        pointer.frame(self);
-    }
-
-    /// With sloppy focus, focuses `window`, which the pointer is over, and
-    /// with auto-raise raises it once the pointer has rested there a while.
-    fn pointer_entered(&mut self, window: WindowId) {
-        let focus = self.config.settings.focus;
-        if focus.model != FocusModel::Sloppy || self.focused() == Some(window) {
-            return;
-        }
-        self.focus_window(Some(window), SERIAL_COUNTER.next_serial());
-        self.input.auto_raise = None;
-        if focus.auto_raise {
-            let raise = Timer::once(
-                &self.loop_handle,
-                &self.ledger,
-                focus.auto_raise_delay(),
-                move |compositor: &mut Self| {
-                    if compositor.focused() == Some(window) {
-                        compositor.raise_window(window);
-                    }
-                },
-            );
-            match raise {
-                Ok(timer) => self.input.auto_raise = Some(timer),
-                Err(error) => tracing::warn!(
-                    error = &error as &dyn std::error::Error,
-                    "could not schedule raising a window"
-                ),
+/// Returns the scroll `event` as the frame a client receives.
+pub(crate) fn axis_frame<B: InputBackend>(event: &B::PointerAxisEvent) -> AxisFrame {
+    let source = event.source();
+    let mut frame = AxisFrame::new(event.time()).source(source);
+    for axis in [Axis::Horizontal, Axis::Vertical] {
+        let discrete = event.amount_v120(axis);
+        let amount = event
+            .amount(axis)
+            .unwrap_or_else(|| discrete.unwrap_or(0.0) * SCROLL_UNITS_PER_V120);
+        if amount != 0.0 {
+            frame = frame.value(axis, amount);
+            if let Some(discrete) = discrete {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "v120 values are whole numbers"
+                )]
+                let steps = discrete as i32;
+                frame = frame.v120(axis, steps);
             }
         }
-    }
-
-    /// Presses or releases a pointer button.
-    fn handle_pointer_button<B: InputBackend>(&mut self, event: &B::PointerButtonEvent) {
-        let pointer = self
-            .seat
-            .get_pointer()
-            .expect("the seat gets a pointer at startup");
-        let serial = SERIAL_COUNTER.next_serial();
-        let location = pointer.current_location();
-        match event.state() {
-            ButtonState::Pressed if !pointer.is_grabbed() => {
-                self.press_button(event.button_code(), location, serial);
-            }
-            ButtonState::Pressed => {}
-            ButtonState::Released => self.release_titlebar(location),
-        }
-        pointer.button(
-            self,
-            &ButtonEvent {
-                button: event.button_code(),
-                state: event.state(),
-                serial,
-                time: event.time(),
-            },
-        );
-        pointer.frame(self);
-    }
-
-    /// Handles a press of `button` at `location` while nothing holds the
-    /// pointer: focuses and raises the window there, then runs what the
-    /// press is bound to. A titlebar button pressed without modifiers is
-    /// held down until released; an unbound press on a border resizes.
-    fn press_button(&mut self, button: u32, location: Point<f64, Logical>, serial: Serial) {
-        self.focus.finish_cycle();
-        let target = self.scene().target_at(location);
-        if let Some(PointerTarget::Layer {
-            surface,
-            is_below_windows: false,
-            ..
-        }) = &target
-        {
-            // A panel or notification: the press is its client's alone.
-            self.focus_layer(surface);
-            return;
-        }
-        let clicked = target.as_ref().and_then(PointerTarget::window);
-        if let Some(id) = clicked
-            && self.config.settings.focus.raise_on_click
-        {
-            self.raise_window(id);
-        }
-        self.focus_window(clicked, serial);
-        let modifiers = self.held_modifiers();
-        if let Some(PointerTarget::Window(WindowTarget::Frame {
-            window,
-            part: FramePart::Titlebar(_),
-        })) = target
-            && modifiers == Modifiers::default()
-            && self.press_titlebar_button(window, location)
-        {
-            return;
-        }
-        let interval = self.config.settings.windows.double_click_interval();
-        let is_double = self.input.is_double_click(button, clicked, interval);
-        let bound = MouseButton::from_code(button).and_then(|mouse_button| {
-            let bindings = self.config.bindings.button(
-                MouseContext::search_order(target.as_ref()),
-                modifiers,
-                mouse_button,
-                is_double,
-            )?;
-            Some((bindings.press.cloned(), bindings.drag.cloned()))
-        });
-        let press = Press {
-            start: GrabStartData {
-                focus: None,
-                button,
-                location,
-            },
-            serial,
-        };
-        match (bound, target) {
-            (Some((on_press, on_drag)), _) => {
-                if let Some(command) = on_press {
-                    let mut context = ExecutionContext::for_press(clicked, press.clone());
-                    self.execute(&command, &mut context);
-                }
-                let pointer = self
-                    .seat
-                    .get_pointer()
-                    .expect("the seat gets a pointer at startup");
-                // Unless the binding started a drag, hold the press, so it
-                // never reaches a client.
-                if !pointer.is_grabbed() {
-                    self.hold_press(clicked, on_drag, press);
-                }
-            }
-            (
-                None,
-                Some(PointerTarget::Window(WindowTarget::Frame {
-                    window,
-                    part: FramePart::Border(edges),
-                })),
-            ) => self.start_window_grab(window, WindowDrag::Resize { edges }, press.start, serial),
-            (
-                None,
-                Some(
-                    PointerTarget::Window(
-                        WindowTarget::Frame { .. } | WindowTarget::Surface { .. },
-                    )
-                    | PointerTarget::Layer { .. },
-                )
-                | None,
-            ) => {}
+        // A finger lifted from a touchpad ends kinetic scrolling.
+        if source == AxisSource::Finger && event.amount(axis) == Some(0.0) {
+            frame = frame.stop(axis);
         }
     }
-
-    /// Holds down the titlebar button of `window` at `location`, if there
-    /// is one; returns whether there was.
-    fn press_titlebar_button(&mut self, window: WindowId, location: Point<f64, Logical>) -> bool {
-        let metrics = self.theme.metrics();
-        let is_pressed = self
-            .windows
-            .get_mut(window)
-            .is_some_and(|target| target.press_titlebar_button(location, metrics));
-        if is_pressed {
-            self.held_titlebar = Some(window);
-            self.schedule_render();
-        }
-        is_pressed
-    }
-
-    /// Lets go of a held titlebar button at global `location`, clicking it
-    /// if the pointer is still on it.
-    fn release_titlebar(&mut self, location: Point<f64, Logical>) {
-        let Some(id) = self.held_titlebar.take() else {
-            return;
-        };
-        let metrics = self.theme.metrics();
-        let clicked = self
-            .windows
-            .get_mut(id)
-            .and_then(|window| window.release_titlebar_button(location, metrics));
-        if let Some(button) = clicked {
-            let command = Command::Run(button.action());
-            self.execute(&command, &mut ExecutionContext::for_window(Some(id)));
-        }
-        self.schedule_render();
-    }
-
-    /// Scrolls the surface under the pointer, unless the wheel is bound
-    /// there.
-    fn handle_pointer_axis<B: InputBackend>(&mut self, event: &B::PointerAxisEvent) {
-        if self.run_scroll_binding(event.amount_v120(Axis::Vertical)) {
-            return;
-        }
-        let source = event.source();
-        let mut frame = AxisFrame::new(event.time()).source(source);
-        for axis in [Axis::Horizontal, Axis::Vertical] {
-            let discrete = event.amount_v120(axis);
-            let amount = event
-                .amount(axis)
-                .unwrap_or_else(|| discrete.unwrap_or(0.0) * SCROLL_UNITS_PER_V120);
-            if amount != 0.0 {
-                frame = frame.value(axis, amount);
-                if let Some(discrete) = discrete {
-                    // Discrete steps are whole 120ths; the cast drops nothing.
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "v120 values are whole numbers"
-                    )]
-                    let steps = discrete as i32;
-                    frame = frame.v120(axis, steps);
-                }
-            }
-            // A finger lifted from a touchpad ends kinetic scrolling.
-            if source == AxisSource::Finger && event.amount(axis) == Some(0.0) {
-                frame = frame.stop(axis);
-            }
-        }
-        let pointer = self
-            .seat
-            .get_pointer()
-            .expect("the seat gets a pointer at startup");
-        pointer.axis(self, frame);
-        pointer.frame(self);
-    }
-
-    /// Runs what a wheel turn of `steps` (in 120ths of a notch, positive
-    /// down) is bound to where the pointer is; returns whether it was bound.
-    fn run_scroll_binding(&mut self, steps: Option<f64>) -> bool {
-        let pointer = self
-            .seat
-            .get_pointer()
-            .expect("the seat gets a pointer at startup");
-        let button = match steps {
-            _ if pointer.is_grabbed() => return false,
-            Some(steps) if steps < 0.0 => MouseButton::ScrollUp,
-            Some(steps) if steps > 0.0 => MouseButton::ScrollDown,
-            Some(_) | None => return false,
-        };
-        let target = self.scene().target_at(pointer.current_location());
-        let command = self
-            .config
-            .bindings
-            .button(
-                MouseContext::search_order(target.as_ref()),
-                self.held_modifiers(),
-                button,
-                false,
-            )
-            .and_then(|bindings| bindings.press.cloned());
-        let Some(command) = command else {
-            return false;
-        };
-        let window = target.as_ref().and_then(PointerTarget::window);
-        self.execute(&command, &mut ExecutionContext::for_window(window));
-        true
-    }
+    frame
 }
 
 /// The input state that outlives a single event.
 #[derive(Debug, Default)]
-pub(crate) struct InputState {
+pub(crate) struct Input {
     /// Keys whose press was a binding: their releases are vaht's too.
     suppressed_keys: HashSet<Keycode>,
     /// The repeating key binding being held, if any.
@@ -539,12 +69,12 @@ pub(crate) struct InputState {
     auto_raise: Option<Timer<Compositor>>,
 }
 
-impl InputState {
+impl Input {
     /// Decides whose a key event is: the client's, or vaht's, with the
     /// command a bound press runs. `chord` is the press
     /// with its modifiers, if the key has a keysym. A bound press's release
     /// is vaht's too, and any press or that key's release ends a repeat.
-    fn key(
+    pub(crate) fn key(
         &mut self,
         keycode: Keycode,
         state: KeyState,
@@ -585,7 +115,7 @@ impl InputState {
     /// Records a press of `button` on `window` (or the desktop); returns
     /// whether it completes a double click, within `interval` of the press
     /// before. A third quick press starts a new one.
-    fn is_double_click(
+    pub(crate) fn is_double_click(
         &mut self,
         button: u32,
         window: Option<WindowId>,
@@ -603,6 +133,69 @@ impl InputState {
             at: now,
         });
         is_double
+    }
+
+    /// Runs `command`, bound to `keycode`, again and again at `rate` per
+    /// second (the keyboard's own when `None`) while the key is held.
+    pub(crate) fn repeat_key_binding(
+        &mut self,
+        keycode: Keycode,
+        command: Command,
+        rate: Option<NonZeroU32>,
+        event_loop: (&LoopHandle<'static, Compositor>, &ResourceLedger),
+    ) {
+        let (handle, ledger) = event_loop;
+        let interval = Duration::from_secs(1) / rate.unwrap_or(Compositor::KEY_REPEAT_RATE).get();
+        let started = RepeatingTimer::start(
+            handle,
+            ledger,
+            Compositor::KEY_REPEAT_DELAY,
+            interval,
+            move |compositor: &mut Compositor| {
+                let window = compositor.window_manager.focused();
+                compositor.execute(&command, &mut ExecutionContext::for_window(window));
+            },
+        );
+        match started {
+            Ok(timer) => {
+                self.key_repeat = Some(KeyRepeat {
+                    keycode,
+                    _timer: timer,
+                });
+            }
+            Err(error) => tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "could not repeat a key binding"
+            ),
+        }
+    }
+
+    /// Raises `window` once `delay` has passed, if it still has focus then;
+    /// replaces any raise pending.
+    pub(crate) fn raise_later(
+        &mut self,
+        window: WindowId,
+        delay: Duration,
+        event_loop: (&LoopHandle<'static, Compositor>, &ResourceLedger),
+    ) {
+        let (handle, ledger) = event_loop;
+        let raise = Timer::once(handle, ledger, delay, move |compositor: &mut Compositor| {
+            if compositor.window_manager.focused() == Some(window) {
+                compositor.window_manager.raise(window);
+            }
+        });
+        match raise {
+            Ok(timer) => self.auto_raise = Some(timer),
+            Err(error) => tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "could not schedule raising a window"
+            ),
+        }
+    }
+
+    /// Cancels a raise pending.
+    pub(crate) fn cancel_raise(&mut self) {
+        self.auto_raise = None;
     }
 }
 

@@ -17,8 +17,7 @@ use std::num::NonZeroUsize;
 use regex::Regex;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 
-use crate::window::Window;
-use crate::workspaces::Workspace;
+use crate::window_manager::{Window, Workspace};
 
 /// Which windows something is about.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
@@ -42,14 +41,12 @@ impl WindowMatcher {
     /// Returns whether `window` matches while `current` is the workspace
     /// shown.
     pub(crate) fn matches(&self, window: &Window, current: Workspace) -> bool {
-        let text_matches = |pattern: &Option<TextPattern>, text: Option<String>| {
-            pattern
-                .as_ref()
-                .is_none_or(|pattern| pattern.matches(&text.unwrap_or_default()))
+        let text_matches = |pattern: &Option<TextPattern>, text: &str| {
+            pattern.as_ref().is_none_or(|pattern| pattern.matches(text))
         };
         let state = window.state();
-        text_matches(&self.app_id, window.toplevel().app_id())
-            && text_matches(&self.title, window.toplevel().title())
+        text_matches(&self.app_id, window.app_id())
+            && text_matches(&self.title, window.title())
             && self.workspace.is_none_or(|selector| {
                 state.is_sticky || selector.workspace(current) == window.workspace()
             })

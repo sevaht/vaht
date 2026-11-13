@@ -40,9 +40,6 @@ impl WlrLayerShellHandler for Compositor {
     }
 
     fn layer_destroyed(&mut self, surface: LayerSurface) {
-        let output = self.backend.output().clone();
-        self.layers.unmap(surface.wl_surface(), &output);
-        self.refresh_layer_keyboard();
-        self.schedule_render();
+        self.remove_layer_surface(surface.wl_surface());
     }
 }

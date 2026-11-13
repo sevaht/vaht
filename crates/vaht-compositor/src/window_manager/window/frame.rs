@@ -4,32 +4,23 @@
 //! it, and this module only says what it shows (01 §4.3). The borders are
 //! plain colored rectangles, which cost no pixel buffers. The frame is never
 //! one big buffer around the window, which would cost megabytes per window.
+//! Nothing here knows a renderer: the scene turns the pixels and the
+//! geometry into render elements.
 //!
 //! Geometry is derived, never stored: [`FrameGeometry::around`] computes every
 //! part from the window's content area and the theme's metrics, so the frame
 //! cannot drift from the window it surrounds.
 
-use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::element::Kind;
-use smithay::backend::renderer::element::memory::{
-    MemoryRenderBuffer, MemoryRenderBufferRenderElement,
-};
-use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
-use smithay::backend::renderer::{ImportMem, Renderer};
-use smithay::utils::{
-    Buffer as BufferCoordinates, Logical, Physical, Point, Rectangle, Scale, Transform,
-};
-use vaht_ui::texture::Fill;
+use smithay::utils::{Logical, Point, Rectangle};
 use vaht_ui::theme::Metrics;
 use vaht_ui::{
     Glyph, Panel, PanelContent, SizePolicy, Theme, ThemeElement, Typesetter, Widget, WidgetState,
 };
 
+use super::placement::Axes;
 use super::resize::ResizeEdges;
-use crate::config::Action;
+use crate::config::WindowManagerAction;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
-use crate::scene::SceneElement;
-use crate::window::Axes;
 
 /// What clicking a titlebar can report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -58,13 +49,13 @@ pub(crate) enum TitlebarButton {
 
 impl TitlebarButton {
     /// Returns what clicking the button does.
-    pub(crate) const fn action(self) -> Action {
+    pub(crate) const fn action(self) -> WindowManagerAction {
         match self {
-            Self::Shade => Action::Shade,
-            Self::Stick => Action::Stick,
-            Self::Minimize => Action::Minimize,
-            Self::Maximize => Action::Maximize(Axes::Both),
-            Self::Close => Action::Close,
+            Self::Shade => WindowManagerAction::Shade,
+            Self::Stick => WindowManagerAction::Stick,
+            Self::Minimize => WindowManagerAction::Minimize,
+            Self::Maximize => WindowManagerAction::Maximize(Axes::Both),
+            Self::Close => WindowManagerAction::Close,
         }
     }
 
@@ -171,17 +162,15 @@ impl FrameGeometry {
     }
 }
 
-/// A window's frame: its titlebar panel and its borders' buffers.
+/// A window's frame: what its titlebar shows, laid out and painted.
+///
+/// The pixels stay here; the compositor uploads them for the renderer
+/// ([`crate::scene::FrameTextures`]), so the window manager never sees a
+/// renderer.
 #[derive(Debug)]
 pub(crate) struct Frame {
     /// The titlebar's content, layout and pixels.
     titlebar: Panel<Titlebar>,
-    /// The titlebar's pixels as the renderer takes them.
-    titlebar_buffer: MemoryRenderBuffer,
-    /// The titlebar generation last copied into the buffer.
-    uploaded_generation: Option<u64>,
-    /// One colored buffer per border line, in [`FrameGeometry::borders`]'s order.
-    borders: [SolidColorBuffer; 5],
     /// Counts the frame while it exists.
     _tracked: Tracked,
 }
@@ -199,17 +188,18 @@ impl Frame {
                 },
                 vaht_ui::Size::default(),
             ),
-            titlebar_buffer: MemoryRenderBuffer::new(
-                Fourcc::Argb8888,
-                (1, 1),
-                1,
-                Transform::Normal,
-                None,
-            ),
-            uploaded_generation: None,
-            borders: std::array::from_fn(|_| SolidColorBuffer::default()),
             _tracked: ledger.track(ResourceKind::Frame),
         }
+    }
+
+    /// Returns the titlebar panel: its pixels, and how new they are.
+    pub(crate) const fn titlebar(&self) -> &Panel<Titlebar> {
+        &self.titlebar
+    }
+
+    /// Returns how the frame looks: focused or not.
+    pub(crate) fn state(&self) -> WidgetState {
+        self.titlebar.content().state()
     }
 
     /// Holds down the titlebar button at `point` (in the titlebar's own
@@ -231,14 +221,12 @@ impl Frame {
         }
     }
 
-    /// Shows `title`; returns whether it changed.
-    pub(crate) fn set_title(&mut self, title: &str) -> bool {
-        let changed = self.titlebar.content().title != title;
-        if changed {
+    /// Shows `title`.
+    pub(crate) fn set_title(&mut self, title: &str) {
+        if self.titlebar.content().title != title {
             self.titlebar
                 .update(|content| title.clone_into(&mut content.title));
         }
-        changed
     }
 
     /// Lays the titlebar's buttons out as `buttons`.
@@ -249,19 +237,16 @@ impl Frame {
         }
     }
 
-    /// Shows the window as focused or not; returns whether that changed.
-    pub(crate) fn set_focused(&mut self, is_focused: bool) -> bool {
-        let changed = self.titlebar.content().is_focused != is_focused;
-        if changed {
+    /// Shows the window as focused or not.
+    pub(crate) fn set_focused(&mut self, is_focused: bool) {
+        if self.titlebar.content().is_focused != is_focused {
             self.titlebar
                 .update(|content| content.is_focused = is_focused);
         }
-        changed
     }
 
-    /// Paints the titlebar to fit `geometry` if anything changed, and copies
-    /// new pixels for the renderer; recolors the borders.
-    pub(crate) fn prepare(
+    /// Paints the titlebar to fit `geometry`, if anything changed.
+    pub(crate) fn paint(
         &mut self,
         geometry: &FrameGeometry,
         theme: &Theme,
@@ -271,82 +256,6 @@ impl Frame {
         self.titlebar
             .resize(vaht_ui::Size::new(to_u32(size.w), to_u32(size.h)));
         self.titlebar.paint(theme, typesetter);
-        self.upload_titlebar();
-        let border_color = solid_color(theme, self.titlebar.content().state());
-        for (buffer, rectangle) in self.borders.iter_mut().zip(geometry.borders) {
-            buffer.update(rectangle.size, border_color);
-        }
-    }
-
-    /// Returns the elements that draw the frame at `geometry`, topmost first.
-    pub(crate) fn render_elements<R>(
-        &self,
-        renderer: &mut R,
-        geometry: &FrameGeometry,
-        scale: Scale<f64>,
-    ) -> Vec<SceneElement<R>>
-    where
-        R: Renderer + ImportMem,
-        R::TextureId: Send + Clone + 'static,
-    {
-        let mut elements = Vec::new();
-        if self.titlebar.pixels().is_some() {
-            let location: Point<i32, Physical> =
-                geometry.titlebar.loc.to_physical_precise_round(scale);
-            match MemoryRenderBufferRenderElement::from_buffer(
-                renderer,
-                location.to_f64(),
-                &self.titlebar_buffer,
-                None,
-                None,
-                None,
-                Kind::Unspecified,
-            ) {
-                Ok(element) => elements.push(SceneElement::Panel(element)),
-                Err(error) => tracing::warn!(?error, "could not draw a titlebar"),
-            }
-        }
-        for (buffer, rectangle) in self.borders.iter().zip(geometry.borders) {
-            if !rectangle.is_empty() {
-                elements.push(SceneElement::Solid(SolidColorRenderElement::from_buffer(
-                    buffer,
-                    rectangle.loc.to_physical_precise_round(scale),
-                    scale,
-                    1.0,
-                    Kind::Unspecified,
-                )));
-            }
-        }
-        elements
-    }
-
-    /// Copies the titlebar's pixels into the renderer's buffer if they are
-    /// newer than the last copy.
-    fn upload_titlebar(&mut self) {
-        let Some(pixels) = self.titlebar.pixels() else {
-            return;
-        };
-        let generation = self.titlebar.generation();
-        if self.uploaded_generation == Some(generation) {
-            return;
-        }
-        let size: smithay::utils::Size<i32, BufferCoordinates> =
-            (to_i32(pixels.width()), to_i32(pixels.height())).into();
-        let mut context = self.titlebar_buffer.render();
-        context.resize(size);
-        let drawn: Result<(), std::convert::Infallible> = context.draw(|memory| {
-            // tiny-skia is premultiplied RGBA; Wayland's ARGB8888 is
-            // premultiplied BGRA in memory.
-            let (targets, _) = memory.as_chunks_mut::<4>();
-            for (target, source) in targets.iter_mut().zip(pixels.pixels()) {
-                *target = [source.blue(), source.green(), source.red(), source.alpha()];
-            }
-            Ok(vec![Rectangle::from_size(size)])
-        });
-        match drawn {
-            Ok(()) => self.uploaded_generation = Some(generation),
-            Err(never) => match never {},
-        }
     }
 }
 
@@ -390,15 +299,6 @@ impl PanelContent for Titlebar {
             WidgetState::Unfocused
         }
     }
-}
-
-/// Returns the border color the theme gives windows in `state`: the
-/// border's fill, or the start of its gradient.
-fn solid_color(theme: &Theme, state: WidgetState) -> [f32; 4] {
-    let color = match theme.style(ThemeElement::Border, state).texture.fill {
-        Fill::Solid(color) | Fill::Gradient { from: color, .. } => color,
-    };
-    [color.red, color.green, color.blue, color.alpha].map(|channel| f32::from(channel) / 255.0)
 }
 
 /// Converts a pixel extent to a signed coordinate.

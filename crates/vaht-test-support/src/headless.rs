@@ -15,10 +15,12 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// The resource kinds that exist only on behalf of clients; all must be gone
 /// once the clients are.
-const CLIENT_RESOURCES: [&str; 5] = [
+const CLIENT_RESOURCES: [&str; 7] = [
     "client",
     "window",
+    "toplevel",
     "frame",
+    "frame-texture",
     "capture-session",
     "layer-surface",
 ];

@@ -14,8 +14,9 @@ use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use smithay::utils::{Logical, Point, Rectangle, Size};
 
 use super::matcher::WindowMatcher;
-use crate::window::{Axes, Direction, HorizontalEdge, ResizeEdges, TileCell, VerticalEdge};
-use crate::workspaces::WorkspaceTarget;
+use crate::window_manager::{
+    Axes, Direction, HorizontalEdge, ResizeEdges, TileCell, VerticalEdge, WorkspaceTarget,
+};
 
 /// Actions of 02 §4 that vaht does not have yet. Naming one is an error that
 /// says so, rather than "unknown action", and nothing is silently ignored.
@@ -209,18 +210,10 @@ impl<'de> Visitor<'de> for CommandVisitor {
 /// word are the action's name (02 §4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Action {
+    /// Window management, which the window manager carries out.
+    WindowManager(WindowManagerAction),
     /// Runs a command line with `sh -c` (`exec <command line>`).
     Exec(String),
-    /// Asks the window to close.
-    Close,
-    /// Ends the window's program.
-    Kill,
-    /// Moves the window above all others.
-    Raise,
-    /// Moves the window below all others.
-    Lower,
-    /// Gives the window keyboard focus.
-    Focus,
     /// Moves the window with the pointer while the button that started it
     /// is held; only a mouse binding can start it.
     StartMoving,
@@ -238,6 +231,22 @@ pub(crate) enum Action {
         /// Its value.
         value: String,
     },
+}
+
+/// An action on windows, workspaces or focus: everything the window
+/// manager decides alone ([`crate::window_manager::WindowManager::run`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WindowManagerAction {
+    /// Asks the window to close.
+    Close,
+    /// Ends the window's program.
+    Kill,
+    /// Moves the window above all others.
+    Raise,
+    /// Moves the window below all others.
+    Lower,
+    /// Gives the window keyboard focus.
+    Focus,
     /// Toggles maximizing the window along the axes (`maximize`, or
     /// `maximize horizontal|vertical`).
     Maximize(Axes),
@@ -297,21 +306,10 @@ impl Action {
 
     /// Builds the action `name` with `arguments`, as written after it.
     fn from_parts(name: &str, arguments: &str) -> Result<Self, String> {
-        let without_arguments = |action: Self| {
-            if arguments.is_empty() {
-                Ok(action)
-            } else {
-                Err(format!("`{name}` takes no arguments"))
-            }
-        };
+        let without_arguments = |action: Self| no_arguments(name, arguments).map(|()| action);
         match name {
             "exec" if arguments.is_empty() => Err("`exec` needs a command line".to_owned()),
             "exec" => Ok(Self::Exec(arguments.to_owned())),
-            "close" => without_arguments(Self::Close),
-            "kill" => without_arguments(Self::Kill),
-            "raise" => without_arguments(Self::Raise),
-            "lower" => without_arguments(Self::Lower),
-            "focus" => without_arguments(Self::Focus),
             "start-moving" => without_arguments(Self::StartMoving),
             "start-resizing" => ResizeFrom::parse(arguments).map(Self::StartResizing),
             "reload" => without_arguments(Self::Reload),
@@ -332,85 +330,24 @@ impl Action {
                     value: value.to_owned(),
                 })
             }
-            "maximize" if arguments.is_empty() => Ok(Self::Maximize(Axes::Both)),
-            "maximize" => match arguments.parse() {
-                Ok(axes @ (Axes::Horizontal | Axes::Vertical)) => Ok(Self::Maximize(axes)),
-                Ok(Axes::Both) | Err(_) => Err(format!(
-                    "`maximize` takes nothing, horizontal or vertical, not `{arguments}`"
-                )),
-            },
-            "minimize" => without_arguments(Self::Minimize),
-            "fullscreen" => without_arguments(Self::Fullscreen),
-            "shade" => without_arguments(Self::Shade),
-            "stick" => without_arguments(Self::Stick),
-            "snap-step" => arguments.parse().map(Self::SnapStep).map_err(|_unknown| {
-                format!("`snap-step` takes left, right, up or down, not `{arguments}`")
-            }),
-            "tile" => Self::cell(arguments).map(Self::Tile),
-            "move" => Self::pair(name, arguments).map(|(x, y)| Self::Move((x, y).into())),
-            "move-to" => Self::pair(name, arguments).map(|(x, y)| Self::MoveTo((x, y).into())),
-            "resize" => Self::pair(name, arguments).map(|(x, y)| Self::Resize((x, y).into())),
-            "resize-to" => match Self::pair(name, arguments)? {
-                (width, height) if width > 0 && height > 0 => {
-                    Ok(Self::ResizeTo((width, height).into()))
-                }
-                _ => Err("`resize-to` takes a width and height above 0".to_owned()),
-            },
-            "workspace" => arguments.parse().map(Self::Workspace),
-            "send-to-workspace" => arguments.parse().map(Self::SendToWorkspace),
-            "take-to-workspace" => arguments.parse().map(Self::TakeToWorkspace),
-            "add-workspace" => without_arguments(Self::AddWorkspace),
-            "remove-last-workspace" => without_arguments(Self::RemoveLastWorkspace),
-            "next-window" => without_arguments(Self::NextWindow(WindowMatcher::default())),
-            "previous-window" => without_arguments(Self::PreviousWindow(WindowMatcher::default())),
-            "show-desktop" => without_arguments(Self::ShowDesktop),
-            _ if PLANNED_ACTIONS.contains(&name) => {
-                Err(format!("`{name}` is not available in vaht yet"))
-            }
-            _ => Err(format!("unknown action `{name}`")),
+            _ => WindowManagerAction::from_parts(name, arguments).map(Self::WindowManager),
         }
     }
 
     /// Returns the action about the windows `windows` matches, for the
     /// actions that are about a set of windows.
     fn with_windows(self, windows: Option<WindowMatcher>) -> Result<Self, String> {
+        use WindowManagerAction::{NextWindow, PreviousWindow};
         match (self, windows) {
             (action, None) => Ok(action),
-            (Self::NextWindow(_), Some(windows)) => Ok(Self::NextWindow(windows)),
-            (Self::PreviousWindow(_), Some(windows)) => Ok(Self::PreviousWindow(windows)),
+            (Self::WindowManager(NextWindow(_)), Some(windows)) => {
+                Ok(Self::WindowManager(NextWindow(windows)))
+            }
+            (Self::WindowManager(PreviousWindow(_)), Some(windows)) => {
+                Ok(Self::WindowManager(PreviousWindow(windows)))
+            }
             (action, Some(_)) => Err(format!("`{}` takes no `windows`", action.name())),
         }
-    }
-
-    /// Parses two whole numbers, as `move`, `move-to`, `resize` and
-    /// `resize-to` take.
-    fn pair(name: &str, arguments: &str) -> Result<(i32, i32), String> {
-        let numbers: Vec<i32> = arguments
-            .split_whitespace()
-            .map(str::parse)
-            .collect::<Result<_, _>>()
-            .map_err(|_not_a_number| format!("`{name}` takes two whole numbers"))?;
-        match numbers.as_slice() {
-            [first, second] => Ok((*first, *second)),
-            _ => Err(format!("`{name}` takes two whole numbers")),
-        }
-    }
-
-    /// Parses `tile`'s cell: four thousandths of the usable area.
-    fn cell(arguments: &str) -> Result<TileCell, String> {
-        let numbers: Option<Vec<u16>> = arguments
-            .split_whitespace()
-            .map(|number| number.parse().ok())
-            .collect();
-        match numbers.as_deref() {
-            Some(&[x, y, width, height]) => TileCell::new(x, y, width, height),
-            Some(_) | None => None,
-        }
-        .ok_or_else(|| {
-            "`tile` takes x, y, width and height in thousandths of the usable area, \
-             within 0 to 1000, such as `tile 0 0 500 1000`"
-                .to_owned()
-        })
     }
 
     /// Returns the action's name, the first word of its string form.
@@ -456,12 +393,8 @@ impl Action {
 impl fmt::Display for Action {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::WindowManager(action) => action.fmt(formatter),
             Self::Exec(command_line) => write!(formatter, "exec {command_line}"),
-            Self::Close => formatter.write_str("close"),
-            Self::Kill => formatter.write_str("kill"),
-            Self::Raise => formatter.write_str("raise"),
-            Self::Lower => formatter.write_str("lower"),
-            Self::Focus => formatter.write_str("focus"),
             Self::StartMoving => formatter.write_str("start-moving"),
             Self::StartResizing(from) => write!(formatter, "start-resizing {from}"),
             Self::Reload => formatter.write_str("reload"),
@@ -469,6 +402,101 @@ impl fmt::Display for Action {
             Self::SetEnvironment { name, value } => {
                 write!(formatter, "set-environment {name} {value}")
             }
+        }
+    }
+}
+
+impl WindowManagerAction {
+    /// Builds the window-management action `name` with `arguments`, as
+    /// written after it.
+    fn from_parts(name: &str, arguments: &str) -> Result<Self, String> {
+        let without_arguments = |action: Self| no_arguments(name, arguments).map(|()| action);
+        match name {
+            "close" => without_arguments(Self::Close),
+            "kill" => without_arguments(Self::Kill),
+            "raise" => without_arguments(Self::Raise),
+            "lower" => without_arguments(Self::Lower),
+            "focus" => without_arguments(Self::Focus),
+            "maximize" if arguments.is_empty() => Ok(Self::Maximize(Axes::Both)),
+            "maximize" => match arguments.parse() {
+                Ok(axes @ (Axes::Horizontal | Axes::Vertical)) => Ok(Self::Maximize(axes)),
+                Ok(Axes::Both) | Err(_) => Err(format!(
+                    "`maximize` takes nothing, horizontal or vertical, not `{arguments}`"
+                )),
+            },
+            "minimize" => without_arguments(Self::Minimize),
+            "fullscreen" => without_arguments(Self::Fullscreen),
+            "shade" => without_arguments(Self::Shade),
+            "stick" => without_arguments(Self::Stick),
+            "snap-step" => arguments.parse().map(Self::SnapStep).map_err(|_unknown| {
+                format!("`snap-step` takes left, right, up or down, not `{arguments}`")
+            }),
+            "tile" => Self::cell(arguments).map(Self::Tile),
+            "move" => Self::pair(name, arguments).map(|(x, y)| Self::Move((x, y).into())),
+            "move-to" => Self::pair(name, arguments).map(|(x, y)| Self::MoveTo((x, y).into())),
+            "resize" => Self::pair(name, arguments).map(|(x, y)| Self::Resize((x, y).into())),
+            "resize-to" => match Self::pair(name, arguments)? {
+                (width, height) if width > 0 && height > 0 => {
+                    Ok(Self::ResizeTo((width, height).into()))
+                }
+                _ => Err("`resize-to` takes a width and height above 0".to_owned()),
+            },
+            "workspace" => arguments.parse().map(Self::Workspace),
+            "send-to-workspace" => arguments.parse().map(Self::SendToWorkspace),
+            "take-to-workspace" => arguments.parse().map(Self::TakeToWorkspace),
+            "add-workspace" => without_arguments(Self::AddWorkspace),
+            "remove-last-workspace" => without_arguments(Self::RemoveLastWorkspace),
+            "next-window" => without_arguments(Self::NextWindow(WindowMatcher::default())),
+            "previous-window" => without_arguments(Self::PreviousWindow(WindowMatcher::default())),
+            "show-desktop" => without_arguments(Self::ShowDesktop),
+            _ if PLANNED_ACTIONS.contains(&name) => {
+                Err(format!("`{name}` is not available in vaht yet"))
+            }
+            _ => Err(format!("unknown action `{name}`")),
+        }
+    }
+
+    /// Parses two whole numbers, as `move`, `move-to`, `resize` and
+    /// `resize-to` take.
+    fn pair(name: &str, arguments: &str) -> Result<(i32, i32), String> {
+        let numbers: Vec<i32> = arguments
+            .split_whitespace()
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .map_err(|_not_a_number| format!("`{name}` takes two whole numbers"))?;
+        match numbers.as_slice() {
+            [first, second] => Ok((*first, *second)),
+            _ => Err(format!("`{name}` takes two whole numbers")),
+        }
+    }
+
+    /// Parses `tile`'s cell: four thousandths of the usable area.
+    fn cell(arguments: &str) -> Result<TileCell, String> {
+        let numbers: Option<Vec<u16>> = arguments
+            .split_whitespace()
+            .map(|number| number.parse().ok())
+            .collect();
+        match numbers.as_deref() {
+            Some(&[x, y, width, height]) => TileCell::new(x, y, width, height),
+            Some(_) | None => None,
+        }
+        .ok_or_else(|| {
+            "`tile` takes x, y, width and height in thousandths of the usable area, \
+             within 0 to 1000, such as `tile 0 0 500 1000`"
+                .to_owned()
+        })
+    }
+}
+
+/// The string form, which is what vaht writes (02 §4).
+impl fmt::Display for WindowManagerAction {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Close => formatter.write_str("close"),
+            Self::Kill => formatter.write_str("kill"),
+            Self::Raise => formatter.write_str("raise"),
+            Self::Lower => formatter.write_str("lower"),
+            Self::Focus => formatter.write_str("focus"),
             Self::Maximize(Axes::Both) => formatter.write_str("maximize"),
             Self::Maximize(axes) => write!(formatter, "maximize {axes}"),
             Self::Minimize => formatter.write_str("minimize"),
@@ -491,6 +519,16 @@ impl fmt::Display for Action {
             Self::PreviousWindow(_) => formatter.write_str("previous-window"),
             Self::ShowDesktop => formatter.write_str("show-desktop"),
         }
+    }
+}
+
+/// Returns an error unless `arguments`, written after action `name`, are
+/// empty.
+fn no_arguments(name: &str, arguments: &str) -> Result<(), String> {
+    if arguments.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("`{name}` takes no arguments"))
     }
 }
 
@@ -587,13 +625,37 @@ mod tests {
 
     /// One of each action, with arguments where it takes them.
     fn every_action() -> Vec<Action> {
+        let managed = [
+            WindowManagerAction::Close,
+            WindowManagerAction::Kill,
+            WindowManagerAction::Raise,
+            WindowManagerAction::Lower,
+            WindowManagerAction::Focus,
+            WindowManagerAction::Maximize(Axes::Both),
+            WindowManagerAction::Maximize(Axes::Vertical),
+            WindowManagerAction::Minimize,
+            WindowManagerAction::Fullscreen,
+            WindowManagerAction::Shade,
+            WindowManagerAction::Stick,
+            WindowManagerAction::SnapStep(Direction::Left),
+            WindowManagerAction::Tile(TileCell::new(500, 0, 500, 500).expect("a valid cell")),
+            WindowManagerAction::Move((-10, 20).into()),
+            WindowManagerAction::MoveTo((0, 0).into()),
+            WindowManagerAction::Resize((-30, 5).into()),
+            WindowManagerAction::ResizeTo((800, 600).into()),
+            WindowManagerAction::Workspace(WorkspaceTarget::Last),
+            WindowManagerAction::SendToWorkspace(WorkspaceTarget::Numbered(
+                std::num::NonZeroUsize::new(3).expect("not zero"),
+            )),
+            WindowManagerAction::TakeToWorkspace(WorkspaceTarget::Next),
+            WindowManagerAction::AddWorkspace,
+            WindowManagerAction::RemoveLastWorkspace,
+            WindowManagerAction::NextWindow(WindowMatcher::default()),
+            WindowManagerAction::PreviousWindow(WindowMatcher::default()),
+            WindowManagerAction::ShowDesktop,
+        ];
         let mut actions = vec![
             Action::Exec("kitty --single-instance".to_owned()),
-            Action::Close,
-            Action::Kill,
-            Action::Raise,
-            Action::Lower,
-            Action::Focus,
             Action::StartMoving,
             Action::StartResizing(ResizeFrom::NearestCorner),
             Action::Reload,
@@ -602,29 +664,8 @@ mod tests {
                 name: "GDK_SCALE".to_owned(),
                 value: "2".to_owned(),
             },
-            Action::Maximize(Axes::Both),
-            Action::Maximize(Axes::Vertical),
-            Action::Minimize,
-            Action::Fullscreen,
-            Action::Shade,
-            Action::Stick,
-            Action::SnapStep(Direction::Left),
-            Action::Tile(TileCell::new(500, 0, 500, 500).expect("a valid cell")),
-            Action::Move((-10, 20).into()),
-            Action::MoveTo((0, 0).into()),
-            Action::Resize((-30, 5).into()),
-            Action::ResizeTo((800, 600).into()),
-            Action::Workspace(WorkspaceTarget::Last),
-            Action::SendToWorkspace(WorkspaceTarget::Numbered(
-                std::num::NonZeroUsize::new(3).expect("not zero"),
-            )),
-            Action::TakeToWorkspace(WorkspaceTarget::Next),
-            Action::AddWorkspace,
-            Action::RemoveLastWorkspace,
-            Action::NextWindow(WindowMatcher::default()),
-            Action::PreviousWindow(WindowMatcher::default()),
-            Action::ShowDesktop,
         ];
+        actions.extend(managed.into_iter().map(Action::WindowManager));
         actions.extend(ResizeFrom::EDGES.iter().map(|&(_, horizontal, vertical)| {
             Action::StartResizing(ResizeFrom::Edges(ResizeEdges {
                 horizontal,
@@ -661,7 +702,8 @@ mod tests {
     fn an_action_table_carries_its_windows() {
         let parsed = command("{ action = \"next-window\", windows = { workspace = \"current\" } }")
             .expect("valid");
-        let Command::Run(Action::NextWindow(windows)) = parsed else {
+        let Command::Run(Action::WindowManager(WindowManagerAction::NextWindow(windows))) = parsed
+        else {
             panic!("next-window with a matcher");
         };
         assert_ne!(windows, WindowMatcher::default());
@@ -672,8 +714,8 @@ mod tests {
         assert_eq!(
             command("[\"raise\", \"focus\"]"),
             Ok(Command::Sequence(vec![
-                Command::Run(Action::Raise),
-                Command::Run(Action::Focus),
+                Command::Run(Action::WindowManager(WindowManagerAction::Raise)),
+                Command::Run(Action::WindowManager(WindowManagerAction::Focus)),
             ]))
         );
         assert_eq!(

@@ -8,6 +8,12 @@
 //! contributes its client surfaces, then the frame vaht draws beneath them;
 //! the taskbar, menus and the wallpaper will join as further [`SceneElement`]
 //! variants.
+//!
+//! The scene joins three sources: the window manager says which windows are
+//! shown and where, the [`Toplevels`] draw and hit-test their surfaces, and
+//! [`FrameTextures`] draws their frames.
+
+mod frame_textures;
 
 use smithay::backend::renderer::element::AsRenderElements as _;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
@@ -17,12 +23,11 @@ use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
-use vaht_ui::theme::Metrics;
 
+pub(crate) use self::frame_textures::FrameTextures;
 use crate::layers::{ABOVE_WINDOWS, BELOW_WINDOWS, OutputLayers};
-use crate::window::{Window, WindowId};
-use crate::windows::{WindowTarget, Windows};
-use crate::workspaces::Workspace;
+use crate::toplevels::{Toplevel, Toplevels};
+use crate::window_manager::{FramePart, Window, WindowId, WindowManager};
 
 /// What is drawn where nothing else is: a dark grey, until wallpapers exist.
 pub(crate) const BACKGROUND_COLOR: [f32; 4] = [0.1, 0.1, 0.1, 1.0];
@@ -36,6 +41,36 @@ smithay::backend::renderer::element::render_elements! {
     Panel = MemoryRenderBufferRenderElement<R>,
     /// A plain colored rectangle, such as a border line.
     Solid = SolidColorRenderElement,
+}
+
+/// What of a window is under a point.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum WindowTarget {
+    /// One of the client's surfaces.
+    Surface {
+        /// The window it belongs to.
+        window: WindowId,
+        /// The surface.
+        surface: WlSurface,
+        /// The surface's origin, in global coordinates.
+        origin: Point<f64, Logical>,
+    },
+    /// Part of the frame vaht draws around it.
+    Frame {
+        /// The window the frame surrounds.
+        window: WindowId,
+        /// Which part.
+        part: FramePart,
+    },
+}
+
+impl WindowTarget {
+    /// Returns the window the target belongs to.
+    pub(crate) const fn window(&self) -> WindowId {
+        match self {
+            Self::Surface { window, .. } | Self::Frame { window, .. } => *window,
+        }
+    }
 }
 
 /// What is under the pointer.
@@ -80,40 +115,46 @@ impl PointerTarget {
     }
 }
 
-/// What an output shows: its layer surfaces, and the windows of a workspace
-/// with frames sized by the theme.
+/// What an output shows: its layer surfaces, and the windows shown, with
+/// their frames.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Scene<'windows> {
-    /// The windows, in stacking order.
-    windows: &'windows Windows,
-    /// The theme's sizes, which frames are drawn with.
-    metrics: Metrics,
-    /// The workspace shown.
-    workspace: Workspace,
+pub(crate) struct Scene<'state> {
+    /// Which windows are shown, and where.
+    window_manager: &'state WindowManager,
+    /// The windows' surfaces.
+    toplevels: &'state Toplevels,
+    /// The windows' frames, as the renderer takes them.
+    frame_textures: &'state FrameTextures,
     /// The output's layer surfaces.
-    layers: OutputLayers<'windows>,
+    layers: OutputLayers<'state>,
 }
 
-impl<'windows> Scene<'windows> {
-    /// Creates the scene of `windows` shown while `workspace` is, their
-    /// frames sized by `metrics`, between the output's `layers`.
+impl<'state> Scene<'state> {
+    /// Creates the scene of the windows `window_manager` shows, drawn from
+    /// their `toplevels` and `frame_textures`, between the output's
+    /// `layers`.
     pub(crate) const fn new(
-        windows: &'windows Windows,
-        metrics: Metrics,
-        workspace: Workspace,
-        layers: OutputLayers<'windows>,
+        window_manager: &'state WindowManager,
+        toplevels: &'state Toplevels,
+        frame_textures: &'state FrameTextures,
+        layers: OutputLayers<'state>,
     ) -> Self {
         Self {
-            windows,
-            metrics,
-            workspace,
+            window_manager,
+            toplevels,
+            frame_textures,
             layers,
         }
     }
 
-    /// Returns the windows shown, from top to bottom.
-    pub(crate) fn windows(&self) -> impl Iterator<Item = &'windows Window> + 'windows {
-        self.windows.shown_top_down(self.workspace)
+    /// Returns the windows shown, from top to bottom, with their toplevels.
+    pub(crate) fn windows(
+        &self,
+    ) -> impl Iterator<Item = (&'state Window, &'state Toplevel)> + 'state {
+        let toplevels = self.toplevels;
+        self.window_manager
+            .shown_top_down()
+            .filter_map(move |window| Some((window, toplevels.get(window.id())?)))
     }
 
     /// Returns what is under `point` (global coordinates): a layer surface
@@ -143,20 +184,25 @@ impl<'windows> Scene<'windows> {
     {
         let mut elements = Vec::new();
         self.push_layers(&mut elements, renderer, ABOVE_WINDOWS, scale);
-        for window in self.windows() {
+        let metrics = self.window_manager.metrics();
+        for (window, toplevel) in self.windows() {
             if window.shows_content() {
                 let origin = window.surface_origin().to_physical_precise_round(scale);
                 elements.extend(
-                    window
-                        .toplevel()
+                    toplevel
                         .render_elements(renderer, origin, scale)
                         .into_iter()
                         .map(SceneElement::Surface),
                 );
             }
             if window.has_frame() {
-                let geometry = window.frame_geometry(self.metrics);
-                elements.extend(window.frame().render_elements(renderer, &geometry, scale));
+                let geometry = window.frame_geometry(metrics);
+                elements.extend(self.frame_textures.render_elements(
+                    window.id(),
+                    &geometry,
+                    renderer,
+                    scale,
+                ));
             }
         }
         self.push_layers(&mut elements, renderer, BELOW_WINDOWS, scale);
@@ -166,11 +212,15 @@ impl<'windows> Scene<'windows> {
     /// Returns the topmost shown window's client surface or frame at
     /// `point`.
     fn window_at(&self, point: Point<f64, Logical>) -> Option<WindowTarget> {
-        self.windows().find_map(|window| {
+        let metrics = self.window_manager.metrics();
+        self.windows().find_map(|(window, toplevel)| {
             let id = window.id();
+            let surface_origin = window.surface_origin();
             if window.shows_content()
-                && let Some((surface, origin)) = window.surface_under(point)
+                && let Some((surface, offset)) =
+                    toplevel.surface_under(point - surface_origin.to_f64())
             {
+                let origin = (offset + surface_origin).to_f64();
                 return Some(WindowTarget::Surface {
                     window: id,
                     surface,
@@ -180,7 +230,7 @@ impl<'windows> Scene<'windows> {
             if !window.has_frame() {
                 return None;
             }
-            let part = window.frame_geometry(self.metrics).part_at(point)?;
+            let part = window.frame_geometry(metrics).part_at(point)?;
             Some(WindowTarget::Frame { window: id, part })
         })
     }

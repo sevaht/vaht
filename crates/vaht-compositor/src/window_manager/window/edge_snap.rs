@@ -5,10 +5,9 @@
 //! area's edge, or of another window's edge beside it, jumps to it, so
 //! windows line up against the output and each other without pixel hunting.
 
-use smithay::utils::{Logical, Point, Rectangle};
+use smithay::utils::{Logical, Point};
 
-/// An area in global logical coordinates.
-type Area = Rectangle<i32, Logical>;
+use super::placement::Area;
 
 /// The edges a moved window snaps to, and from how far.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +73,8 @@ impl EdgeSnap {
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
+
+    use smithay::utils::Rectangle;
 
     use super::*;
 

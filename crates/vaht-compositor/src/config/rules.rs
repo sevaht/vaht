@@ -19,8 +19,7 @@ use std::num::NonZeroUsize;
 use smithay::utils::{Logical, Point, Rectangle, Size};
 
 use super::matcher::WindowMatcher;
-use crate::window::{Axes, Placement, TileCell, Window};
-use crate::workspaces::Workspace;
+use crate::window_manager::{Axes, Placement, TileCell, Window, Workspace};
 
 /// Every rule, in order.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]

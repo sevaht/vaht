@@ -23,9 +23,8 @@ use smithay::input::keyboard::{Keysym, xkb};
 
 use super::command::Command;
 use super::unique_map;
-use crate::scene::PointerTarget;
-use crate::window::FramePart;
-use crate::windows::WindowTarget;
+use crate::scene::{PointerTarget, WindowTarget};
+use crate::window_manager::FramePart;
 
 /// Every binding.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -452,7 +451,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::config::command::Action;
+    use crate::config::command::{Action, WindowManagerAction};
 
     /// Parses a bindings file.
     fn bindings(text: &str) -> Result<Bindings, String> {
@@ -483,7 +482,9 @@ mod tests {
         let alt_shift_tab = KeyChord::new(held(&["alt", "shift"]), Keysym::Tab);
         assert_eq!(
             parsed.key(alt_shift_tab),
-            Some(&Command::Run(Action::Raise))
+            Some(&Command::Run(Action::WindowManager(
+                WindowManagerAction::Raise
+            )))
         );
         assert_eq!(
             parsed.key(KeyChord::new(held(&["alt"]), Keysym::Tab)),
@@ -504,7 +505,12 @@ mod tests {
         let titlebar = parsed
             .button(&contexts, none, MouseButton::Left, true)
             .expect("the titlebar binds Left");
-        assert_eq!(titlebar.press, Some(&Command::Run(Action::Raise)));
+        assert_eq!(
+            titlebar.press,
+            Some(&Command::Run(Action::WindowManager(
+                WindowManagerAction::Raise
+            )))
+        );
         assert_eq!(titlebar.drag, Some(&Command::Run(Action::StartMoving)));
         let alt = parsed
             .button(&contexts, held(&["alt"]), MouseButton::Left, false)

@@ -165,6 +165,14 @@ impl SizeLimits {
     }
 }
 
+/// No limits beyond the 1 × 1 minimum: what a client that sets none
+/// accepts.
+impl Default for SizeLimits {
+    fn default() -> Self {
+        Self::from_client(Size::default(), Size::default())
+    }
+}
+
 /// A resize in progress, or just finished: where the window started, and
 /// which edges move. It positions the window as the client's new sizes
 /// arrive, since a client takes a moment to apply each one.

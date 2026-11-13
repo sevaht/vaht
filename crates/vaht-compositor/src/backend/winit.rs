@@ -76,7 +76,20 @@ impl WinitBackend {
         output.set_preferred(mode);
         let damage_tracker = OutputDamageTracker::from_output(&output);
         let events = EventSource::insert(handle, ledger, events, |event, (), compositor| {
-            compositor.handle_host_window_event(event);
+            match event {
+                WinitEvent::Resized { size, .. } => {
+                    if let super::Backend::Winit(backend) = &compositor.backend {
+                        backend.resize(size);
+                    }
+                    compositor.schedule_render();
+                }
+                WinitEvent::Input(input) => compositor.handle_input(input),
+                WinitEvent::Redraw => compositor.render(),
+                WinitEvent::CloseRequested => compositor.stop(),
+                // Keyboard focus moving to or from the host window changes
+                // nothing inside vaht.
+                WinitEvent::Focus(_) => {}
+            }
         })
         .map_err(|error| BackendError::RegisterEvents(error.error))?;
         Ok(Self {
@@ -188,25 +201,5 @@ impl fmt::Debug for WinitBackend {
             .debug_struct("WinitBackend")
             .field("output", &self.output.name())
             .finish_non_exhaustive()
-    }
-}
-
-impl Compositor {
-    /// Handles an event from the host window.
-    fn handle_host_window_event(&mut self, event: WinitEvent) {
-        match event {
-            WinitEvent::Resized { size, .. } => {
-                if let super::Backend::Winit(backend) = &self.backend {
-                    backend.resize(size);
-                }
-                self.schedule_render();
-            }
-            WinitEvent::Input(input) => self.handle_input(input),
-            WinitEvent::Redraw => self.render(),
-            WinitEvent::CloseRequested => self.stop(),
-            // Keyboard focus moving to or from the host window changes
-            // nothing inside vaht.
-            WinitEvent::Focus(_) => {}
-        }
     }
 }

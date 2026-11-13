@@ -56,30 +56,63 @@ directory.
 ## Where behavior lives
 
 The coding standards' modeling rules apply throughout (General M1–M16,
-RUST.md §4). Behavior lives with the data it governs: `Window` moves and
-resizes itself (`WindowDrag`), `Frame` presses its buttons, `InputState`
-decides whose a key is, `MouseContext` knows where a press looks for
-bindings, `Scene` composes what an output shows and hit-tests it,
-`ConfigFile` reads itself. `Placement` is a value: maximizing, fullscreen
-and the snap ladder are pure functions from one placement to the next, and
-`Window::place` applies the result. `Workspaces` and `Focus` (focus history
-and Alt+Tab cycling) are entities that decide; the compositor carries out
-their decisions with the seat.
+RUST.md §4). The compositor crate has two halves:
 
-**One deliberate exception to R-M2 (one `impl` block per type):**
-`Compositor` is Smithay's state type, and Smithay's seat, grab and protocol
-calls all need `&mut Compositor`, so the use cases that make those calls
-cannot be methods of the subsystems. They are `Compositor` methods, in one
-`impl Compositor` block per concern: `compositor.rs` (lifecycle, focus,
-windows coming and going), `input.rs`, `grab.rs`, `execute.rs`,
-`capture.rs`, `protocols/xdg_shell.rs` and `backend/winit.rs`. Those blocks
-only coordinate: each decision they need is asked of the type that owns it.
-A method that needs no Smithay call does not belong in them.
+- **The window manager** (`window_manager/`, `WindowManager`) decides
+  everything about windows, workspaces and focus. It holds no protocol
+  object and never calls Smithay's seat: clients' commits arrive as
+  `CommittedState` values and their requests as `ClientRequest`s, bindings
+  run `WindowManagerAction`s, and what it decides goes out as
+  `ClientUpdates` (each window's `RequestedState`, and `Ending`s) and as
+  its choice of focused window. Its rules are unit- and property-tested on
+  their own (`window_manager.rs`, `tests`): a random sequence of opens,
+  closes, actions, client requests, drags and panels must keep every
+  invariant (focus only on a shown window, every window stacked once, on
+  a workspace that exists, maximized and tiled windows within the usable
+  area).
+- **The compositor** (`Compositor`) is Smithay's state type. It owns the
+  window manager and the gateways: `Toplevels` (each window's xdg-shell
+  object, the only code that speaks the protocol to a window),
+  `FrameTextures` (frame pixels as the renderer takes them), `Layers`,
+  `Input` (key filtering, double clicks, repeat and auto-raise timers),
+  the backend and the protocol states. It routes events and carries out
+  the window manager's decisions; it decides nothing about windows.
+
+Within the window manager, behavior lives with the data it governs:
+`Window` moves and resizes itself (`WindowDrag`) and keeps what vaht asks
+apart from what its client committed, `Frame` presses its buttons,
+`Placement` is a value (maximizing, fullscreen and the snap ladder are pure
+functions from one placement to the next, and `Window::place` applies the
+result), `Workspaces` and `Focus` (focus history and Alt+Tab cycling) are
+entities, `PlacementStrategy` and `EdgeSnap` are pure. Elsewhere,
+`MouseContext` knows where a press looks for bindings, `Scene` composes
+what an output shows and hit-tests it, and `ConfigSource` reads and watches
+the configuration.
+
+**Why `Compositor` is large, in one `impl` block (R-M2).** Smithay's seat
+calls (`KeyboardHandle::set_focus`, pointer motion and buttons, grabs,
+keymap changes) take `&mut Compositor` and call back into its handler
+traits, so code that makes them cannot run inside a subsystem's method
+while that subsystem is borrowed. Those calls, and the routing around them,
+are `Compositor` methods; everything else is a method of the type that owns
+the data. The handler traits (`protocols/`, `capture.rs`) are separate
+trait impls, which R-M2 allows.
+
+**Settling.** The window manager's decisions are carried out in one place,
+`Compositor::settle`: after every event-loop round and every client
+dispatch, before an input event reaches a client (so a key typed right
+after a binding moved focus goes where focus went), and after a window's
+commit (so its first configure carries what was asked). Nothing else sends
+configures for windows or sets keyboard focus.
 
 ## Invariants that are easy to break
 
 - Only `Windows` owns a `Window`; everything else holds a `WindowId` (01 §1).
-- Only `window/toplevel.rs` knows whether a window is Xdg or X11 (01 §4.1).
+- Only `toplevels/toplevel.rs` knows whether a window is Xdg or X11, and
+  only it speaks the protocol to a window (01 §4.1).
+- Nothing under `window_manager/` uses Wayland protocol objects, the seat,
+  or a renderer; a `Window` and its `Toplevel` are added and removed
+  together, by `Compositor::add_window` and `Compositor::remove_window`.
 - Only `Outputs::apply` changes output modes (01 §5.1).
 - Only `Launcher` spawns processes (03 §2).
 - Every event-loop registration is an `EventSource` guard (03 §2); clippy
@@ -91,7 +124,8 @@ A method that needs no Smithay call does not belong in them.
   `std::process::Command`: the child must get an empty signal mask, and
   `Command` passes on vaht's blocked one (03 §2).
 - Commands are parsed once, into `Command` values (01 §8), and run only by
-  `Compositor::execute`. `Action::parse` reads both the string and the table
+  `Compositor::execute`, which hands every `WindowManagerAction` to
+  `WindowManager::run`. `Action::parse` reads both the string and the table
   form, so they cannot disagree.
 - `start-moving` and `start-resizing` from a drag binding run inside a
   pointer grab, where a new grab cannot be set: they turn the held grab into
@@ -113,17 +147,21 @@ A method that needs no Smithay call does not belong in them.
   wallpaper) counts as the desktop for bindings; a click on one above (a
   panel) is its client's alone.
 - A new window is placed on its client's first commit with a size
-  (`Compositor::place_new_window`), not when it is created: the
-  placement strategies need its size. Until then it counts for nothing.
+  (`WindowManager::commit`), not when it is created: the placement
+  strategies need its size. Until then it counts for nothing.
+- Areas follow what the client committed, never what vaht asked: a
+  client may take a while to apply a size, or not apply it exactly.
+- Maximized, tiled and fullscreen windows follow the output's areas:
+  `WindowManager::set_output_area` places them again when a panel comes or
+  goes.
 - A window's area follows from its `Placement`: code that maximizes, tiles
   or fullscreens a window builds a new `Placement` and calls
   `Window::place`, never moves or sizes it directly.
-- Primary selection focus is set with the clipboard's, for the same
-  reason.
 - The dmabuf global exists only when the backend's renderer imports GPU
   buffers (`Backend::dmabuf_formats`). Advertising it without that would
   make GL clients fail instead of falling back to shared memory.
-- Clipboard focus is set together with keyboard focus in
-  `Compositor::focus_window`: Smithay clears the focus of a destroyed
-  surface silently, and the clipboard would otherwise keep a disconnected
-  client's state alive.
+- Clipboard and primary selection focus are set together with keyboard
+  focus in `Compositor::sync_keyboard_focus`, which compares with the focus
+  it last set rather than the seat's: Smithay clears the focus of a
+  destroyed surface silently, and the clipboard would otherwise keep a
+  disconnected client's state alive.

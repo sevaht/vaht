@@ -2,7 +2,7 @@
 //! was last selected, pasted with the middle button.
 //!
 //! Its focus follows keyboard focus, set with the clipboard's in
-//! `Compositor::focus_window`, so a client that is gone is never kept alive
+//! `Compositor::sync_keyboard_focus`, so a client that is gone is never kept alive
 //! by it.
 
 use smithay::wayland::selection::primary_selection::{

@@ -1,29 +1,38 @@
-//! One managed window: its identity, the client's side of it, and where it is.
+//! One managed window as the window manager sees it: what its client
+//! committed, where it is and why, and what vaht asks of the client.
 //!
-//! A [`Window`] is owned only by [`Windows`](crate::windows::Windows);
+//! A [`Window`] is owned only by [`Windows`](super::windows::Windows);
 //! everything else refers to it by its [`WindowId`], so a closed window can
-//! never be reached through a stale reference (01 §1).
+//! never be reached through a stale reference (01 §1). It holds no protocol
+//! object: the compositor gives it each [`CommittedState`] and carries out
+//! the [`RequestedState`] it asks for.
+//!
+//! What vaht asks and what the client has are kept apart on purpose: a
+//! client takes a moment to apply a new size, and need not apply it
+//! exactly. Areas follow the committed size, and a resize keeps the edges
+//! opposite the dragged ones still as each new size arrives
+//! ([`ResizeAnchor`]).
 
+mod client;
 mod edge_snap;
 mod frame;
 mod placement;
 mod resize;
-mod toplevel;
 
 use std::fmt;
 
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Size};
 use vaht_ui::theme::Metrics;
+use vaht_ui::{Theme, Typesetter};
 
+pub(crate) use client::{CommittedState, Ending, PlacementKind, RequestedState};
 pub(crate) use edge_snap::EdgeSnap;
 pub(crate) use frame::{Frame, FrameGeometry, FramePart, TitlebarButton, TitlebarLayout};
 pub(crate) use placement::{Area, Axes, Direction, OutputArea, Placement, SnapStep, TileCell};
-pub(crate) use resize::{HorizontalEdge, ResizeAnchor, ResizeEdges, VerticalEdge};
-pub(crate) use toplevel::Toplevel;
+pub(crate) use resize::{HorizontalEdge, ResizeAnchor, ResizeEdges, SizeLimits, VerticalEdge};
 
+use super::workspaces::Workspace;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
-use crate::workspaces::Workspace;
 
 /// Identifies a window for as long as vaht runs; never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -61,17 +70,6 @@ pub(crate) enum WindowDrag {
     },
 }
 
-/// A window about to be managed: its parts, before it has an id.
-#[derive(Debug)]
-pub(crate) struct NewWindow {
-    /// The client's side.
-    pub(crate) toplevel: Toplevel,
-    /// The frame vaht draws around it.
-    pub(crate) frame: Frame,
-    /// The workspace it opens on.
-    pub(crate) workspace: Workspace,
-}
-
 /// What the user has done to a window besides placing it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) struct WindowState {
@@ -83,22 +81,35 @@ pub(crate) struct WindowState {
     pub(crate) is_shaded: bool,
 }
 
+/// A drag of the window in progress.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DragProgress {
+    /// A move, which began with the content's corner at `origin`.
+    Move {
+        /// Where the content's corner was when the move began.
+        origin: Point<i32, Logical>,
+    },
+    /// A resize, or one just finished whose last size is still to arrive.
+    Resize(ResizeAnchor),
+}
+
 /// A managed window.
 #[derive(Debug)]
 pub(crate) struct Window {
     /// Its identity.
     id: WindowId,
-    /// The client's side: the only part that knows the protocol.
-    toplevel: Toplevel,
+    /// What its client last committed.
+    committed: CommittedState,
+    /// What vaht asks of its client.
+    requested: RequestedState,
+    /// Whether `requested` changed since the compositor last took it.
+    is_request_pending: bool,
     /// Where the top-left corner of its content is, in global coordinates.
     location: Point<i32, Logical>,
     /// What vaht draws around it.
     frame: Frame,
-    /// Where the content's corner was when the move in progress began.
-    move_origin: Option<Point<i32, Logical>>,
-    /// The resize in progress, which positions the window as the client
-    /// applies new sizes.
-    resize: Option<ResizeAnchor>,
+    /// The drag in progress, if any.
+    drag: Option<DragProgress>,
     /// Where it is and why.
     placement: Placement,
     /// Minimized, sticky, shaded.
@@ -112,21 +123,22 @@ pub(crate) struct Window {
 }
 
 impl Window {
-    /// Creates the window `new`, identified by `id`. It waits for its
-    /// first place until the client has given it a size.
-    pub(crate) fn new(id: WindowId, new: NewWindow, ledger: &ResourceLedger) -> Self {
-        let NewWindow {
-            toplevel,
-            frame,
-            workspace,
-        } = new;
+    /// Creates the window `id` with `frame`, on `workspace`. It waits for
+    /// its first place until its client commits a size.
+    pub(crate) fn new(
+        id: WindowId,
+        frame: Frame,
+        workspace: Workspace,
+        ledger: &ResourceLedger,
+    ) -> Self {
         Self {
             id,
-            toplevel,
+            committed: CommittedState::default(),
+            requested: RequestedState::default(),
+            is_request_pending: false,
             location: Point::default(),
             frame,
-            move_origin: None,
-            resize: None,
+            drag: None,
             placement: Placement::Floating,
             state: WindowState::default(),
             workspace,
@@ -140,9 +152,14 @@ impl Window {
         self.id
     }
 
-    /// Returns the client's side of the window.
-    pub(crate) const fn toplevel(&self) -> &Toplevel {
-        &self.toplevel
+    /// Returns the title its client set.
+    pub(crate) fn title(&self) -> &str {
+        &self.committed.title
+    }
+
+    /// Returns the application id its client set.
+    pub(crate) fn app_id(&self) -> &str {
+        &self.committed.app_id
     }
 
     /// Returns where the content's top-left corner is.
@@ -165,6 +182,11 @@ impl Window {
         self.workspace
     }
 
+    /// Returns the frame.
+    pub(crate) const fn frame(&self) -> &Frame {
+        &self.frame
+    }
+
     /// Returns whether the window has had its first place.
     pub(crate) const fn is_placed(&self) -> bool {
         !self.awaits_placement
@@ -173,7 +195,7 @@ impl Window {
     /// Returns whether the window still waits for its first place and has
     /// a size to choose it by.
     pub(crate) fn is_ready_for_placement(&self) -> bool {
-        self.awaits_placement && !self.toplevel.geometry().size.is_empty()
+        self.awaits_placement && !self.committed.geometry.size.is_empty()
     }
 
     /// Returns whether the window is shown while `current` is.
@@ -193,7 +215,7 @@ impl Window {
 
     /// Returns the area the window's content covers, in global coordinates.
     pub(crate) fn content_area(&self) -> Rectangle<i32, Logical> {
-        Rectangle::new(self.location, self.toplevel.geometry().size)
+        Rectangle::new(self.location, self.committed.geometry.size)
     }
 
     /// Returns the area the window covers on screen, frame included.
@@ -215,32 +237,46 @@ impl Window {
         FrameGeometry::around(content, metrics)
     }
 
-    /// Returns the frame.
-    pub(crate) const fn frame(&self) -> &Frame {
-        &self.frame
-    }
-
-    /// Returns the frame, to change it.
-    pub(crate) const fn frame_mut(&mut self) -> &mut Frame {
-        &mut self.frame
-    }
-
     /// Returns where the client's surface is drawn: the content location,
     /// moved by the margin a client-side shadow adds around its content.
     pub(crate) fn surface_origin(&self) -> Point<i32, Logical> {
-        self.location - self.toplevel.geometry().loc
+        self.location - self.committed.geometry.loc
     }
 
-    /// Returns the client surface under `point` (global coordinates) and that
-    /// surface's origin in global coordinates.
-    pub(crate) fn surface_under(
-        &self,
-        point: Point<f64, Logical>,
-    ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        let origin = self.surface_origin();
-        self.toplevel
-            .surface_under(point - origin.to_f64())
-            .map(|(surface, offset)| (surface, (offset + origin).to_f64()))
+    /// Brings the window up to date with what its client committed: its
+    /// title, its size, and its position while a resize keeps edges still.
+    pub(crate) fn commit(&mut self, committed: CommittedState) {
+        self.frame.set_title(&committed.title);
+        self.committed = committed;
+        if let Some(DragProgress::Resize(anchor)) = self.drag {
+            let size = self.committed.geometry.size;
+            self.location = anchor.edges.anchored_location(anchor.initial, size);
+            if anchor.is_finishing {
+                self.drag = None;
+            }
+        }
+    }
+
+    /// Shows the window as focused or not, and tells its client.
+    pub(crate) fn set_focused(&mut self, is_focused: bool) {
+        self.frame.set_focused(is_focused);
+        self.request(|requested| requested.is_activated = is_focused);
+    }
+
+    /// Lays the titlebar's buttons out as `buttons`.
+    pub(crate) fn set_titlebar_buttons(&mut self, buttons: &TitlebarLayout) {
+        self.frame.set_buttons(buttons);
+    }
+
+    /// Paints the frame, sized by `metrics`, if anything changed.
+    pub(crate) fn paint_frame(
+        &mut self,
+        metrics: Metrics,
+        theme: &Theme,
+        typesetter: &mut Typesetter,
+    ) {
+        let geometry = self.frame_geometry(metrics);
+        self.frame.paint(&geometry, theme, typesetter);
     }
 
     /// Holds down the titlebar button at global `location`, if there is one
@@ -271,13 +307,14 @@ impl Window {
         let content = FrameGeometry::content_within(outer, metrics);
         self.location = content.loc;
         if content.size != self.content_area().size {
-            self.toplevel.request_size(content.size);
+            self.request_size(content.size);
         }
         self.awaits_placement = false;
     }
 
     /// Places the window so on `output`, its frame sized by `metrics`: moves
-    /// it, asks the client for the size, and tells the client its state.
+    /// it, and asks the client for the size and to show the placement. A
+    /// drag in progress ends: the window is no longer the user's to drag.
     pub(crate) fn place(&mut self, placement: Placement, output: OutputArea, metrics: Metrics) {
         let current = self.outer_area(metrics);
         let outer = match placement {
@@ -292,45 +329,14 @@ impl Window {
             FrameGeometry::content_within(outer, metrics)
         };
         tracing::debug!(window = %self.id, ?placement, "placed");
+        self.drag = None;
+        self.location = content.loc;
+        self.request(|requested| {
+            requested.placement = placement.kind();
+            requested.is_resizing = false;
+        });
         self.placement = placement;
-        self.resize = None;
-        self.location = content.loc;
-        self.toplevel
-            .configure_placement(&self.placement, content.size);
-    }
-
-    /// Makes the window float where it is, so it can be moved or resized by
-    /// hand. For a move with the pointer at `pointer`, a window that was
-    /// maximized or tiled goes back to its floating size, the pointer at
-    /// the same place across it.
-    pub(crate) fn float(&mut self, pointer: Option<Point<f64, Logical>>, metrics: Metrics) {
-        if self.placement == Placement::Floating {
-            return;
-        }
-        let current = self.outer_area(metrics);
-        let outer = match pointer {
-            Some(pointer) => {
-                let restore = self.placement.restore_area(current);
-                let across = (pointer.x - f64::from(current.loc.x)) / f64::from(current.size.w);
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "an offset within a window's width fits in i32"
-                )]
-                let offset = (across * f64::from(restore.size.w)).round() as i32;
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "pointer coordinates fit in i32"
-                )]
-                let left = pointer.x.round() as i32 - offset;
-                Rectangle::new((left, current.loc.y).into(), restore.size)
-            }
-            None => current,
-        };
-        let content = FrameGeometry::content_within(outer, metrics);
-        self.placement = Placement::Floating;
-        self.location = content.loc;
-        self.toplevel
-            .configure_placement(&self.placement, content.size);
+        self.request_size(content.size);
     }
 
     /// Minimizes the window, or restores it.
@@ -362,7 +368,7 @@ impl Window {
     /// Asks the client to make the content `size`, as a floating window.
     pub(crate) fn resize_to(&mut self, size: Size<i32, Logical>, metrics: Metrics) {
         self.float(None, metrics);
-        self.toplevel.request_size(size);
+        self.request_size(size);
     }
 
     /// Starts `drag` with the pointer at `pointer`. A maximized or tiled
@@ -377,75 +383,117 @@ impl Window {
         match drag {
             WindowDrag::Move => {
                 self.float(Some(pointer), metrics);
-                self.move_origin = Some(self.location);
+                self.drag = Some(DragProgress::Move {
+                    origin: self.location,
+                });
             }
             WindowDrag::Resize { edges } => {
                 self.float(None, metrics);
-                self.resize = Some(ResizeAnchor {
+                self.drag = Some(DragProgress::Resize(ResizeAnchor {
                     edges,
                     initial: self.content_area(),
                     is_finishing: false,
-                });
-                self.toplevel.set_resizing(true);
+                }));
+                self.request(|requested| requested.is_resizing = true);
             }
         }
     }
 
-    /// Applies `drag` after the pointer moved `delta` since it began: moves
-    /// the window, its edges snapping as `snap` says, or asks the client for
-    /// the size the resize has reached.
+    /// Follows the drag in progress after the pointer moved `delta` since
+    /// it began: moves the window, its edges snapping as `snap` says, or
+    /// asks the client for the size the resize has reached.
     pub(crate) fn follow_drag(
         &mut self,
-        drag: WindowDrag,
         delta: Point<i32, Logical>,
         snap: &EdgeSnap,
         metrics: Metrics,
     ) {
-        match drag {
-            WindowDrag::Move => {
-                if let Some(origin) = self.move_origin {
-                    let outer = self.outer_area(metrics);
-                    let moved = origin + delta;
-                    let moved_outer =
-                        Rectangle::new(outer.loc + (moved - self.location), outer.size);
-                    self.location = moved + (snap.snap(moved_outer) - moved_outer.loc);
-                }
+        match self.drag {
+            Some(DragProgress::Move { origin }) => {
+                let outer = self.outer_area(metrics);
+                let moved = origin + delta;
+                let moved_outer = Rectangle::new(outer.loc + (moved - self.location), outer.size);
+                self.location = moved + (snap.snap(moved_outer) - moved_outer.loc);
             }
-            WindowDrag::Resize { .. } => {
-                if let Some(anchor) = self.resize {
-                    let limits = self.toplevel.size_limits();
-                    let size: Size<i32, Logical> =
-                        anchor.edges.resize(anchor.initial.size, delta, limits);
-                    self.toplevel.request_size(size);
-                }
+            Some(DragProgress::Resize(anchor)) if !anchor.is_finishing => {
+                let limits = self.committed.size_limits;
+                self.request_size(anchor.edges.resize(anchor.initial.size, delta, limits));
             }
+            Some(DragProgress::Resize(_)) | None => {}
         }
     }
 
-    /// Ends `drag`; a resize's last size from the client is still anchored.
-    pub(crate) fn end_drag(&mut self, drag: WindowDrag) {
-        match (drag, &mut self.resize) {
-            (WindowDrag::Move, _) => self.move_origin = None,
-            (WindowDrag::Resize { .. }, Some(anchor)) => {
+    /// Ends the drag in progress; a resize's last size from the client is
+    /// still anchored when it arrives.
+    pub(crate) fn end_drag(&mut self) {
+        match &mut self.drag {
+            Some(DragProgress::Move { .. }) => self.drag = None,
+            Some(DragProgress::Resize(anchor)) => {
                 anchor.is_finishing = true;
-                self.toplevel.set_resizing(false);
+                self.request(|requested| requested.is_resizing = false);
             }
-            (WindowDrag::Resize { .. }, None) => {}
+            None => {}
         }
     }
 
-    /// Brings vaht's view up to date with what the client last committed:
-    /// its title, and its position while a resize keeps an edge still.
-    pub(crate) fn sync_with_client(&mut self) {
-        let title = self.toplevel.title().unwrap_or_default();
-        self.frame.set_title(&title);
-        if let Some(anchor) = self.resize {
-            let size = self.toplevel.geometry().size;
-            self.location = anchor.edges.anchored_location(anchor.initial, size);
-            if anchor.is_finishing {
-                self.resize = None;
-            }
+    /// Returns what vaht asks of the client, if that changed since it was
+    /// last taken: the compositor carries it out.
+    pub(crate) const fn take_request(&mut self) -> Option<RequestedState> {
+        if self.is_request_pending {
+            self.is_request_pending = false;
+            Some(self.requested)
+        } else {
+            None
         }
+    }
+
+    /// Makes the window float where it is, so it can be moved or resized by
+    /// hand. For a move with the pointer at `pointer`, a window that was
+    /// maximized or tiled goes back to its floating size, the pointer at
+    /// the same place across it.
+    fn float(&mut self, pointer: Option<Point<f64, Logical>>, metrics: Metrics) {
+        if self.placement == Placement::Floating {
+            return;
+        }
+        let current = self.outer_area(metrics);
+        let outer = match pointer {
+            Some(pointer) => {
+                let restore = self.placement.restore_area(current);
+                let across = (pointer.x - f64::from(current.loc.x)) / f64::from(current.size.w);
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "an offset within a window's width fits in i32"
+                )]
+                let offset = (across * f64::from(restore.size.w)).round() as i32;
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "pointer coordinates fit in i32"
+                )]
+                let left = pointer.x.round() as i32 - offset;
+                Rectangle::new((left, current.loc.y).into(), restore.size)
+            }
+            None => current,
+        };
+        let content = FrameGeometry::content_within(outer, metrics);
+        self.placement = Placement::Floating;
+        self.location = content.loc;
+        self.request(|requested| requested.placement = PlacementKind::Floating);
+        self.request_size(content.size);
+    }
+
+    /// Changes what vaht asks of the client; it is sent if that changed.
+    fn request(&mut self, change: impl FnOnce(&mut RequestedState)) {
+        let before = self.requested;
+        change(&mut self.requested);
+        self.is_request_pending |= self.requested != before;
+    }
+
+    /// Asks the client for content of `size`. It is sent even when the
+    /// size asked last was the same: the client may since have chosen
+    /// another.
+    const fn request_size(&mut self, size: Size<i32, Logical>) {
+        self.requested.size = Some(size);
+        self.is_request_pending = true;
     }
 
     /// Returns global `location` in the titlebar's own pixels.

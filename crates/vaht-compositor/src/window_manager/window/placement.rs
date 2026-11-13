@@ -15,18 +15,10 @@ use std::fmt;
 
 use smithay::utils::{Logical, Rectangle};
 
+use super::client::PlacementKind;
+
 /// An area in global logical coordinates.
 pub(crate) type Area = Rectangle<i32, Logical>;
-
-impl fmt::Display for TileCell {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{} {} {} {}",
-            self.x, self.y, self.width, self.height
-        )
-    }
-}
 
 /// The parts of an output a window can be placed in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +77,17 @@ impl Placement {
                 ..
             }
         )
+    }
+
+    /// Returns how the window is placed, without the areas it returns to:
+    /// what its client is told.
+    pub(crate) const fn kind(&self) -> PlacementKind {
+        match self {
+            Self::Floating => PlacementKind::Floating,
+            Self::Maximized { axes, .. } => PlacementKind::Maximized(*axes),
+            Self::Tiled { .. } => PlacementKind::Tiled,
+            Self::Fullscreen { .. } => PlacementKind::Fullscreen,
+        }
     }
 
     /// Returns the area the window covers when placed so, given its
@@ -380,6 +383,17 @@ impl TileCell {
             && (area.loc.y - cell.loc.y).abs() <= POSITION_SLACK
             && (area.size.w - cell.size.w).abs() <= SIZE_SLACK
             && (area.size.h - cell.size.h).abs() <= SIZE_SLACK
+    }
+}
+
+/// Writes the four thousandths `tile` takes.
+impl fmt::Display for TileCell {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} {} {} {}",
+            self.x, self.y, self.width, self.height
+        )
     }
 }
 

@@ -9,8 +9,7 @@
 
 use smithay::utils::{Logical, Point, Rectangle, Size};
 
-/// An area in global logical coordinates.
-type Area = Rectangle<i32, Logical>;
+use super::window::Area;
 
 /// How a place for a new window is chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]

@@ -44,10 +44,14 @@ pub enum ResourceKind {
     EventSource,
     /// A connected Wayland client.
     Client,
-    /// A managed window.
+    /// A managed window, as the window manager knows it.
     Window,
-    /// A window's frame: its titlebar panel and border buffers.
+    /// A window's toplevel: the client's protocol object behind it.
+    Toplevel,
+    /// A window's frame: its titlebar panel.
     Frame,
+    /// A window's frame pixels, as the renderer takes them.
+    FrameTexture,
     /// An open screenshot or recording session.
     CaptureSession,
     /// A program vaht started that has not been reaped yet.
@@ -225,7 +229,7 @@ mod tests {
         let _tracked = ledger.track(ResourceKind::EventSource);
         assert_eq!(
             ledger.to_string(),
-            "event-source: 1 (peak 1)\nclient: 0 (peak 0)\nwindow: 0 (peak 0)\nframe: 0 (peak 0)\ncapture-session: 0 (peak 0)\nprogram: 0 (peak 0)\nlayer-surface: 0 (peak 0)\n"
+            "event-source: 1 (peak 1)\nclient: 0 (peak 0)\nwindow: 0 (peak 0)\ntoplevel: 0 (peak 0)\nframe: 0 (peak 0)\nframe-texture: 0 (peak 0)\ncapture-session: 0 (peak 0)\nprogram: 0 (peak 0)\nlayer-surface: 0 (peak 0)\n"
         );
     }
 }

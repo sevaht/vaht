@@ -71,24 +71,32 @@ The dialogs reuse it, so they look like the rest of the desktop.
 ## 3. The compositor state and its ownership tree
 
 Smithay requires one state type that implements all its handler traits. vaht
-accepts that, but the type only **holds** subsystems and routes between them.
-It is not where behavior lives.
+accepts that, but the type only **holds** subsystems, routes between them and
+carries out decisions. It is not where behavior lives. Window management is a
+separate model with no Wayland in it, `WindowManager`, so its rules are
+tested on their own (M12; DESIGN.md, "Where behavior lives").
 
 ```
-Compositor                      (the Smithay state; coordinator of last resort)
+Compositor                      (the Smithay state; routes events, carries out decisions)
+├── window_manager: WindowManager  windows, workspaces, focus; every rule about them.
+│   │                           No protocol objects, no seat, no renderer
+│   ├── windows: Windows        arena WindowId → Window, plus Stack (layers)
+│   │   └── Window              CommittedState, RequestedState, Frame, Placement,
+│   │                           WindowState, workspace, settings
+│   ├── workspaces: Workspaces  names, current index, membership queries
+│   └── focus: Focus            MRU history, FocusCycle
+├── toplevels: Toplevels        WindowId → Toplevel: the xdg-shell (later X11) side
+├── frame_textures: FrameTextures  frame pixels as the renderer takes them
 ├── protocols: ProtocolStates   Smithay's *State globals. Mechanical; no logic
-├── backend: Backend            enum { Drm(DrmBackend), Winit(WinitBackend) }
+├── backend: Backend            enum { Drm(DrmBackend), Winit(WinitBackend), Headless }
 ├── outputs: Outputs            Output entities, layout, primary output
 │   └── Output                  identity, mode, usable area, FrameClock, VrrPolicy,
 │       ├── layers: LayerMap    layer-shell surfaces (other bars, launchers, swaybg)
 │       ├── taskbar: Option<Taskbar>
 │       └── wallpaper: Option<Wallpaper>
 ├── profiles: DisplayProfiles   named layouts, automatic choice, hooks
-├── windows: Windows            arena WindowId → Window, plus Stack (layers)
-│   └── Window                  Toplevel, Frame, Placement, WindowState, settings
-├── workspaces: Workspaces      names, current index, membership queries
-├── focus: Focus                MRU history, focus model, FocusCycle, activation policy
-├── input: Input                Seat, KeyBindings + KeyChain, MouseBindings, Grab
+├── input: Input                key filtering, KeyChain, key repeat, double clicks
+├── seat: Seat                  Smithay's keyboard and pointer, and the active Grab
 ├── overlays: Overlays          menus (MenuStack), tooltip, snap picker,
 │                               wireframe, position overlay
 ├── config: Config              the validated configuration, plus runtime overrides
@@ -102,14 +110,19 @@ Compositor                      (the Smithay state; coordinator of last resort)
     └── session: Session        lock, idle, activation environment export
 ```
 
-Methods on `Compositor` exist only for use cases that span several
-subsystems: "map a window", "apply a profile", "execute a command". Each one
-reads as a short sequence of calls on the fields. Rust lets a method borrow
-disjoint fields mutably at the same time
-(`self.focus.activate(&mut self.windows, id)`), so subsystems never need
-back-pointers to each other.
+The window manager talks to the rest only in values:
+- **In:** a client's commit as a `CommittedState` (title, app id, content
+  geometry, size limits); a client's request as a `ClientRequest`; a
+  `WindowManagerAction` from a binding, menu or IPC; the output's areas;
+  drags and titlebar presses.
+- **Out:** `ClientUpdates` (each window's changed `RequestedState`: size,
+  placement, activation, resizing; and `Ending`s: close or kill), the
+  focused window, and whether a frame is needed.
 
----
+`Compositor::settle` carries the out-values out, in one place. `Compositor`
+methods exist only for what needs the whole state: Smithay's seat calls
+(`set_focus`, pointer events, grabs) take `&mut Compositor` and call back
+into its handler traits, so they cannot run inside a subsystem's method.
 
 ## 4. Windows
 
@@ -397,6 +410,10 @@ pub enum Command {
   `SetEnvironment { name, value }`, `CycleProfile`, `CyclePrimaryOutput` and
   so on.
 - **`Compositor::execute(command, ExecutionContext)`** is the only dispatcher.
+  `Action` splits in two: `Action::WindowManager(WindowManagerAction)` goes
+  to `WindowManager::run`, whose exhaustive match is the window-management
+  dispatcher; the rest (`exec`, `start-moving`, `reload`…) need the seat,
+  the launcher or the configuration, and stay with the compositor.
   The context carries the target window, resolved per binding kind: the
   clicked window, the focused one, or each one under `ForEach`.
 - Keys, mouse bindings, menu items, panel widgets and IPC all build a
@@ -449,17 +466,18 @@ disagree.
 ## 11. How a few use cases flow
 
 **A window opens.**
-1. `XdgShellHandler::new_toplevel` creates `Windows::insert(Toplevel)` (not yet
-   mapped).
-2. At the first commit, `Compositor::map_window(id)` runs:
-   1. `Rules::settings_for`
-   2. `Placement` from rules, or `PlacementStrategy::place`
-   3. `Workspaces` assignment
-   4. `Frame::new`
-   5. `Focus::on_mapped` (focus new windows, activation policy)
-   6. `Stack::push`
-   7. affected outputs marked damaged
-   8. IPC event `WindowOpened`
+1. `XdgShellHandler::new_toplevel`: `WindowManager::add_window` creates the
+   `Window` (with its `Frame`, stacked on top, focused if new windows take
+   focus), and `Toplevels::insert` records its `Toplevel`.
+2. At the first commit with a size, `WindowManager::commit(id, committed)`
+   places it:
+   1. `Rules::for_window`
+   2. its corner from the rule's position, or `PlacementStrategy::place`
+   3. the rule's workspace, sticky, minimized and placement
+   4. focus moves on if a rule sent it out of sight
+   5. later: IPC event `WindowOpened`
+3. `Compositor::settle` sends the size it asked for with the first
+   configure, and gives it keyboard focus.
 
 **Click the close button.**
 1. Pointer motion computes

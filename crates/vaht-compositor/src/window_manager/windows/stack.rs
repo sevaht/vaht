@@ -1,6 +1,6 @@
 //! The stacking order of windows: the single record of what is above what.
 
-use crate::window::WindowId;
+use crate::window_manager::WindowId;
 
 /// Windows from bottom to top; the last is drawn above all others.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

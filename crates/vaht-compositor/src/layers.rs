@@ -40,20 +40,24 @@ impl Layers {
         self.keyboard.as_ref()
     }
 
-    /// Returns whether the layer surface `surface` takes the keyboard when
-    /// clicked.
-    pub(crate) fn takes_keyboard_on_click(&self, surface: &WlSurface) -> bool {
-        self.find(surface).is_some_and(|layer| {
-            layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None
-        })
+    /// Gives the keyboard to a layer surface of `output` that wants it to
+    /// itself (a launcher, a lock screen). Without one, a layer surface
+    /// that took the keyboard on a click keeps it while it still takes
+    /// keys; otherwise the windows have it back.
+    pub(crate) fn refresh_keyboard(&mut self, output: OutputLayers<'_>) {
+        let kept = self
+            .keyboard
+            .take()
+            .filter(|surface| self.takes_keyboard_on_click(surface));
+        self.keyboard = output.exclusive_keyboard_surface().or(kept);
     }
 
-    /// Records that `surface`, a layer surface, holds the keyboard, or with
-    /// `None` that none does; returns whether that changed.
-    pub(crate) fn set_keyboard(&mut self, surface: Option<WlSurface>) -> bool {
-        let changes = self.keyboard != surface;
-        self.keyboard = surface;
-        changes
+    /// Gives the keyboard to the layer surface `surface`, clicked, if it
+    /// takes the keyboard on a click.
+    pub(crate) fn click(&mut self, surface: &WlSurface) {
+        if self.takes_keyboard_on_click(surface) {
+            self.keyboard = Some(surface.clone());
+        }
     }
 
     /// Returns the layer surface whose root is `surface`, if it is one.
@@ -95,6 +99,14 @@ impl Layers {
         if self.keyboard.as_ref() == Some(surface) {
             self.keyboard = None;
         }
+    }
+
+    /// Returns whether the layer surface `surface` takes the keyboard when
+    /// clicked.
+    fn takes_keyboard_on_click(&self, surface: &WlSurface) -> bool {
+        self.find(surface).is_some_and(|layer| {
+            layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None
+        })
     }
 }
 

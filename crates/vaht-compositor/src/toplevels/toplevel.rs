@@ -1,9 +1,11 @@
 //! The client's side of a window: the only code that knows its protocol.
 //!
-//! Everything else talks to a [`Toplevel`] in protocol-neutral terms (its
-//! size, title, activation, closing). Today every toplevel is an xdg-shell
-//! surface; X11 windows will become a second case here, and nothing outside
-//! this module will need to know which one a window is (01 §4.1).
+//! A [`Toplevel`] translates both ways between the protocol and the window
+//! manager's values: it reads a commit as a [`CommittedState`], and carries
+//! out a [`RequestedState`] or an [`Ending`]. Today every toplevel is an
+//! xdg-shell surface; X11 windows will become a second case here, and
+//! nothing outside this module will need to know which one a window is
+//! (01 §4.1).
 
 use std::time::Duration;
 
@@ -17,15 +19,16 @@ use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource as _};
-use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size};
+use smithay::utils::{Logical, Physical, Point, Scale};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
 
-use super::placement::{Axes, Placement};
-use super::resize::SizeLimits;
+use crate::window_manager::{
+    Axes, CommittedState, Ending, PlacementKind, RequestedState, SizeLimits,
+};
 
 /// The client's side of a window.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub(crate) struct Toplevel {
     /// Smithay's surface-agnostic window, which tracks the surface tree.
     window: SurfaceWindow,
@@ -44,22 +47,27 @@ impl Toplevel {
         self.xdg().wl_surface()
     }
 
-    /// Returns the window's content area relative to its surface: the
-    /// surface minus any client-side shadow.
-    pub(crate) fn geometry(&self) -> Rectangle<i32, Logical> {
-        self.window.geometry()
+    /// Returns whether `surface` is this window's root surface.
+    pub(crate) fn has_surface(&self, surface: &WlSurface) -> bool {
+        self.wl_surface() == surface
     }
 
-    /// Returns the window's title, if the client set one.
-    pub(crate) fn title(&self) -> Option<String> {
-        self.with_attributes(|attributes| attributes.title.clone())
-            .flatten()
-    }
-
-    /// Returns the client's application id, if it set one.
-    pub(crate) fn app_id(&self) -> Option<String> {
-        self.with_attributes(|attributes| attributes.app_id.clone())
-            .flatten()
+    /// Returns what the client last committed.
+    pub(crate) fn committed_state(&self) -> CommittedState {
+        let (title, app_id) = self
+            .with_attributes(|attributes| {
+                (
+                    attributes.title.clone().unwrap_or_default(),
+                    attributes.app_id.clone().unwrap_or_default(),
+                )
+            })
+            .unwrap_or_default();
+        CommittedState {
+            title,
+            app_id,
+            geometry: self.window.geometry(),
+            size_limits: self.size_limits(),
+        }
     }
 
     /// Returns the surface under `point` (relative to the surface origin) and
@@ -106,45 +114,21 @@ impl Toplevel {
         }
     }
 
-    /// Shows the window as focused or not; the client restyles itself.
-    pub(crate) fn set_activated(&self, is_activated: bool) {
-        if self.window.set_activated(is_activated) {
-            self.xdg().send_pending_configure();
-        }
-    }
-
-    /// Returns the content sizes the client accepts.
-    pub(crate) fn size_limits(&self) -> SizeLimits {
-        with_states(self.wl_surface(), |states| {
-            let mut cached = states.cached_state.get::<SurfaceCachedState>();
-            let current = cached.current();
-            SizeLimits::from_client(current.min_size, current.max_size)
-        })
-    }
-
-    /// Asks the client to make its content `size`.
-    pub(crate) fn request_size(&self, size: Size<i32, Logical>) {
-        self.xdg()
-            .with_pending_state(|state| state.size = Some(size));
-        self.send_configure_if_ready();
-    }
-
-    /// Tells the client how it is placed, so it can drop its shadows and
-    /// rounded corners where it touches an edge, and asks it for `size`.
-    pub(crate) fn configure_placement(&self, placement: &Placement, size: Size<i32, Logical>) {
-        let (maximized, fullscreen, tiled) = match placement {
-            Placement::Floating => (false, false, [false; 4]),
-            Placement::Maximized { axes, .. } => {
+    /// Asks the client to make its window as `requested` says.
+    pub(crate) fn request(&self, requested: &RequestedState) {
+        let (maximized, fullscreen, tiled) = match requested.placement {
+            PlacementKind::Floating => (false, false, [false; 4]),
+            PlacementKind::Maximized(axes) => {
                 let horizontal = matches!(axes, Axes::Horizontal | Axes::Both);
                 let vertical = matches!(axes, Axes::Vertical | Axes::Both);
                 (
-                    *axes == Axes::Both,
+                    axes == Axes::Both,
                     false,
                     [horizontal, horizontal, vertical, vertical],
                 )
             }
-            Placement::Tiled { .. } => (false, false, [true; 4]),
-            Placement::Fullscreen { .. } => (false, true, [false; 4]),
+            PlacementKind::Tiled => (false, false, [true; 4]),
+            PlacementKind::Fullscreen => (false, true, [false; 4]),
         };
         let tiled_states = [
             xdg_toplevel::State::TiledLeft,
@@ -165,28 +149,31 @@ impl Toplevel {
             for (flag, is_on) in tiled_states.into_iter().zip(tiled) {
                 set(flag, is_on);
             }
-            state.size = Some(size);
+            set(xdg_toplevel::State::Activated, requested.is_activated);
+            set(xdg_toplevel::State::Resizing, requested.is_resizing);
+            state.size = requested.size;
         });
         self.send_configure_if_ready();
     }
 
-    /// Tells the client whether the user is resizing it, so it can redraw
-    /// cheaply meanwhile.
-    pub(crate) fn set_resizing(&self, is_resizing: bool) {
-        self.xdg().with_pending_state(|state| {
-            if is_resizing {
-                state.states.set(xdg_toplevel::State::Resizing);
-            } else {
-                state.states.unset(xdg_toplevel::State::Resizing);
-            }
-        });
+    /// Answers a request the window manager did not act on: xdg-shell
+    /// requires a configure in reply even when nothing changes.
+    pub(crate) fn acknowledge(&self) {
         self.send_configure_if_ready();
+    }
+
+    /// Ends the window as `ending` says.
+    pub(crate) fn end(&self, ending: Ending, display: &DisplayHandle) {
+        match ending {
+            Ending::Close => self.xdg().send_close(),
+            Ending::Kill => self.kill_program(display),
+        }
     }
 
     /// Ends the client's program at once (SIGKILL), as Fluxbox's `Kill`
     /// does: the program is the one the kernel says is at the other end of
     /// the client's socket. A window of vaht's own is never killed.
-    pub(crate) fn kill_program(&self, display: &DisplayHandle) {
+    fn kill_program(&self, display: &DisplayHandle) {
         let Ok(client) = display.get_client(self.wl_surface().id()) else {
             return;
         };
@@ -207,14 +194,13 @@ impl Toplevel {
         }
     }
 
-    /// Asks the client to close the window.
-    pub(crate) fn close(&self) {
-        self.xdg().send_close();
-    }
-
-    /// Returns whether `surface` is this window's root surface.
-    pub(crate) fn has_surface(&self, surface: &WlSurface) -> bool {
-        self.wl_surface() == surface
+    /// Returns the content sizes the client accepts.
+    fn size_limits(&self) -> SizeLimits {
+        with_states(self.wl_surface(), |states| {
+            let mut cached = states.cached_state.get::<SurfaceCachedState>();
+            let current = cached.current();
+            SizeLimits::from_client(current.min_size, current.max_size)
+        })
     }
 
     /// Sends pending changes, once the client has had its first configure;

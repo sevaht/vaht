@@ -19,11 +19,6 @@ impl Workspace {
     pub(crate) const fn numbered(number: NonZeroUsize) -> Self {
         Self(number.get() - 1)
     }
-
-    /// Returns whether this workspace exists among `workspaces`.
-    pub(crate) const fn is_within(self, workspaces: &Workspaces) -> bool {
-        self.0 < workspaces.count()
-    }
 }
 
 /// Writes the 1-based number, as users count workspaces.
@@ -106,6 +101,11 @@ impl Workspaces {
     /// Returns how many workspaces there are.
     pub(crate) const fn count(&self) -> usize {
         self.names.len()
+    }
+
+    /// Returns whether `workspace` exists.
+    pub(crate) const fn contains(&self, workspace: Workspace) -> bool {
+        workspace.0 < self.count()
     }
 
     /// Returns the last workspace.

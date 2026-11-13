@@ -1,9 +1,19 @@
 //! The compositor's state, and the loop that runs it.
 //!
 //! [`Compositor`] is the state Smithay's handler traits are implemented on.
-//! It holds the subsystems and coordinates use cases that span them (a
-//! window opening, focus moving); the behavior itself lives in the
-//! subsystems' own types (01 §3).
+//! It owns the subsystems and routes events between them; it decides
+//! nothing about windows. The window manager ([`WindowManager`]) decides,
+//! and the compositor carries its decisions out through Smithay:
+//! - each event loop round ends by *settling* ([`Compositor::run`]): what
+//!   the window manager asked of clients is sent, keyboard focus follows its
+//!   choice, and a frame is drawn if anything shown changed;
+//! - before an input event reaches a client, the same settling happens, so
+//!   a key typed right after a binding moved focus goes where focus went.
+//!
+//! Its methods are the ones that need the whole state: Smithay's seat calls
+//! (`set_focus`, pointer motion and buttons, grabs) take `&mut Compositor`
+//! and call back into its handler traits, so they cannot run inside a
+//! subsystem's method (DESIGN.md, "Where behavior lives").
 //!
 //! The Wayland [`Display`] is deliberately *not* part of that state. Clients
 //! are dispatched with `display.dispatch_clients(&mut compositor)`, which
@@ -21,38 +31,53 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use smithay::desktop::{PopupKind, PopupManager};
-use smithay::input::keyboard::{KeymapFile, XkbConfig};
+use smithay::backend::input::{
+    AbsolutePositionEvent, Axis, ButtonState, Event, InputBackend, InputEvent, InputTime, KeyState,
+    KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
+};
+use smithay::desktop::{
+    PopupKind, PopupManager, find_popup_root_surface, get_popup_toplevel_coords,
+};
+use smithay::input::keyboard::{
+    FilterResult, KeyboardSource, Keycode, KeymapFile, KeysymHandle, ModifiersState, XkbConfig,
+};
+use smithay::input::pointer::{ButtonEvent, Focus, GrabStartData, MotionEvent};
 use smithay::input::{Seat, SeatState};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, Mode, PostAction};
+use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
-use smithay::utils::{Rectangle, Serial};
+use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
 use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::selection::primary_selection::set_primary_focus;
-use smithay::wayland::shell::xdg::ToplevelSurface;
+use smithay::wayland::shell::xdg::{PopupSurface, ToplevelSurface};
 use smithay::wayland::socket::ListeningSocketSource;
+use smithay::wayland::virtual_keyboard::VirtualKeyboardKeyEvent;
 use vaht_ui::{Theme, Typesetter};
 
 use crate::backend::{Backend, BackendChoice, BackendError};
 use crate::capture::ScreenCapture;
 use crate::client::ClientState;
-use crate::config::{Config, ConfigWatch};
-use crate::event_source::{EventSource, Timer};
-use crate::focus::Focus;
-use crate::input::InputState;
+use crate::config::{
+    Action, Command, Config, ConfigSource, FocusModel, KeyChord, Modifiers, MouseButton,
+    MouseContext, ResizeFrom,
+};
+use crate::event_source::EventSource;
+use crate::execution::{ExecutionContext, Press};
+use crate::grab::{GrabKind, WindowGrab};
+use crate::input::{self, Input};
 use crate::launcher::Launcher;
 use crate::layers::{Layers, OutputLayers};
-use crate::placement_strategy::Room;
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceKind, ResourceLedger};
-use crate::scene::Scene;
+use crate::scene::{FrameTextures, PointerTarget, Scene, WindowTarget};
 use crate::signals::{ProcessSignals, SignalRequest};
-use crate::window::{Frame, NewWindow, OutputArea, Toplevel, Window, WindowId};
-use crate::windows::Windows;
-use crate::workspaces::{Workspace, Workspaces};
+use crate::toplevels::{Toplevel, Toplevels};
+use crate::window_manager::{
+    ClientRequest, FramePart, OutputArea, Window, WindowDrag, WindowId, WindowManager,
+};
 
 /// The running compositor.
 pub struct Compositor {
@@ -66,52 +91,43 @@ pub struct Compositor {
     pub(crate) seat: Seat<Self>,
     /// Where frames go and input comes from.
     pub(crate) backend: Backend,
-    /// Every managed window.
-    pub(crate) windows: Windows,
+    /// Windows, workspaces and focus, and every rule about them.
+    pub(crate) window_manager: WindowManager,
+    /// The client's side of every window.
+    pub(crate) toplevels: Toplevels,
+    /// Every window's frame, as the renderer takes it.
+    pub(crate) frame_textures: FrameTextures,
     /// Popups, by the surface they belong to.
     pub(crate) popups: PopupManager,
+    /// The mapped layer surfaces.
+    pub(crate) layers: Layers,
     /// How everything vaht draws looks.
-    pub(crate) theme: Theme,
-    /// Draws screenshots for capture clients.
-    pub(crate) capture: ScreenCapture,
+    theme: Theme,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
+    /// Draws screenshots for capture clients.
+    pub(crate) capture: ScreenCapture,
     /// vaht's own keymap, restored after a virtual keyboard used its own.
-    pub(crate) physical_keymap: KeymapFile,
+    physical_keymap: KeymapFile,
+    /// The surface keyboard focus was last given to: the seat's focus as
+    /// vaht set it.
+    keyboard_focus: Option<WlSurface>,
+    /// Key and button state between events: repeats, double clicks.
+    input: Input,
     /// Whether a client released a surface or a capture session since the
     /// last cleanup: renderers and Smithay may still reference its memory.
     pub(crate) client_cleanup_pending: bool,
     /// How many clients were connected at the last cleanup; fewer now means
     /// some left, and what they held must be let go.
     connected_clients: usize,
-    /// The window whose titlebar the pointer is holding down, if any.
-    pub(crate) held_titlebar: Option<WindowId>,
     /// The configuration in effect.
     pub(crate) config: Config,
-    /// Where the configuration files are.
-    config_directory: PathBuf,
-    /// Watches the configuration directory, while it exists.
-    config_watch: Option<ConfigWatch>,
-    /// Whether the directory was removed or renamed, so the watch sees
-    /// nothing any more and must be renewed.
-    config_watch_is_stale: bool,
-    /// Reloads the configuration once a burst of file changes settles.
-    reload_timer: Option<Timer<Self>>,
+    /// Where the configuration comes from, and when it is read again.
+    pub(crate) config_source: ConfigSource,
     /// Starts programs and reaps them.
-    pub(crate) launcher: Launcher,
-    /// Key and button state between events: repeats, double clicks.
-    pub(crate) input: InputState,
+    launcher: Launcher,
     /// Registers timers and other sources with the event loop.
     pub(crate) loop_handle: LoopHandle<'static, Self>,
-    /// Which window has keyboard focus, and which had it before.
-    pub(crate) focus: Focus,
-    /// The window a snap step down just minimized: a step up restores it
-    /// while the modifiers that went down for it are held.
-    pub(crate) snap_minimized: Option<WindowId>,
-    /// The workspaces, and which one is shown.
-    pub(crate) workspaces: Workspaces,
-    /// The mapped layer surfaces.
-    pub(crate) layers: Layers,
     /// When vaht started; frame times are measured from it.
     pub(crate) start_time: Instant,
     /// False once vaht has been asked to stop.
@@ -133,10 +149,6 @@ impl Compositor {
     pub(crate) const KEY_REPEAT_RATE: NonZeroU32 =
         NonZeroU32::new(25).expect("the key repeat rate is not zero");
 
-    /// How long the configuration files must be left alone after a change
-    /// before they are read: an editor's save is several changes.
-    const RELOAD_DELAY: Duration = Duration::from_millis(200);
-
     /// Runs vaht until it is asked to stop: by its host window closing, by
     /// a termination signal among `signals`, or by the `exit` action.
     ///
@@ -157,11 +169,13 @@ impl Compositor {
             event_loop
                 .dispatch(None, &mut compositor)
                 .map_err(RunError::WaitForEvents)?;
+            compositor.settle();
             display
                 .dispatch_clients(&mut compositor)
                 .map_err(RunError::DispatchClients)?;
             compositor.popups.cleanup();
             compositor.release_dead_client_resources();
+            compositor.settle();
             if let Err(error) = display.flush_clients() {
                 tracing::warn!(
                     error = &error as &dyn std::error::Error,
@@ -199,42 +213,9 @@ impl Compositor {
             );
         }
 
-        let socket = ListeningSocketSource::new_auto().map_err(RunError::Listen)?;
-        let socket_name = socket.socket_name().to_os_string();
-        let listening = EventSource::insert(handle, &ledger, socket, |stream, (), compositor| {
-            compositor.accept_client(stream);
-        })
-        .map_err(|error| RunError::RegisterSource(error.error))?;
-        // Readiness only wakes the loop; `run` dispatches the clients.
-        let display_descriptor = display
-            .as_fd()
-            .try_clone_to_owned()
-            .map_err(RunError::DuplicateDisplayDescriptor)?;
-        let display_wakeup = EventSource::insert(
-            handle,
-            &ledger,
-            Generic::new(display_descriptor, Interest::READ, Mode::Level),
-            |_, _, _| Ok(PostAction::Continue),
-        )
-        .map_err(|error| RunError::RegisterSource(error.error))?;
-        // A termination request stops vaht cleanly: clients are told, and
-        // the exit resource report is written.
-        let signals = EventSource::insert(
-            handle,
-            &ledger,
-            signals.into_source(),
-            |event, (), compositor| match SignalRequest::of(event.signal()) {
-                Some(SignalRequest::Stop) => {
-                    tracing::info!(signal = ?event.signal(), "asked to stop");
-                    compositor.stop();
-                }
-                Some(SignalRequest::Reload) => compositor.reload_configuration(),
-                Some(SignalRequest::ReapPrograms) => compositor.launcher.reap(),
-                None => {}
-            },
-        )
-        .map_err(|error| RunError::RegisterSource(error.error))?;
-        let config = Config::load(&options.config_directory).unwrap_or_else(|error| {
+        let (socket_name, event_sources) = Self::listen(handle, display, &ledger, signals)?;
+        let config_source = ConfigSource::new(options.config_directory);
+        let config = config_source.load().unwrap_or_else(|error| {
             tracing::error!(
                 error = &error as &dyn std::error::Error,
                 "the configuration is not valid; using the built-in one until it is fixed"
@@ -242,137 +223,60 @@ impl Compositor {
             Config::built_in()
         });
 
+        let theme = Theme::built_in();
+        let whole = backend.output_geometry();
+        let window_manager = WindowManager::new(
+            config.settings.workspaces.names(),
+            OutputArea {
+                whole,
+                usable: whole,
+            },
+            theme.metrics(),
+        );
         let launcher = Launcher::new(socket_name.clone(), &ledger);
-        let workspaces = Workspaces::named(config.settings.workspaces.names());
-        Ok(Self {
+        let mut compositor = Self {
             display_handle,
             ledger,
             protocols,
             seat,
             backend,
-            windows: Windows::default(),
+            window_manager,
+            toplevels: Toplevels::default(),
+            frame_textures: FrameTextures::default(),
             popups: PopupManager::default(),
-            theme: Theme::built_in(),
-            capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
+            layers: Layers::default(),
+            theme,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
-            held_titlebar: None,
-            config,
-            config_watch: None,
-            config_watch_is_stale: false,
-            config_directory: options.config_directory,
-            reload_timer: None,
-            launcher,
-            input: InputState::default(),
-            loop_handle: handle.clone(),
+            capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
+            physical_keymap,
+            keyboard_focus: None,
+            input: Input::default(),
             client_cleanup_pending: false,
             connected_clients: 0,
-            physical_keymap,
-            focus: Focus::default(),
-            snap_minimized: None,
-            workspaces,
-            layers: Layers::default(),
+            config,
+            config_source,
+            launcher,
+            loop_handle: handle.clone(),
             start_time: Instant::now(),
             is_running: true,
             socket_name,
-            _event_sources: [listening, display_wakeup, signals],
-        })
-        .map(|mut compositor| {
-            compositor.watch_configuration();
-            for command_line in compositor.config.settings.session.autostart.clone() {
-                compositor.launcher.run(&command_line);
-            }
-            compositor
-        })
-    }
-
-    /// Reads the configuration again and applies it if it is valid;
-    /// otherwise the current one stays, and the problem is logged.
-    pub(crate) fn reload_configuration(&mut self) {
-        self.watch_configuration();
-        match Config::load(&self.config_directory) {
-            Ok(config) => {
-                self.config = config;
-                self.apply_settings();
-                tracing::info!(directory = %self.config_directory.display(), "configuration reloaded");
-            }
-            Err(error) => tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                "configuration rejected; the previous one stays in effect"
-            ),
+            _event_sources: event_sources,
+        };
+        compositor
+            .config_source
+            .watch(&compositor.loop_handle, &compositor.ledger);
+        for command_line in &compositor.config.settings.session.autostart {
+            compositor.launcher.run(command_line);
         }
-    }
-
-    /// Brings what follows the settings up to date with them: the
-    /// workspaces' names and number, and the titlebars' buttons.
-    fn apply_settings(&mut self) {
-        let settings = &self.config.settings;
-        if let Some(last) = self.workspaces.rename(settings.workspaces.names()) {
-            for window in self.windows.iter_mut() {
-                if window.workspace() > last {
-                    window.move_to_workspace(last);
-                }
-            }
-        }
-        let buttons = settings.windows.frame.titlebar_layout();
-        for window in self.windows.iter_mut() {
-            window.frame_mut().set_buttons(&buttons);
-        }
-        self.focus_most_recent();
-        self.schedule_render();
-    }
-
-    /// Notes that a configuration file changed, or with `directory_gone`
-    /// that the directory itself went away, and reloads once things settle.
-    pub(crate) fn configuration_changed(&mut self, directory_gone: bool) {
-        self.config_watch_is_stale |= directory_gone;
-        match Timer::once(
-            &self.loop_handle,
-            &self.ledger,
-            Self::RELOAD_DELAY,
-            Self::reload_configuration,
-        ) {
-            // Replacing a pending timer cancels it: the burst goes on.
-            Ok(timer) => self.reload_timer = Some(timer),
-            Err(error) => tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                "could not schedule a configuration reload"
-            ),
-        }
-    }
-
-    /// Watches the configuration directory, unless it already is or the
-    /// directory does not exist; a reload tries again.
-    fn watch_configuration(&mut self) {
-        if self.config_watch.is_some() && !self.config_watch_is_stale {
-            return;
-        }
-        match ConfigWatch::start(&self.loop_handle, &self.ledger, &self.config_directory) {
-            Ok(watch) => {
-                self.config_watch = Some(watch);
-                self.config_watch_is_stale = false;
-                tracing::debug!(directory = %self.config_directory.display(), "watching the configuration");
-            }
-            Err(error) => {
-                tracing::debug!(
-                    error = &error as &dyn std::error::Error,
-                    directory = %self.config_directory.display(),
-                    "not watching the configuration; it reloads on SIGHUP or the reload action"
-                );
-            }
-        }
-    }
-
-    /// Returns the window with keyboard focus.
-    pub(crate) const fn focused(&self) -> Option<WindowId> {
-        self.focus.focused()
+        Ok(compositor)
     }
 
     /// Returns what the output shows now.
     pub(crate) fn scene(&self) -> Scene<'_> {
         Scene::new(
-            &self.windows,
-            self.theme.metrics(),
-            self.workspaces.current(),
+            &self.window_manager,
+            &self.toplevels,
+            &self.frame_textures,
             self.output_layers(),
         )
     }
@@ -382,33 +286,418 @@ impl Compositor {
         OutputLayers::new(self.backend.output(), self.backend.output_geometry())
     }
 
+    /// Asks vaht to stop after the current events.
+    pub(crate) const fn stop(&mut self) {
+        self.is_running = false;
+    }
+
+    /// Reads the configuration again and applies it if it is valid;
+    /// otherwise the current one stays, and the problem is logged.
+    pub(crate) fn reload_configuration(&mut self) {
+        self.config_source.watch(&self.loop_handle, &self.ledger);
+        match self.config_source.load() {
+            Ok(config) => {
+                self.window_manager.apply_settings(&config.settings);
+                self.config = config;
+                tracing::info!(
+                    directory = %self.config_source.directory().display(),
+                    "configuration reloaded"
+                );
+            }
+            Err(error) => tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "configuration rejected; the previous one stays in effect"
+            ),
+        }
+    }
+
+    /// Asks for a frame to be drawn soon.
+    pub(crate) fn schedule_render(&mut self) {
+        self.backend.schedule_render();
+    }
+
+    /// Draws a frame, then tells the windows and layer surfaces in it that
+    /// they were shown; hidden windows get no frame callbacks, so they stop
+    /// drawing.
+    pub(crate) fn render(&mut self) {
+        self.prepare_frames();
+        let output = self.backend.output().clone();
+        let scene = Scene::new(
+            &self.window_manager,
+            &self.toplevels,
+            &self.frame_textures,
+            OutputLayers::new(&output, self.backend.output_geometry()),
+        );
+        if let Err(error) = self.backend.render(&scene) {
+            tracing::warn!(error = &error as &dyn std::error::Error, "frame skipped");
+        }
+        let time = self.start_time.elapsed();
+        for (_, toplevel) in scene.windows() {
+            toplevel.send_frame(&output, time);
+        }
+        for layer in self.layers.iter() {
+            layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+                Some(output.clone())
+            });
+        }
+        tracing::trace!("frame drawn");
+    }
+
+    /// Brings every frame's pixels up to date with what it shows; drawing a
+    /// frame and taking a screenshot both start here, so a screenshot shows
+    /// the same as the screen would.
+    pub(crate) fn prepare_frames(&mut self) {
+        self.window_manager
+            .paint_frames(&self.theme, &mut self.typesetter);
+        self.frame_textures
+            .update(&self.window_manager, &self.theme, &self.ledger);
+    }
+
+    /// Starts managing the window of a new xdg-shell toplevel.
+    pub(crate) fn add_window(&mut self, surface: ToplevelSurface) {
+        let window = self
+            .window_manager
+            .add_window(&self.config.settings, &self.ledger);
+        self.toplevels
+            .insert(window, Toplevel::from_xdg(surface), &self.ledger);
+    }
+
+    /// Stops managing the window whose root surface is `surface`.
+    pub(crate) fn remove_window(&mut self, surface: &WlSurface) {
+        if let Some(window) = self.toplevels.remove(surface) {
+            self.window_manager.remove_window(window);
+        }
+    }
+
+    /// Updates what is known of a surface after its client commits it.
+    pub(crate) fn handle_commit(&mut self, surface: &WlSurface) {
+        if !is_sync_subsurface(surface) {
+            let mut root = surface.clone();
+            while let Some(parent) = get_parent(&root) {
+                root = parent;
+            }
+            self.commit_window(&root, surface == &root);
+        }
+        if self.output_layers().commit(surface) {
+            self.refresh_layer_keyboard();
+            self.refresh_output_area();
+        }
+        self.popups.commit(surface);
+        if let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(surface)
+            && !popup.is_initial_configure_sent()
+            && let Err(error) = popup.send_configure()
+        {
+            tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "could not configure a popup"
+            );
+        }
+        self.schedule_render();
+    }
+
+    /// Updates layer surfaces after `surface`, one of them, is gone.
+    pub(crate) fn remove_layer_surface(&mut self, surface: &WlSurface) {
+        let output = self.backend.output().clone();
+        self.layers.unmap(surface, &output);
+        self.refresh_layer_keyboard();
+        self.refresh_output_area();
+        self.schedule_render();
+    }
+
+    /// Delivers one input event.
+    pub(crate) fn handle_input<B: InputBackend>(&mut self, event: InputEvent<B>) {
+        // A key typed right after a binding moved focus goes where it went.
+        self.settle();
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "Smithay's input enum has many kinds vaht does not handle yet"
+        )]
+        match event {
+            InputEvent::Keyboard { event } => {
+                self.activate_keymap(None);
+                self.press_key(
+                    KeyboardSource::Physical,
+                    event.key_code(),
+                    event.state(),
+                    event.time(),
+                );
+            }
+            InputEvent::PointerMotion { event } => {
+                let output = self.backend.output_geometry().to_f64();
+                let moved = self.pointer_location() + event.delta();
+                // The far edges are outside the output, so stop just short.
+                let location = Point::from((
+                    moved
+                        .x
+                        .clamp(output.loc.x, output.loc.x + output.size.w - 1.0),
+                    moved
+                        .y
+                        .clamp(output.loc.y, output.loc.y + output.size.h - 1.0),
+                ));
+                self.move_pointer_to(location, event.time());
+            }
+            InputEvent::PointerMotionAbsolute { event } => {
+                let output = self.backend.output_geometry();
+                let location = event.position_transformed(output.size) + output.loc.to_f64();
+                self.move_pointer_to(location, event.time());
+            }
+            InputEvent::PointerButton { event } => self.handle_pointer_button::<B>(&event),
+            InputEvent::PointerAxis { event } => self.handle_pointer_axis::<B>(&event),
+            _ => {}
+        }
+    }
+
+    /// Sends a key from a virtual keyboard, read with that keyboard's own
+    /// keymap (or the seat's, when it sent none).
+    pub(crate) fn handle_virtual_key(&mut self, event: &VirtualKeyboardKeyEvent) {
+        self.settle();
+        let device = event.device();
+        self.activate_keymap(device.keymap());
+        self.press_key(
+            device.source(),
+            event.key_code(),
+            event.state(),
+            event.time(),
+        );
+    }
+
+    /// Releases every key a virtual keyboard still holds; it is going away.
+    pub(crate) fn release_virtual_keys(&mut self, source: KeyboardSource) {
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .expect("the seat gets a keyboard at startup");
+        keyboard.release_source(self, source);
+    }
+
+    /// Sets the modifier state a virtual keyboard asks for: `masks` are its
+    /// depressed, latched and locked modifiers and its layout group, relative
+    /// to its `keymap` (or the seat's).
+    pub(crate) fn set_virtual_modifiers(&mut self, keymap: Option<KeymapFile>, masks: [u32; 4]) {
+        self.activate_keymap(keymap);
+        let [depressed, latched, locked, group] = masks;
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .expect("the seat gets a keyboard at startup");
+        keyboard.with_xkb_state(self, |mut context| {
+            context.set_modifier_mask(depressed, latched, locked, group);
+        });
+        if depressed == 0 {
+            self.window_manager.modifiers_released();
+        }
+    }
+
+    /// Runs `command` in `context`.
+    pub(crate) fn execute(&mut self, command: &Command, context: &mut ExecutionContext<'_>) {
+        match command {
+            Command::Run(action) => self.run_action(action, context),
+            Command::Sequence(commands) => {
+                for command in commands {
+                    self.execute(command, context);
+                }
+            }
+            // The key handling repeats it; here it runs once.
+            Command::Repeat { command, .. } => self.execute(command, context),
+        }
+    }
+
+    /// Starts `drag` on `window` with the pointer button held since `start`.
+    pub(crate) fn start_window_grab(
+        &mut self,
+        window: WindowId,
+        drag: WindowDrag,
+        start: GrabStartData<Self>,
+        serial: Serial,
+    ) {
+        if self.window_manager.begin_drag(window, drag, start.location) {
+            self.set_grab(WindowGrab::drag(window, drag, start, serial));
+        }
+    }
+
+    /// Passes a client's `request` for the window of `surface` on to the
+    /// window manager; the client hears back even when nothing changes, as
+    /// xdg-shell requires.
+    pub(crate) fn honor_client_request(
+        &mut self,
+        surface: &ToplevelSurface,
+        request: ClientRequest,
+    ) {
+        let Some(window) = self.toplevels.window_of(surface.wl_surface()) else {
+            return;
+        };
+        if !self.window_manager.honor(window, request)
+            && let Some(toplevel) = self.toplevels.get(window)
+        {
+            toplevel.acknowledge();
+        }
+    }
+
+    /// Starts `drag` on the window of `surface`, as its client asks, if the
+    /// request is genuine: the pointer button behind `serial` is still
+    /// held, on a surface of the same client. Anything else is a stale or
+    /// forged request, and is ignored.
+    pub(crate) fn start_requested_drag(
+        &mut self,
+        surface: &ToplevelSurface,
+        seat: &WlSeat,
+        serial: Serial,
+        drag: WindowDrag,
+    ) {
+        let Some(pointer) = Seat::<Self>::from_resource(seat).and_then(|seat| seat.get_pointer())
+        else {
+            return;
+        };
+        let Some(start) = pointer
+            .grab_start_data()
+            .filter(|_| pointer.has_grab(serial))
+        else {
+            return;
+        };
+        let is_same_client = start
+            .focus
+            .as_ref()
+            .is_some_and(|(focus, _)| focus.id().same_client_as(&surface.wl_surface().id()));
+        if let Some(window) = self.toplevels.window_of(surface.wl_surface())
+            && is_same_client
+        {
+            self.start_window_grab(window, drag, start, serial);
+        }
+    }
+
+    /// Keeps `popup` within its window's output, flipping or sliding it as
+    /// its positioner allows.
+    pub(crate) fn unconstrain_popup(&self, popup: &PopupSurface) {
+        let kind = PopupKind::Xdg(popup.clone());
+        let Some(location) = find_popup_root_surface(&kind)
+            .ok()
+            .and_then(|root| self.toplevels.window_of(&root))
+            .and_then(|window| self.window_manager.window(window))
+            .map(Window::location)
+        else {
+            return;
+        };
+        // The positioner works relative to the popup's parent.
+        let mut target = self.backend.output_geometry();
+        target.loc -= get_popup_toplevel_coords(&kind);
+        target.loc -= location;
+        popup.with_pending_state(|state| {
+            state.geometry = state.positioner.get_unconstrained_geometry(target);
+        });
+    }
+
     /// Returns the parts of the output windows can be placed in: all of
     /// it, and what panels leave free.
-    pub(crate) fn output_area(&self) -> OutputArea {
+    fn output_area(&self) -> OutputArea {
         OutputArea {
             whole: self.backend.output_geometry(),
             usable: self.output_layers().usable_area(),
         }
     }
 
-    /// Gives the keyboard to a layer surface that wants it to itself, or
-    /// back to the focused window when none does any more.
-    pub(crate) fn refresh_layer_keyboard(&mut self) {
-        let exclusive = self.output_layers().exclusive_keyboard_surface();
-        if self.layers.set_keyboard(exclusive) {
-            self.focus_window(self.focused(), smithay::utils::SERIAL_COUNTER.next_serial());
+    /// Returns where the pointer is.
+    fn pointer_location(&self) -> Point<f64, Logical> {
+        self.seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup")
+            .current_location()
+    }
+
+    /// Returns the modifiers held now.
+    fn held_modifiers(&self) -> Modifiers {
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .expect("the seat gets a keyboard at startup");
+        Modifiers::held(&keyboard.modifier_state())
+    }
+
+    /// Carries out what the window manager decided since the last call:
+    /// places windows can be put, what clients are asked, where keyboard
+    /// focus goes, and whether a frame is needed.
+    fn settle(&mut self) {
+        self.refresh_output_area();
+        let updates = self.window_manager.take_client_updates();
+        for (window, requested) in &updates.states {
+            if let Some(toplevel) = self.toplevels.get(*window) {
+                toplevel.request(requested);
+            }
+        }
+        for (window, ending) in updates.endings {
+            if let Some(toplevel) = self.toplevels.get(window) {
+                toplevel.end(ending, &self.display_handle);
+            }
+        }
+        self.sync_keyboard_focus();
+        if self.window_manager.take_redraw() {
+            self.schedule_render();
         }
     }
 
-    /// Gives the keyboard to the layer surface `surface`, clicked, if it
-    /// takes the keyboard on a click; returns whether it did.
-    pub(crate) fn focus_layer(&mut self, surface: &WlSurface) -> bool {
-        if !self.layers.takes_keyboard_on_click(surface) {
-            return false;
+    /// Gives the keyboard to a layer surface that wants it to itself, or
+    /// back to the windows when none does any more.
+    fn refresh_layer_keyboard(&mut self) {
+        let output = OutputLayers::new(self.backend.output(), self.backend.output_geometry());
+        self.layers.refresh_keyboard(output);
+    }
+
+    /// Tells the window manager where windows can be placed now.
+    fn refresh_output_area(&mut self) {
+        let output = self.output_area();
+        self.window_manager.set_output_area(output);
+    }
+
+    /// Gives the seat's keyboard to the focused window, unless a layer
+    /// surface holds it (a launcher keeps it), if that changed.
+    fn sync_keyboard_focus(&mut self) {
+        let window_surface = self
+            .window_manager
+            .focused()
+            .and_then(|window| self.toplevels.get(window))
+            .map(|toplevel| toplevel.wl_surface().clone());
+        let surface = self.layers.keyboard().cloned().or(window_surface);
+        if surface == self.keyboard_focus {
+            return;
         }
-        self.layers.set_keyboard(Some(surface.clone()));
-        self.focus_window(self.focused(), smithay::utils::SERIAL_COUNTER.next_serial());
-        true
+        self.keyboard_focus.clone_from(&surface);
+        // Smithay clears the focus of a destroyed surface without telling
+        // SeatHandler::focus_changed, so the clipboard focus is set here too:
+        // otherwise it keeps the last focused client's state alive after
+        // that client disconnects.
+        let client = surface
+            .as_ref()
+            .and_then(|surface| self.display_handle.get_client(surface.id()).ok());
+        set_data_device_focus(&self.display_handle, &self.seat, client.clone());
+        set_primary_focus(&self.display_handle, &self.seat, client);
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .expect("the seat gets a keyboard at startup");
+        keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
+    }
+
+    /// Updates the window whose root surface is `root` after a commit of
+    /// it (`is_root`) or of one of its subsurfaces.
+    fn commit_window(&mut self, root: &WlSurface, is_root: bool) {
+        let Some(window) = self.toplevels.window_of(root) else {
+            return;
+        };
+        let Some(toplevel) = self.toplevels.get(window) else {
+            return;
+        };
+        toplevel.on_commit();
+        if !is_root {
+            return;
+        }
+        let committed = toplevel.committed_state();
+        let pointer = self.pointer_location().to_i32_round();
+        self.window_manager
+            .commit(window, committed, &self.config, pointer);
+        // The first configure carries what the window manager asked.
+        self.settle();
+        if let Some(toplevel) = self.toplevels.get(window) {
+            toplevel.configure_if_unconfigured();
+        }
     }
 
     /// Lets go of everything still referencing what clients released, if
@@ -432,263 +721,351 @@ impl Compositor {
         }
     }
 
-    /// Asks vaht to stop after the current events.
-    pub(crate) fn stop(&mut self) {
-        self.is_running = false;
-    }
-
-    /// Asks for a frame to be drawn soon.
-    pub(crate) fn schedule_render(&mut self) {
-        self.backend.schedule_render();
-    }
-
-    /// Draws a frame, then tells the windows in it that they were shown.
-    pub(crate) fn render(&mut self) {
-        self.prepare_panels();
-        let output = self.backend.output().clone();
-        let scene = Scene::new(
-            &self.windows,
-            self.theme.metrics(),
-            self.workspaces.current(),
-            OutputLayers::new(&output, self.backend.output_geometry()),
-        );
-        if let Err(error) = self.backend.render(&scene) {
-            tracing::warn!(error = &error as &dyn std::error::Error, "frame skipped");
-        }
-        // Hidden windows get no frame callbacks, so they stop drawing.
-        let time = self.start_time.elapsed();
-        for window in scene.windows() {
-            window.toplevel().send_frame(&output, time);
-        }
-        for layer in self.layers.iter() {
-            layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
-                Some(output.clone())
-            });
-        }
-        tracing::trace!("frame drawn");
-    }
-
-    /// Brings every panel's pixels up to date with what it shows; drawing a
-    /// frame and taking a screenshot both start here, so a screenshot shows
-    /// the same as the screen would.
-    pub(crate) fn prepare_panels(&mut self) {
-        let metrics = self.theme.metrics();
-        for window in self.windows.iter_mut() {
-            let geometry = window.frame_geometry(metrics);
-            window
-                .frame_mut()
-                .prepare(&geometry, &self.theme, &mut self.typesetter);
+    /// Runs one action.
+    fn run_action(&mut self, action: &Action, context: &mut ExecutionContext<'_>) {
+        tracing::debug!(%action, window = ?context.window, "running an action");
+        match action {
+            Action::WindowManager(action) => self.window_manager.run(action, context.window),
+            Action::Exec(command_line) => self.launcher.run(command_line),
+            Action::StartMoving => self.start_drag(None, context),
+            Action::StartResizing(from) => self.start_drag(Some(*from), context),
+            Action::Reload => self.reload_configuration(),
+            Action::Exit => self.stop(),
+            Action::SetEnvironment { name, value } => {
+                self.launcher.set_environment(name.clone(), value.clone());
+            }
         }
     }
 
-    /// Starts managing a new application window, on top, and focused if
-    /// the settings say new windows take focus. It is placed once its
-    /// client gives it a size.
-    pub(crate) fn add_window(&mut self, surface: ToplevelSurface) {
-        let buttons = self.config.settings.windows.frame.titlebar_layout();
-        let new = NewWindow {
-            toplevel: Toplevel::from_xdg(surface),
-            frame: Frame::new(buttons, &self.ledger),
-            workspace: self.workspaces.current(),
+    /// Starts moving the context's window with the pointer, or resizing it
+    /// when `resize` says from where, or turns the drag in progress into
+    /// that.
+    fn start_drag(&mut self, resize: Option<ResizeFrom>, context: &mut ExecutionContext<'_>) {
+        let (Some(window), Some(press)) = (context.window, context.press.as_ref()) else {
+            tracing::warn!(
+                "start-moving and start-resizing work only in mouse bindings on a window"
+            );
+            return;
         };
-        let id = self.windows.insert(new, &self.ledger);
-        tracing::debug!(window = %id, "window opened");
-        if self.config.settings.focus.focus_new_windows {
-            self.focus_window(Some(id), smithay::utils::SERIAL_COUNTER.next_serial());
+        let metrics = self.window_manager.metrics();
+        let Some(target) = self.window_manager.window(window) else {
+            return;
+        };
+        let pointer = press.start.location;
+        let drag = match resize {
+            None => WindowDrag::Move,
+            Some(from) => WindowDrag::Resize {
+                edges: from.edges(target.frame_geometry(metrics).outer, pointer),
+            },
+        };
+        if let Some(grab) = context.grab.as_deref_mut() {
+            if *grab == GrabKind::Hold && self.window_manager.begin_drag(window, drag, pointer) {
+                *grab = GrabKind::Drag(drag);
+            }
+        } else {
+            let (start, serial) = (press.start.clone(), press.serial);
+            self.start_window_grab(window, drag, start, serial);
         }
     }
 
-    /// Gives the window `id` its first place, by the placement settings,
-    /// among the windows already shown.
-    fn place_new_window(&mut self, id: WindowId) {
-        let metrics = self.theme.metrics();
-        let current = self.workspaces.current();
-        let occupied = self
-            .windows
-            .shown_top_down(current)
-            .filter(|window| window.id() != id && window.is_placed())
-            .map(|window| window.outer_area(metrics))
-            .collect();
+    /// Gives the pointer to `grab`.
+    fn set_grab(&mut self, grab: WindowGrab) {
+        let serial = grab.serial();
         let pointer = self
             .seat
             .get_pointer()
-            .expect("the seat gets a pointer at startup")
-            .current_location()
-            .to_i32_round();
-        let room = Room {
-            usable: self.output_area().usable,
-            occupied,
-            pointer,
-        };
-        let output = self.output_area();
-        let placement = self.config.settings.placement;
-        let Some(window) = self.windows.get_mut(id) else {
-            return;
-        };
-        let rule = self.config.rules.for_window(window, current);
-        let size = rule.size().unwrap_or(window.outer_area(metrics).size);
-        let corner = rule.position.map_or_else(
-            || {
-                placement.strategy.place(
-                    size,
-                    &room,
-                    placement.row_direction,
-                    placement.column_direction,
-                )
-            },
-            |position| position.corner(room.usable, size),
-        );
-        let outer = Rectangle::new(corner, size);
-        window.place_initially(outer, metrics);
-        if let Some(workspace) = rule.workspace.map(Workspace::numbered)
-            && workspace.is_within(&self.workspaces)
-        {
-            window.move_to_workspace(workspace);
-        }
-        if let Some(is_sticky) = rule.sticky {
-            window.set_sticky(is_sticky);
-        }
-        if let Some(is_minimized) = rule.minimized {
-            window.set_minimized(is_minimized);
-        }
-        if let Some(placement) = rule.placement {
-            window.place(placement.placement(outer), output, metrics);
-        }
-        // A rule may have sent the new window out of sight.
-        self.focus_most_recent();
+            .expect("the seat gets a pointer at startup");
+        pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 
-    /// Stops managing the window whose root surface is `surface`.
-    pub(crate) fn remove_window(&mut self, surface: &WlSurface) {
-        let Some(id) = self.windows.id_of(surface) else {
-            return;
-        };
-        let window = self.windows.remove(id);
-        tracing::debug!(
-            window = %id,
-            app_id = ?window.as_ref().and_then(|window| window.toplevel().app_id()),
-            "window closed"
-        );
-        let was_focused = self.focused() == Some(id);
-        self.focus.forget(id);
-        if was_focused {
-            self.focus_most_recent();
-        }
-        self.schedule_render();
-    }
-
-    /// Moves the window with `id` below all others.
-    pub(crate) fn lower_window(&mut self, id: WindowId) {
-        if self.windows.lower(id) {
-            self.schedule_render();
-        }
-    }
-
-    /// Moves the window with `id` above all others.
-    pub(crate) fn raise_window(&mut self, id: WindowId) {
-        if self.windows.raise(id) {
-            self.schedule_render();
-        }
-    }
-
-    /// Gives focus to the window that had it most recently among those
-    /// shown, if the focused one is not shown: it was minimized, closed,
-    /// or left on another workspace.
-    pub(crate) fn focus_most_recent(&mut self) {
-        let current = self.workspaces.current();
-        let is_shown = |id| {
-            self.windows
-                .get(id)
-                .is_some_and(|window| window.is_shown_on(current))
-        };
-        if self.focused().is_some_and(is_shown) {
-            return;
-        }
-        let shown = self
-            .windows
-            .shown_top_down(current)
-            .map(Window::id)
-            .collect::<Vec<_>>();
-        let most_recent = self.focus.by_recency(shown).first().copied();
-        self.focus_window(most_recent, smithay::utils::SERIAL_COUNTER.next_serial());
-    }
-
-    /// Gives keyboard focus to the window with `id`, or to nothing.
-    pub(crate) fn focus_window(&mut self, id: Option<WindowId>, serial: Serial) {
-        let previous_focus = self.focused();
-        if previous_focus != id {
-            if let Some(previous) =
-                previous_focus.and_then(|previous| self.windows.get_mut(previous))
-            {
-                previous.toplevel().set_activated(false);
-                previous.frame_mut().set_focused(false);
-            }
-            if let Some(window) = id.and_then(|id| self.windows.get_mut(id)) {
-                window.toplevel().set_activated(true);
-                window.frame_mut().set_focused(true);
-                tracing::debug!(window = %window.id(), title = ?window.toplevel().title(), "focused");
-            }
-        }
-        self.focus.set(id);
-        let surface = id
-            .and_then(|id| self.windows.get(id))
-            .map(|window| window.toplevel().wl_surface().clone());
+    /// Makes `keymap` the seat's keymap, or vaht's own for `None`, if it is
+    /// not already: a virtual keyboard's keycodes mean something only in its
+    /// own keymap.
+    fn activate_keymap(&mut self, keymap: Option<KeymapFile>) {
+        let wanted = keymap.unwrap_or_else(|| self.physical_keymap.clone());
         let keyboard = self
             .seat
             .get_keyboard()
             .expect("the seat gets a keyboard at startup");
-        // A layer surface holding the keyboard (a launcher) keeps it.
-        let surface = self.layers.keyboard().cloned().or(surface);
-        // Smithay clears the focus of a destroyed surface without telling
-        // SeatHandler::focus_changed, so the clipboard focus is set here too:
-        // otherwise it keeps the last focused client's state alive after
-        // that client disconnects.
-        let client = surface
-            .as_ref()
-            .and_then(|surface| self.display_handle.get_client(surface.id()).ok());
-        set_data_device_focus(&self.display_handle, &self.seat, client.clone());
-        set_primary_focus(&self.display_handle, &self.seat, client);
-        keyboard.set_focus(self, surface, serial);
-        self.schedule_render();
-    }
-
-    /// Updates what is known of a surface after its client commits it.
-    pub(crate) fn handle_commit(&mut self, surface: &WlSurface) {
-        if !is_sync_subsurface(surface) {
-            let mut root = surface.clone();
-            while let Some(parent) = get_parent(&root) {
-                root = parent;
-            }
-            if let Some(window) = self
-                .windows
-                .id_of(&root)
-                .and_then(|id| self.windows.get_mut(id))
-            {
-                window.toplevel().on_commit();
-                if &root == surface {
-                    window.toplevel().configure_if_unconfigured();
-                    window.sync_with_client();
-                    if window.is_ready_for_placement() {
-                        let id = window.id();
-                        self.place_new_window(id);
-                    }
-                }
-            }
-        }
-        if self.output_layers().commit(surface) {
-            self.refresh_layer_keyboard();
-        }
-        self.popups.commit(surface);
-        if let Some(PopupKind::Xdg(popup)) = self.popups.find_popup(surface)
-            && !popup.is_initial_configure_sent()
-            && let Err(error) = popup.send_configure()
+        if keyboard.keymap_file().id() != wanted.id()
+            && let Err(error) = keyboard.set_keymap_from_keymap_file(self, wanted)
         {
             tracing::warn!(
                 error = &error as &dyn std::error::Error,
-                "could not configure a popup"
+                "could not switch keymaps"
             );
         }
-        self.schedule_render();
+    }
+
+    /// Sends a key from `source` to the focused window, unless it is bound.
+    fn press_key(
+        &mut self,
+        source: KeyboardSource,
+        keycode: Keycode,
+        state: KeyState,
+        time: InputTime,
+    ) {
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .expect("the seat gets a keyboard at startup");
+        let bound = keyboard.input_from_source(
+            source,
+            self,
+            keycode,
+            state,
+            SERIAL_COUNTER.next_serial(),
+            time,
+            |compositor, modifiers, keysym| {
+                compositor.filter_key(keycode, state, modifiers, &keysym)
+            },
+        );
+        if let Some(Some(command)) = bound {
+            self.run_key_binding(keycode, command);
+        }
+    }
+
+    /// Decides whether a key event is vaht's: a bound press, or the release
+    /// of one. Returns the bound press's command.
+    fn filter_key(
+        &mut self,
+        keycode: Keycode,
+        state: KeyState,
+        modifiers: &ModifiersState,
+        keysym: &KeysymHandle<'_>,
+    ) -> FilterResult<Option<Command>> {
+        let held = Modifiers::held(modifiers);
+        if state == KeyState::Released && held == Modifiers::default() {
+            self.window_manager.modifiers_released();
+        }
+        let chord = keysym
+            .raw_latin_sym_or_raw_current_sym()
+            .map(|key| KeyChord::new(held, key));
+        self.input.key(keycode, state, chord, &self.config.bindings)
+    }
+
+    /// Runs a bound key's `command` for the focused window, and starts
+    /// repeating it while `keycode` is held if it repeats.
+    fn run_key_binding(&mut self, keycode: Keycode, command: Command) {
+        let focused = self.window_manager.focused();
+        self.execute(&command, &mut ExecutionContext::for_window(focused));
+        if let Command::Repeat { rate, .. } = &command {
+            let rate = *rate;
+            self.input.repeat_key_binding(
+                keycode,
+                command,
+                rate,
+                (&self.loop_handle, &self.ledger),
+            );
+        }
+    }
+
+    /// Moves the pointer to `location`, telling the surface under it.
+    fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
+        let target = self.scene().target_at(location);
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        if let Some(window) = target.as_ref().and_then(PointerTarget::window)
+            && !pointer.is_grabbed()
+        {
+            self.pointer_entered(window);
+        }
+        // Over a frame, no client has the pointer: the frame is vaht's.
+        let under = target.as_ref().and_then(PointerTarget::client_surface);
+        pointer.motion(
+            self,
+            under,
+            &MotionEvent {
+                location,
+                serial: SERIAL_COUNTER.next_serial(),
+                time,
+            },
+        );
+        pointer.frame(self);
+    }
+
+    /// With sloppy focus, focuses `window`, which the pointer is over, and
+    /// with auto-raise raises it once the pointer has rested there a while.
+    fn pointer_entered(&mut self, window: WindowId) {
+        let focus = self.config.settings.focus;
+        if focus.model != FocusModel::Sloppy || self.window_manager.focused() == Some(window) {
+            return;
+        }
+        self.window_manager.focus(Some(window));
+        self.input.cancel_raise();
+        if focus.auto_raise {
+            self.input.raise_later(
+                window,
+                focus.auto_raise_delay(),
+                (&self.loop_handle, &self.ledger),
+            );
+        }
+    }
+
+    /// Presses or releases a pointer button.
+    fn handle_pointer_button<B: InputBackend>(&mut self, event: &B::PointerButtonEvent) {
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        let serial = SERIAL_COUNTER.next_serial();
+        let location = pointer.current_location();
+        match event.state() {
+            ButtonState::Pressed if !pointer.is_grabbed() => {
+                self.press_button(event.button_code(), location, serial);
+            }
+            ButtonState::Pressed => {}
+            ButtonState::Released => self.window_manager.release_titlebar_button(location),
+        }
+        // A client clicked has keyboard focus by the time it hears of it.
+        self.settle();
+        pointer.button(
+            self,
+            &ButtonEvent {
+                button: event.button_code(),
+                state: event.state(),
+                serial,
+                time: event.time(),
+            },
+        );
+        pointer.frame(self);
+    }
+
+    /// Handles a press of `button` at `location` while nothing holds the
+    /// pointer: focuses and raises the window there, then runs what the
+    /// press is bound to. A titlebar button pressed without modifiers is
+    /// held down until released; an unbound press on a border resizes.
+    fn press_button(&mut self, button: u32, location: Point<f64, Logical>, serial: Serial) {
+        self.window_manager.finish_cycle();
+        let target = self.scene().target_at(location);
+        if let Some(PointerTarget::Layer {
+            surface,
+            is_below_windows: false,
+            ..
+        }) = &target
+        {
+            // A panel or notification: the press is its client's alone.
+            self.layers.click(surface);
+            return;
+        }
+        let clicked = target.as_ref().and_then(PointerTarget::window);
+        if let Some(window) = clicked
+            && self.config.settings.focus.raise_on_click
+        {
+            self.window_manager.raise(window);
+        }
+        self.window_manager.focus(clicked);
+        let modifiers = self.held_modifiers();
+        if let Some(PointerTarget::Window(WindowTarget::Frame {
+            window,
+            part: FramePart::Titlebar(_),
+        })) = target
+            && modifiers == Modifiers::default()
+            && self.window_manager.press_titlebar_button(window, location)
+        {
+            return;
+        }
+        let interval = self.config.settings.windows.double_click_interval();
+        let is_double = self.input.is_double_click(button, clicked, interval);
+        let bound = MouseButton::from_code(button).and_then(|mouse_button| {
+            let bindings = self.config.bindings.button(
+                MouseContext::search_order(target.as_ref()),
+                modifiers,
+                mouse_button,
+                is_double,
+            )?;
+            Some((bindings.press.cloned(), bindings.drag.cloned()))
+        });
+        let press = Press {
+            start: GrabStartData {
+                focus: None,
+                button,
+                location,
+            },
+            serial,
+        };
+        match (bound, target) {
+            (Some((on_press, on_drag)), _) => {
+                if let Some(command) = on_press {
+                    let mut context = ExecutionContext::for_press(clicked, press.clone());
+                    self.execute(&command, &mut context);
+                }
+                let pointer = self
+                    .seat
+                    .get_pointer()
+                    .expect("the seat gets a pointer at startup");
+                // Unless the binding started a drag, hold the press, so it
+                // never reaches a client.
+                if !pointer.is_grabbed() {
+                    self.set_grab(WindowGrab::hold(clicked, on_drag, press));
+                }
+            }
+            (
+                None,
+                Some(PointerTarget::Window(WindowTarget::Frame {
+                    window,
+                    part: FramePart::Border(edges),
+                })),
+            ) => self.start_window_grab(window, WindowDrag::Resize { edges }, press.start, serial),
+            (
+                None,
+                Some(
+                    PointerTarget::Window(
+                        WindowTarget::Frame { .. } | WindowTarget::Surface { .. },
+                    )
+                    | PointerTarget::Layer { .. },
+                )
+                | None,
+            ) => {}
+        }
+    }
+
+    /// Scrolls the surface under the pointer, unless the wheel is bound
+    /// there.
+    fn handle_pointer_axis<B: InputBackend>(&mut self, event: &B::PointerAxisEvent) {
+        if self.run_scroll_binding(event.amount_v120(Axis::Vertical)) {
+            return;
+        }
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        pointer.axis(self, input::axis_frame::<B>(event));
+        pointer.frame(self);
+    }
+
+    /// Runs what a wheel turn of `steps` (in 120ths of a notch, positive
+    /// down) is bound to where the pointer is; returns whether it was bound.
+    fn run_scroll_binding(&mut self, steps: Option<f64>) -> bool {
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        let button = match steps {
+            _ if pointer.is_grabbed() => return false,
+            Some(steps) if steps < 0.0 => MouseButton::ScrollUp,
+            Some(steps) if steps > 0.0 => MouseButton::ScrollDown,
+            Some(_) | None => return false,
+        };
+        let target = self.scene().target_at(pointer.current_location());
+        let command = self
+            .config
+            .bindings
+            .button(
+                MouseContext::search_order(target.as_ref()),
+                self.held_modifiers(),
+                button,
+                false,
+            )
+            .and_then(|bindings| bindings.press.cloned());
+        let Some(command) = command else {
+            return false;
+        };
+        let window = target.as_ref().and_then(PointerTarget::window);
+        self.execute(&command, &mut ExecutionContext::for_window(window));
+        true
     }
 
     /// Accepts a client that connected to the socket.
@@ -700,6 +1077,53 @@ impl Compositor {
                 "could not accept a client"
             );
         }
+    }
+
+    /// Opens the socket clients connect to, and registers it, the display's
+    /// wake-up descriptor and `signals` with the event loop. Returns the
+    /// socket's name and the registrations.
+    fn listen(
+        handle: &LoopHandle<'static, Self>,
+        display: &Display<Self>,
+        ledger: &ResourceLedger,
+        signals: ProcessSignals,
+    ) -> Result<(OsString, [EventSource<Self>; 3]), RunError> {
+        let socket = ListeningSocketSource::new_auto().map_err(RunError::Listen)?;
+        let socket_name = socket.socket_name().to_os_string();
+        let listening = EventSource::insert(handle, ledger, socket, |stream, (), compositor| {
+            compositor.accept_client(stream);
+        })
+        .map_err(|error| RunError::RegisterSource(error.error))?;
+        // Readiness only wakes the loop; `run` dispatches the clients.
+        let display_descriptor = display
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(RunError::DuplicateDisplayDescriptor)?;
+        let display_wakeup = EventSource::insert(
+            handle,
+            ledger,
+            Generic::new(display_descriptor, Interest::READ, Mode::Level),
+            |_, _, _| Ok(PostAction::Continue),
+        )
+        .map_err(|error| RunError::RegisterSource(error.error))?;
+        // A termination request stops vaht cleanly: clients are told, and
+        // the exit resource report is written.
+        let signals = EventSource::insert(
+            handle,
+            ledger,
+            signals.into_source(),
+            |event, (), compositor| match SignalRequest::of(event.signal()) {
+                Some(SignalRequest::Stop) => {
+                    tracing::info!(signal = ?event.signal(), "asked to stop");
+                    compositor.stop();
+                }
+                Some(SignalRequest::Reload) => compositor.reload_configuration(),
+                Some(SignalRequest::ReapPrograms) => compositor.launcher.reap(),
+                None => {}
+            },
+        )
+        .map_err(|error| RunError::RegisterSource(error.error))?;
+        Ok((socket_name, [listening, display_wakeup, signals]))
     }
 
     /// Creates the seat with its keyboard and pointer.
@@ -724,8 +1148,8 @@ impl fmt::Debug for Compositor {
         formatter
             .debug_struct("Compositor")
             .field("socket_name", &self.socket_name)
-            .field("windows", &self.windows.len())
-            .field("focused", &self.focused())
+            .field("windows", &self.window_manager.window_count())
+            .field("focused", &self.window_manager.focused())
             .finish_non_exhaustive()
     }
 }

@@ -73,7 +73,11 @@ impl ConfigWatch {
                     .iter()
                     .any(|event| event.name.as_deref().is_some_and(ConfigFile::is_named));
                 if directory_gone || file_changed {
-                    compositor.configuration_changed(directory_gone);
+                    compositor.config_source.note_change(
+                        directory_gone,
+                        &compositor.loop_handle,
+                        &compositor.ledger,
+                    );
                 }
                 Ok(PostAction::Continue)
             },
