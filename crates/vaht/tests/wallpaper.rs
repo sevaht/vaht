@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use vaht_test_support::{HeadlessVaht, TestClient, WINDOW_COLOR, solid_png};
+use vaht_test_support::{HeadlessVaht, TestClient, WINDOW_COLOR, keys, solid_png};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
@@ -16,6 +16,11 @@ const MIDDLE: (u32, u32) = (960, 540);
 
 /// Starts vaht with a solid wallpaper, tiled, and `rules`.
 fn start(rules: &str) -> (HeadlessVaht, TestClient) {
+    start_with_bindings(rules, "")
+}
+
+/// Starts vaht with a solid wallpaper, tiled, `rules` and `bindings`.
+fn start_with_bindings(rules: &str, bindings: &str) -> (HeadlessVaht, TestClient) {
     let picture = solid_png(16, SKY);
     let settings = "[wallpaper]\nimage = \"sky.png\"\nfit = \"tile\"\n";
     let vaht = HeadlessVaht::start_with_files(
@@ -23,6 +28,7 @@ fn start(rules: &str) -> (HeadlessVaht, TestClient) {
         &[
             ("settings.toml", settings.as_bytes()),
             ("rules.toml", rules.as_bytes()),
+            ("bindings.toml", bindings.as_bytes()),
             ("sky.png", &picture),
         ],
         &[],
@@ -65,4 +71,17 @@ fn a_pseudo_transparent_window_shows_only_the_wallpaper() {
     drop(client);
     vaht.wait_for_disconnections(1);
     vaht.stop().assert_nothing_left_behind();
+}
+
+#[test]
+fn set_alpha_makes_a_window_translucent_and_nothing_restores_it() {
+    let (_vaht, mut client) = start_with_bindings(
+        &centered(""),
+        "[keys]\nF1 = \"set-alpha 0\"\nF2 = \"set-alpha\"\n",
+    );
+    client.open_windows(1);
+    client.type_chord(&[keys::F1]);
+    assert_eq!(client.screenshot().rgb(MIDDLE.0, MIDDLE.1), SKY);
+    client.type_chord(&[keys::F2]);
+    assert_eq!(client.screenshot().rgb(MIDDLE.0, MIDDLE.1), WINDOW_COLOR);
 }

@@ -328,7 +328,8 @@ impl Taskbar {
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
-        self.texture.render_element(renderer, self.area.loc, scale)
+        self.texture
+            .render_element(renderer, self.area.loc, scale, 1.0)
     }
 
     /// Wakes vaht to draw the clock anew when its text next changes, at

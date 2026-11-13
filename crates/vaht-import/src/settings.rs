@@ -215,6 +215,11 @@ impl InitFile {
             self.set(&["windows", "double_click_ms"], Value::from(interval));
         }
         self.convert_flag("opaqueResize", &["windows", "opaque_resize"]);
+        for (state, key) in [("focus", "focused_alpha"), ("unfocus", "unfocused_alpha")] {
+            if let Some(alpha) = self.number(&format!("{SCREEN}window.{state}.alpha")) {
+                self.set(&["windows", key], Value::from(alpha.clamp(0, 255)));
+            }
+        }
         // vaht moves windows as they are dragged; an outline move is not
         // built.
         if let Some(resource) = self.resources.get(&format!("{SCREEN}opaqueMove")).cloned()

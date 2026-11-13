@@ -2,7 +2,7 @@
 //! handle's pixels ([`PanelTexture`]), one colored buffer per line, and an
 //! arc at each rounded corner.
 //!
-//! The window manager paints each titlebar and handle ([`Frame`]); [`FrameTextures`]
+//! The window manager paints each titlebar and handle (`Frame`); [`FrameTextures`]
 //! copies new pixels into buffers the renderer can draw and turns frames
 //! into render elements. A window's buffers go when the window does: each
 //! update forgets the windows that are gone.
@@ -17,7 +17,7 @@ use vaht_ui::{Color, Corner, CornerArc, Theme, ThemeElement};
 
 use super::{CornerTexture, PanelTexture, SceneElement};
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
-use crate::window_manager::{Frame, FrameGeometry, WindowId, WindowManager};
+use crate::window_manager::{FrameGeometry, Window, WindowId, WindowManager};
 
 /// The frame buffers of every window, by window.
 #[derive(Debug, Default)]
@@ -42,7 +42,12 @@ impl FrameTextures {
             self.by_window
                 .entry(window.id())
                 .or_insert_with(|| FrameTexture::new(ledger))
-                .update(window.frame(), &window.frame_geometry(metrics), theme);
+                .update(
+                    window,
+                    &window.frame_geometry(metrics),
+                    theme,
+                    window_manager.opacity(window),
+                );
         }
     }
 
@@ -77,6 +82,8 @@ struct FrameTexture {
     borders: [SolidColorBuffer; FrameGeometry::LINES],
     /// Each corner's arc, in [`Corner`]'s order.
     corners: [CornerTexture; 4],
+    /// How opaque the window is drawn, 0.0 to 1.0.
+    opacity: f32,
     /// Counts the buffers while they exist.
     _tracked: Tracked,
 }
@@ -89,13 +96,17 @@ impl FrameTexture {
             handle: PanelTexture::new(),
             corners: std::array::from_fn(|_| CornerTexture::new()),
             borders: std::array::from_fn(|_| SolidColorBuffer::default()),
+            opacity: 1.0,
             _tracked: ledger.track(ResourceKind::FrameTexture),
         }
     }
 
-    /// Copies `frame`'s titlebar and handle pixels if they are newer than
-    /// the last copy, and sizes and colors the lines for `geometry`.
-    fn update(&mut self, frame: &Frame, geometry: &FrameGeometry, theme: &Theme) {
+    /// Copies `window`'s titlebar and handle pixels if they are newer than
+    /// the last copy, sizes and colors the lines for `geometry`, and takes
+    /// the window's `opacity`.
+    fn update(&mut self, window: &Window, geometry: &FrameGeometry, theme: &Theme, opacity: f32) {
+        self.opacity = opacity;
+        let frame = window.frame();
         self.titlebar.upload(frame.titlebar());
         self.handle.upload(frame.handle());
         let color = theme
@@ -136,7 +147,12 @@ impl FrameTexture {
             .iter()
             .zip(<Corner as strum::IntoEnumIterator>::iter())
             .filter_map(|(texture, corner)| {
-                texture.render_element(renderer, geometry.corner_square(corner), scale)
+                texture.render_element(
+                    renderer,
+                    geometry.corner_square(corner),
+                    scale,
+                    self.opacity,
+                )
             })
             .collect();
         for (buffer, rectangle) in self.borders.iter().zip(geometry.borders) {
@@ -145,21 +161,25 @@ impl FrameTexture {
                     buffer,
                     rectangle.loc.to_physical_precise_round(scale),
                     scale,
-                    1.0,
+                    self.opacity,
                     Kind::Unspecified,
                 )));
             }
         }
         // Below the lines: the grips' lines are drawn over the handle.
-        elements.extend(
-            self.titlebar
-                .render_element(renderer, geometry.titlebar.loc, scale),
-        );
+        elements.extend(self.titlebar.render_element(
+            renderer,
+            geometry.titlebar.loc,
+            scale,
+            self.opacity,
+        ));
         if !geometry.handle.is_empty() {
-            elements.extend(
-                self.handle
-                    .render_element(renderer, geometry.handle.loc, scale),
-            );
+            elements.extend(self.handle.render_element(
+                renderer,
+                geometry.handle.loc,
+                scale,
+                self.opacity,
+            ));
         }
         elements
     }

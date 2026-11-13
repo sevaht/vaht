@@ -130,6 +130,7 @@ impl FluxboxCommand<'_> {
             "resizeto" => with("resize-to"),
             "reconfigure" | "reconfig" => plain("reload"),
             "exit" | "quit" => plain("exit"),
+            "setalpha" => with("set-alpha"),
             "rundialog" => plain("run-dialog"),
             "commanddialog" => plain("command-dialog"),
             "rootmenu" => plain("root-menu"),
@@ -322,6 +323,7 @@ mod tests {
     #[case::take_previous("TakeToPrevWorkspace", r#""take-to-workspace previous""#)]
     #[case::fluxland_snap("SnapStep left", r#""snap-step left""#)]
     #[case::run_dialog("RunDialog", r#""run-dialog""#)]
+    #[case::set_alpha("SetAlpha 200 +10", r#""set-alpha 200 +10""#)]
     #[case::command_dialog("CommandDialog", r#""command-dialog""#)]
     #[case::fbrun("Exec fbrun", r#""run-dialog""#)]
     #[case::fluxland_run("ExecCommand fluxland-run -f 'Sans 10'", r#""run-dialog""#)]

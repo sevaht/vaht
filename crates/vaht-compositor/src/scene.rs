@@ -241,7 +241,12 @@ impl<'state> Scene<'state> {
                 let origin = window.surface_origin().to_physical_precise_round(scale);
                 elements.extend(
                     toplevel
-                        .render_elements(renderer, origin, scale)
+                        .render_elements(
+                            renderer,
+                            origin,
+                            scale,
+                            self.window_manager.opacity(window),
+                        )
                         .into_iter()
                         .map(SceneElement::Surface),
                 );

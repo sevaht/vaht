@@ -301,6 +301,7 @@ impl MenuFiles {
             "iconify" => item(&[("toggle", Value::from("minimize"))]),
             "raise" | "lower" | "close" | "kill" => command(&line.tag),
             "sendto" => item(&[("generate", Value::from("send-to-workspace"))]),
+            "alpha" => item(&[("generate", Value::from("alpha"))]),
             "encoding" | "endencoding" => {
                 note(Reason::Dropped, "the encoding: menus.toml is UTF-8")
             }

@@ -13,6 +13,7 @@
 //! opposite the dragged ones still as each new size arrives
 //! ([`ResizeAnchor`]).
 
+mod alpha;
 mod client;
 mod edge_snap;
 mod frame;
@@ -25,6 +26,7 @@ use smithay::utils::{Logical, Point, Rectangle, Size};
 use vaht_ui::theme::Metrics;
 use vaht_ui::{Theme, Typesetter};
 
+pub(crate) use alpha::{AlphaChange, WindowAlpha};
 pub(crate) use client::{ClientIcon, CommittedState, Ending, PlacementKind, RequestedState};
 pub(crate) use edge_snap::EdgeSnap;
 pub(crate) use frame::{
@@ -141,6 +143,8 @@ pub(crate) struct Window {
     /// Whether only the wallpaper shows through it where it is
     /// translucent, as a rule says.
     is_pseudo_transparent: bool,
+    /// Its opacity, as `set-alpha` set it; the settings' when none.
+    alpha: Option<WindowAlpha>,
     /// Counts the window while it exists.
     _tracked: Tracked,
 }
@@ -167,6 +171,7 @@ impl Window {
             workspace,
             awaits_placement: true,
             is_pseudo_transparent: false,
+            alpha: None,
             _tracked: ledger.track(ResourceKind::Window),
         }
     }
@@ -219,6 +224,19 @@ impl Window {
     /// Returns whether the window has had its first place.
     pub(crate) const fn is_placed(&self) -> bool {
         !self.awaits_placement
+    }
+
+    /// Returns how opaque the window is drawn, 0.0 to 1.0: as `set-alpha`
+    /// set it, else as `defaults` say, for whether it has focus.
+    pub(crate) fn opacity(&self, defaults: WindowAlpha) -> f32 {
+        let is_focused = self.frame.state() == vaht_ui::WidgetState::Focused;
+        self.alpha.unwrap_or(defaults).opacity(is_focused)
+    }
+
+    /// Changes the window's opacity as `change` says, from what it is with
+    /// `defaults`.
+    pub(crate) fn change_alpha(&mut self, change: AlphaChange, defaults: WindowAlpha) {
+        self.alpha = change.applied(self.alpha.unwrap_or(defaults));
     }
 
     /// Returns whether only the wallpaper shows through the window where it

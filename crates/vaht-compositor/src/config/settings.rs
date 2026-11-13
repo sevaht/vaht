@@ -20,6 +20,7 @@ pub(crate) use self::taskbar::{
 };
 use crate::window_manager::{
     ColumnDirection, PlacementStrategy, Room, RowDirection, TitlebarButton, TitlebarLayout,
+    WindowAlpha,
 };
 
 /// Every setting.
@@ -124,6 +125,10 @@ pub(crate) struct WindowSettings {
     pub(crate) edge_snap_distance: u16,
     /// The longest time between the presses of a double click.
     double_click_ms: u64,
+    /// How opaque a focused window is, 0 to 255.
+    focused_alpha: u8,
+    /// How opaque an unfocused window is, 0 to 255.
+    unfocused_alpha: u8,
     /// Whether a window resized by hand takes each size as the pointer
     /// moves; otherwise an outline shows the size, which the window takes
     /// when the drag ends.
@@ -137,6 +142,14 @@ impl WindowSettings {
     pub(crate) const fn double_click_interval(&self) -> Duration {
         Duration::from_millis(self.double_click_ms)
     }
+
+    /// Returns how opaque windows are, focused and not.
+    pub(crate) const fn alpha(&self) -> WindowAlpha {
+        WindowAlpha {
+            focused: self.focused_alpha,
+            unfocused: self.unfocused_alpha,
+        }
+    }
 }
 
 impl Default for WindowSettings {
@@ -144,6 +157,8 @@ impl Default for WindowSettings {
         Self {
             edge_snap_distance: 10,
             double_click_ms: 250,
+            focused_alpha: 255,
+            unfocused_alpha: 255,
             opaque_resize: true,
             frame: FrameSettings::default(),
         }

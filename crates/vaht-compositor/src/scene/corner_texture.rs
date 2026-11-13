@@ -44,13 +44,14 @@ impl CornerTexture {
         }
     }
 
-    /// Returns the element that draws the arc in `square`; none for a
-    /// square corner.
+    /// Returns the element that draws the arc in `square` at opacity
+    /// `alpha`; none for a square corner.
     pub(crate) fn render_element<R>(
         &self,
         renderer: &mut R,
         square: Rectangle<i32, Logical>,
         scale: Scale<f64>,
+        alpha: f32,
     ) -> Option<SceneElement<R>>
     where
         R: Renderer + ImportMem,
@@ -59,6 +60,7 @@ impl CornerTexture {
         if square.is_empty() {
             return None;
         }
-        self.texture.render_element(renderer, square.loc, scale)
+        self.texture
+            .render_element(renderer, square.loc, scale, alpha)
     }
 }

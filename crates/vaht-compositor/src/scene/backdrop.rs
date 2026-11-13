@@ -160,7 +160,7 @@ impl Backdrop {
         R::TextureId: Send + Clone + 'static,
     {
         let (area, _) = self.painting.as_ref()?;
-        self.texture.render_element(renderer, area.loc, scale)
+        self.texture.render_element(renderer, area.loc, scale, 1.0)
     }
 
     /// Returns the element that draws the wallpaper under `window`, if it
@@ -178,7 +178,7 @@ impl Backdrop {
         let piece = self.pieces.get(&window)?;
         piece
             .texture
-            .render_element(renderer, piece.area.loc, scale)
+            .render_element(renderer, piece.area.loc, scale, 1.0)
     }
 
     /// Reads the image `settings` name; none, with a warning, if it cannot

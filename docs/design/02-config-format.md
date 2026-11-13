@@ -177,7 +177,9 @@ rest by name, so a setting never silently does nothing:
   was added for Fluxbox's `ColMinOverlapPlacement`. The smart strategies
   try only corners flush against edges, so `row` and `row-min-overlap`
   place alike.
-- `[windows]`: `edge_snap_distance`, `double_click_ms`, `opaque_resize`
+- `[windows]`: `edge_snap_distance`, `double_click_ms`, `focused_alpha`
+  and `unfocused_alpha` (0 to 255; `set-alpha` changes one window's),
+  `opaque_resize`
   (false shows a 2-pixel outline of the new frame while resizing, and the
   window takes the size when the drag ends; from Fluxbox's
   `opaqueResize`), and `[windows.frame]`
@@ -554,7 +556,8 @@ items = [
   - `icon` (optional on any item).
 - **Built so far:** `command`, `submenu`, `toggle` (`shade`, `stick`,
   `maximize`, `minimize`, `fullscreen`), `generate` (`workspaces`,
-  `send-to-workspace`, `window-list`; `inline = true` lists in place),
+  `send-to-workspace`, `window-list`, `alpha`; `inline = true` lists in
+  place),
   `separator`, and a bare `label` (drawn disabled). The actions
   `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`,
   `custom-menu <name>` and `hide-menus`, bound as Fluxbox binds them by

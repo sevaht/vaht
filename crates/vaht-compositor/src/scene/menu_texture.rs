@@ -89,7 +89,7 @@ impl MenuTexture {
             .iter()
             .zip(<Corner as strum::IntoEnumIterator>::iter())
             .filter_map(|(texture, corner)| {
-                texture.render_element(renderer, geometry.corner_square(corner), scale)
+                texture.render_element(renderer, geometry.corner_square(corner), scale, 1.0)
             })
             .collect();
         let solid = |buffer: &SolidColorBuffer, line: &Rectangle<i32, Logical>| {
@@ -112,7 +112,7 @@ impl MenuTexture {
         );
         elements.extend(
             self.panel
-                .render_element(renderer, geometry.panel.loc, scale),
+                .render_element(renderer, geometry.panel.loc, scale, 1.0),
         );
         elements
     }

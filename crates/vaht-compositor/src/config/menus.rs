@@ -260,18 +260,22 @@ pub(crate) enum MenuGenerator {
     SendToWorkspace,
     /// The windows: choosing one brings it forward.
     WindowList,
+    /// Opacities for the menu's window: opaque, 90%, 75%, 50%, and the
+    /// settings' (fluxland's `[alpha]` steps).
+    Alpha,
 }
 
 impl MenuGenerator {
     /// The generators by name.
-    const NAMES: [(&str, Self); 3] = [
+    const NAMES: [(&str, Self); 4] = [
         ("workspaces", Self::Workspaces),
         ("send-to-workspace", Self::SendToWorkspace),
         ("window-list", Self::WindowList),
+        ("alpha", Self::Alpha),
     ];
 
     /// Generators of 02 §8 that vaht does not have yet.
-    const PLANNED: [&str; 5] = ["themes", "layer", "alpha", "outputs", "profiles"];
+    const PLANNED: [&str; 4] = ["themes", "layer", "outputs", "profiles"];
 
     /// Returns what the item says when its label is not given.
     pub(crate) const fn label(self) -> &'static str {
@@ -279,6 +283,7 @@ impl MenuGenerator {
             Self::Workspaces => "Workspaces",
             Self::SendToWorkspace => "Send To...",
             Self::WindowList => "Windows",
+            Self::Alpha => "Transparency",
         }
     }
 }
@@ -297,7 +302,7 @@ impl<'de> serde::Deserialize<'de> for MenuGenerator {
             .map(|&(_, generator)| generator)
             .ok_or_else(|| {
                 de::Error::custom(format!(
-                    "`{name}` is no list; they are workspaces, send-to-workspace and window-list"
+                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list and alpha"
                 ))
             })
     }

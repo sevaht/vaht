@@ -72,12 +72,14 @@ impl PanelTexture {
     }
 
     /// Returns the element that draws the pixels with their top-left corner
-    /// at `location`; none before the first upload.
+    /// at `location`, at opacity `alpha` (0.0 to 1.0); none before the first
+    /// upload.
     pub(crate) fn render_element<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Logical>,
         scale: Scale<f64>,
+        alpha: f32,
     ) -> Option<SceneElement<R>>
     where
         R: Renderer + ImportMem,
@@ -89,7 +91,7 @@ impl PanelTexture {
             renderer,
             location.to_f64(),
             &self.buffer,
-            None,
+            Some(alpha),
             None,
             None,
             Kind::Unspecified,

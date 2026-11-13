@@ -26,12 +26,13 @@ use vaht_ui::{Theme, Typesetter};
 pub(crate) use self::focus::CycleDirection;
 use self::focus::Focus;
 pub(crate) use self::placement_strategy::{ColumnDirection, PlacementStrategy, Room, RowDirection};
+pub(crate) use self::window::AlphaChange;
 pub use self::window::WindowId;
 pub(crate) use self::window::{
     Area, Axes, ClientIcon, CommittedState, Direction, EdgeSnap, Ending, Frame, FrameGeometry,
     FramePart, GripSide, HorizontalEdge, OutputArea, Placement, PlacementKind, RequestedState,
     ResizeEdges, ResizeStyle, SizeLimits, SnapStep, TileCell, TitlebarButton, TitlebarLayout,
-    VerticalEdge, Window, WindowDrag,
+    VerticalEdge, Window, WindowAlpha, WindowDrag,
 };
 use self::windows::Windows;
 use self::workspaces::Workspaces;
@@ -89,6 +90,8 @@ pub(crate) struct WindowManager {
     metrics: Metrics,
     /// How a resize by hand is shown, from the settings.
     resize_style: ResizeStyle,
+    /// How opaque windows are unless `set-alpha` says, from the settings.
+    default_alpha: WindowAlpha,
     /// Windows asked to end, until the compositor takes them.
     endings: Vec<(WindowId, Ending)>,
     /// Whether anything shown changed since the compositor last asked.
@@ -112,6 +115,7 @@ impl WindowManager {
             metrics: frame.frame_metrics(metrics),
             frame,
             resize_style: Self::resize_style(settings),
+            default_alpha: settings.windows.alpha(),
             endings: Vec::new(),
             is_redraw_needed: false,
         }
@@ -124,6 +128,11 @@ impl WindowManager {
         } else {
             ResizeStyle::Outline
         }
+    }
+
+    /// Returns how opaque `window` is drawn, 0.0 to 1.0.
+    pub(crate) fn opacity(&self, window: &Window) -> f32 {
+        window.opacity(self.default_alpha)
     }
 
     /// Returns where an outline resize in progress would put its window's
@@ -402,6 +411,13 @@ impl WindowManager {
                 self.cycle_focus(windows, CycleDirection::Backward);
             }
             WindowManagerAction::ShowDesktop => self.show_desktop(),
+            WindowManagerAction::SetAlpha(change) => {
+                let defaults = self.default_alpha;
+                if let Some(target) = window.and_then(|window| self.window_mut(window)) {
+                    target.change_alpha(*change, defaults);
+                    self.is_redraw_needed = true;
+                }
+            }
         }
     }
 
@@ -540,6 +556,7 @@ impl WindowManager {
             window.set_titlebar_buttons(&buttons);
         }
         self.resize_style = Self::resize_style(settings);
+        self.default_alpha = settings.windows.alpha();
         if settings.windows.frame != self.frame {
             self.frame = settings.windows.frame.clone();
             self.restyle(self.theme_metrics);

@@ -12,7 +12,7 @@ use crate::config::{
     Action, Command, MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowManagerAction,
     WindowToggle,
 };
-use crate::window_manager::{WindowId, WindowManager, WorkspaceTarget};
+use crate::window_manager::{AlphaChange, WindowId, WindowManager, WorkspaceTarget};
 
 /// A menu: its title and items.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +98,16 @@ impl<'state> MenuBuilder<'state> {
     /// How deep submenus go before vaht stops following them: a menu that
     /// is its own submenu goes no deeper.
     const MAX_DEPTH: usize = 8;
+
+    /// The `alpha` list's items: fluxland's steps, and back to the
+    /// settings'.
+    const ALPHA_STEPS: [(&str, AlphaChange); 5] = [
+        ("Opaque", AlphaChange::both(255)),
+        ("90%", AlphaChange::both(230)),
+        ("75%", AlphaChange::both(191)),
+        ("50%", AlphaChange::both(128)),
+        ("Use Defaults", AlphaChange::Reset),
+    ];
 
     /// A builder of menus about `window`.
     pub(crate) const fn new(
@@ -269,6 +279,19 @@ impl<'state> MenuBuilder<'state> {
                     })
                     .collect()
             }
+            MenuGenerator::Alpha => Self::ALPHA_STEPS
+                .iter()
+                .map(|(label, change)| MenuItem::Choice {
+                    label: (*label).to_owned(),
+                    choice: MenuChoice::Run {
+                        command: Command::Run(Action::WindowManager(
+                            WindowManagerAction::SetAlpha(*change),
+                        )),
+                        window: self.window,
+                    },
+                    mark: None,
+                })
+                .collect(),
         }
     }
 }
