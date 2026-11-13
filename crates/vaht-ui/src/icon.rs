@@ -53,6 +53,22 @@ impl Icon {
         })
     }
 
+    /// Returns the picture `width` by `height` whose pixels `bytes` holds,
+    /// four bytes each in network byte order (alpha, red, green, blue), as
+    /// tray items send theirs; none if the bytes are not exactly that.
+    #[must_use]
+    pub fn from_argb_bytes(width: u32, height: u32, bytes: &[u8]) -> Option<Self> {
+        let mut pixmap = Pixmap::new(width, height)?;
+        let (pixels, rest) = bytes.as_chunks::<4>();
+        if pixels.len() != pixmap.pixels().len() || !rest.is_empty() {
+            return None;
+        }
+        for (target, [alpha, red, green, blue]) in pixmap.pixels_mut().iter_mut().zip(pixels) {
+            *target = tiny_skia::ColorU8::from_rgba(*red, *green, *blue, *alpha).premultiply();
+        }
+        Self::fitted(&pixmap, width.max(height))
+    }
+
     /// Reads the PNG or SVG file at `path` as an icon `size` wide.
     ///
     /// # Errors
@@ -251,6 +267,19 @@ mod tests {
         let alpha = |x, y| icon.pixels().pixel(x, y).expect("in the icon").alpha();
         assert_eq!(alpha(10, 2), 0, "above the picture, which is half as tall");
         assert_eq!(alpha(10, 10), 255, "the picture, centered");
+    }
+
+    #[test]
+    fn network_order_pixels_become_an_icon() {
+        let half_red = [128_u8, 255, 0, 0];
+        let icon = Icon::from_argb_bytes(2, 2, &half_red.repeat(4)).expect("whole");
+        let pixel = icon.pixels().pixel(0, 0).expect("inside");
+        assert_eq!((pixel.alpha(), pixel.red()), (128, 128), "premultiplied");
+        assert!(
+            Icon::from_argb_bytes(2, 2, &half_red).is_none(),
+            "too few bytes"
+        );
+        assert!(Icon::from_argb_bytes(0, 2, &[]).is_none(), "no area");
     }
 
     #[test]

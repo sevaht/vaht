@@ -334,7 +334,7 @@ const UNUSED_REASONS: [(&str, Reason, &str); 7] = [
     (
         "systray",
         Reason::NotYetInVaht,
-        "the tray: vaht has no tray yet",
+        "the tray's tooltips: vaht has no tooltips yet",
     ),
     ("slit", Reason::Dropped, "the slit is gone"),
     ("window.tab", Reason::Dropped, "tabs are gone"),

@@ -32,6 +32,7 @@ mod shared_memory;
 mod signals;
 mod taskbar;
 mod toplevels;
+mod tray;
 mod wall_clock;
 mod window_manager;
 

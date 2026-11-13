@@ -71,6 +71,7 @@ use crate::scene::{FrameTextures, PointerTarget, Scene, WindowTarget};
 use crate::signals::ProcessSignals;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
 use crate::toplevels::{Toplevel, Toplevels};
+use crate::tray::TrayAction;
 use crate::window_manager::{
     ClientRequest, FramePart, OutputArea, Window, WindowDrag, WindowId, WindowManager,
     WorkspaceTarget,
@@ -257,7 +258,7 @@ impl Compositor {
         compositor
             .config_source
             .watch(&compositor.loop_handle, &compositor.ledger);
-        compositor.schedule_clock();
+        compositor.start_taskbar_services();
         for command_line in &compositor.config.settings.session.autostart {
             compositor.launcher.run(command_line);
         }
@@ -306,7 +307,7 @@ impl Compositor {
                     taskbar.forget_icons();
                 }
                 self.config = config;
-                self.schedule_clock();
+                self.start_taskbar_services();
                 tracing::info!(
                     directory = %self.config_source.directory().display(),
                     "configuration reloaded"
@@ -625,11 +626,42 @@ impl Compositor {
         self.schedule_clock();
     }
 
+    /// Starts what the taskbar keeps running: its clock's alarm and its
+    /// tray, as it shows them.
+    fn start_taskbar_services(&mut self) {
+        self.schedule_clock();
+        if let Some(taskbar) = &mut self.taskbar {
+            taskbar.start_tray((&self.loop_handle, &self.ledger));
+        }
+    }
+
     /// Wakes vaht when the taskbar's clock next changes, if it shows one.
     fn schedule_clock(&mut self) {
         if let Some(taskbar) = &mut self.taskbar {
             taskbar.schedule_clock(&Zoned::now(), (&self.loop_handle, &self.ledger));
         }
+    }
+
+    /// Hands a wheel turn of `steps` (in 120ths of a notch, positive down)
+    /// to the tray item under the pointer; returns whether one was there.
+    fn scroll_tray_item(&mut self, steps: Option<f64>) -> bool {
+        let location = self.pointer_location();
+        let Some(PointerTarget::Taskbar(Some(TaskbarHit::TrayItem(item)))) =
+            self.scene().target_at(location)
+        else {
+            return false;
+        };
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a wheel turn is a few notches, far inside i32"
+        )]
+        let notches = (steps.unwrap_or(0.0) / 120.0).round() as i32;
+        if notches != 0
+            && let Some(taskbar) = &self.taskbar
+        {
+            taskbar.act_on_tray(item, TrayAction::Scroll(notches), location);
+        }
+        true
     }
 
     /// Lets go of a held taskbar button with the pointer at `location`,
@@ -652,7 +684,9 @@ impl Compositor {
                 .window_manager
                 .run(&WindowManagerAction::Workspace(WorkspaceTarget::Next), None),
             TaskbarHit::Entry(window) => self.window_manager.activate_or_minimize(window),
-            TaskbarHit::WorkspaceName | TaskbarHit::Clock => {}
+            // Never held down: neither is a button, and tray items act as
+            // they are pressed.
+            TaskbarHit::WorkspaceName | TaskbarHit::Clock | TaskbarHit::TrayItem(_) => {}
         }
         self.schedule_render();
     }
@@ -1071,6 +1105,11 @@ impl Compositor {
                 }
                 self.schedule_render();
             }
+            AfterClick::AskTrayItem(item, action) => {
+                if let Some(taskbar) = &self.taskbar {
+                    taskbar.act_on_tray(item, action, location);
+                }
+            }
             AfterClick::RunBinding { press, drag } => {
                 if let Some(command) = press {
                     let mut context = ExecutionContext::for_press(window, start.clone());
@@ -1096,7 +1135,9 @@ impl Compositor {
     /// Scrolls the surface under the pointer, unless the wheel is bound
     /// there.
     fn handle_pointer_axis<B: InputBackend>(&mut self, event: &B::PointerAxisEvent) {
-        if self.run_scroll_binding(event.amount_v120(Axis::Vertical)) {
+        if self.scroll_tray_item(event.amount_v120(Axis::Vertical))
+            || self.run_scroll_binding(event.amount_v120(Axis::Vertical))
+        {
             return;
         }
         let pointer = self

@@ -2,8 +2,9 @@
 //!
 //! [`IconStore`] looks in the XDG data directories, as the icon theme and
 //! desktop entry specifications describe, keeping to what every system
-//! has: the `hicolor` theme (each `NxN` size's `apps`, then `scalable`)
-//! and the old `pixmaps` directory. An app id finds its desktop entry by
+//! has: the `hicolor` theme (each `NxN` size's `apps`, `status`, `devices`
+//! and `panel`, then `scalable`'s) and the old `pixmaps` directory, after
+//! the directory an application brings its own icons in, if it names one. An app id finds its desktop entry by
 //! file name (exactly, in any case, or as the last part of a reverse-DNS
 //! name) or by its `StartupWMClass`; the entry's `Icon` names the icon,
 //! and without an entry the app id itself is tried as a name. Lookups are
@@ -19,13 +20,18 @@ use super::Icon;
 pub struct IconStore {
     /// Where to look, most important first.
     data_directories: Vec<PathBuf>,
-    /// Icons found (or not) by name and size.
-    by_name: HashMap<(String, u32), Option<Icon>>,
+    /// Icons found (or not) by name, size and the application's own
+    /// directory.
+    by_name: HashMap<(String, u32, Option<PathBuf>), Option<Icon>>,
     /// Icon names found (or not) by app id.
     names_by_app_id: HashMap<String, Option<String>>,
 }
 
 impl IconStore {
+    /// The theme directories icons are looked for in: applications', and
+    /// the status icons tray items show.
+    const CONTEXTS: [&str; 4] = ["apps", "status", "devices", "panel"];
+
     /// The data directories when `XDG_DATA_DIRS` names none, as the XDG
     /// base directory specification says.
     const DEFAULT_DATA_DIRECTORIES: [&str; 2] = ["/usr/local/share", "/usr/share"];
@@ -83,11 +89,23 @@ impl IconStore {
     /// Returns the icon named `name` (or at the absolute path `name`),
     /// `size` wide, if one is found.
     pub fn named(&mut self, name: &str, size: u32) -> Option<Icon> {
-        let key = (name.to_owned(), size);
+        self.named_in(name, size, None)
+    }
+
+    /// Returns the icon named `name`, `size` wide, looking first in
+    /// `own_directory`, the icons an application brings along (a tray
+    /// item's `IconThemePath`): its own files, or a theme inside it.
+    pub fn named_in(
+        &mut self,
+        name: &str,
+        size: u32,
+        own_directory: Option<&Path>,
+    ) -> Option<Icon> {
+        let key = (name.to_owned(), size, own_directory.map(Path::to_path_buf));
         if let Some(icon) = self.by_name.get(&key) {
             return icon.clone();
         }
-        let icon = self.find_file(name, size).and_then(|path| {
+        let icon = self.find_file(name, size, own_directory).and_then(|path| {
             Icon::load(&path, size)
                 .inspect_err(|error| {
                     tracing::debug!(
@@ -107,10 +125,9 @@ impl IconStore {
         self.names_by_app_id.clear();
     }
 
-    /// Returns the file of the icon `name` best for `size`: a `hicolor`
-    /// picture at least that big (the closest), then a scalable one, then
-    /// a smaller one (the closest), then one in `pixmaps`.
-    fn find_file(&self, name: &str, size: u32) -> Option<PathBuf> {
+    /// Returns the file of the icon `name` best for `size`, from
+    /// `own_directory` first, then from the data directories.
+    fn find_file(&self, name: &str, size: u32, own_directory: Option<&Path>) -> Option<PathBuf> {
         let path = Path::new(name);
         if path.is_absolute() {
             return path.is_file().then(|| path.to_path_buf());
@@ -118,12 +135,49 @@ impl IconStore {
         if name.contains('/') || name.is_empty() {
             return None;
         }
-        let mut sized: Vec<(u32, PathBuf)> = self
+        let own = own_directory.filter(|directory| directory.is_absolute());
+        let own_file = own.and_then(|directory| {
+            ["png", "svg"]
+                .into_iter()
+                .map(|extension| directory.join(format!("{name}.{extension}")))
+                .find(|file| file.is_file())
+        });
+        let own_themes: Vec<PathBuf> = own
+            .map(|directory| vec![directory.join("hicolor"), directory.to_path_buf()])
+            .unwrap_or_default();
+        let shared_themes: Vec<PathBuf> = self
             .data_directories
             .iter()
-            .flat_map(|directory| Self::sized_directories(&directory.join("icons/hicolor")))
-            .map(|(pixels, directory)| (pixels, directory.join(format!("apps/{name}.png"))))
-            .filter(|(_, file)| file.is_file())
+            .map(|directory| directory.join("icons/hicolor"))
+            .collect();
+        own_file
+            .or_else(|| Self::best_in_themes(&own_themes, name, size))
+            .or_else(|| Self::best_in_themes(&shared_themes, name, size))
+            .or_else(|| {
+                ["png", "svg"].into_iter().find_map(|extension| {
+                    self.data_directories
+                        .iter()
+                        .map(|directory| directory.join(format!("pixmaps/{name}.{extension}")))
+                        .find(|file| file.is_file())
+                })
+            })
+    }
+
+    /// Returns the file of the icon `name` best for `size` in the themes
+    /// laid out as `hicolor` is (`NxN/<context>/` and `scalable/<context>/`):
+    /// a picture at least that big (the closest), then a scalable one,
+    /// then a smaller one (the closest).
+    fn best_in_themes(themes: &[PathBuf], name: &str, size: u32) -> Option<PathBuf> {
+        let in_contexts = |directory: &Path, extension: &str| {
+            Self::CONTEXTS
+                .iter()
+                .map(|context| directory.join(format!("{context}/{name}.{extension}")))
+                .find(|file| file.is_file())
+        };
+        let mut sized: Vec<(u32, PathBuf)> = themes
+            .iter()
+            .flat_map(|theme| Self::sized_directories(theme))
+            .filter_map(|(pixels, directory)| Some((pixels, in_contexts(&directory, "png")?)))
             .collect();
         // Big enough first, smallest first; then too small, biggest first.
         sized.sort_by_key(|(pixels, _)| {
@@ -135,20 +189,16 @@ impl IconStore {
         });
         let (big_enough, too_small): (Vec<_>, Vec<_>) =
             sized.into_iter().partition(|(pixels, _)| *pixels >= size);
-        let within = |relative: &str| {
-            self.data_directories
-                .iter()
-                .map(|directory| directory.join(relative))
-                .find(|file| file.is_file())
-        };
         big_enough
             .into_iter()
             .map(|(_, file)| file)
             .next()
-            .or_else(|| within(&format!("icons/hicolor/scalable/apps/{name}.svg")))
+            .or_else(|| {
+                themes
+                    .iter()
+                    .find_map(|theme| in_contexts(&theme.join("scalable"), "svg"))
+            })
             .or_else(|| too_small.into_iter().map(|(_, file)| file).next())
-            .or_else(|| within(&format!("pixmaps/{name}.png")))
-            .or_else(|| within(&format!("pixmaps/{name}.svg")))
     }
 
     /// Returns the `NxN` size directories of the theme at `theme`, with
@@ -346,6 +396,27 @@ mod tests {
         let data = DataDirectory::new();
         data.picture("pixmaps/kitty.png", 32, Color::rgb(255, 0, 0));
         assert!(data.store().app_icon("kitty", 20).is_some());
+    }
+
+    #[test]
+    fn an_application_s_own_icons_come_first_and_status_icons_are_found() {
+        let data = DataDirectory::new();
+        data.picture(
+            "icons/hicolor/22x22/status/network.png",
+            22,
+            Color::rgb(255, 0, 0),
+        );
+        let own = DataDirectory::new();
+        own.picture("network.png", 22, Color::rgb(0, 0, 255));
+        let mut store = data.store();
+        let shared = store
+            .named("network", 22)
+            .expect("found among status icons");
+        assert_eq!(middle(&shared), (255, 0, 0));
+        let mine = store
+            .named_in("network", 22, Some(own.0.path()))
+            .expect("found in its own directory");
+        assert_eq!(middle(&mine), (0, 0, 255));
     }
 
     #[test]

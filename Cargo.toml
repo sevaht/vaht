@@ -27,7 +27,7 @@ clap = { version = "4", features = ["derive", "env"] }
 cosmic-text = "0.19"
 file-rotate = "0.8"
 # `StreamExt`, to read D-Bus signal streams; zbus already depends on it.
-futures-util = { version = "0.3", default-features = false }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 jiff = "0.2"
 nix = { version = "0.31", features = ["inotify", "process", "signal", "time"] }
 procfs = "0.18"

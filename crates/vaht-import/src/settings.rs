@@ -357,6 +357,7 @@ impl InitFile {
                     "workspacename" => Some("workspace-name"),
                     "nextworkspace" => Some("workspace-next"),
                     "iconbar" => Some("window-list"),
+                    "systemtray" => Some("tray"),
                     "clock" => Some("clock"),
                     _ => None,
                 };
@@ -369,6 +370,7 @@ impl InitFile {
         }
         self.convert_clock(report);
         self.convert_window_list(report);
+        self.convert_tray_pins();
         for (name, default) in [
             ("height", "0"),
             ("onhead", "1"),
@@ -376,6 +378,22 @@ impl InitFile {
             ("layer", "Dock"),
         ] {
             self.resources.accept_default(&toolbar(name), default);
+        }
+    }
+
+    /// The tray's pins, from `systray.pinLeft` and `systray.pinRight`:
+    /// item names, split at commas and spaces as Fluxbox splits them.
+    fn convert_tray_pins(&mut self) {
+        for (side, key) in [("pinLeft", "pin_left"), ("pinRight", "pin_right")] {
+            let Some(names) = self.resources.value(&format!("{SCREEN}systray.{side}")) else {
+                continue;
+            };
+            let pins: Array = names
+                .split([',', ' '])
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .collect();
+            self.set(&["taskbar", "tray", key], Value::Array(pins));
         }
     }
 
@@ -597,6 +615,8 @@ session.screen0.iconbar.mode:\t{static groups} (workspace) (minimized=no)
 session.screen0.iconbar.iconWidth:\t200
 session.screen0.iconbar.usePixmap:\tfalse
 session.screen0.toolbar.widthPercent:\t100
+session.screen0.systray.pinLeft:\tnm-applet, Discord
+session.screen0.systray.pinRight:\t
 ";
         let mut report = Report::default();
         let document =
@@ -604,16 +624,13 @@ session.screen0.toolbar.widthPercent:\t100
         assert_eq!(
             document.to_string(),
             "[taskbar]\nedge = \"top\"\nalign = \"left\"\nreserve_space = false\n\
-             widgets = [\"workspace-previous\", \"window-list\", \"clock\"]\n\n\
+             widgets = [\"workspace-previous\", \"window-list\", \"tray\", \"clock\"]\n\n\
              [taskbar.clock]\nformat = \"%H:%M:%S\"\n\n\
              [taskbar.window_list]\nshow = { workspace = \"current\", minimized = false }\n\
-             entry_width = { max = 200 }\nicons = false\n"
+             entry_width = { max = 200 }\nicons = false\n\n\
+             [taskbar.tray]\npin_left = [\"nm-applet\", \"Discord\"]\n"
         );
         let notes: Vec<String> = report.notes().iter().map(ToString::to_string).collect();
-        assert_eq!(notes.len(), 1, "{notes:?}");
-        assert!(
-            notes[0].contains("the toolbar tool systemtray"),
-            "{notes:?}"
-        );
+        assert_eq!(notes, Vec::<String>::new(), "everything converts");
     }
 }

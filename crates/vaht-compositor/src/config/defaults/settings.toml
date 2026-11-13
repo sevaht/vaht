@@ -54,8 +54,8 @@ reserve_space = true
 auto_hide = false
 auto_hide_delay_ms = 500
 # Left to right: workspace-previous, workspace-name, workspace-next,
-# window-list and clock.
-widgets = ["workspace-previous", "workspace-name", "workspace-next", "window-list", "clock"]
+# window-list, tray and clock.
+widgets = ["workspace-previous", "workspace-name", "workspace-next", "window-list", "tray", "clock"]
 
 [taskbar.window_list]
 # Which windows have an entry: a window matcher, as bindings take one.
@@ -65,6 +65,12 @@ entry_width = { max = 128 }
 # Whether entries show their application's icon: the one the window names,
 # else its desktop entry's, from the hicolor theme or pixmaps.
 icons = true
+
+[taskbar.tray]
+# Programs' status icons named here (by their id, in any case) go first,
+# in this order, and those named in pin_right last.
+pin_left = []
+pin_right = []
 
 [taskbar.clock]
 # strftime: %k:%M is the hour, space-padded, and the minutes.

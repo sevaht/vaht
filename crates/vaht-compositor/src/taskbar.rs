@@ -1,5 +1,5 @@
-//! The taskbar: workspace buttons and name, the window list and the clock,
-//! along an output edge (01 §6.3).
+//! The taskbar: workspace buttons and name, the window list, the tray and
+//! the clock, along an output edge (01 §6.3).
 //!
 //! [`Taskbar`] is a panel like a window's frame: its content
 //! ([`TaskbarContent`]) says what it shows, read from the window manager
@@ -10,7 +10,9 @@
 //! the `taskbar` and `window-list-entry` mouse bindings.
 //!
 //! An entry shows its window's icon ([`IconStore`]): the one the window
-//! names, else its application's, found by app id.
+//! names, else its application's, found by app id. The tray shows programs'
+//! status icons ([`Tray`]); any button on one, or the wheel, goes to its
+//! program.
 //!
 //! It spans its edge, or a share of it ([`TaskbarSettings`]). An
 //! auto-hiding taskbar stays hidden until the pointer touches its edge, and
@@ -33,10 +35,12 @@ use vaht_ui::{
 };
 
 use crate::Compositor;
+use crate::bus::Bus;
 use crate::config::{TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent};
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
 use crate::scene::{PanelTexture, SceneElement};
+use crate::tray::{ItemIcon, Tray, TrayAction, TrayHooks, TrayItem, TrayItemKey};
 use crate::wall_clock::{ClockHooks, WallClock, ZoneSources};
 use crate::window_manager::{Area, Window, WindowId, WindowManager};
 
@@ -53,6 +57,8 @@ pub(crate) enum TaskbarHit {
     Entry(WindowId),
     /// The clock.
     Clock,
+    /// A program's status icon in the tray.
+    TrayItem(TrayItemKey),
 }
 
 impl TaskbarHit {
@@ -60,9 +66,11 @@ impl TaskbarHit {
     pub(crate) const fn window(self) -> Option<WindowId> {
         match self {
             Self::Entry(window) => Some(window),
-            Self::WorkspacePrevious | Self::WorkspaceNext | Self::WorkspaceName | Self::Clock => {
-                None
-            }
+            Self::WorkspacePrevious
+            | Self::WorkspaceNext
+            | Self::WorkspaceName
+            | Self::Clock
+            | Self::TrayItem(_) => None,
         }
     }
 
@@ -71,7 +79,7 @@ impl TaskbarHit {
     pub(crate) const fn is_button(self) -> bool {
         match self {
             Self::WorkspacePrevious | Self::WorkspaceNext | Self::Entry(_) => true,
-            Self::WorkspaceName | Self::Clock => false,
+            Self::WorkspaceName | Self::Clock | Self::TrayItem(_) => false,
         }
     }
 }
@@ -104,8 +112,10 @@ pub(crate) struct Taskbar {
     clock_shows_seconds: bool,
     /// Wakes vaht when the clock's text next changes.
     wall_clock: Option<WallClock<Compositor>>,
-    /// The entries' icons.
+    /// The entries' and tray items' icons.
     icons: IconStore,
+    /// The tray, once started, if the taskbar shows one.
+    tray: Option<Tray<Compositor>>,
 }
 
 impl Taskbar {
@@ -119,6 +129,8 @@ impl Taskbar {
                     entries: Vec::new(),
                     entry_max_width: settings.window_list.entry_width.max,
                     clock: String::new(),
+                    tray: Vec::new(),
+                    tray_slot: 0,
                 },
                 vaht_ui::Size::default(),
             ),
@@ -136,6 +148,7 @@ impl Taskbar {
                 && settings.widgets.contains(&TaskbarWidget::Clock),
             wall_clock: None,
             icons: IconStore::from_environment(),
+            tray: None,
         })
     }
 
@@ -252,11 +265,14 @@ impl Taskbar {
     ) {
         let height = theme.metrics().taskbar_height;
         self.area = self.area_in(view.whole, height);
-        let icon_size = WidgetIcon::side(height);
+        let tray_items: Vec<&TrayItem> = self.tray.as_ref().map_or_else(Vec::new, |tray| {
+            tray.ordered(&view.settings.tray.pin_left, &view.settings.tray.pin_right)
+        });
         let content = TaskbarContent::of(
             &view,
             &self.panel.content().widgets,
-            (&mut self.icons, icon_size),
+            &tray_items,
+            (&mut self.icons, height),
         );
         if *self.panel.content() != content {
             self.panel.update(|current| *current = content);
@@ -359,6 +375,42 @@ impl Taskbar {
         }
     }
 
+    /// Starts the tray, if the taskbar shows one and it has not started.
+    pub(crate) fn start_tray(
+        &mut self,
+        event_loop: (&LoopHandle<'static, Compositor>, &ResourceLedger),
+    ) {
+        if !self.panel.content().widgets.contains(&TaskbarWidget::Tray) || self.tray.is_some() {
+            return;
+        }
+        let (handle, ledger) = event_loop;
+        let hooks = TrayHooks {
+            on_change: Compositor::schedule_render,
+            find: Self::tray_of,
+        };
+        match Tray::start(handle, ledger, Bus::Session, hooks) {
+            Ok(tray) => self.tray = Some(tray),
+            Err(error) => tracing::warn!(%error, "the tray cannot start"),
+        }
+    }
+
+    /// Asks the tray item `key` for `action`, the pointer at global `at`.
+    pub(crate) fn act_on_tray(
+        &self,
+        key: TrayItemKey,
+        action: TrayAction,
+        at: Point<f64, Logical>,
+    ) {
+        if let Some(tray) = &self.tray {
+            tray.act(key, action, at.to_i32_round());
+        }
+    }
+
+    /// Returns the taskbar's tray in `compositor`, while it has one.
+    fn tray_of(compositor: &mut Compositor) -> Option<&mut Tray<Compositor>> {
+        compositor.taskbar.as_mut()?.tray.as_mut()
+    }
+
     /// Returns the taskbar's wall clock in `compositor`, while it has one.
     fn wall_clock_of(compositor: &mut Compositor) -> Option<&mut WallClock<Compositor>> {
         compositor.taskbar.as_mut()?.wall_clock.as_mut()
@@ -416,13 +468,43 @@ pub(crate) struct TaskbarContent {
     entry_max_width: u32,
     /// The clock's text.
     clock: String,
+    /// The tray's items, in their order.
+    tray: Vec<TrayEntry>,
+    /// How wide each tray item is: as tall as the taskbar.
+    tray_slot: u32,
 }
 
 impl TaskbarContent {
-    /// Returns what the taskbar of `widgets` shows of `view`, its entries'
-    /// icons from `icons`' store at its size.
-    fn of(view: &TaskbarView<'_>, widgets: &[TaskbarWidget], icons: (&mut IconStore, u32)) -> Self {
-        let (store, icon_size) = icons;
+    /// How much room the tray leaves at each end, beside the gap each icon
+    /// keeps around it: with it, icons are 2 pixels apart and 2 from the
+    /// ends, as Fluxbox lays its tray out.
+    const TRAY_END_MARGIN: u32 = 1;
+
+    /// Returns what the taskbar of `widgets` shows of `view`, and of
+    /// `tray_items`, its icons from `icons`' store, sized for a taskbar of
+    /// its height.
+    fn of(
+        view: &TaskbarView<'_>,
+        widgets: &[TaskbarWidget],
+        tray_items: &[&TrayItem],
+        icons: (&mut IconStore, u32),
+    ) -> Self {
+        let (store, height) = icons;
+        let icon_size = WidgetIcon::side(height);
+        let tray = tray_items
+            .iter()
+            .map(|item| TrayEntry {
+                key: item.key,
+                icon: match &item.icon {
+                    ItemIcon::Named {
+                        name,
+                        own_directory,
+                    } => store.named_in(name, icon_size, own_directory.as_deref()),
+                    ItemIcon::Pixels(icon) => Some(icon.clone()),
+                    ItemIcon::Missing => None,
+                },
+            })
+            .collect();
         let shows_icons = view.settings.window_list.icons && icon_size > 0;
         let manager = view.window_manager;
         let current = manager.current_workspace();
@@ -455,6 +537,8 @@ impl TaskbarContent {
                 .collect(),
             entry_max_width: view.settings.window_list.entry_width.max,
             clock: view.settings.clock.format.format(view.now),
+            tray,
+            tray_slot: WidgetIcon::span(height),
         }
     }
 
@@ -482,7 +566,43 @@ impl TaskbarContent {
             ),
             TaskbarWidget::Clock => Widget::text(ThemeElement::TaskbarClock, self.clock.clone())
                 .with_hit(TaskbarHit::Clock),
+            TaskbarWidget::Tray => self.tray_widget(),
         }
+    }
+
+    /// Returns the tray: a slot per item, drawn on the taskbar's own
+    /// background, as wide as its items need.
+    fn tray_widget(&self) -> Widget<TaskbarHit> {
+        if self.tray.is_empty() {
+            return Widget::fill(ThemeElement::Taskbar).with_size(SizePolicy::Fixed(0));
+        }
+        let margin = || {
+            Widget::fill(ThemeElement::Taskbar).with_size(SizePolicy::Fixed(Self::TRAY_END_MARGIN))
+        };
+        let slots = self.tray.iter().map(|entry| {
+            let slot = Widget::fill(ThemeElement::Taskbar)
+                .with_size(SizePolicy::Fixed(self.tray_slot))
+                .with_hit(TaskbarHit::TrayItem(entry.key));
+            match &entry.icon {
+                Some(icon) => slot.with_icon(WidgetIcon {
+                    icon: icon.clone(),
+                    emphasis: IconEmphasis::Full,
+                }),
+                None => slot,
+            }
+        });
+        let count = u32::try_from(self.tray.len()).unwrap_or(u32::MAX);
+        let width = count
+            .saturating_mul(self.tray_slot)
+            .saturating_add(2 * Self::TRAY_END_MARGIN);
+        Widget::row(
+            ThemeElement::Taskbar,
+            std::iter::once(margin())
+                .chain(slots)
+                .chain(std::iter::once(margin()))
+                .collect(),
+        )
+        .with_size(SizePolicy::Fixed(width))
     }
 }
 
@@ -502,6 +622,15 @@ impl PanelContent for TaskbarContent {
     fn state(&self) -> WidgetState {
         WidgetState::Focused
     }
+}
+
+/// One item of the tray as the taskbar shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TrayEntry {
+    /// The item.
+    key: TrayItemKey,
+    /// Its icon, if one was found.
+    icon: Option<vaht_ui::Icon>,
 }
 
 /// One window's entry in the window list.
@@ -654,6 +783,44 @@ mod tests {
             ..TaskbarSettings::default()
         };
         assert!(Taskbar::new(&settings).is_none());
+    }
+
+    #[test]
+    fn the_tray_is_a_slot_per_item_with_a_pixel_at_each_end() {
+        let content = TaskbarContent {
+            widgets: vec![TaskbarWidget::Tray],
+            workspace_name: String::new(),
+            entries: Vec::new(),
+            entry_max_width: 128,
+            clock: String::new(),
+            tray: [1, 2]
+                .map(|key| TrayEntry {
+                    key: TrayItemKey(key),
+                    icon: None,
+                })
+                .to_vec(),
+            tray_slot: 20,
+        };
+        let tray = content.tray_widget();
+        assert_eq!(
+            tray.size,
+            SizePolicy::Fixed(42),
+            "two 20-pixel slots and two 1-pixel ends"
+        );
+        let vaht_ui::widget::WidgetKind::Row(children) = tray.kind else {
+            panic!("the tray is a row");
+        };
+        let hits: Vec<_> = children.iter().map(|child| child.hit).collect();
+        assert_eq!(
+            hits,
+            [
+                None,
+                Some(TaskbarHit::TrayItem(TrayItemKey(1))),
+                Some(TaskbarHit::TrayItem(TrayItemKey(2))),
+                None
+            ]
+        );
+        assert!(!children[1].is_button, "an item acts as it is pressed");
     }
 
     #[test]

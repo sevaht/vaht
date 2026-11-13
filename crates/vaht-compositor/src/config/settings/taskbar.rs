@@ -36,6 +36,8 @@ pub(crate) struct TaskbarSettings {
     pub(crate) window_list: WindowListSettings,
     /// The clock.
     pub(crate) clock: ClockSettings,
+    /// The tray.
+    pub(crate) tray: TraySettings,
 }
 
 impl Default for TaskbarSettings {
@@ -53,10 +55,12 @@ impl Default for TaskbarSettings {
                 TaskbarWidget::WorkspaceName,
                 TaskbarWidget::WorkspaceNext,
                 TaskbarWidget::WindowList,
+                TaskbarWidget::Tray,
                 TaskbarWidget::Clock,
             ],
             window_list: WindowListSettings::default(),
             clock: ClockSettings::default(),
+            tray: TraySettings::default(),
         }
     }
 }
@@ -105,6 +109,16 @@ impl<'de> serde::Deserialize<'de> for WidthPercent {
             de::Error::custom(format!("{percent} is no width: it is 1 to 100 percent"))
         })
     }
+}
+
+/// The tray: which items go first and last.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct TraySettings {
+    /// Items first, in this order, named by their id in any case.
+    pub(crate) pin_left: Vec<String>,
+    /// Items last, in this order.
+    pub(crate) pin_right: Vec<String>,
 }
 
 /// Where along its edge a taskbar narrower than the edge sits.
@@ -156,20 +170,23 @@ pub(crate) enum TaskbarWidget {
     WindowList,
     /// The time.
     Clock,
+    /// Programs' status icons.
+    Tray,
 }
 
 impl TaskbarWidget {
     /// The widgets by name.
-    const NAMES: [(&str, Self); 5] = [
+    const NAMES: [(&str, Self); 6] = [
         ("workspace-previous", Self::WorkspacePrevious),
         ("workspace-name", Self::WorkspaceName),
         ("workspace-next", Self::WorkspaceNext),
         ("window-list", Self::WindowList),
+        ("tray", Self::Tray),
         ("clock", Self::Clock),
     ];
 
     /// Widgets of 02 §3.1 that vaht does not have yet.
-    const PLANNED: [&str; 3] = ["tray", "window-previous", "window-next"];
+    const PLANNED: [&str; 2] = ["window-previous", "window-next"];
 }
 
 impl<'de> serde::Deserialize<'de> for TaskbarWidget {
@@ -187,7 +204,7 @@ impl<'de> serde::Deserialize<'de> for TaskbarWidget {
             .ok_or_else(|| {
                 de::Error::custom(format!(
                     "`{name}` is no taskbar widget; they are workspace-previous, \
-                     workspace-name, workspace-next, window-list and clock"
+                     workspace-name, workspace-next, window-list, tray and clock"
                 ))
             })
     }
@@ -321,7 +338,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case::planned_widget("widgets = [\"tray\"]\n", "not available in vaht yet")]
+    #[case::planned_widget("widgets = [\"window-previous\"]\n", "not available in vaht yet")]
     #[case::unknown_widget("widgets = [\"pager\"]\n", "no taskbar widget")]
     #[case::bad_format("[clock]\nformat = \"%k:%\"\n", "not valid")]
     #[case::planned_key("rows = 2\n", "unknown field")]

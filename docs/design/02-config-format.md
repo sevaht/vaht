@@ -195,13 +195,20 @@ rest by name, so a setting never silently does nothing:
   auto-hiding taskbar reserves nothing, and its clock rests while hidden),
   `reserve_space`,
   `widgets` (`workspace-previous`, `workspace-name`, `workspace-next`,
-  `window-list`, `clock`; `tray` is refused until it exists),
+  `window-list`, `tray`, `clock`),
   `[taskbar.window_list]` with `show` (a matcher),
   `entry_width = { max }` and `icons` (each entry's icon: the one the
   window names over xdg-toplevel-icon, else its desktop entry's `Icon`,
   found in the `hicolor` theme or `pixmaps`; PNG and SVG; from
-  `iconbar.usePixmap`), and `[taskbar.clock]` with `format`, checked
-  when read. The taskbar spans the output; clicking an arrow shows the
+  `iconbar.usePixmap`), `[taskbar.tray]` with `pin_left` and `pin_right`
+  (item ids, from `systray.pinLeft` and `systray.pinRight`), and
+  `[taskbar.clock]` with `format`, checked when read. The tray hosts
+  StatusNotifierItems: it serves the watcher on the session bus, or hosts
+  for another program's; it learns of items and their changes only from
+  the bus's signals; a left, middle or right click asks the item to
+  activate, act otherwise or show its menu, and the wheel scrolls it. Not
+  yet: dbusmenu menus (with vaht's menus), tooltips, and
+  `activation_grace_ms`. The taskbar spans the output; clicking an arrow shows the
   workspace before or after, clicking an entry brings its window forward
   or, if it has focus, minimizes it, and the `taskbar` and
   `window-list-entry` mouse bindings take every other press. A fullscreen

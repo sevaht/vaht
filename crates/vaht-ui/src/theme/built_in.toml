@@ -6,7 +6,8 @@
 # [<element>.<state>]. Elements: window.titlebar, window.label,
 # window.button, window.handle, window.grip, window.border, taskbar,
 # taskbar.button, taskbar.workspace, taskbar.clock,
-# taskbar.window-list.entry, taskbar.window-list.empty. States: focused,
+# taskbar.window-list.entry, taskbar.window-list.empty (the tray shows on
+# the taskbar's own background). States: focused,
 # unfocused, pressed.
 
 [default]

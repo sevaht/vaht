@@ -26,6 +26,7 @@ use crate::execution::ExecutionContext;
 use crate::resources::ResourceLedger;
 use crate::scene::{PointerTarget, WindowTarget};
 use crate::taskbar::TaskbarHit;
+use crate::tray::{TrayAction, TrayItemKey};
 use crate::window_manager::{FramePart, ResizeEdges, WindowId};
 
 /// Scroll distance per wheel notch, in the 120ths that high-resolution
@@ -108,6 +109,8 @@ pub(crate) enum AfterClick {
     HoldTitlebarButton(WindowId),
     /// The taskbar button pressed is held down until released.
     HoldTaskbarButton,
+    /// The tray item pressed is asked for what the button means.
+    AskTrayItem(TrayItemKey, TrayAction),
     /// The press is bound: `press` runs now, and the press is held from the
     /// client, `drag` running if the pointer moves first.
     RunBinding {
@@ -204,11 +207,14 @@ impl Input {
             return PressOutcome::ClickLayer(surface.clone());
         }
         if let Some(PointerTarget::Taskbar(hit)) = target {
-            let then = match hit {
-                Some(hit) if hit.is_button() && press.modifiers == Modifiers::default() => {
-                    AfterClick::HoldTaskbarButton
+            let is_plain = press.modifiers == Modifiers::default();
+            let tray_action = TrayAction::for_button(press.button);
+            let then = match (hit, tray_action) {
+                (Some(TaskbarHit::TrayItem(item)), Some(action)) if is_plain => {
+                    AfterClick::AskTrayItem(*item, action)
                 }
-                Some(_) | None => self.bound_or_border(press, config),
+                (Some(hit), _) if hit.is_button() && is_plain => AfterClick::HoldTaskbarButton,
+                (Some(_) | None, _) => self.bound_or_border(press, config),
             };
             return PressOutcome::ClickTaskbar {
                 window: hit.and_then(TaskbarHit::window),
@@ -412,6 +418,8 @@ mod tests {
         TaskbarEntry,
         /// The taskbar's clock.
         TaskbarClock,
+        /// A program's icon in the tray.
+        TrayItem,
         /// The bare desktop.
         Desktop,
         /// The window's titlebar, off its buttons.
@@ -440,6 +448,12 @@ mod tests {
                 Self::TaskbarClock => {
                     (Some(PointerTarget::Taskbar(Some(TaskbarHit::Clock))), false)
                 }
+                Self::TrayItem => (
+                    Some(PointerTarget::Taskbar(Some(TaskbarHit::TrayItem(
+                        TrayItemKey(1),
+                    )))),
+                    false,
+                ),
                 Self::Desktop => (None, false),
                 Self::Titlebar => (frame(titlebar), false),
                 Self::TitlebarButton => (frame(titlebar), true),
@@ -514,6 +528,11 @@ mod tests {
     #[case::taskbar_entry(Under::TaskbarEntry, false, AfterClick::HoldTaskbarButton)]
     #[case::taskbar_entry_with_alt_runs_its_binding(Under::TaskbarEntry, true, runs("lower"))]
     #[case::unbound_clock(Under::TaskbarClock, false, AfterClick::PassToClient)]
+    #[case::tray_item(
+        Under::TrayItem,
+        false,
+        AfterClick::AskTrayItem(TrayItemKey(1), TrayAction::Activate)
+    )]
     fn a_press_does_what_is_under_it_and_its_bindings_say(
         #[case] under: Under,
         #[case] holds_alt: bool,

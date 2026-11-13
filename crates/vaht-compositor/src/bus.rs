@@ -1,18 +1,21 @@
 //! Which D-Bus message bus vaht talks to, and connecting to it.
 //!
 //! vaht reads system services from the system bus (timedated, for time
-//! zone changes) and will host the tray on the session bus. A [`Bus`] names
+//! zone changes) and hosts the tray on the session bus. A [`Bus`] names
 //! one of them, or a bus at an address, which is how tests give vaht a
 //! private bus of their own. Connections are zbus's; their futures run on
 //! the event loop ([`crate::event_source::StreamSource`]).
 
 use zbus::Connection;
+use zbus::connection::Builder;
 
 /// A D-Bus message bus.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Bus {
     /// The system-wide bus, where system services such as timedated are.
     System,
+    /// The bus of the user's session, where tray items are.
+    Session,
     /// The bus at a D-Bus address, such as `unix:path=/run/test-bus`.
     #[cfg_attr(
         not(test),
@@ -28,13 +31,16 @@ impl Bus {
     ///
     /// Returns zbus's error if the bus cannot be reached or refuses vaht.
     pub(crate) async fn connect(&self) -> zbus::Result<Connection> {
+        self.builder().build().await
+    }
+
+    /// Returns a builder of a connection to the bus, to serve objects on;
+    /// an address it cannot use fails as it builds.
+    pub(crate) fn builder(&self) -> Builder<'static> {
         match self {
-            Self::System => Connection::system().await,
-            Self::At(address) => {
-                zbus::connection::Builder::address(address.as_str())
-                    .build()
-                    .await
-            }
+            Self::System => Builder::system(),
+            Self::Session => Builder::session(),
+            Self::At(address) => Builder::address(address.as_str()),
         }
     }
 }
