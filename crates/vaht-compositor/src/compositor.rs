@@ -61,13 +61,12 @@ use crate::backend::{Backend, BackendChoice, BackendError};
 use crate::capture::ScreenCapture;
 use crate::client::ClientState;
 use crate::config::{
-    Action, Command, Config, ConfigSource, FocusModel, KeyChord, Modifiers, MouseButton,
-    MouseContext, ResizeFrom,
+    Action, Command, Config, ConfigSource, FocusModel, KeyChord, Modifiers, ResizeFrom,
 };
 use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
 use crate::grab::{GrabKind, WindowGrab};
-use crate::input::{self, Input};
+use crate::input::{self, AfterClick, ButtonPress, Input, PressOutcome};
 use crate::launcher::Launcher;
 use crate::layers::{Layers, OutputLayers};
 use crate::protocols::ProtocolStates;
@@ -943,51 +942,46 @@ impl Compositor {
     }
 
     /// Handles a press of `button` at `location` while nothing holds the
-    /// pointer: focuses and raises the window there, then runs what the
-    /// press is bound to. A titlebar button pressed without modifiers is
-    /// held down until released; an unbound press on a border resizes.
+    /// pointer, as `Input` decides: focuses and raises the window there,
+    /// then holds a titlebar button, runs a binding, or resizes from a
+    /// border.
     fn press_button(&mut self, button: u32, location: Point<f64, Logical>, serial: Serial) {
         self.window_manager.finish_cycle();
         let target = self.scene().target_at(location);
-        if let Some(PointerTarget::Layer {
-            surface,
-            is_below_windows: false,
-            ..
-        }) = &target
-        {
-            // A panel or notification: the press is its client's alone.
-            self.layers.click(surface);
-            return;
-        }
-        let clicked = target.as_ref().and_then(PointerTarget::window);
-        if let Some(window) = clicked
-            && self.config.settings.focus.raise_on_click
-        {
-            self.window_manager.raise(window);
-        }
-        self.window_manager.focus(clicked);
-        let modifiers = self.held_modifiers();
-        if let Some(PointerTarget::Window(WindowTarget::Frame {
-            window,
-            part: FramePart::Titlebar(_),
-        })) = target
-            && modifiers == Modifiers::default()
-            && self.window_manager.press_titlebar_button(window, location)
-        {
-            return;
-        }
-        let interval = self.config.settings.windows.double_click_interval();
-        let is_double = self.input.is_double_click(button, clicked, interval);
-        let bound = MouseButton::from_code(button).and_then(|mouse_button| {
-            let bindings = self.config.bindings.button(
-                MouseContext::search_order(target.as_ref()),
-                modifiers,
-                mouse_button,
-                is_double,
-            )?;
-            Some((bindings.press.cloned(), bindings.drag.cloned()))
-        });
-        let press = Press {
+        let is_on_titlebar_button = match &target {
+            Some(PointerTarget::Window(WindowTarget::Frame {
+                window,
+                part: FramePart::Titlebar(_),
+            })) => self
+                .window_manager
+                .has_titlebar_button_at(*window, location),
+            _ => false,
+        };
+        let press = ButtonPress {
+            button,
+            target: target.as_ref(),
+            modifiers: self.held_modifiers(),
+            is_on_titlebar_button,
+            time: Instant::now(),
+        };
+        let (window, then) = match self.input.press(&press, &self.config) {
+            PressOutcome::ClickLayer(surface) => {
+                self.layers.click(&surface);
+                return;
+            }
+            PressOutcome::Click {
+                window,
+                raises,
+                then,
+            } => {
+                if let Some(raised) = window.filter(|_| raises) {
+                    self.window_manager.raise(raised);
+                }
+                self.window_manager.focus(window);
+                (window, then)
+            }
+        };
+        let start = Press {
             start: GrabStartData {
                 focus: None,
                 button,
@@ -995,10 +989,13 @@ impl Compositor {
             },
             serial,
         };
-        match (bound, target) {
-            (Some((on_press, on_drag)), _) => {
-                if let Some(command) = on_press {
-                    let mut context = ExecutionContext::for_press(clicked, press.clone());
+        match then {
+            AfterClick::HoldTitlebarButton(pressed) => {
+                self.window_manager.press_titlebar_button(pressed, location);
+            }
+            AfterClick::RunBinding { press, drag } => {
+                if let Some(command) = press {
+                    let mut context = ExecutionContext::for_press(window, start.clone());
                     self.execute(&command, &mut context);
                 }
                 let pointer = self
@@ -1008,26 +1005,13 @@ impl Compositor {
                 // Unless the binding started a drag, hold the press, so it
                 // never reaches a client.
                 if !pointer.is_grabbed() {
-                    self.set_grab(WindowGrab::hold(clicked, on_drag, press));
+                    self.set_grab(WindowGrab::hold(window, drag.map(|drag| *drag), start));
                 }
             }
-            (
-                None,
-                Some(PointerTarget::Window(WindowTarget::Frame {
-                    window,
-                    part: FramePart::Border(edges),
-                })),
-            ) => self.start_window_grab(window, WindowDrag::Resize { edges }, press.start, serial),
-            (
-                None,
-                Some(
-                    PointerTarget::Window(
-                        WindowTarget::Frame { .. } | WindowTarget::Surface { .. },
-                    )
-                    | PointerTarget::Layer { .. },
-                )
-                | None,
-            ) => {}
+            AfterClick::ResizeBorder(resized, edges) => {
+                self.start_window_grab(resized, WindowDrag::Resize { edges }, start.start, serial);
+            }
+            AfterClick::PassToClient => {}
         }
     }
 
@@ -1052,24 +1036,16 @@ impl Compositor {
             .seat
             .get_pointer()
             .expect("the seat gets a pointer at startup");
-        let button = match steps {
-            _ if pointer.is_grabbed() => return false,
-            Some(steps) if steps < 0.0 => MouseButton::ScrollUp,
-            Some(steps) if steps > 0.0 => MouseButton::ScrollDown,
-            Some(_) | None => return false,
+        let Some(steps) = steps.filter(|_| !pointer.is_grabbed()) else {
+            return false;
         };
         let target = self.scene().target_at(pointer.current_location());
-        let command = self
+        let Some(command) = self
             .config
             .bindings
-            .button(
-                MouseContext::search_order(target.as_ref()),
-                self.held_modifiers(),
-                button,
-                false,
-            )
-            .and_then(|bindings| bindings.press.cloned());
-        let Some(command) = command else {
+            .scroll(target.as_ref(), self.held_modifiers(), steps)
+            .cloned()
+        else {
             return false;
         };
         let window = target.as_ref().and_then(PointerTarget::window);

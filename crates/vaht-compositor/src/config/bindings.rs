@@ -53,6 +53,19 @@ impl Bindings {
         self.keys.get(&chord)
     }
 
+    /// Returns what turning the wheel `steps` (in 120ths of a notch,
+    /// negative up) over `target` with `modifiers` held is bound to.
+    pub(crate) fn scroll(
+        &self,
+        target: Option<&PointerTarget>,
+        modifiers: Modifiers,
+        steps: f64,
+    ) -> Option<&Command> {
+        let button = MouseButton::for_scroll(steps)?;
+        self.button(MouseContext::search_order(target), modifiers, button, false)?
+            .press
+    }
+
     /// Returns what pressing `button` with `modifiers` is bound to in the
     /// first of `contexts` that binds it at all; `is_double` says the press
     /// completes a double click, which a `Double` binding takes over from a
@@ -329,6 +342,18 @@ impl MouseButton {
             .map(|&(_, button, _)| button)
     }
 
+    /// Returns the wheel direction of a turn of `steps`: negative is up.
+    /// None for no turn.
+    fn for_scroll(steps: f64) -> Option<Self> {
+        if steps < 0.0 {
+            Some(Self::ScrollUp)
+        } else if steps > 0.0 {
+            Some(Self::ScrollDown)
+        } else {
+            None
+        }
+    }
+
     /// Returns the button named `name`, in any letter case.
     fn named(name: &str) -> Option<Self> {
         Self::NAMES
@@ -466,6 +491,35 @@ mod tests {
             shift: names.contains(&"shift"),
             ..ModifiersState::default()
         })
+    }
+
+    #[rstest]
+    #[case::up_on_the_desktop(-120.0, None, Some("workspace previous"))]
+    #[case::down_on_the_desktop(120.0, None, Some("workspace next"))]
+    #[case::no_turn(0.0, None, None)]
+    #[case::unbound_on_a_window(
+        -120.0,
+        Some(PointerTarget::Window(WindowTarget::Frame {
+            window: crate::window_manager::WindowId::new(1),
+            part: FramePart::Titlebar(vaht_ui::Point::new(1, 1)),
+        })),
+        None
+    )]
+    fn the_wheel_runs_what_it_is_bound_to_where_it_turns(
+        #[case] steps: f64,
+        #[case] target: Option<PointerTarget>,
+        #[case] expected: Option<&str>,
+    ) {
+        let bindings = bindings(
+            "[mouse.desktop]\n\"ScrollUp\" = \"workspace previous\"\n\
+             \"ScrollDown\" = \"workspace next\"\n",
+        )
+        .expect("valid");
+        let expected = expected.map(|text| Command::Run(Action::parse(text).expect("valid")));
+        assert_eq!(
+            bindings.scroll(target.as_ref(), Modifiers::default(), steps),
+            expected.as_ref()
+        );
     }
 
     #[test]

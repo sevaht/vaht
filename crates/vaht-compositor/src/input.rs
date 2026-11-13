@@ -1,10 +1,10 @@
 //! The input state that outlives a single event, and its decisions.
 //!
 //! [`Input`] decides whose a key event is (a bound press, and its release,
-//! are vaht's and never reach the client), recognizes double clicks, and
-//! keeps the timers that repeat a held key binding and raise a window the
-//! pointer rests on. The compositor routes events through it and the seat
-//! (01 §7).
+//! are vaht's and never reach the client) and what a button press does
+//! ([`PressOutcome`]), and keeps the timers that repeat a held key binding
+//! and raise a window the pointer rests on. Its decisions are values: the
+//! compositor carries them out through the seat (01 §7).
 
 use std::collections::HashSet;
 use std::num::NonZeroU32;
@@ -17,12 +17,15 @@ use smithay::input::keyboard::{FilterResult, Keycode};
 use smithay::input::pointer::AxisFrame;
 use smithay::reexports::calloop::LoopHandle;
 
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+
 use crate::Compositor;
-use crate::config::{Bindings, Command, KeyChord};
+use crate::config::{Bindings, Command, Config, KeyChord, Modifiers, MouseButton, MouseContext};
 use crate::event_source::{RepeatingTimer, Timer};
 use crate::execution::ExecutionContext;
 use crate::resources::ResourceLedger;
-use crate::window_manager::WindowId;
+use crate::scene::{PointerTarget, WindowTarget};
+use crate::window_manager::{FramePart, ResizeEdges, WindowId};
 
 /// Scroll distance per wheel notch, in the 120ths that high-resolution
 /// wheels report: a notch is 120, and libinput maps it to 15 units.
@@ -54,6 +57,59 @@ pub(crate) fn axis_frame<B: InputBackend>(event: &B::PointerAxisEvent) -> AxisFr
         }
     }
     frame
+}
+
+/// A button press, with what decides what it does.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ButtonPress<'target> {
+    /// The button's Linux input code.
+    pub(crate) button: u32,
+    /// What is under the pointer; none for the bare desktop.
+    pub(crate) target: Option<&'target PointerTarget>,
+    /// The modifiers held.
+    pub(crate) modifiers: Modifiers,
+    /// Whether the pointer is on a titlebar button.
+    pub(crate) is_on_titlebar_button: bool,
+    /// When it happened.
+    pub(crate) time: Instant,
+}
+
+/// What a button press does.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PressOutcome {
+    /// A layer surface above the windows (a panel, a notification) was
+    /// pressed: the press is its client's alone, and the surface may take
+    /// the keyboard.
+    ClickLayer(WlSurface),
+    /// A window, or the desktop, was pressed.
+    Click {
+        /// The window pressed, which gets focus; none for the desktop,
+        /// which takes it from every window.
+        window: Option<WindowId>,
+        /// Whether the window is raised first.
+        raises: bool,
+        /// What happens then.
+        then: AfterClick,
+    },
+}
+
+/// What a press on a window or the desktop does after focusing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AfterClick {
+    /// The titlebar button of this window is held down until released.
+    HoldTitlebarButton(WindowId),
+    /// The press is bound: `press` runs now, and the press is held from the
+    /// client, `drag` running if the pointer moves first.
+    RunBinding {
+        /// Run on the press.
+        press: Option<Box<Command>>,
+        /// Run once the press becomes a drag.
+        drag: Option<Box<Command>>,
+    },
+    /// An unbound press on this window's border resizes it by `edges`.
+    ResizeBorder(WindowId, ResizeEdges),
+    /// Nothing of vaht's: the client under the pointer gets the press.
+    PassToClient,
 }
 
 /// The input state that outlives a single event.
@@ -112,27 +168,37 @@ impl Input {
         }
     }
 
-    /// Records a press of `button` on `window` (or the desktop); returns
-    /// whether it completes a double click, within `interval` of the press
-    /// before. A third quick press starts a new one.
-    pub(crate) fn is_double_click(
-        &mut self,
-        button: u32,
-        window: Option<WindowId>,
-        interval: Duration,
-    ) -> bool {
-        let now = Instant::now();
-        let is_double = self.last_click.as_ref().is_some_and(|click| {
-            click.button == button
-                && click.window == window
-                && now.duration_since(click.at) <= interval
-        });
-        self.last_click = (!is_double).then_some(Click {
-            button,
+    /// Decides what `press` does under `config`: on a panel, it is the
+    /// panel's; otherwise the window pressed is focused (and raised, if the
+    /// settings say so), then a titlebar button pressed without modifiers
+    /// is held, a bound press runs its binding, and an unbound press on a
+    /// border resizes. A double click is recognized here, so the press is
+    /// recorded.
+    pub(crate) fn press(&mut self, press: &ButtonPress<'_>, config: &Config) -> PressOutcome {
+        let target = press.target;
+        if let Some(PointerTarget::Layer {
+            surface,
+            is_below_windows: false,
+            ..
+        }) = target
+        {
+            return PressOutcome::ClickLayer(surface.clone());
+        }
+        let window = target.and_then(PointerTarget::window);
+        let then = match target {
+            Some(PointerTarget::Window(WindowTarget::Frame {
+                window,
+                part: FramePart::Titlebar(_),
+            })) if press.is_on_titlebar_button && press.modifiers == Modifiers::default() => {
+                AfterClick::HoldTitlebarButton(*window)
+            }
+            _ => self.bound_or_border(press, config),
+        };
+        PressOutcome::Click {
             window,
-            at: now,
-        });
-        is_double
+            raises: window.is_some() && config.settings.focus.raise_on_click,
+            then,
+        }
     }
 
     /// Runs `command`, bound to `keycode`, again and again at `rate` per
@@ -197,6 +263,62 @@ impl Input {
     pub(crate) fn cancel_raise(&mut self) {
         self.auto_raise = None;
     }
+
+    /// Returns what `press`, past the titlebar buttons, does: its binding,
+    /// or a border resize, or nothing.
+    fn bound_or_border(&mut self, press: &ButtonPress<'_>, config: &Config) -> AfterClick {
+        let window = press.target.and_then(PointerTarget::window);
+        let interval = config.settings.windows.double_click_interval();
+        let is_double = self.is_double_click(press.button, window, press.time, interval);
+        let bound = MouseButton::from_code(press.button).and_then(|button| {
+            config.bindings.button(
+                MouseContext::search_order(press.target),
+                press.modifiers,
+                button,
+                is_double,
+            )
+        });
+        if let Some(bindings) = bound {
+            return AfterClick::RunBinding {
+                press: bindings.press.cloned().map(Box::new),
+                drag: bindings.drag.cloned().map(Box::new),
+            };
+        }
+        match press.target {
+            Some(PointerTarget::Window(WindowTarget::Frame {
+                window,
+                part: FramePart::Border(edges),
+            })) => AfterClick::ResizeBorder(*window, *edges),
+            Some(
+                PointerTarget::Window(WindowTarget::Frame { .. } | WindowTarget::Surface { .. })
+                | PointerTarget::Layer { .. },
+            )
+            | None => AfterClick::PassToClient,
+        }
+    }
+
+    /// Records a press of `button` on `window` (or the desktop) at `now`;
+    /// returns whether it completes a double click, within `interval` of
+    /// the press before. A third quick press starts a new one.
+    fn is_double_click(
+        &mut self,
+        button: u32,
+        window: Option<WindowId>,
+        now: Instant,
+        interval: Duration,
+    ) -> bool {
+        let is_double = self.last_click.as_ref().is_some_and(|click| {
+            click.button == button
+                && click.window == window
+                && now.duration_since(click.at) <= interval
+        });
+        self.last_click = (!is_double).then_some(Click {
+            button,
+            window,
+            at: now,
+        });
+        is_double
+    }
 }
 
 /// A repeating key binding being held.
@@ -217,4 +339,248 @@ struct Click {
     window: Option<WindowId>,
     /// When.
     at: Instant,
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::window_manager::{HorizontalEdge, VerticalEdge};
+
+    /// The left button's Linux input code.
+    const LEFT: u32 = 0x110;
+
+    /// The Alt key, as bindings name it.
+    fn alt() -> Modifiers {
+        Modifiers::held(&smithay::input::keyboard::ModifiersState {
+            alt: true,
+            ..Default::default()
+        })
+    }
+
+    /// The window every press lands on.
+    fn window() -> WindowId {
+        WindowId::new(7)
+    }
+
+    /// The edges of the right border.
+    fn right_edge() -> ResizeEdges {
+        ResizeEdges {
+            horizontal: HorizontalEdge::Right,
+            vertical: VerticalEdge::None,
+        }
+    }
+
+    /// What is under the pointer.
+    #[derive(Debug, Clone, Copy)]
+    enum Under {
+        /// The bare desktop.
+        Desktop,
+        /// The window's titlebar, off its buttons.
+        Titlebar,
+        /// One of the window's titlebar buttons.
+        TitlebarButton,
+        /// The window's right border.
+        Border,
+    }
+
+    impl Under {
+        /// Returns the pointer target, and whether it is a titlebar button.
+        fn target(self) -> (Option<PointerTarget>, bool) {
+            let frame = |part| {
+                Some(PointerTarget::Window(WindowTarget::Frame {
+                    window: window(),
+                    part,
+                }))
+            };
+            let titlebar = FramePart::Titlebar(vaht_ui::Point::new(5, 5));
+            match self {
+                Self::Desktop => (None, false),
+                Self::Titlebar => (frame(titlebar), false),
+                Self::TitlebarButton => (frame(titlebar), true),
+                Self::Border => (frame(FramePart::Border(right_edge())), false),
+            }
+        }
+    }
+
+    /// The configuration with `bindings` and `settings`, as files hold them.
+    fn config(bindings: &str, settings: &str) -> Config {
+        let mut config = Config::built_in();
+        config.bindings = toml::from_str::<Bindings>(bindings).expect("valid bindings");
+        config.settings = toml::from_str(settings).expect("valid settings");
+        config
+    }
+
+    /// Bindings on the titlebar and on windows with Alt.
+    const BINDINGS: &str = "[mouse.titlebar]\n\"Double+Left\" = \"maximize\"\n\
+                            [mouse.window]\n\"Alt+Left\" = \"start-moving\"\n";
+
+    /// Presses the left button once on `under` with `modifiers` held.
+    fn press(
+        input: &mut Input,
+        config: &Config,
+        under: Under,
+        modifiers: Modifiers,
+        time: Instant,
+    ) -> PressOutcome {
+        let (target, is_on_titlebar_button) = under.target();
+        input.press(
+            &ButtonPress {
+                button: LEFT,
+                target: target.as_ref(),
+                modifiers,
+                is_on_titlebar_button,
+                time,
+            },
+            config,
+        )
+    }
+
+    /// Returns what the press does after focusing, and whether it raises.
+    fn then(outcome: PressOutcome) -> (AfterClick, bool) {
+        match outcome {
+            PressOutcome::Click { then, raises, .. } => (then, raises),
+            PressOutcome::ClickLayer(_) => panic!("no layer surface was pressed"),
+        }
+    }
+
+    /// The outcome of a press bound to run the action `text`, with no drag.
+    fn runs(text: &str) -> AfterClick {
+        let action = crate::config::Action::parse(text).expect("a valid action");
+        AfterClick::RunBinding {
+            press: Some(Box::new(Command::Run(action))),
+            drag: None,
+        }
+    }
+
+    #[rstest]
+    #[case::titlebar_button(Under::TitlebarButton, false, AfterClick::HoldTitlebarButton(window()))]
+    #[case::titlebar_button_with_alt_runs_the_window_binding(
+        Under::TitlebarButton,
+        true,
+        runs("start-moving")
+    )]
+    #[case::unbound_titlebar(Under::Titlebar, false, AfterClick::PassToClient)]
+    #[case::unbound_border(Under::Border, false, AfterClick::ResizeBorder(window(), right_edge()))]
+    #[case::bound_border(Under::Border, true, runs("start-moving"))]
+    #[case::unbound_desktop(Under::Desktop, false, AfterClick::PassToClient)]
+    fn a_press_does_what_is_under_it_and_its_bindings_say(
+        #[case] under: Under,
+        #[case] holds_alt: bool,
+        #[case] expected: AfterClick,
+    ) {
+        let config = config(BINDINGS, "");
+        let modifiers = if holds_alt {
+            alt()
+        } else {
+            Modifiers::default()
+        };
+        let outcome = press(
+            &mut Input::default(),
+            &config,
+            under,
+            modifiers,
+            Instant::now(),
+        );
+        assert_eq!(then(outcome).0, expected);
+    }
+
+    #[rstest]
+    #[case::raised_by_default("", Under::Titlebar, true)]
+    #[case::not_when_the_settings_say_so(
+        "[focus]\nraise_on_click = false\n",
+        Under::Titlebar,
+        false
+    )]
+    #[case::nothing_to_raise_on_the_desktop("", Under::Desktop, false)]
+    fn a_pressed_window_is_raised_if_the_settings_say_so(
+        #[case] settings: &str,
+        #[case] under: Under,
+        #[case] raises: bool,
+    ) {
+        let config = config(BINDINGS, settings);
+        let outcome = press(
+            &mut Input::default(),
+            &config,
+            under,
+            Modifiers::default(),
+            Instant::now(),
+        );
+        assert_eq!(then(outcome).1, raises);
+    }
+
+    #[test]
+    fn a_second_quick_press_is_a_double_click_and_a_third_starts_over() {
+        let config = config(BINDINGS, "");
+        let mut input = Input::default();
+        let start = Instant::now();
+        let quickly = config.settings.windows.double_click_interval() / 2;
+        let outcomes: Vec<AfterClick> = (0..3)
+            .map(|count| {
+                let time = start + quickly * count;
+                then(press(
+                    &mut input,
+                    &config,
+                    Under::Titlebar,
+                    Modifiers::default(),
+                    time,
+                ))
+                .0
+            })
+            .collect();
+        assert_eq!(
+            outcomes,
+            [
+                AfterClick::PassToClient,
+                runs("maximize"),
+                AfterClick::PassToClient,
+            ]
+        );
+    }
+
+    #[test]
+    fn presses_too_far_apart_are_not_a_double_click() {
+        let config = config(BINDINGS, "");
+        let mut input = Input::default();
+        let start = Instant::now();
+        let slowly = config.settings.windows.double_click_interval() * 2;
+        press(
+            &mut input,
+            &config,
+            Under::Titlebar,
+            Modifiers::default(),
+            start,
+        );
+        let second = press(
+            &mut input,
+            &config,
+            Under::Titlebar,
+            Modifiers::default(),
+            start + slowly,
+        );
+        assert_eq!(then(second).0, AfterClick::PassToClient);
+    }
+
+    #[test]
+    fn a_titlebar_button_press_does_not_count_toward_a_double_click() {
+        let config = config(BINDINGS, "");
+        let mut input = Input::default();
+        let now = Instant::now();
+        press(
+            &mut input,
+            &config,
+            Under::TitlebarButton,
+            Modifiers::default(),
+            now,
+        );
+        let next = press(
+            &mut input,
+            &config,
+            Under::Titlebar,
+            Modifiers::default(),
+            now,
+        );
+        assert_eq!(then(next).0, AfterClick::PassToClient);
+    }
 }

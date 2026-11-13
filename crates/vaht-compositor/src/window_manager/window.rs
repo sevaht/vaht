@@ -243,6 +243,17 @@ impl Window {
         self.location - self.committed.geometry.loc
     }
 
+    /// Returns whether a titlebar button is at global `location`, with
+    /// frames sized by `metrics`.
+    pub(crate) fn has_titlebar_button_at(
+        &self,
+        location: Point<f64, Logical>,
+        metrics: Metrics,
+    ) -> bool {
+        self.frame
+            .has_button_at(self.titlebar_point(location, metrics))
+    }
+
     /// Brings the window up to date with what its client committed: its
     /// title, its size, and its position while a resize keeps edges still.
     pub(crate) fn commit(&mut self, committed: CommittedState) {

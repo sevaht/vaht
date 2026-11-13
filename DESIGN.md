@@ -74,7 +74,8 @@ RUST.md §4). The compositor crate has two halves:
   window manager and the gateways: `Toplevels` (each window's xdg-shell
   object, the only code that speaks the protocol to a window),
   `FrameTextures` (frame pixels as the renderer takes them), `Layers`,
-  `Input` (key filtering, double clicks, repeat and auto-raise timers),
+  `Input` (key filtering, button presses, double clicks, repeat and
+  auto-raise timers),
   the backend and the protocol states. It routes events and carries out
   the window manager's decisions; it decides nothing about windows.
 
@@ -84,8 +85,12 @@ apart from what its client committed, `Frame` presses its buttons,
 `Placement` is a value (maximizing, fullscreen and the snap ladder are pure
 functions from one placement to the next, and `Window::place` applies the
 result), `Workspaces` and `Focus` (focus history and Alt+Tab cycling) are
-entities, `PlacementStrategy` and `EdgeSnap` are pure. Elsewhere,
-`MouseContext` knows where a press looks for bindings, `Scene` composes
+entities, `PlacementStrategy` and `EdgeSnap` are pure. Elsewhere, `Input`
+decides whose a key is and what a button press does (a `PressOutcome`:
+the panel's click, or focus and raise, then a titlebar button, a binding,
+a border resize or the client's press), and `Bindings` what a wheel turn
+runs, both tested without a seat; `MouseContext` knows where a press looks
+for bindings, `Scene` composes
 what an output shows and hit-tests it, and `ConfigSource` reads and watches
 the configuration.
 

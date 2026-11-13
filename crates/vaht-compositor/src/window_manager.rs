@@ -136,6 +136,17 @@ impl WindowManager {
         self.windows.shown_top_down(self.workspaces.current())
     }
 
+    /// Returns whether a titlebar button of `window` is at `location`.
+    pub(crate) fn has_titlebar_button_at(
+        &self,
+        window: WindowId,
+        location: Point<f64, Logical>,
+    ) -> bool {
+        self.windows
+            .get(window)
+            .is_some_and(|target| target.has_titlebar_button_at(location, self.metrics))
+    }
+
     /// Starts managing a new window, on top of the current workspace and
     /// focused if `settings` say new windows take focus. It is placed once
     /// its client commits a size.

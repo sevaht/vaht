@@ -202,10 +202,16 @@ impl Frame {
         self.titlebar.content().state()
     }
 
+    /// Returns whether a titlebar button is at `point`, in the titlebar's
+    /// own pixels.
+    pub(crate) fn has_button_at(&self, point: vaht_ui::Point) -> bool {
+        matches!(self.titlebar.hit_at(point), Some(TitlebarHit::Button(_)))
+    }
+
     /// Holds down the titlebar button at `point` (in the titlebar's own
     /// pixels), if there is one there; returns whether there was.
     pub(crate) fn press_button(&mut self, point: vaht_ui::Point) -> bool {
-        let is_button = matches!(self.titlebar.hit_at(point), Some(TitlebarHit::Button(_)));
+        let is_button = self.has_button_at(point);
         if is_button {
             self.titlebar.press(point);
         }
