@@ -47,6 +47,39 @@ const PLANNED_ACTIONS: &[&str] = &[
 /// Structured command forms of 02 §4 that vaht does not have yet.
 const PLANNED_FORMS: [&str; 4] = ["toggle", "if", "for_each", "delay_ms"];
 
+/// The windows `next-window` and `previous-window` go through, and in what
+/// order: `{ action = "next-window", windows = <matcher>, order = "opening" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct WindowCycle {
+    /// Which windows.
+    pub(crate) windows: WindowMatcher,
+    /// In what order.
+    pub(crate) order: CycleOrder,
+}
+
+/// The order a window cycle goes in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum CycleOrder {
+    /// The order windows last had focus in, most recent first; a cycle
+    /// keeps its order until the keys held for it are let go.
+    #[default]
+    Focus,
+    /// The order windows opened in, as the taskbar lists them (Fluxbox's
+    /// `{static}`).
+    Opening,
+}
+
+impl CycleOrder {
+    /// Reads `focus` or `opening`.
+    fn parse(text: &str) -> Result<Self, String> {
+        match text {
+            "focus" => Ok(Self::Focus),
+            "opening" => Ok(Self::Opening),
+            other => Err(format!("`order` is focus or opening, not `{other}`")),
+        }
+    }
+}
+
 /// What to do: an action, or several, or one repeated while a key is held.
 ///
 /// Commands are immutable values; anything that changes while vaht runs (a
@@ -119,6 +152,7 @@ impl Command {
     fn from_action_table(entries: Vec<(String, toml::Value)>) -> Result<Self, String> {
         let mut action = None;
         let mut windows = None;
+        let mut order = None;
         for (key, value) in entries {
             match key.as_str() {
                 "action" => {
@@ -134,15 +168,20 @@ impl Command {
                             .map_err(|error| format!("windows: {}", error.message()))?,
                     );
                 }
+                "order" => {
+                    let text = value.as_str().ok_or("`order` is focus or opening")?;
+                    order = Some(CycleOrder::parse(text)?);
+                }
                 other => {
                     return Err(format!(
-                        "a table with `action` takes only `windows` beside it, not `{other}`"
+                        "a table with `action` takes only `windows` and `order` beside it, \
+                         not `{other}`"
                     ));
                 }
             }
         }
         let action = action.ok_or("`action` is missing")?;
-        action.with_windows(windows).map(Self::Run)
+        action.with_cycle(windows, order).map(Self::Run)
     }
 
     /// Reads a repeat's `rate`: a whole number of repeats per second.
@@ -301,11 +340,11 @@ pub(crate) enum WindowManagerAction {
     AddWorkspace,
     /// Removes the last workspace; its windows move to the one before.
     RemoveLastWorkspace,
-    /// Focuses and raises the next window, in the order windows last had
-    /// focus, among those matching.
-    NextWindow(WindowMatcher),
+    /// Focuses and raises the next window, among those matching, in the
+    /// cycle's order.
+    NextWindow(WindowCycle),
     /// Focuses and raises the previous window among those matching.
-    PreviousWindow(WindowMatcher),
+    PreviousWindow(WindowCycle),
     /// Minimizes every window on the workspace, or restores them if they
     /// all are.
     ShowDesktop,
@@ -377,20 +416,28 @@ impl Action {
         }
     }
 
-    /// Returns the action about the windows `windows` matches, for the
-    /// actions that are about a set of windows.
-    fn with_windows(self, windows: Option<WindowMatcher>) -> Result<Self, String> {
+    /// Returns the action going through the windows `windows` matches in
+    /// `order`, for the actions that cycle through windows.
+    fn with_cycle(
+        self,
+        windows: Option<WindowMatcher>,
+        order: Option<CycleOrder>,
+    ) -> Result<Self, String> {
         use WindowManagerAction::{NextWindow, PreviousWindow};
-        match (self, windows) {
-            (action, None) => Ok(action),
-            (Self::WindowManager(NextWindow(_)), Some(windows)) => {
-                Ok(Self::WindowManager(NextWindow(windows)))
-            }
-            (Self::WindowManager(PreviousWindow(_)), Some(windows)) => {
-                Ok(Self::WindowManager(PreviousWindow(windows)))
-            }
-            (action, Some(_)) => Err(format!("`{}` takes no `windows`", action.name())),
+        if windows.is_none() && order.is_none() {
+            return Ok(self);
         }
+        let cycle = |given: WindowCycle| WindowCycle {
+            windows: windows.unwrap_or(given.windows),
+            order: order.unwrap_or(given.order),
+        };
+        if let Self::WindowManager(NextWindow(given)) = self {
+            return Ok(Self::WindowManager(NextWindow(cycle(given))));
+        }
+        if let Self::WindowManager(PreviousWindow(given)) = self {
+            return Ok(Self::WindowManager(PreviousWindow(cycle(given))));
+        }
+        Err(format!("`{}` takes no `windows` or `order`", self.name()))
     }
 
     /// Returns the action's name, the first word of its string form.
@@ -504,8 +551,8 @@ impl WindowManagerAction {
             "take-to-workspace" => arguments.parse().map(Self::TakeToWorkspace),
             "add-workspace" => without_arguments(Self::AddWorkspace),
             "remove-last-workspace" => without_arguments(Self::RemoveLastWorkspace),
-            "next-window" => without_arguments(Self::NextWindow(WindowMatcher::default())),
-            "previous-window" => without_arguments(Self::PreviousWindow(WindowMatcher::default())),
+            "next-window" => without_arguments(Self::NextWindow(WindowCycle::default())),
+            "previous-window" => without_arguments(Self::PreviousWindow(WindowCycle::default())),
             "show-desktop" => without_arguments(Self::ShowDesktop),
             _ if PLANNED_ACTIONS.contains(&name) => {
                 Err(format!("`{name}` is not available in vaht yet"))
@@ -712,8 +759,8 @@ mod tests {
             WindowManagerAction::TakeToWorkspace(WorkspaceTarget::Next),
             WindowManagerAction::AddWorkspace,
             WindowManagerAction::RemoveLastWorkspace,
-            WindowManagerAction::NextWindow(WindowMatcher::default()),
-            WindowManagerAction::PreviousWindow(WindowMatcher::default()),
+            WindowManagerAction::NextWindow(WindowCycle::default()),
+            WindowManagerAction::PreviousWindow(WindowCycle::default()),
             WindowManagerAction::ShowDesktop,
         ];
         let mut actions = vec![
@@ -764,11 +811,20 @@ mod tests {
     fn an_action_table_carries_its_windows() {
         let parsed = command("{ action = \"next-window\", windows = { workspace = \"current\" } }")
             .expect("valid");
-        let Command::Run(Action::WindowManager(WindowManagerAction::NextWindow(windows))) = parsed
+        let Command::Run(Action::WindowManager(WindowManagerAction::NextWindow(cycle))) = parsed
         else {
             panic!("next-window with a matcher");
         };
-        assert_ne!(windows, WindowMatcher::default());
+        assert_ne!(cycle.windows, WindowMatcher::default());
+        assert_eq!(cycle.order, CycleOrder::Focus);
+        let parsed =
+            command("{ action = \"previous-window\", order = \"opening\" }").expect("valid");
+        let Command::Run(Action::WindowManager(WindowManagerAction::PreviousWindow(cycle))) =
+            parsed
+        else {
+            panic!("previous-window in opening order");
+        };
+        assert_eq!(cycle.order, CycleOrder::Opening);
     }
 
     #[test]
@@ -799,7 +855,10 @@ mod tests {
     #[case::cell_outside("\"tile 600 0 500 1000\"", "within 0 to 1000")]
     #[case::empty_size("\"resize-to 0 300\"", "above 0")]
     #[case::workspace_zero("\"workspace 0\"", "a workspace is a number")]
-    #[case::windows_on_close("{ action = \"close\", windows = {} }", "takes no `windows`")]
+    #[case::windows_on_close(
+        "{ action = \"close\", windows = {} }",
+        "takes no `windows` or `order`"
+    )]
     #[case::bad_matcher(
         "{ action = \"next-window\", windows = { colour = 1 } }",
         "unknown field"

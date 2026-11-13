@@ -51,6 +51,12 @@ impl<'text> ClientPattern<'text> {
         let (key, is_negated) = key
             .strip_suffix('!')
             .map_or((key, false), |key| (key, true));
+        // vaht hides no window from its window list, so asking for those it
+        // does not hide asks for every window: nothing to add.
+        let lowered = key.trim().to_ascii_lowercase();
+        if lowered == "iconhidden" && (value.eq_ignore_ascii_case("no") != is_negated) {
+            return true;
+        }
         let vaht = match (key.trim().to_ascii_lowercase().as_str(), value) {
             ("workspace", "[current]") => Some(("workspace", Value::from("current"))),
             // The run window is vaht's run dialog now.

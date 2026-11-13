@@ -282,6 +282,7 @@ impl FluxboxCommand<'_> {
     /// window matcher.
     fn cycle(action: &str, arguments: &str) -> Translated {
         let mut losses = Vec::new();
+        let mut is_static = false;
         for option in Self::braced(arguments)
             .iter()
             .flat_map(|options| options.split_whitespace())
@@ -291,16 +292,13 @@ impl FluxboxCommand<'_> {
                     Reason::Dropped,
                     "the groups option (tabs are gone)".to_owned(),
                 )),
-                "static" => losses.push((
-                    Reason::NotYetInVaht,
-                    "the static option (cycling in stacking order)".to_owned(),
-                )),
+                "static" => is_static = true,
                 other => losses.push((Reason::NotYetInVaht, format!("the {other} option"))),
             }
         }
         let (windows, lost) = ClientPattern::new(arguments).matcher();
         losses.extend(lost);
-        if windows.is_empty() {
+        if windows.is_empty() && !is_static {
             return Translated {
                 value: Value::from(action),
                 losses,
@@ -308,7 +306,13 @@ impl FluxboxCommand<'_> {
         }
         let mut table = InlineTable::new();
         table.insert("action", Value::from(action));
-        table.insert("windows", Value::InlineTable(windows));
+        if !windows.is_empty() {
+            table.insert("windows", Value::InlineTable(windows));
+        }
+        // Fluxbox's static order is the order windows opened in.
+        if is_static {
+            table.insert("order", Value::from("opening"));
+        }
         Translated {
             value: Value::InlineTable(table),
             losses,
@@ -383,11 +387,14 @@ mod tests {
     }
 
     #[test]
-    fn options_and_patterns_vaht_lacks_are_noted() {
+    fn my_taskbar_scrolling_cycles_in_opening_order() {
         let translated = FluxboxCommand("PrevWindow {static groups} (iconhidden=no)")
             .to_vaht()
-            .expect("translated without them");
-        assert_eq!(translated.value.to_string().trim(), r#""previous-window""#);
+            .expect("translated");
+        assert_eq!(
+            translated.value.to_string().trim(),
+            r#"{ action = "previous-window", order = "opening" }"#
+        );
         let reasons: Vec<_> = translated
             .losses
             .iter()
@@ -395,7 +402,12 @@ mod tests {
             .collect();
         assert_eq!(
             reasons,
-            [Reason::NotYetInVaht, Reason::Dropped, Reason::NotYetInVaht]
+            [Reason::Dropped],
+            "only the groups, as tabs are gone"
         );
+        let unknown = FluxboxCommand("NextWindow {fancy} (iconhidden=yes)")
+            .to_vaht()
+            .expect("translated without them");
+        assert_eq!(unknown.losses.len(), 2, "{:?}", unknown.losses);
     }
 }

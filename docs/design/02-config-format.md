@@ -277,7 +277,7 @@ A command is written in one of three forms:
    | `{ for_each = matcher, do = cmd }` | ForEach / Map |
    | `{ delay_ms = 300, do = cmd }` | Delay |
    | `{ repeat = cmd, rate = 20 }` | Repeat (rate per second, optional) |
-   | `{ action = "next-window", windows = matcher }` | Action plus a window matcher argument |
+   | `{ action = "next-window", windows = matcher, order = "opening" }` | Action plus a window matcher argument; `order` is `focus` (the default: most recently focused first) or `opening` (the order windows opened in, as the taskbar lists them: Fluxbox's `{static}`) |
 
    A **condition** is a window matcher (§5), or `{ all = [..] }`,
    `{ any = [..] }`, or `{ not = .. }`.

@@ -138,3 +138,29 @@ fn a_window_in_a_lower_layer_stays_under_when_raised() {
         "under the normal window: {order:?}"
     );
 }
+
+#[test]
+fn cycling_in_opening_order_goes_through_windows_as_they_opened() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[(
+            "bindings.toml",
+            "[keys]\nF1 = { action = \"next-window\", order = \"opening\" }\n",
+        )],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(3);
+    let focused = |vaht: &HeadlessVaht| {
+        windows(vaht)
+            .into_iter()
+            .find(|window| window.is_focused)
+            .map(|window| window.id)
+    };
+    let mut opened: Vec<u64> = windows(&vaht).iter().map(|window| window.id).collect();
+    opened.sort_unstable();
+    assert_eq!(focused(&vaht), Some(opened[2]), "the newest");
+    client.type_chord(&[vaht_test_support::keys::F1]);
+    assert_eq!(focused(&vaht), Some(opened[0]), "around to the first");
+    client.type_chord(&[vaht_test_support::keys::F1]);
+    assert_eq!(focused(&vaht), Some(opened[1]));
+}

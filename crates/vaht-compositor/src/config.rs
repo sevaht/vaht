@@ -29,7 +29,9 @@ use std::path::{Path, PathBuf};
 use vaht_ui::Theme;
 
 pub(crate) use self::bindings::{Bindings, KeyChord, Modifiers, MouseButton, MouseContext};
-pub(crate) use self::command::{Action, Command, MenuRequest, ResizeFrom, WindowManagerAction};
+pub(crate) use self::command::{
+    Action, Command, CycleOrder, MenuRequest, ResizeFrom, WindowCycle, WindowManagerAction,
+};
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};
 pub(crate) use self::rules::{FocusStealing, Rules};

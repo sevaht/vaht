@@ -38,7 +38,9 @@ pub(crate) use self::windows::StackLayer;
 use self::windows::Windows;
 use self::workspaces::Workspaces;
 pub(crate) use self::workspaces::{Workspace, WorkspaceTarget};
-use crate::config::{Config, FrameSettings, Settings, WindowManagerAction, WindowMatcher};
+use crate::config::{
+    Config, CycleOrder, FrameSettings, Settings, WindowCycle, WindowManagerAction,
+};
 use crate::resources::ResourceLedger;
 
 /// What a client asks for its window.
@@ -443,11 +445,11 @@ impl WindowManager {
                 tracing::debug!(workspace = %added, "workspace added");
             }
             WindowManagerAction::RemoveLastWorkspace => self.remove_last_workspace(),
-            WindowManagerAction::NextWindow(windows) => {
-                self.cycle_focus(windows, CycleDirection::Forward);
+            WindowManagerAction::NextWindow(cycle) => {
+                self.cycle_focus(cycle, CycleDirection::Forward);
             }
-            WindowManagerAction::PreviousWindow(windows) => {
-                self.cycle_focus(windows, CycleDirection::Backward);
+            WindowManagerAction::PreviousWindow(cycle) => {
+                self.cycle_focus(cycle, CycleDirection::Backward);
             }
             WindowManagerAction::ShowDesktop => self.show_desktop(),
             WindowManagerAction::SetTitle(title) => self.set_title(window, title.clone()),
@@ -840,12 +842,13 @@ impl WindowManager {
         self.is_redraw_needed = true;
     }
 
-    /// Focuses and raises the next window in `direction` among those
-    /// `windows` matches, in the order windows last had focus. Minimized
-    /// windows count only if the matcher asks for them.
-    fn cycle_focus(&mut self, windows: &WindowMatcher, direction: CycleDirection) {
+    /// Focuses and raises the next window in `direction` among those the
+    /// cycle's matcher matches, in its order. Minimized windows count only
+    /// if the matcher asks for them.
+    fn cycle_focus(&mut self, cycle: &WindowCycle, direction: CycleDirection) {
         let current = self.workspaces.current();
-        let candidates = self
+        let windows = &cycle.windows;
+        let mut candidates = self
             .windows
             .top_down()
             .filter(|window| {
@@ -854,10 +857,39 @@ impl WindowManager {
             })
             .map(Window::id)
             .collect::<Vec<_>>();
-        let ordered = self.focus.by_recency(candidates);
-        if let Some(next) = self.focus.step(ordered, direction) {
+        let next = match cycle.order {
+            CycleOrder::Focus => {
+                let ordered = self.focus.by_recency(candidates);
+                self.focus.step(ordered, direction)
+            }
+            CycleOrder::Opening => {
+                candidates.sort();
+                Self::step_from(&candidates, self.focused(), direction)
+            }
+        };
+        if let Some(next) = next {
             self.activate(next);
         }
+    }
+
+    /// Returns the window a step in `direction` from `from` goes to among
+    /// `windows`, wrapping around; the first or last when `from` is not
+    /// among them.
+    fn step_from(
+        windows: &[WindowId],
+        from: Option<WindowId>,
+        direction: CycleDirection,
+    ) -> Option<WindowId> {
+        let count = windows.len();
+        let position = from.and_then(|from| windows.iter().position(|id| *id == from));
+        let index = match (position, direction) {
+            (_, _) if count == 0 => return None,
+            (Some(position), CycleDirection::Forward) => (position + 1) % count,
+            (Some(position), CycleDirection::Backward) => (position + count - 1) % count,
+            (None, CycleDirection::Forward) => 0,
+            (None, CycleDirection::Backward) => count - 1,
+        };
+        windows.get(index).copied()
     }
 
     /// Minimizes every window shown, or, when none is, restores the
