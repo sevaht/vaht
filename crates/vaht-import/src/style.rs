@@ -707,11 +707,11 @@ impl StyleFile {
             })
             .collect();
         cell.insert(Property::Padding, Written(Value::Array(padding)));
-        if self
-            .number(&["systray.tooltip.radius"])
-            .is_some_and(|radius| radius > 0)
-        {
-            self.note_resource("systray.tooltip.radius", report, "rounded tooltips");
+        if let Some(radius) = self.number(&["systray.tooltip.radius"]) {
+            cell.insert(
+                Property::CornerRadius,
+                Written(Value::from(i64::from(radius))),
+            );
         }
         if self
             .number(&["systray.tooltip.alpha"])
@@ -1555,9 +1555,11 @@ menu.bullet:\tsquare
     #[test]
     fn square_corners_add_nothing() {
         let (cells, _, _) = convert("window.roundCorners: none\n");
+        // A tooltip is rounded as fluxland's are, whatever the style.
         assert!(
             cells
                 .iter()
+                .filter(|(element, ..)| *element != ThemeElement::Tooltip)
                 .all(|(.., cell)| !cell.contains_key(&Property::CornerRadius))
         );
     }

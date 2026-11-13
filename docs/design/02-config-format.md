@@ -712,8 +712,9 @@ exactly what each element gets.
   `taskbar.workspace`, `taskbar.clock`, `taskbar.window-list.entry`,
   `taskbar.window-list.empty`, `menu.title`, `menu.frame`, `menu.item`,
   `dialog.field`, `wireframe` (a resize's outline, drawn in its
-  `border`) and `tooltip` (converted from fluxland's `systray.tooltip.*`;
-  its `radius` and `alpha` are not built). States: `focused`, `unfocused`, `pressed`, `hovered`,
+  `border`) and `tooltip` (converted from fluxland's `systray.tooltip.*`,
+  rounded as `corner_radius` says, as frames and menus are; its `alpha` is
+  not built). States: `focused`, `unfocused`, `pressed`, `hovered`,
   `disabled`.
 - Properties: `texture` (solid or gradient, with a bevel), `font`,
   `text_color`, `text_effect`, `justify`, `glyph_color`, `padding`,

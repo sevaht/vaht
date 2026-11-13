@@ -2,7 +2,8 @@
 //!
 //! As fluxland's: a window list entry whose title does not fit shows the
 //! whole title, and a tray item its own tooltip (or title), a line each,
-//! in the theme's `tooltip` style. It is centered over the pointer, 10
+//! in the theme's `tooltip` style, its corners as round as that says. It
+//! is centered over the pointer, 10
 //! pixels above it, or below it when there is no room above, and kept on
 //! the output. Moving to something else hides it and waits again; a press
 //! hides it until the pointer moves to something else.
@@ -162,12 +163,14 @@ impl Tooltip {
             lines,
             line_height: row_height,
         };
+        let corners = tooltip.corner_radii();
         let mut panel = Panel::new(content, vaht_ui::Size::new(width, height));
+        panel.set_corners(corners.inset(tooltip.border.width));
         panel.paint(theme, typesetter);
         let mut texture = PanelTexture::new();
         texture.upload(&panel);
         let mut outline = Outline::default();
-        outline.update_as(Some(area), theme, ThemeElement::Tooltip);
+        outline.update_as(Some(area), theme, ThemeElement::Tooltip, corners);
         self.shown = Some(Shown {
             area,
             border,
@@ -190,7 +193,7 @@ impl Tooltip {
         let Some(shown) = &self.shown else {
             return Vec::new();
         };
-        let mut elements = shown.outline.render_elements(scale);
+        let mut elements = shown.outline.render_elements(renderer, scale);
         let inside = shown.area.loc + Point::from((shown.border, shown.border));
         elements.extend(shown.texture.render_element(renderer, inside, scale, 1.0));
         elements

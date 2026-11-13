@@ -235,7 +235,7 @@ impl<'state> Scene<'state> {
         // Menus are above everything, even the overlay layer.
         let mut elements = self.drawn.tooltip.render_elements(renderer, scale);
         elements.extend(self.drawn.menus.render_elements(renderer, scale));
-        elements.extend(self.drawn.outline.render_elements(scale));
+        elements.extend(self.drawn.outline.render_elements(renderer, scale));
         self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
         self.push_windows(&mut elements, renderer, scale, true);
         elements.extend(

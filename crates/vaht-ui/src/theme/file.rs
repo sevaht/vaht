@@ -32,7 +32,11 @@ const CORNER_PROPERTIES: [&str; 2] = ["corner_radius", "corners"];
 
 /// The elements whose corners may be rounded: a window frame's outline and
 /// a menu's.
-const ROUNDED_ELEMENTS: [ThemeElement; 2] = [ThemeElement::Border, ThemeElement::MenuFrame];
+const ROUNDED_ELEMENTS: [ThemeElement; 3] = [
+    ThemeElement::Border,
+    ThemeElement::MenuFrame,
+    ThemeElement::Tooltip,
+];
 
 /// States of 02 §10.1 that vaht does not have yet.
 const PLANNED_STATES: [&str; 1] = ["active"];
@@ -248,9 +252,11 @@ impl StylePatch {
             return Err(refuse(
                 map,
                 format!(
-                    "`{key}` goes in [{}] or [{}] alone: only frames and menus are rounded",
+                    "`{key}` goes in [{}], [{}] or [{}] alone: only frames, menus and \
+                     tooltips are rounded",
                     ROUNDED_ELEMENTS[0].path(),
-                    ROUNDED_ELEMENTS[1].path()
+                    ROUNDED_ELEMENTS[1].path(),
+                    ROUNDED_ELEMENTS[2].path()
                 ),
             ));
         }
@@ -738,7 +744,7 @@ mod tests {
     #[case::planned_property("[window.label]\nalpha = 4\n", "not available in vaht yet", 2)]
     #[case::corners_off_the_frame(
         "[window.label]\ncorner_radius = 4\n",
-        "goes in [window.border] or [menu.frame] alone",
+        "goes in [window.border], [menu.frame] or [tooltip] alone",
         2
     )]
     #[case::corners_for_every_element(

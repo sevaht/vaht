@@ -1,96 +1,209 @@
-//! The outline an outline resize shows: where the window's frame will go.
+//! A line around an area: a resize's outline, a tooltip's edge.
 //!
-//! Four lines in the theme's `wireframe` border (white at 80%, two pixels
-//! wide, as fluxland draws it, in the built-in theme); drawn over
-//! everything but the menus.
+//! Four straight lines in the border a theme element gives (the
+//! `wireframe`: white at 80%, two pixels wide, as fluxland draws it, in the
+//! built-in theme), stopping short of rounded corners, where an arc each
+//! joins them ([`CornerTexture`]). [`Outline::lines_around`] is where such
+//! lines go, which menus' outlines share.
 
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
+use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::utils::{Logical, Rectangle, Scale};
+use vaht_ui::{Corner, CornerArc, CornerRadii, Theme, ThemeElement, WidgetState};
 
-use vaht_ui::{Theme, ThemeElement, WidgetState};
-
-use super::SceneElement;
+use super::{CornerTexture, SceneElement};
 use crate::window_manager::Area;
 
-/// The outline's lines, as the renderer takes them.
-#[derive(Debug, Default)]
+/// The outline's lines and arcs, as the renderer takes them.
+#[derive(Debug)]
 pub(crate) struct Outline {
-    /// Where each line goes: top, bottom, left, right; none while no
-    /// outline shows.
-    lines: Option<[Rectangle<i32, Logical>; 4]>,
+    /// What is outlined, while an outline shows.
+    shown: Option<Outlined>,
     /// Each line's buffer.
     buffers: [SolidColorBuffer; 4],
+    /// Each corner's arc, in [`Corner`]'s order.
+    arcs: [CornerTexture; 4],
+}
+
+/// An area outlined.
+#[derive(Debug, Clone, Copy)]
+struct Outlined {
+    /// The area.
+    area: Area,
+    /// How round its corners are.
+    corners: CornerRadii,
+    /// Its lines: top, bottom, left, right.
+    lines: [Rectangle<i32, Logical>; 4],
+}
+
+impl Default for Outline {
+    fn default() -> Self {
+        Self {
+            shown: None,
+            buffers: std::array::from_fn(|_| SolidColorBuffer::default()),
+            arcs: std::array::from_fn(|_| CornerTexture::new()),
+        }
+    }
 }
 
 impl Outline {
     /// Shows the outline of `area`, or none, in `theme`'s wireframe.
     pub(crate) fn update(&mut self, area: Option<Area>, theme: &Theme) {
-        self.update_as(area, theme, ThemeElement::Wireframe);
+        self.update_as(area, theme, ThemeElement::Wireframe, CornerRadii::SQUARE);
     }
 
     /// Shows the outline of `area`, or none, in the border `theme` gives
-    /// `element`: a resize's wireframe, a tooltip's edge.
-    pub(crate) fn update_as(&mut self, area: Option<Area>, theme: &Theme, element: ThemeElement) {
+    /// `element`, its corners as round as `corners` says.
+    pub(crate) fn update_as(
+        &mut self,
+        area: Option<Area>,
+        theme: &Theme,
+        element: ThemeElement,
+        corners: CornerRadii,
+    ) {
         let border = theme.style(element, WidgetState::Focused).border;
-        let width = i32::try_from(border.width).unwrap_or(i32::MAX);
+        let Some(area) = area else {
+            self.shown = None;
+            return;
+        };
+        let width = i32::try_from(border.width)
+            .unwrap_or(i32::MAX)
+            .min(area.size.w)
+            .min(area.size.h);
+        let lines = Self::lines_around(area, width, corners);
         // Premultiplied, as solid buffers take colors.
         let color = border.color;
         let alpha = f32::from(color.alpha) / 255.0;
         let [red, green, blue] =
             [color.red, color.green, color.blue].map(|channel| f32::from(channel) / 255.0 * alpha);
-        let render_color = [red, green, blue, alpha];
-        self.lines = area.map(|area| {
-            let thickness = width.min(area.size.w).min(area.size.h);
-            let (left, top) = (area.loc.x, area.loc.y);
-            let (width, height) = (area.size.w, area.size.h);
-            let line = |left, top, width, height| {
-                Rectangle::new((left, top).into(), (width, height).into())
-            };
-            let side_height = height - 2 * thickness;
-            [
-                line(left, top, width, thickness),
-                line(left, top + height - thickness, width, thickness),
-                line(left, top + thickness, thickness, side_height),
-                line(
-                    left + width - thickness,
-                    top + thickness,
-                    thickness,
-                    side_height,
-                ),
-            ]
-        });
-        if let Some(lines) = &self.lines {
-            for (buffer, line) in self.buffers.iter_mut().zip(lines) {
-                buffer.update(line.size, render_color);
-            }
+        for (buffer, line) in self.buffers.iter_mut().zip(&lines) {
+            buffer.update(line.size, [red, green, blue, alpha]);
         }
+        for (texture, corner) in self
+            .arcs
+            .iter_mut()
+            .zip(<Corner as strum::IntoEnumIterator>::iter())
+        {
+            texture.update(CornerArc {
+                corner,
+                radius: corners.radius(corner),
+                line_width: u32::try_from(width).unwrap_or(0),
+                color,
+            });
+        }
+        self.shown = Some(Outlined {
+            area,
+            corners,
+            lines,
+        });
+    }
+
+    /// Returns where the lines around `outer` go, `width` wide, stopping
+    /// short of its rounded `corners`: top, bottom, left, right.
+    pub(crate) fn lines_around(
+        outer: Area,
+        width: i32,
+        corners: CornerRadii,
+    ) -> [Rectangle<i32, Logical>; 4] {
+        let radius = |corner| i32::try_from(corners.radius(corner)).unwrap_or(0);
+        let (top_left, top_right) = (radius(Corner::TopLeft), radius(Corner::TopRight));
+        let (bottom_left, bottom_right) = (radius(Corner::BottomLeft), radius(Corner::BottomRight));
+        let (left, top) = (outer.loc.x, outer.loc.y);
+        let (right, bottom) = (left + outer.size.w, top + outer.size.h);
+        let line =
+            |left, top, width, height| Rectangle::new((left, top).into(), (width, height).into());
+        [
+            line(
+                left + top_left,
+                top,
+                outer.size.w - top_left - top_right,
+                width,
+            ),
+            line(
+                left + bottom_left,
+                bottom - width,
+                outer.size.w - bottom_left - bottom_right,
+                width,
+            ),
+            line(
+                left,
+                top + top_left,
+                width,
+                outer.size.h - top_left - bottom_left,
+            ),
+            line(
+                right - width,
+                top + top_right,
+                width,
+                outer.size.h - top_right - bottom_right,
+            ),
+        ]
+    }
+
+    /// Returns where the square of `corner`'s arc is: as wide as its
+    /// radius, in that corner of `outer`.
+    pub(crate) fn corner_square(outer: Area, corner: Corner, corners: CornerRadii) -> Area {
+        let radius = i32::try_from(corners.radius(corner)).unwrap_or(0);
+        let x = if corner.is_left() {
+            outer.loc.x
+        } else {
+            outer.loc.x + outer.size.w - radius
+        };
+        let y = if corner.is_top() {
+            outer.loc.y
+        } else {
+            outer.loc.y + outer.size.h - radius
+        };
+        Rectangle::new((x, y).into(), (radius, radius).into())
     }
 
     /// Returns the elements that draw the outline, if one shows.
-    pub(crate) fn render_elements<R>(&self, scale: Scale<f64>) -> Vec<SceneElement<R>>
+    pub(crate) fn render_elements<R>(
+        &self,
+        renderer: &mut R,
+        scale: Scale<f64>,
+    ) -> Vec<SceneElement<R>>
     where
-        R: smithay::backend::renderer::Renderer
-            + smithay::backend::renderer::ImportAll
-            + smithay::backend::renderer::ImportMem,
+        R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
-        let Some(lines) = &self.lines else {
+        let Some(Outlined {
+            area,
+            corners,
+            lines,
+        }) = &self.shown
+        else {
             return Vec::new();
         };
-        self.buffers
+        let mut elements: Vec<SceneElement<R>> = self
+            .arcs
             .iter()
-            .zip(lines)
-            .filter(|(_, line)| !line.is_empty())
-            .map(|(buffer, line)| {
-                SceneElement::Solid(SolidColorRenderElement::from_buffer(
-                    buffer,
-                    line.loc.to_physical_precise_round(scale),
+            .zip(<Corner as strum::IntoEnumIterator>::iter())
+            .filter_map(|(texture, corner)| {
+                texture.render_element(
+                    renderer,
+                    Self::corner_square(*area, corner, *corners),
                     scale,
                     1.0,
-                    Kind::Unspecified,
-                ))
+                )
             })
-            .collect()
+            .collect();
+        elements.extend(
+            self.buffers
+                .iter()
+                .zip(lines)
+                .filter(|(_, line)| !line.is_empty())
+                .map(|(buffer, line)| {
+                    SceneElement::Solid(SolidColorRenderElement::from_buffer(
+                        buffer,
+                        line.loc.to_physical_precise_round(scale),
+                        scale,
+                        1.0,
+                        Kind::Unspecified,
+                    ))
+                }),
+        );
+        elements
     }
 }

@@ -132,3 +132,4 @@ text_color = "white"
 justify = "left"
 padding = [8, 14, 8, 13]
 border = { width = 1, color = "#191919" }
+corner_radius = 5

@@ -16,6 +16,7 @@ use vaht_ui::{
 };
 
 use super::model::{MenuItem, MenuModel};
+use crate::scene::Outline;
 
 /// What a menu's panel shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,10 +219,6 @@ impl MenuGeometry {
             .fold(metrics.corners, |radii, corner| {
                 radii.with(corner, metrics.corners.radius(corner).min(most))
             });
-        let radius = |corner| to_i32(corners.radius(corner));
-        let (top_left, top_right) = (radius(Corner::TopLeft), radius(Corner::TopRight));
-        let (bottom_left, bottom_right) = (radius(Corner::BottomLeft), radius(Corner::BottomRight));
-        let (right, bottom) = (outer.loc.x + outer.size.w, outer.loc.y + outer.size.h);
         let title_line = if content.model.title.is_some() {
             rectangle(
                 panel.loc.x,
@@ -253,33 +250,10 @@ impl MenuGeometry {
         Self {
             outer,
             panel,
-            lines: [
-                rectangle(
-                    outer.loc.x + top_left,
-                    outer.loc.y,
-                    outer.size.w - top_left - top_right,
-                    border,
-                ),
-                rectangle(
-                    outer.loc.x + bottom_left,
-                    bottom - border,
-                    outer.size.w - bottom_left - bottom_right,
-                    border,
-                ),
-                rectangle(
-                    outer.loc.x,
-                    outer.loc.y + top_left,
-                    border,
-                    outer.size.h - top_left - bottom_left,
-                ),
-                rectangle(
-                    right - border,
-                    outer.loc.y + top_right,
-                    border,
-                    outer.size.h - top_right - bottom_right,
-                ),
-                title_line,
-            ],
+            lines: {
+                let [top, bottom, left, right] = Outline::lines_around(outer, border, corners);
+                [top, bottom, left, right, title_line]
+            },
             separators,
             line_width: metrics.border_width,
             corners,
@@ -289,19 +263,7 @@ impl MenuGeometry {
     /// Returns where the corner square of `corner` is: as wide as its
     /// radius, in that corner of the menu; empty for a square corner.
     pub(crate) fn corner_square(&self, corner: Corner) -> Rectangle<i32, Logical> {
-        let radius = to_i32(self.corners.radius(corner));
-        let outer = self.outer;
-        let x = if corner.is_left() {
-            outer.loc.x
-        } else {
-            outer.loc.x + outer.size.w - radius
-        };
-        let y = if corner.is_top() {
-            outer.loc.y
-        } else {
-            outer.loc.y + outer.size.h - radius
-        };
-        Rectangle::new((x, y).into(), (radius, radius).into())
+        Outline::corner_square(self.outer, corner, self.corners)
     }
 
     /// Returns how round the panel's corners are: the menu's, just inside
