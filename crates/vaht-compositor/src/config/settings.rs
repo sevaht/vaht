@@ -19,8 +19,8 @@ pub(crate) use self::taskbar::{
     TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent,
 };
 use crate::window_manager::{
-    ColumnDirection, PlacementStrategy, Room, RowDirection, TitlebarButton, TitlebarLayout,
-    WindowAlpha,
+    ColumnDirection, PlacementStrategy, Room, RowDirection, TileCell, TitlebarButton,
+    TitlebarLayout, WindowAlpha,
 };
 
 /// Every setting.
@@ -137,6 +137,8 @@ pub(crate) struct WindowSettings {
     pub(crate) opaque_resize: bool,
     /// What the frame shows.
     pub(crate) frame: FrameSettings,
+    /// Snapping a dragged window to the output's edges.
+    pub(crate) snapping: SnapSettings,
 }
 
 impl WindowSettings {
@@ -163,6 +165,102 @@ impl Default for WindowSettings {
             unfocused_alpha: 255,
             opaque_resize: true,
             frame: FrameSettings::default(),
+            snapping: SnapSettings::default(),
+        }
+    }
+}
+
+/// Snapping a dragged window to the output's edges (fluxland's snap
+/// zones and layout picker).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct SnapSettings {
+    /// Whether a window dragged to an edge takes that half, quarter or
+    /// the whole usable area when let go.
+    pub(crate) enabled: bool,
+    /// How close, in pixels, the pointer must come to an edge.
+    pub(crate) zone_distance: u16,
+    /// Whether dragging to the top edge shows the layout picker.
+    pub(crate) layout_picker: bool,
+    /// How wide each layout's thumbnail is, in pixels (60 to 300).
+    pub(crate) picker_size: u16,
+    /// How many thumbnails to a row; 0 for as many as fit.
+    pub(crate) picker_columns: u16,
+    /// The picker's layouts: each a list of cells, `[x, y, width,
+    /// height]` in thousandths of the usable area, as `tile` takes them.
+    #[serde(deserialize_with = "SnapSettings::deserialize_layouts")]
+    pub(crate) layouts: Vec<Vec<TileCell>>,
+}
+
+impl SnapSettings {
+    /// Returns the thumbnail width, kept to 60 to 300 pixels.
+    pub(crate) fn thumbnail_size(&self) -> u16 {
+        self.picker_size.clamp(60, 300)
+    }
+
+    /// Reads the layouts, refusing a cell outside the usable area.
+    fn deserialize_layouts<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<Vec<TileCell>>, D::Error> {
+        let layouts: Vec<Vec<[u16; 4]>> = serde::Deserialize::deserialize(deserializer)?;
+        layouts
+            .into_iter()
+            .map(|cells| {
+                cells
+                    .into_iter()
+                    .map(|[x, y, width, height]| {
+                        TileCell::new(x, y, width, height).ok_or_else(|| {
+                            serde::de::Error::custom(format!(
+                                "[{x}, {y}, {width}, {height}] is no cell: thousandths, \
+                                 not empty, inside 1000"
+                            ))
+                        })
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// fluxland's layouts, in two rows of four: splits in two (left heavy,
+    /// even, right heavy, top and bottom), then a wide middle, three
+    /// columns, a big cell with two beside it, and four quarters.
+    fn default_layouts() -> Vec<Vec<TileCell>> {
+        let layouts: [&[[u16; 4]]; 8] = [
+            &[[0, 0, 667, 1000], [667, 0, 333, 1000]],
+            &[[0, 0, 500, 1000], [500, 0, 500, 1000]],
+            &[[0, 0, 333, 1000], [333, 0, 667, 1000]],
+            &[[0, 0, 1000, 500], [0, 500, 1000, 500]],
+            &[[0, 0, 250, 1000], [250, 0, 500, 1000], [750, 0, 250, 1000]],
+            &[[0, 0, 333, 1000], [333, 0, 334, 1000], [667, 0, 333, 1000]],
+            &[[0, 0, 500, 1000], [500, 0, 500, 500], [500, 500, 500, 500]],
+            &[
+                [0, 0, 500, 500],
+                [500, 0, 500, 500],
+                [0, 500, 500, 500],
+                [500, 500, 500, 500],
+            ],
+        ];
+        layouts
+            .iter()
+            .map(|cells| {
+                cells
+                    .iter()
+                    .filter_map(|&[x, y, width, height]| TileCell::new(x, y, width, height))
+                    .collect()
+            })
+            .collect()
+    }
+}
+
+impl Default for SnapSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            zone_distance: 10,
+            layout_picker: false,
+            picker_size: 120,
+            picker_columns: 4,
+            layouts: Self::default_layouts(),
         }
     }
 }

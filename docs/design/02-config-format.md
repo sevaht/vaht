@@ -177,6 +177,14 @@ rest by name, so a setting never silently does nothing:
   was added for Fluxbox's `ColMinOverlapPlacement`. The smart strategies
   try only corners flush against edges, so `row` and `row-min-overlap`
   place alike.
+- `[windows.snapping]` (fluxland's snap zones, from `enableWindowSnapping`
+  and its kin): `enabled`, `zone_distance`; a window let go within it of
+  the left, right or bottom edge takes that half, of a corner that quarter,
+  of the top edge the whole usable area, restoring to where the move began;
+  a blue preview just under the window shows where. `layout_picker`,
+  `picker_size`, `picker_columns` and `layouts` (cells in thousandths, as
+  `tile` takes them; fluxland's eight by default): dragging to the top edge
+  shows a panel of layouts, and letting go on a cell puts the window there.
 - `[windows]`: `edge_snap_distance`, `double_click_ms`, `focused_alpha`
   and `unfocused_alpha` (0 to 255; `set-alpha` changes one window's),
   `opaque_resize`

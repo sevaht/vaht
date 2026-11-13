@@ -135,6 +135,9 @@ impl PointerGrab<Compositor> for WindowGrab {
             compositor
                 .window_manager
                 .follow_drag(window, delta.to_i32_round(), snap_distance);
+            compositor
+                .window_manager
+                .follow_drag_pointer(window, event.location.to_i32_round());
         }
     }
 

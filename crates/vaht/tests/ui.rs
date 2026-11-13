@@ -513,3 +513,27 @@ fn an_outline_resize_shows_the_size_and_resizes_on_release() {
         }
     );
 }
+
+#[test]
+fn a_window_dragged_to_the_left_edge_shows_where_and_takes_the_left_half() {
+    let mut window = OneWindow::open_with_settings("[windows.snapping]\nenabled = true\n");
+    let (x, y) = OneWindow::middle(window.titlebar());
+    window.client.move_pointer_to(x, y);
+    window.client.press(BUTTON_LEFT);
+    window.client.move_pointer_to(2, 500);
+    let during = window.client.screenshot();
+    // Low in the left half, clear of the window: the preview's blue.
+    let [red, _, blue] = during.rgb(300, 1000);
+    assert!(blue > red + 20, "a blue preview: {red} {blue}");
+    window.client.release(BUTTON_LEFT);
+    let content = window.find_content();
+    let half = during.width() / 2;
+    assert!(content.left <= 2, "{content:?}");
+    assert!(
+        content.right + 3 >= half && content.right < half,
+        "to the middle: {content:?}"
+    );
+    let after = window.client.screenshot();
+    let [red, _, blue] = after.rgb(1500, 1000);
+    assert!(blue <= red + 20, "no preview on the right: {red} {blue}");
+}

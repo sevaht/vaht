@@ -15,6 +15,7 @@
 
 mod focus;
 mod placement_strategy;
+mod snap_zones;
 mod window;
 mod windows;
 mod workspaces;
@@ -26,6 +27,7 @@ use vaht_ui::{Theme, Typesetter};
 pub(crate) use self::focus::CycleDirection;
 use self::focus::Focus;
 pub(crate) use self::placement_strategy::{ColumnDirection, PlacementStrategy, Room, RowDirection};
+use self::snap_zones::{LayoutPicker, SnapTarget};
 pub(crate) use self::window::AlphaChange;
 pub use self::window::WindowId;
 pub(crate) use self::window::{
@@ -39,9 +41,33 @@ use self::windows::Windows;
 use self::workspaces::Workspaces;
 pub(crate) use self::workspaces::{Workspace, WorkspaceTarget};
 use crate::config::{
-    Config, CycleOrder, FocusStealing, FrameSettings, Settings, WindowCycle, WindowManagerAction,
+    Config, CycleOrder, FocusStealing, FrameSettings, Settings, SnapSettings, WindowCycle,
+    WindowManagerAction,
 };
 use crate::resources::ResourceLedger;
+
+/// Where the window being moved would snap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DragSnap {
+    /// The window.
+    window: WindowId,
+    /// Where it would go, if anywhere.
+    target: Option<SnapTarget>,
+    /// The layout picker, if it shows, and the layout and cell under the
+    /// pointer.
+    picker: Option<(LayoutPicker, Option<(usize, usize)>)>,
+}
+
+/// The layout picker as it shows.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ShownPicker<'manager> {
+    /// Where it and its thumbnails are.
+    pub(crate) picker: &'manager LayoutPicker,
+    /// The layouts, one per thumbnail.
+    pub(crate) layouts: &'manager [Vec<TileCell>],
+    /// The layout and cell under the pointer.
+    pub(crate) hovered: Option<(usize, usize)>,
+}
 
 /// What a client asks for its window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -95,6 +121,10 @@ pub(crate) struct WindowManager {
     resize_style: ResizeStyle,
     /// How opaque windows are unless `set-alpha` says, from the settings.
     default_alpha: WindowAlpha,
+    /// Snapping dragged windows to the output's edges, from the settings.
+    snapping: SnapSettings,
+    /// Where the window being moved would snap, while one is.
+    drag_snap: Option<DragSnap>,
     /// Windows asked to end, until the compositor takes them.
     endings: Vec<(WindowId, Ending)>,
     /// Whether anything shown changed since the compositor last asked.
@@ -119,6 +149,8 @@ impl WindowManager {
             frame,
             resize_style: Self::resize_style(settings),
             default_alpha: settings.windows.alpha(),
+            snapping: settings.windows.snapping.clone(),
+            drag_snap: None,
             endings: Vec::new(),
             is_redraw_needed: false,
         }
@@ -535,13 +567,105 @@ impl WindowManager {
         self.is_redraw_needed = true;
     }
 
-    /// Ends the drag of `window`.
+    /// Ends the drag of `window`: a move let go over a snap zone, or a
+    /// cell of the layout picker, puts the window there, to be restored to
+    /// where the move began.
     pub(crate) fn end_drag(&mut self, window: WindowId) {
+        let snap = self
+            .drag_snap
+            .take()
+            .filter(|snap| snap.window == window)
+            .and_then(|snap| snap.target);
         if let Some(target) = self.window_mut(window) {
-            target.end_drag();
-            tracing::debug!(%window, "drag ended");
+            match snap {
+                Some(_) => target.cancel_move(),
+                None => target.end_drag(),
+            }
+            tracing::debug!(%window, ?snap, "drag ended");
+        }
+        match snap {
+            Some(SnapTarget::Maximize) => {
+                self.change_placement(Some(window), |placement, current| match placement {
+                    Placement::Floating => placement.with_maximized_toggled(Axes::Both, current),
+                    other @ (Placement::Maximized { .. }
+                    | Placement::Tiled { .. }
+                    | Placement::Fullscreen { .. }) => other,
+                });
+            }
+            Some(SnapTarget::Cell(cell)) => {
+                self.change_placement(Some(window), |_, current| Placement::Tiled {
+                    cell,
+                    restore: current,
+                });
+            }
+            None => {}
         }
         self.is_redraw_needed = true;
+    }
+
+    /// Follows the pointer, at `pointer`, of a move of `window`: over a
+    /// snap zone or the layout picker's cells, the window would go there.
+    pub(crate) fn follow_drag_pointer(&mut self, window: WindowId, pointer: Point<i32, Logical>) {
+        let is_moving = self.windows.get(window).is_some_and(Window::is_moving);
+        if !self.snapping.enabled || !is_moving {
+            self.drag_snap = None;
+            return;
+        }
+        let usable = self.output.usable;
+        let distance = i32::from(self.snapping.zone_distance);
+        let zone = SnapTarget::at(pointer, usable, distance);
+        let was_picking = self
+            .drag_snap
+            .as_ref()
+            .is_some_and(|snap| snap.picker.is_some());
+        let mut target = zone;
+        let mut picker = None;
+        if self.snapping.layout_picker
+            && let Some(layout) = LayoutPicker::new(
+                self.snapping.layouts.len(),
+                usable,
+                self.snapping.thumbnail_size(),
+                self.snapping.picker_columns,
+                distance,
+            )
+            && (zone == Some(SnapTarget::Maximize)
+                || (was_picking && layout.holds(pointer, usable)))
+        {
+            let hit = layout.hit(&self.snapping.layouts, pointer);
+            if let Some((index, cell)) = hit {
+                target = Some(SnapTarget::Cell(self.snapping.layouts[index][cell]));
+            } else if zone != Some(SnapTarget::Maximize) {
+                // Between the picker's cells: nowhere.
+                target = None;
+            }
+            picker = Some((layout, hit));
+        }
+        let snap = DragSnap {
+            window,
+            target,
+            picker,
+        };
+        if self.drag_snap.as_ref() != Some(&snap) {
+            self.drag_snap = Some(snap);
+            self.is_redraw_needed = true;
+        }
+    }
+
+    /// Returns where the window being moved would snap, with its id.
+    pub(crate) fn snap_preview(&self) -> Option<(WindowId, Area)> {
+        let snap = self.drag_snap.as_ref()?;
+        Some((snap.window, snap.target?.area_in(self.output.usable)))
+    }
+
+    /// Returns the layout picker shown, the layouts and the cell under the
+    /// pointer, while a move shows it.
+    pub(crate) fn layout_picker(&self) -> Option<ShownPicker<'_>> {
+        let (picker, hovered) = self.drag_snap.as_ref()?.picker.as_ref()?;
+        Some(ShownPicker {
+            picker,
+            layouts: &self.snapping.layouts,
+            hovered: *hovered,
+        })
     }
 
     /// Holds down the titlebar button of `window` at `location`, if there
@@ -594,6 +718,7 @@ impl WindowManager {
         }
         self.resize_style = Self::resize_style(settings);
         self.default_alpha = settings.windows.alpha();
+        self.snapping = settings.windows.snapping.clone();
         if settings.windows.frame != self.frame {
             self.frame = settings.windows.frame.clone();
             self.restyle(self.theme_metrics);
@@ -1475,6 +1600,71 @@ mod tests {
             "out of reach"
         );
         desk.manager.end_drag(window);
+    }
+
+    /// A desk whose windows snap to the edges, the layout picker on.
+    fn snapping_desk() -> Desk {
+        let mut config = Config::built_in();
+        config.settings.windows.snapping.enabled = true;
+        config.settings.windows.snapping.layout_picker = true;
+        Desk::with_config(config)
+    }
+
+    #[test]
+    fn a_window_let_go_at_the_left_edge_takes_the_left_half_and_restores_back() {
+        let mut desk = snapping_desk();
+        let window = desk.open();
+        desk.run(&action("move-to 100 100"));
+        let before = desk.outer(window);
+        assert!(
+            desk.manager
+                .begin_drag(window, WindowDrag::Move, (150.0, 110.0).into())
+        );
+        desk.manager.follow_drag(window, (-145, 300).into(), 0);
+        desk.manager.follow_drag_pointer(window, (5, 410).into());
+        let usable = output(0).usable;
+        let left_half = Rectangle::new(usable.loc, (usable.size.w / 2, usable.size.h).into());
+        assert_eq!(desk.manager.snap_preview(), Some((window, left_half)));
+        desk.manager.end_drag(window);
+        desk.settle();
+        assert_eq!(desk.outer(window), left_half);
+        assert_eq!(desk.manager.snap_preview(), None, "the preview goes");
+        desk.run(&action("maximize"));
+        desk.run(&action("maximize"));
+        assert_eq!(desk.outer(window), before, "back where the move began");
+    }
+
+    #[test]
+    fn the_top_edge_maximizes_and_the_picker_puts_the_window_on_a_cell() {
+        let mut desk = snapping_desk();
+        let window = desk.open();
+        assert!(
+            desk.manager
+                .begin_drag(window, WindowDrag::Move, (150.0, 110.0).into())
+        );
+        desk.manager.follow_drag_pointer(window, (960, 2).into());
+        assert_eq!(
+            desk.manager.snap_preview().map(|(_, area)| area),
+            Some(output(0).usable),
+            "the top edge maximizes"
+        );
+        let shown = desk.manager.layout_picker().expect("the picker shows");
+        let thumb = shown.picker.thumbs()[1];
+        let right_cell = thumb.loc + Point::from((thumb.size.w * 3 / 4, thumb.size.h / 2));
+        desk.manager.follow_drag_pointer(window, right_cell);
+        let usable = output(0).usable;
+        let right_half = Rectangle::new(
+            (usable.loc.x + usable.size.w / 2, usable.loc.y).into(),
+            (usable.size.w / 2, usable.size.h).into(),
+        );
+        assert_eq!(
+            desk.manager.snap_preview().map(|(_, area)| area),
+            Some(right_half),
+            "the even split's right cell"
+        );
+        desk.manager.end_drag(window);
+        desk.settle();
+        assert_eq!(desk.outer(window), right_half);
     }
 
     #[test]

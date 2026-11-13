@@ -204,6 +204,7 @@ impl ImageCopyCaptureHandler for Compositor {
                 backdrop: &self.backdrop,
                 outline: &self.outline,
                 tooltip: &self.tooltip,
+                snap: &self.snap_overlay,
             },
             OutputLayers::new(output, self.backend.output_geometry()),
         );

@@ -38,8 +38,8 @@ pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, Wi
 pub(crate) use self::overrides::SettingOverrides;
 pub(crate) use self::rules::{FocusStealing, Rules};
 pub(crate) use self::settings::{
-    FocusModel, FrameSettings, MenuSearch, Settings, TaskbarAlign, TaskbarEdge, TaskbarSettings,
-    TaskbarWidget, WallpaperSettings, WidthPercent,
+    FocusModel, FrameSettings, MenuSearch, Settings, SnapSettings, TaskbarAlign, TaskbarEdge,
+    TaskbarSettings, TaskbarWidget, WallpaperSettings, WidthPercent,
 };
 pub(crate) use self::source::ConfigSource;
 pub(crate) use self::theme::ThemeFile;

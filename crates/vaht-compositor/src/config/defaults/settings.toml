@@ -36,6 +36,33 @@ unfocused_alpha = 255
 # drag ends.
 opaque_resize = true
 
+[windows.snapping]
+# Whether a window dragged to the output's edge takes that half (the left,
+# right or bottom edge), quarter (a corner) or the whole usable area (the
+# top edge) when let go; a preview shows where.
+enabled = false
+# How close, in pixels, the pointer must come to the edge.
+zone_distance = 10
+# Whether dragging to the top edge shows a picker of layouts: letting go on
+# a layout's cell puts the window there.
+layout_picker = false
+# Each layout's thumbnail width (60 to 300), and how many to a row (0: as
+# many as fit).
+picker_size = 120
+picker_columns = 4
+# The layouts: each a list of cells, [x, y, width, height] in thousandths of
+# the usable area, as tile takes them.
+layouts = [
+    [[0, 0, 667, 1000], [667, 0, 333, 1000]],
+    [[0, 0, 500, 1000], [500, 0, 500, 1000]],
+    [[0, 0, 333, 1000], [333, 0, 667, 1000]],
+    [[0, 0, 1000, 500], [0, 500, 1000, 500]],
+    [[0, 0, 250, 1000], [250, 0, 500, 1000], [750, 0, 250, 1000]],
+    [[0, 0, 333, 1000], [333, 0, 334, 1000], [667, 0, 333, 1000]],
+    [[0, 0, 500, 1000], [500, 0, 500, 500], [500, 500, 500, 500]],
+    [[0, 0, 500, 500], [500, 0, 500, 500], [0, 500, 500, 500], [500, 500, 500, 500]],
+]
+
 [windows.frame]
 # Buttons: shade, stick, minimize, maximize, close.
 titlebar_left = []

@@ -290,6 +290,7 @@ impl InitFile {
             self.resources.get(&format!("{SCREEN}opaqueResizeDelay"));
         }
         self.convert_flag("allowRemoteActions", &["ipc", "allow_commands"]);
+        self.convert_snapping(report);
         self.convert_flag("clientMenu.usePixmap", &["menus", "window_icons"]);
         // Fluxbox's -1 turns tooltips off.
         match self.number(&format!("{SCREEN}tooltipDelay")) {
@@ -483,6 +484,82 @@ impl InitFile {
         ] {
             self.resources.accept_default(&toolbar(name), default);
         }
+    }
+
+    /// fluxland's snap zones and layout picker: `enableWindowSnapping`,
+    /// `snapZoneThreshold`, `snapLayoutPicker`, `snapLayoutPickerSize`,
+    /// `snapLayoutPickerColumns` and `snapLayouts`.
+    fn convert_snapping(&mut self, report: &mut Report) {
+        let section = ["windows", "snapping"];
+        self.convert_flag("enableWindowSnapping", &[section[0], section[1], "enabled"]);
+        self.convert_flag(
+            "snapLayoutPicker",
+            &[section[0], section[1], "layout_picker"],
+        );
+        for (resource, key) in [
+            ("snapZoneThreshold", "zone_distance"),
+            ("snapLayoutPickerSize", "picker_size"),
+            ("snapLayoutPickerColumns", "picker_columns"),
+        ] {
+            if let Some(number) = self.number(&format!("{SCREEN}{resource}")) {
+                self.set(&[section[0], section[1], key], Value::from(number.max(0)));
+            }
+        }
+        let Some(layouts) = self.resources.get(&format!("{SCREEN}snapLayouts")).cloned() else {
+            return;
+        };
+        match Self::snap_layouts(&layouts.value) {
+            Some(converted) => self.set(
+                &[section[0], section[1], "layouts"],
+                Value::Array(converted),
+            ),
+            None => self.note(
+                report,
+                layouts.line,
+                format!(
+                    "the snap layouts {} (cells vaht cannot read)",
+                    layouts.value
+                ),
+            ),
+        }
+    }
+
+    /// Converts fluxland's `snapLayouts`: layouts split at `;`, cells at
+    /// blanks, each `x,y,width,height` in percent; to vaht's cells in
+    /// thousandths. None if a cell is not one.
+    fn snap_layouts(text: &str) -> Option<Array> {
+        let layouts = text
+            .split(';')
+            .filter(|layout| !layout.trim().is_empty())
+            .map(|layout| {
+                let cells = layout
+                    .split_whitespace()
+                    .map(|cell| {
+                        let numbers = cell
+                            .split(',')
+                            .map(|number| number.trim().parse::<f64>().ok())
+                            .collect::<Option<Vec<f64>>>()?;
+                        let [x, y, width, height] = numbers.as_slice() else {
+                            return None;
+                        };
+                        let thousandths: Array = [x, y, width, height]
+                            .into_iter()
+                            .map(|percent| {
+                                #[expect(
+                                    clippy::cast_possible_truncation,
+                                    reason = "percentages to 100, rounded"
+                                )]
+                                let rounded = (percent * 10.0).round() as i64;
+                                rounded
+                            })
+                            .collect();
+                        Some(Value::Array(thousandths))
+                    })
+                    .collect::<Option<Array>>()?;
+                Some(Value::Array(cells))
+            })
+            .collect::<Option<Array>>()?;
+        Some(layouts)
     }
 
     /// The tray's pins, from `systray.pinLeft` and `systray.pinRight`
@@ -710,6 +787,22 @@ session.screen0.toolbar.widthPercent:\t80
             convert("session.screen0.tooltipDelay:\t-1\n"),
             "[taskbar.tooltips]\nenabled = false\n"
         );
+    }
+
+    #[test]
+    fn snapping_converts_with_its_layouts_in_thousandths() {
+        let init = "session.screen0.enableWindowSnapping:\ttrue\n\
+                    session.screen0.snapLayoutPicker:\ttrue\n\
+                    session.screen0.snapLayouts:\t0,0,66.7,100 66.7,0,33.3,100;0,0,50,100 50,0,50,100\n";
+        let mut report = Report::default();
+        let document =
+            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        assert_eq!(
+            document.to_string(),
+            "[windows.snapping]\nenabled = true\nlayout_picker = true\n\
+             layouts = [[[0, 0, 667, 1000], [667, 0, 333, 1000]], [[0, 0, 500, 1000], [500, 0, 500, 1000]]]\n"
+        );
+        assert!(report.notes().is_empty(), "{report}");
     }
 
     #[test]

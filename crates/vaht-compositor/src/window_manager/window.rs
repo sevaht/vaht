@@ -573,6 +573,19 @@ impl Window {
         }
     }
 
+    /// Returns whether the window is being moved by hand.
+    pub(crate) const fn is_moving(&self) -> bool {
+        matches!(self.drag, Some(DragProgress::Move { .. }))
+    }
+
+    /// Ends a move, putting the window back where it began.
+    pub(crate) fn cancel_move(&mut self) {
+        if let Some(DragProgress::Move { origin }) = self.drag {
+            self.location = origin;
+            self.drag = None;
+        }
+    }
+
     /// Ends the drag in progress; a resize's last size from the client is
     /// still anchored when it arrives.
     pub(crate) fn end_drag(&mut self) {

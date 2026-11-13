@@ -69,7 +69,9 @@ use crate::layers::{Layers, OutputLayers};
 use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack};
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceKind, ResourceLedger};
-use crate::scene::{Backdrop, Drawn, FrameTextures, Outline, PointerTarget, Scene, WindowTarget};
+use crate::scene::{
+    Backdrop, Drawn, FrameTextures, Outline, PointerTarget, Scene, SnapOverlay, WindowTarget,
+};
 use crate::signals::ProcessSignals;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
 use crate::tooltip::Tooltip;
@@ -110,6 +112,8 @@ pub struct Compositor {
     pub(crate) backdrop: Backdrop,
     /// The outline of an outline resize.
     pub(crate) outline: Outline,
+    /// Where a moved window would snap, and the layout picker.
+    pub(crate) snap_overlay: SnapOverlay,
     /// The program of the tray item last clicked, and when: it may bring
     /// its windows forward for `activation_grace_ms`.
     pub(crate) tray_grant: Option<(u32, Instant)>,
@@ -278,6 +282,7 @@ impl Compositor {
             menus: MenuStack::with_search(config.settings.menus.search),
             backdrop: Backdrop::new(&config.settings.wallpaper, config_source.directory()),
             outline: Outline::default(),
+            snap_overlay: SnapOverlay::default(),
             tooltip: Tooltip::default(),
             tray_grant: None,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
@@ -342,6 +347,7 @@ impl Compositor {
                 backdrop: &self.backdrop,
                 outline: &self.outline,
                 tooltip: &self.tooltip,
+                snap: &self.snap_overlay,
             },
             self.output_layers(),
         )
@@ -431,6 +437,7 @@ impl Compositor {
                 backdrop: &self.backdrop,
                 outline: &self.outline,
                 tooltip: &self.tooltip,
+                snap: &self.snap_overlay,
             },
             OutputLayers::new(&output, self.backend.output_geometry()),
         );
@@ -477,6 +484,7 @@ impl Compositor {
             .prepare(self.backend.output_geometry(), &self.window_manager);
         self.outline
             .update(self.window_manager.outline(), &self.config.theme);
+        self.snap_overlay.update(&self.window_manager);
     }
 
     /// Starts managing the window of a new xdg-shell toplevel.
