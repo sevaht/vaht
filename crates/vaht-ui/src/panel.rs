@@ -92,6 +92,20 @@ impl<Content: PanelContent> Panel<Content> {
         self.layout.as_ref()?.hit_at(point)
     }
 
+    /// Returns where the widget reporting `hit` is, in the panel's pixels,
+    /// as last laid out.
+    pub fn area_of(&self, hit: Content::Hit) -> Option<Rect>
+    where
+        Content::Hit: PartialEq,
+    {
+        self.layout
+            .as_ref()?
+            .placed()
+            .iter()
+            .find(|placed| placed.hit == Some(hit))
+            .map(|placed| placed.rect)
+    }
+
     /// Returns the widget the pointer is holding down.
     pub const fn pressed(&self) -> Option<Content::Hit> {
         self.pressed

@@ -33,6 +33,7 @@ mod scene;
 mod shared_memory;
 mod signals;
 mod taskbar;
+mod tooltip;
 mod toplevels;
 mod tray;
 mod wall_clock;

@@ -80,6 +80,12 @@ icons = true
 pin_left = []
 pin_right = []
 
+[taskbar.tooltips]
+# Whether resting the pointer on an entry whose title does not fit, or on a
+# tray item, shows a tooltip, and after how long.
+enabled = true
+delay_ms = 500
+
 [taskbar.clock]
 # strftime: %k:%M is the hour, space-padded, and the minutes.
 format = "%k:%M"

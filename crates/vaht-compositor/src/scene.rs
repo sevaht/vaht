@@ -38,6 +38,7 @@ pub(crate) use self::panel_texture::PanelTexture;
 use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, OutputLayers};
 use crate::menu::MenuStack;
 use crate::taskbar::{Taskbar, TaskbarHit};
+use crate::tooltip::Tooltip;
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::window_manager::{FramePart, Window, WindowId, WindowManager};
 
@@ -168,6 +169,8 @@ pub(crate) struct Drawn<'state> {
     pub(crate) backdrop: &'state Backdrop,
     /// The outline of an outline resize.
     pub(crate) outline: &'state Outline,
+    /// The tooltip, if one shows.
+    pub(crate) tooltip: &'state Tooltip,
 }
 
 impl<'state> Scene<'state> {
@@ -230,7 +233,8 @@ impl<'state> Scene<'state> {
         R::TextureId: Send + Clone + 'static,
     {
         // Menus are above everything, even the overlay layer.
-        let mut elements = self.drawn.menus.render_elements(renderer, scale);
+        let mut elements = self.drawn.tooltip.render_elements(renderer, scale);
+        elements.extend(self.drawn.menus.render_elements(renderer, scale));
         elements.extend(self.drawn.outline.render_elements(scale));
         self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
         self.push_windows(&mut elements, renderer, scale, true);

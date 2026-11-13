@@ -38,7 +38,7 @@ const ROUNDED_ELEMENTS: [ThemeElement; 2] = [ThemeElement::Border, ThemeElement:
 const PLANNED_STATES: [&str; 1] = ["active"];
 
 /// Elements of 02 §10.1 that vaht does not have yet.
-const PLANNED_ELEMENTS: [&str; 3] = ["taskbar.tray", "tooltip", "snap-picker"];
+const PLANNED_ELEMENTS: [&str; 2] = ["taskbar.tray", "snap-picker"];
 
 impl ThemeLayers {
     /// Reads a theme file's text.
@@ -756,7 +756,7 @@ mod tests {
         "not available in vaht yet",
         1
     )]
-    #[case::planned_element("[tooltip]\nheight = 3\n", "not available in vaht yet", 1)]
+    #[case::planned_element("[snap-picker]\nheight = 3\n", "not available in vaht yet", 1)]
     #[case::unknown_state("[state.sleepy]\ntext_color = \"red\"\n", "is no state", 1)]
     #[case::bad_color("[default]\ntext_color = \"blurple\"\n", "not a color", 2)]
     #[case::half_gradient(

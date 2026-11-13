@@ -283,6 +283,14 @@ impl InitFile {
         self.convert_flag("opaqueResize", &["windows", "opaque_resize"]);
         self.convert_flag("allowRemoteActions", &["ipc", "allow_commands"]);
         self.convert_flag("clientMenu.usePixmap", &["menus", "window_icons"]);
+        // Fluxbox's -1 turns tooltips off.
+        match self.number(&format!("{SCREEN}tooltipDelay")) {
+            Some(delay) if delay < 0 => {
+                self.set(&["taskbar", "tooltips", "enabled"], Value::from(false));
+            }
+            Some(delay) => self.set(&["taskbar", "tooltips", "delay_ms"], Value::from(delay)),
+            None => {}
+        }
         for (state, key) in [("focus", "focused_alpha"), ("unfocus", "unfocused_alpha")] {
             if let Some(alpha) = self.number(&format!("{SCREEN}window.{state}.alpha")) {
                 self.set(&["windows", key], Value::from(alpha.clamp(0, 255)));
@@ -668,6 +676,24 @@ session.screen0.toolbar.widthPercent:\t80
             reasons,
             [(7, Reason::Dropped), (8, Reason::Dropped)],
             "the tabs and the opaque alpha"
+        );
+    }
+
+    #[test]
+    fn the_tooltip_delay_converts_and_minus_one_turns_tooltips_off() {
+        let convert = |init: &str| {
+            let mut report = Report::default();
+            InitFile::new(Resources::parse(Path::new("init"), init))
+                .convert(&mut report)
+                .to_string()
+        };
+        assert_eq!(
+            convert("session.screen0.tooltipDelay:\t200\n"),
+            "[taskbar.tooltips]\ndelay_ms = 200\n"
+        );
+        assert_eq!(
+            convert("session.screen0.tooltipDelay:\t-1\n"),
+            "[taskbar.tooltips]\nenabled = false\n"
         );
     }
 

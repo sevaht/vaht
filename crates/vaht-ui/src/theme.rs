@@ -63,6 +63,8 @@ pub enum ThemeElement {
     /// The outline a resize shows while the window keeps its size: its
     /// `border` is the lines' width and color.
     Wireframe,
+    /// A tooltip: a title too long for its place, or a tray item's text.
+    Tooltip,
 }
 
 impl ThemeElement {
@@ -87,6 +89,7 @@ impl ThemeElement {
             Self::MenuItem => "menu.item",
             Self::DialogField => "dialog.field",
             Self::Wireframe => "wireframe",
+            Self::Tooltip => "tooltip",
         }
     }
 

@@ -26,9 +26,13 @@ pub(crate) struct Outline {
 impl Outline {
     /// Shows the outline of `area`, or none, in `theme`'s wireframe.
     pub(crate) fn update(&mut self, area: Option<Area>, theme: &Theme) {
-        let border = theme
-            .style(ThemeElement::Wireframe, WidgetState::Focused)
-            .border;
+        self.update_as(area, theme, ThemeElement::Wireframe);
+    }
+
+    /// Shows the outline of `area`, or none, in the border `theme` gives
+    /// `element`: a resize's wireframe, a tooltip's edge.
+    pub(crate) fn update_as(&mut self, area: Option<Area>, theme: &Theme, element: ThemeElement) {
+        let border = theme.style(element, WidgetState::Focused).border;
         let width = i32::try_from(border.width).unwrap_or(i32::MAX);
         // Premultiplied, as solid buffers take colors.
         let color = border.color;

@@ -352,7 +352,7 @@ impl Sources {
             ThemeElement::MenuTitle | ThemeElement::MenuFrame | ThemeElement::MenuItem => {
                 Self::of_menu(element, state)
             }
-            ThemeElement::DialogField | ThemeElement::Wireframe => Self {
+            ThemeElement::DialogField | ThemeElement::Wireframe | ThemeElement::Tooltip => Self {
                 is_built_in: true,
                 ..Self::texture(&[])
             },
@@ -417,7 +417,8 @@ impl Sources {
             | ThemeElement::WindowListEntry
             | ThemeElement::WindowListEmpty
             | ThemeElement::DialogField
-            | ThemeElement::Wireframe => Self {
+            | ThemeElement::Wireframe
+            | ThemeElement::Tooltip => Self {
                 font: Some(&["menu.frame.font"]),
                 text_color: Some(&["menu.frame.textColor"]),
                 justify: Some(&["menu.frame.justify"]),
@@ -429,13 +430,8 @@ impl Sources {
 
 /// The style's lines that vaht leaves out on purpose or cannot use yet, by
 /// how their names start, with why.
-const UNUSED_REASONS: [(&str, Reason, &str); 7] = [
+const UNUSED_REASONS: [(&str, Reason, &str); 6] = [
     ("menu", Reason::NotYetInVaht, "not in vaht's menus yet"),
-    (
-        "systray",
-        Reason::NotYetInVaht,
-        "the tray's tooltips: vaht has no tooltips yet",
-    ),
     ("slit", Reason::Dropped, "the slit is gone"),
     ("window.tab", Reason::Dropped, "tabs are gone"),
     (
@@ -486,6 +482,7 @@ impl StyleFile {
     /// Returns what the style gives every element in every state.
     fn cells(&mut self, report: &mut Report) -> Vec<(ThemeElement, WidgetState, Cell)> {
         let mut cells = Vec::new();
+        let mut tooltip: Option<Cell> = None;
         let mut textures: HashMap<(ThemeElement, WidgetState), Written> = HashMap::new();
         // Parents first, so ParentRelative finds their textures.
         let mut elements: Vec<ThemeElement> =
@@ -495,6 +492,16 @@ impl StyleFile {
         for element in elements {
             for state in <WidgetState as strum::IntoEnumIterator>::iter() {
                 let sources = Sources::of(element, state);
+                if element == ThemeElement::Tooltip {
+                    // The same in every state, read (and noted) once.
+                    let cell = match &tooltip {
+                        Some(cell) => Clone::clone(cell),
+                        None => self.tooltip_cell(report),
+                    };
+                    tooltip = Some(cell.clone());
+                    cells.push((element, state, cell));
+                    continue;
+                }
                 if sources.is_built_in {
                     cells.push((element, state, Self::built_in_cell(element)));
                     continue;
@@ -598,7 +605,8 @@ impl StyleFile {
             | ThemeElement::WindowListEntry
             | ThemeElement::WindowListEmpty
             | ThemeElement::DialogField
-            | ThemeElement::Wireframe => None,
+            | ThemeElement::Wireframe
+            | ThemeElement::Tooltip => None,
         };
         if let Some(height) = height {
             cell.insert(Property::Height, Written(Value::from(i64::from(height))));
@@ -645,8 +653,57 @@ impl StyleFile {
             | ThemeElement::MenuTitle
             | ThemeElement::MenuItem
             | ThemeElement::DialogField
-            | ThemeElement::Wireframe => {}
+            | ThemeElement::Wireframe
+            | ThemeElement::Tooltip => {}
         }
+    }
+
+    /// Returns the tooltip's style: fluxland's tray tooltip, as the
+    /// built-in theme has it, with what the style's `systray.tooltip.*`
+    /// lines say instead.
+    fn tooltip_cell(&mut self, report: &mut Report) -> Cell {
+        let mut cell = Self::built_in_cell(ThemeElement::Tooltip);
+        if let Some(color) = self.color("systray.tooltip.color", report) {
+            let mut texture = InlineTable::new();
+            texture.insert("solid", Value::from(color));
+            cell.insert(Property::Texture, Written(Value::InlineTable(texture)));
+        }
+        if let Some(color) = self.color("systray.tooltip.textColor", report) {
+            cell.insert(Property::TextColor, Written(Value::from(color)));
+        }
+        if self.database.get("systray.tooltip.font").is_some() {
+            self.add_font(&mut cell, &["systray.tooltip.font"], report);
+        }
+        if let Some(color) = self.color("systray.tooltip.borderColor", report) {
+            let mut border = InlineTable::new();
+            border.insert("width", Value::from(1));
+            border.insert("color", Value::from(color));
+            cell.insert(Property::Border, Written(Value::InlineTable(border)));
+        }
+        let built_in = [8, 14, 8, 13];
+        let sides = ["Top", "Right", "Bottom", "Left"];
+        let padding: Array = sides
+            .iter()
+            .zip(built_in)
+            .map(|(side, default)| {
+                let name = format!("systray.tooltip.padding{side}");
+                i64::from(self.number(&[name.as_str()]).unwrap_or(default))
+            })
+            .collect();
+        cell.insert(Property::Padding, Written(Value::Array(padding)));
+        if self
+            .number(&["systray.tooltip.radius"])
+            .is_some_and(|radius| radius > 0)
+        {
+            self.note_resource("systray.tooltip.radius", report, "rounded tooltips");
+        }
+        if self
+            .number(&["systray.tooltip.alpha"])
+            .is_some_and(|alpha| alpha < 255)
+        {
+            self.note_resource("systray.tooltip.alpha", report, "translucent tooltips");
+        }
+        cell
     }
 
     /// Returns what vaht's built-in theme says of `element` in its own

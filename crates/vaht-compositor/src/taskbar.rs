@@ -252,6 +252,47 @@ impl Taskbar {
         self.panel.hit_at(self.local(point.to_i32_floor()))
     }
 
+    /// Returns the tooltip for global `point`: a window list entry's title
+    /// if it does not fit, as `theme` and `typesetter` lay it out, or a
+    /// tray item's text; none elsewhere.
+    pub(crate) fn tooltip_at(
+        &self,
+        point: Point<f64, Logical>,
+        theme: &Theme,
+        typesetter: &mut Typesetter,
+    ) -> Option<String> {
+        let hit = self.hit_at(point)?;
+        let content = self.panel.content();
+        match hit {
+            TaskbarHit::Entry(window) => {
+                let entry = content
+                    .entries
+                    .iter()
+                    .find(|entry| entry.window == window)?;
+                let area = self.panel.area_of(hit)?;
+                let style = theme.style(ThemeElement::WindowListEntry, WidgetState::Focused);
+                let shown = entry.shown_title();
+                let icon = entry
+                    .icon
+                    .as_ref()
+                    .map_or(0, |_| WidgetIcon::span(area.height));
+                let needed = typesetter.text_width(&shown, &style.text.font)
+                    + style.padding.horizontal()
+                    + icon;
+                (needed > area.width).then(|| entry.title.clone())
+            }
+            TaskbarHit::TrayItem(key) => content
+                .tray
+                .iter()
+                .find(|entry| entry.key == key)
+                .and_then(|entry| entry.tooltip.clone()),
+            TaskbarHit::WorkspacePrevious
+            | TaskbarHit::WorkspaceName
+            | TaskbarHit::WorkspaceNext
+            | TaskbarHit::Clock => None,
+        }
+    }
+
     /// Brings what the taskbar shows up to date with `window_manager`,
     /// `settings` and the time `now`, and paints it to fill its edge of an
     /// output covering `whole`, `height` pixels tall, as `theme` styles it.
@@ -494,6 +535,11 @@ impl TaskbarContent {
             .iter()
             .map(|item| TrayEntry {
                 key: item.key,
+                tooltip: item
+                    .tooltip
+                    .clone()
+                    .filter(|text| !text.trim().is_empty())
+                    .or_else(|| (!item.title.is_empty()).then(|| item.title.clone())),
                 icon: match &item.icon {
                     ItemIcon::Named {
                         name,
@@ -623,6 +669,8 @@ impl PanelContent for TaskbarContent {
 struct TrayEntry {
     /// The item.
     key: TrayItemKey,
+    /// Its tooltip: its own, else its title; none when both are empty.
+    tooltip: Option<String>,
     /// Its icon, if one was found.
     icon: Option<vaht_ui::Icon>,
 }
@@ -644,13 +692,19 @@ struct WindowListEntry {
 }
 
 impl WindowListEntry {
-    /// Returns the entry's widget, at most `max_width` wide.
-    fn widget(&self, max_width: u32) -> Widget<TaskbarHit> {
-        let title = if self.is_minimized {
+    /// Returns the title as the entry shows it: in parentheses when the
+    /// window is minimized, as Fluxbox shows it.
+    fn shown_title(&self) -> String {
+        if self.is_minimized {
             format!("({})", self.title)
         } else {
             self.title.clone()
-        };
+        }
+    }
+
+    /// Returns the entry's widget, at most `max_width` wide.
+    fn widget(&self, max_width: u32) -> Widget<TaskbarHit> {
+        let title = self.shown_title();
         let state = if self.is_focused {
             WidgetState::Focused
         } else {
@@ -790,6 +844,7 @@ mod tests {
             tray: [1, 2]
                 .map(|key| TrayEntry {
                     key: TrayItemKey(key),
+                    tooltip: None,
                     icon: None,
                 })
                 .to_vec(),

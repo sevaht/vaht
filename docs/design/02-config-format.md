@@ -205,7 +205,10 @@ rest by name, so a setting never silently does nothing:
   second half), `auto_hide` and `auto_hide_delay_ms` (hidden until the
   pointer touches the edge, hidden again that long after it leaves; an
   auto-hiding taskbar reserves nothing, and its clock rests while hidden),
-  `reserve_space`,
+  `reserve_space`, `[taskbar.tooltips]` `enabled` and `delay_ms` (from
+  `tooltipDelay`;
+  resting the pointer on an entry whose title does not fit shows the whole
+  title, and on a tray item its tooltip, in the theme's `tooltip`),
   `widgets` (`workspace-previous`, `workspace-name`, `workspace-next`,
   `window-list`, `tray`, `clock`),
   `[taskbar.window_list]` with `show` (a matcher),
@@ -704,8 +707,9 @@ exactly what each element gets.
 - Elements: the window's six, and `taskbar`, `taskbar.button`,
   `taskbar.workspace`, `taskbar.clock`, `taskbar.window-list.entry`,
   `taskbar.window-list.empty`, `menu.title`, `menu.frame`, `menu.item`,
-  `dialog.field` and `wireframe` (a resize's outline, drawn in its
-  `border`). States: `focused`, `unfocused`, `pressed`, `hovered`,
+  `dialog.field`, `wireframe` (a resize's outline, drawn in its
+  `border`) and `tooltip` (converted from fluxland's `systray.tooltip.*`;
+  its `radius` and `alpha` are not built). States: `focused`, `unfocused`, `pressed`, `hovered`,
   `disabled`.
 - Properties: `texture` (solid or gradient, with a bevel), `font`,
   `text_color`, `text_effect`, `justify`, `glyph_color`, `padding`,

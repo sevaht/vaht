@@ -30,6 +30,8 @@ pub(crate) struct TaskbarSettings {
     pub(crate) auto_hide: bool,
     /// How long after the pointer leaves it an auto-hiding taskbar hides.
     pub(crate) auto_hide_delay_ms: u64,
+    /// Its tooltips.
+    pub(crate) tooltips: TooltipSettings,
     /// What it shows, left to right.
     pub(crate) widgets: Vec<TaskbarWidget>,
     /// The window list.
@@ -50,6 +52,7 @@ impl Default for TaskbarSettings {
             reserve_space: true,
             auto_hide: false,
             auto_hide_delay_ms: 500,
+            tooltips: TooltipSettings::default(),
             widgets: vec![
                 TaskbarWidget::WorkspacePrevious,
                 TaskbarWidget::WorkspaceName,
@@ -66,6 +69,16 @@ impl Default for TaskbarSettings {
 }
 
 impl TaskbarSettings {
+    /// Returns how long the pointer rests before a tooltip shows; none
+    /// when tooltips are off.
+    pub(crate) const fn tooltip_delay(&self) -> Option<Duration> {
+        if self.tooltips.enabled {
+            Some(Duration::from_millis(self.tooltips.delay_ms))
+        } else {
+            None
+        }
+    }
+
     /// Returns how long after the pointer leaves it an auto-hiding taskbar
     /// hides; none when it does not hide.
     pub(crate) const fn hide_delay(&self) -> Option<Duration> {
@@ -345,5 +358,25 @@ mod tests {
     fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {
         let error = taskbar(text).expect_err(text);
         assert!(error.contains(expected), "{error}");
+    }
+}
+
+/// The taskbar's tooltips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct TooltipSettings {
+    /// Whether resting the pointer on an entry whose title does not fit,
+    /// or on a tray item, shows a tooltip.
+    pub(crate) enabled: bool,
+    /// How long the pointer rests before a tooltip shows.
+    pub(crate) delay_ms: u64,
+}
+
+impl Default for TooltipSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            delay_ms: 500,
+        }
     }
 }

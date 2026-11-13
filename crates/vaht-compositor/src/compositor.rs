@@ -72,6 +72,7 @@ use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::{Backdrop, Drawn, FrameTextures, Outline, PointerTarget, Scene, WindowTarget};
 use crate::signals::ProcessSignals;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
+use crate::tooltip::Tooltip;
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::tray::TrayAction;
 use crate::window_manager::{
@@ -109,6 +110,8 @@ pub struct Compositor {
     pub(crate) backdrop: Backdrop,
     /// The outline of an outline resize.
     pub(crate) outline: Outline,
+    /// The tooltip for what the pointer rests on.
+    pub(crate) tooltip: Tooltip,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
     /// Finds application icons, for the taskbar and menus.
@@ -272,6 +275,7 @@ impl Compositor {
             menus: MenuStack::with_search(config.settings.menus.search),
             backdrop: Backdrop::new(&config.settings.wallpaper, config_source.directory()),
             outline: Outline::default(),
+            tooltip: Tooltip::default(),
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             icons: vaht_ui::IconStore::from_environment(),
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
@@ -333,6 +337,7 @@ impl Compositor {
                 menus: &self.menus,
                 backdrop: &self.backdrop,
                 outline: &self.outline,
+                tooltip: &self.tooltip,
             },
             self.output_layers(),
         )
@@ -421,6 +426,7 @@ impl Compositor {
                 menus: &self.menus,
                 backdrop: &self.backdrop,
                 outline: &self.outline,
+                tooltip: &self.tooltip,
             },
             OutputLayers::new(&output, self.backend.output_geometry()),
         );
@@ -1196,6 +1202,37 @@ impl Compositor {
         }
     }
 
+    /// Notes what has a tooltip under the pointer at `location`: the
+    /// taskbar's entries and tray items, while no menu is open.
+    fn follow_tooltip(&mut self, location: Point<f64, Logical>) {
+        let text = self
+            .taskbar
+            .as_ref()
+            .filter(|taskbar| {
+                taskbar.is_shown() && taskbar.covers(location) && !self.menus.is_open()
+            })
+            .and_then(|taskbar| {
+                taskbar.tooltip_at(location, &self.config.theme, &mut self.typesetter)
+            });
+        let delay = self.config.settings.taskbar.tooltip_delay();
+        if self
+            .tooltip
+            .follow(text, delay, (&self.loop_handle, &self.ledger))
+        {
+            self.schedule_render();
+        }
+    }
+
+    /// Shows the tooltip for what the pointer has rested on.
+    pub(crate) fn show_tooltip(&mut self) {
+        let pointer = self.pointer_location().to_i32_round();
+        let bounds = self.backend.output_geometry();
+        self.tooltip
+            .show(pointer, bounds, (&self.config.theme, &mut self.typesetter));
+        tracing::debug!("tooltip shown");
+        self.schedule_render();
+    }
+
     /// Moves the pointer to `location`, telling the surface under it.
     fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
         let whole = self.backend.output_geometry();
@@ -1206,6 +1243,7 @@ impl Compositor {
             self.schedule_clock();
             self.schedule_render();
         }
+        self.follow_tooltip(location);
         if self.menus.is_open()
             && self.menus.follow_pointer(
                 location,
@@ -1272,6 +1310,9 @@ impl Compositor {
         let location = pointer.current_location();
         match event.state() {
             ButtonState::Pressed if !pointer.is_grabbed() => {
+                if self.tooltip.hide() {
+                    self.schedule_render();
+                }
                 self.press_button(event.button_code(), location, serial);
             }
             ButtonState::Pressed => {}

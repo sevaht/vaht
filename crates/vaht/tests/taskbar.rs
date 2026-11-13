@@ -311,3 +311,31 @@ fn a_window_s_drawn_icon_is_shown() {
         "the picture the window drew, before its application's icon"
     );
 }
+
+#[test]
+fn a_title_too_long_for_its_entry_shows_in_a_tooltip_until_a_click() {
+    let settings = "[taskbar]\nwidgets = [\"window-list\"]\n[taskbar.tooltips]\ndelay_ms = 10\n\
+                    [taskbar.window_list]\nentry_width = { max = 30 }\n";
+    let vaht =
+        HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("settings.toml", settings)]);
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let height = client.screenshot().height();
+    let pointer = (15, height - HEIGHT / 2);
+    // Inside the tooltip's bottom padding: it is above the pointer, and
+    // kept on the output at its left edge.
+    let spot = (3, pointer.1 - 13);
+    let before = client.screenshot().rgb(spot.0, spot.1);
+    client.move_pointer_to(pointer.0, pointer.1);
+    vaht.wait_for_logged("tooltip shown", 1);
+    let shown = client.screenshot().rgb(spot.0, spot.1);
+    assert_eq!(shown, [0, 0, 0], "the built-in tooltip is black");
+    assert_ne!(before, shown);
+    client.press(vaht_test_support::BUTTON_RIGHT);
+    client.release(vaht_test_support::BUTTON_RIGHT);
+    assert_eq!(
+        client.screenshot().rgb(spot.0, spot.1),
+        before,
+        "a click hides it"
+    );
+}
