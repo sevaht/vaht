@@ -43,6 +43,8 @@ pub(crate) struct Settings {
     pub(crate) menus: MenuSettings,
     /// The wallpaper.
     pub(crate) wallpaper: WallpaperSettings,
+    /// vaht's IPC socket.
+    pub(crate) ipc: IpcSettings,
     /// Starting the session.
     pub(crate) session: SessionSettings,
 }
@@ -327,6 +329,23 @@ impl WallpaperSettings {
         match image.strip_prefix("~/") {
             Some(rest) => Some(PathBuf::from(std::env::var_os("HOME")?).join(rest)),
             None => Some(config_directory.join(image)),
+        }
+    }
+}
+
+/// vaht's IPC socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct IpcSettings {
+    /// Whether programs other than vaht's own dialogs may run commands
+    /// over IPC; asking for windows and workspaces is always allowed.
+    pub(crate) allow_commands: bool,
+}
+
+impl Default for IpcSettings {
+    fn default() -> Self {
+        Self {
+            allow_commands: true,
         }
     }
 }

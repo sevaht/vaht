@@ -910,10 +910,14 @@ dialogs use too.
 - **`vaht msg`** asks from the command line: `vaht msg run workspace 2`,
   `vaht msg windows`, `vaht msg workspaces`, `vaht msg version`; `--json`
   prints the reply as sent.
-- **Not built yet:** event subscriptions, the JSON Schema export, and
-  `[ipc] allow_commands`. For now every client may run commands, as any
-  program of the user's can already do through the Wayland socket's
-  virtual keyboard.
+- **`[ipc] allow_commands`** (on by default; from Fluxbox's
+  `allowRemoteActions`): off, only vaht's own dialogs may run commands,
+  known by the process at the other end of the socket. Asking for windows
+  and workspaces stays open to every client. The socket is the user's own
+  (in `XDG_RUNTIME_DIR`, mode 0700), so this guards against the user's
+  other programs, which can already type through the virtual keyboard
+  protocol.
+- **Not built yet:** event subscriptions and the JSON Schema export.
 
 ---
 

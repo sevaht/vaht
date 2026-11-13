@@ -151,3 +151,22 @@ fn what_a_dialog_writes_to_its_errors_reaches_vahts_log() {
     client.type_chord(&[keys::ESCAPE]);
     vaht.wait_for_logged("window closed", 1);
 }
+
+#[test]
+fn vahts_own_dialogs_run_commands_when_other_programs_may_not() {
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let marker = files.path().join("ran");
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[
+            ("bindings.toml", "[keys]\n\"Super+T\" = \"run-dialog\"\n"),
+            ("settings.toml", "[ipc]\nallow_commands = false\n"),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.type_chord(&SUPER_T);
+    vaht.wait_for_logged("placed first", 1);
+    client.type_text(&format!("touch {}", marker.display()));
+    client.type_chord(&[keys::ENTER]);
+    wait_for_file(&marker, |_| true);
+}

@@ -101,6 +101,11 @@ search = "item-start"
 # with grey beside), center or tile (at its own size), or stretch.
 fit = "fill"
 
+[ipc]
+# Whether programs other than vaht's own dialogs may run commands over the
+# IPC socket (vaht msg run ...). Asking what is open is always allowed.
+allow_commands = true
+
 [session]
 # Command lines run once when vaht starts, as exec runs them.
 autostart = []

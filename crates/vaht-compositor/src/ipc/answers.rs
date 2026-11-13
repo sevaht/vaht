@@ -9,12 +9,20 @@ use crate::config::{Action, Command};
 use crate::execution::ExecutionContext;
 
 impl IpcHandler for Compositor {
-    fn answer(&mut self, request: Request) -> Reply {
+    fn answer(&mut self, request: Request, peer: Option<i32>) -> Reply {
         match request {
             Request::Version {} => Reply::Version {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
             },
             Request::Run { command, window } => {
+                let is_own_dialog = peer.is_some_and(|pid| self.launcher.is_dialog(pid));
+                if !self.config.settings.ipc.allow_commands && !is_own_dialog {
+                    return Reply::Error {
+                        message:
+                            "commands from other programs are turned off ([ipc] allow_commands)"
+                                .to_owned(),
+                    };
+                }
                 let action = match Action::parse(&command) {
                     Ok(action) => action,
                     Err(message) => return Reply::Error { message },

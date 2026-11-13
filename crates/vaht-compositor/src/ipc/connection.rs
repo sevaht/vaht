@@ -24,6 +24,8 @@ pub(super) struct Connection {
     input: Vec<u8>,
     /// Replies not yet written.
     output: Vec<u8>,
+    /// The process at the other end, if known.
+    peer: Option<i32>,
     /// Counts the connection while it lives.
     _tracked: Tracked,
 }
@@ -34,11 +36,13 @@ impl Connection {
     /// without bound (03 §1).
     const MAX_UNSENT_BYTES: usize = 16 * MAX_MESSAGE_BYTES;
 
-    /// Creates an empty connection, counted in `ledger`.
-    pub(super) fn new(ledger: &ResourceLedger) -> Self {
+    /// Creates an empty connection to the process `peer`, counted in
+    /// `ledger`.
+    pub(super) fn new(peer: Option<i32>, ledger: &ResourceLedger) -> Self {
         Self {
             input: Vec::new(),
             output: Vec::new(),
+            peer,
             _tracked: ledger.track(ResourceKind::IpcConnection),
         }
     }
@@ -71,7 +75,7 @@ impl Connection {
         while let Some(end) = self.input.iter().position(|byte| *byte == b'\n') {
             let line: Vec<u8> = self.input.drain(..=end).collect();
             let reply = match serde_json::from_slice::<Request>(&line) {
-                Ok(request) => handler.answer(request),
+                Ok(request) => handler.answer(request, self.peer),
                 Err(error) => Reply::Error {
                     message: format!("not a request: {error}"),
                 },
@@ -114,7 +118,7 @@ mod tests {
     struct Echo;
 
     impl IpcHandler for Echo {
-        fn answer(&mut self, request: Request) -> Reply {
+        fn answer(&mut self, request: Request, _: Option<i32>) -> Reply {
             Reply::Error {
                 message: format!("{request:?}"),
             }
@@ -128,7 +132,7 @@ mod tests {
 
     #[test]
     fn each_complete_line_gets_one_reply_in_order() {
-        let mut connection = Connection::new(&ResourceLedger::new());
+        let mut connection = Connection::new(None, &ResourceLedger::new());
         let progress =
             connection.receive(b"{\"request\":\"version\"}\n{\"request\":\"win", &mut Echo);
         assert_eq!(progress, Progress::Open);
@@ -142,21 +146,21 @@ mod tests {
 
     #[test]
     fn a_line_that_is_not_a_request_gets_an_error_reply() {
-        let mut connection = Connection::new(&ResourceLedger::new());
+        let mut connection = Connection::new(None, &ResourceLedger::new());
         connection.receive(b"hello\n", &mut Echo);
         assert!(unsent(&connection).contains("not a request"));
     }
 
     #[test]
     fn an_endless_line_ends_the_connection() {
-        let mut connection = Connection::new(&ResourceLedger::new());
+        let mut connection = Connection::new(None, &ResourceLedger::new());
         let progress = connection.receive(&vec![b'x'; MAX_MESSAGE_BYTES], &mut Echo);
         assert!(matches!(progress, Progress::Ended(_)));
     }
 
     #[test]
     fn a_client_that_never_reads_is_dropped() {
-        let mut connection = Connection::new(&ResourceLedger::new());
+        let mut connection = Connection::new(None, &ResourceLedger::new());
         let requests = "{\"request\":\"version\"}\n".repeat(Connection::MAX_UNSENT_BYTES / 10);
         let progress = connection.receive(requests.as_bytes(), &mut Echo);
         assert!(matches!(progress, Progress::Ended(_)));

@@ -164,3 +164,21 @@ fn cycling_in_opening_order_goes_through_windows_as_they_opened() {
     client.type_chord(&[vaht_test_support::keys::F1]);
     assert_eq!(focused(&vaht), Some(opened[1]));
 }
+
+#[test]
+fn commands_can_be_turned_off_for_other_programs() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[ipc]\nallow_commands = false\n")],
+    );
+    let output = message(&vaht, &["run", "workspace", "2"]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("allow_commands"),
+        "{output:?}"
+    );
+    assert!(
+        message(&vaht, &["workspaces"]).status.success(),
+        "asking is still allowed"
+    );
+}

@@ -42,6 +42,9 @@ use crate::{Compositor, WindowId};
 pub(crate) struct Launcher {
     /// The programs started that have not been reaped yet.
     running: Vec<(Pid, Tracked)>,
+    /// Which of them are vaht's own dialogs, which may always run commands
+    /// over IPC.
+    dialogs: Vec<Pid>,
     /// The error output of dialogs still writing it, by process.
     error_outputs: BTreeMap<i32, EventSource<Compositor>>,
     /// Dialogs whose error output ended during the last dispatch: their
@@ -74,6 +77,7 @@ impl Launcher {
     ) -> Self {
         Self {
             running: Vec::new(),
+            dialogs: Vec::new(),
             error_outputs: BTreeMap::new(),
             ended_outputs: Vec::new(),
             loop_handle: loop_handle.clone(),
@@ -89,6 +93,12 @@ impl Launcher {
         if let Err(error) = self.start(Path::new(Self::SHELL), &arguments, command_line, None) {
             Self::warn_not_started(&error, command_line);
         }
+    }
+
+    /// Returns whether the process `pid` is one of vaht's dialogs, still
+    /// running.
+    pub(crate) fn is_dialog(&self, pid: i32) -> bool {
+        self.dialogs.contains(&Pid::from_raw(pid))
     }
 
     /// Drops the sources of the error outputs that ended.
@@ -143,7 +153,10 @@ impl Launcher {
                 Ok((pid, reader))
             });
         match started {
-            Ok((pid, reader)) => self.read_errors(pid, reader, name.to_owned()),
+            Ok((pid, reader)) => {
+                self.dialogs.push(pid);
+                self.read_errors(pid, reader, name.to_owned());
+            }
             Err(error) => Self::warn_not_started(&error, &what),
         }
     }
@@ -211,16 +224,23 @@ impl Launcher {
 
     /// Reaps every program that has exited.
     pub(crate) fn reap(&mut self) {
+        let dialogs = &mut self.dialogs;
         self.running
             .retain(|(pid, _)| match waitpid(*pid, Some(WaitPidFlag::WNOHANG)) {
                 Ok(WaitStatus::StillAlive) => true,
                 Ok(status) => {
                     tracing::debug!(%pid, ?status, "program exited");
                     // Stopped and continued programs are still running.
-                    !matches!(status, WaitStatus::Exited(..) | WaitStatus::Signaled(..))
+                    let is_gone =
+                        matches!(status, WaitStatus::Exited(..) | WaitStatus::Signaled(..));
+                    if is_gone {
+                        dialogs.retain(|dialog| dialog != pid);
+                    }
+                    !is_gone
                 }
                 Err(error) => {
                     tracing::warn!(%error, %pid, "could not check on a program; no longer tracking it");
+                    dialogs.retain(|dialog| dialog != pid);
                     false
                 }
             });

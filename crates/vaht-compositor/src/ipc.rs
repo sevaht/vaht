@@ -28,8 +28,9 @@ use crate::resources::ResourceLedger;
 
 /// What answers IPC requests: the compositor.
 pub(crate) trait IpcHandler {
-    /// Carries out `request` and returns the reply.
-    fn answer(&mut self, request: Request) -> Reply;
+    /// Carries out `request`, from the process `peer` (none if unknown),
+    /// and returns the reply.
+    fn answer(&mut self, request: Request, peer: Option<i32>) -> Reply;
 }
 
 /// The IPC socket and the clients connected to it.
@@ -125,7 +126,12 @@ impl IpcServer {
         }
         let number = self.next_number;
         self.next_number += 1;
-        let mut connection = Connection::new(ledger);
+        // The process at the other end, which commands may depend on.
+        let peer =
+            nix::sys::socket::getsockopt(&stream, nix::sys::socket::sockopt::PeerCredentials)
+                .ok()
+                .map(|credentials| credentials.pid());
+        let mut connection = Connection::new(peer, ledger);
         // Edge-triggered: each wake-up reads and writes until the socket
         // would block, and writing waits for the socket to drain without
         // waking the loop while there is nothing to write.

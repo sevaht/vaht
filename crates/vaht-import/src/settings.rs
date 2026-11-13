@@ -148,7 +148,7 @@ impl InitFile {
 
     /// Resources whose value asks for what vaht does anyway, so there is
     /// nothing to convert or report: each name, and that value.
-    const WHAT_VAHT_DOES: [(&str, &str); 11] = [
+    const WHAT_VAHT_DOES: [(&str, &str); 10] = [
         // No guard against focus moving while the user types.
         ("session.screen0.noFocusWhileTypingDelay", "0"),
         // Resizing does not snap to edges.
@@ -166,8 +166,6 @@ impl InitFile {
         ("session.screen0.maxDisableResize", "false"),
         // Focus moves between windows whatever output they are on.
         ("session.screen0.focusSameHead", "false"),
-        // IPC clients may run commands.
-        ("session.screen0.allowRemoteActions", "true"),
         // vaht lays text out at 96 dots per inch.
         ("session.dpi", "96"),
     ];
@@ -283,6 +281,7 @@ impl InitFile {
             self.set(&["windows", "double_click_ms"], Value::from(interval));
         }
         self.convert_flag("opaqueResize", &["windows", "opaque_resize"]);
+        self.convert_flag("allowRemoteActions", &["ipc", "allow_commands"]);
         for (state, key) in [("focus", "focused_alpha"), ("unfocus", "unfocused_alpha")] {
             if let Some(alpha) = self.number(&format!("{SCREEN}window.{state}.alpha")) {
                 self.set(&["windows", key], Value::from(alpha.clamp(0, 255)));
