@@ -73,8 +73,8 @@ fn a_key_binding_starts_a_program_that_vaht_reaps() {
     );
     vaht.wait_for_logged("program exited", 1);
     drop(client);
-    // No window was shown, so no buffer waits for a frame to be let go.
-    vaht.wait_for_logged("client disconnected", 1);
+    // The client's memory pool goes with the frame after it leaves.
+    vaht.wait_for_disconnections(1);
     let report = vaht.stop();
     assert_eq!(report.live_count("program"), 0, "the program was reaped");
     report.assert_nothing_left_behind();

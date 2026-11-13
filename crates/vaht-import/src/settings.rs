@@ -125,8 +125,60 @@ impl InitFile {
         if let Some(delay) = self.number(&format!("{SCREEN}menuDelay")) {
             self.set(&["menus", "submenu_delay_ms"], Value::from(delay));
         }
+        self.accept_what_vaht_does();
         self.report_unused(report);
         self.document
+    }
+
+    /// Resources whose value asks for what vaht does anyway, so there is
+    /// nothing to convert or report: each name, and that value.
+    const WHAT_VAHT_DOES: [(&str, &str); 11] = [
+        // No guard against focus moving while the user types.
+        ("session.screen0.noFocusWhileTypingDelay", "0"),
+        // Resizing does not snap to edges.
+        ("session.screen0.edgeResizeSnapThreshold", "0"),
+        // No position overlay while a window moves.
+        ("session.screen0.showwindowposition", "false"),
+        // Dragging a window to the output's edge does not change workspace.
+        ("session.screen0.workspacewarping", "false"),
+        // Wayland windows have no size increments to keep.
+        ("session.screen0.maxIgnoreIncrement", "true"),
+        // Maximized windows leave the taskbar its room.
+        ("session.screen0.fullMaximization", "false"),
+        // Maximized windows can be moved and resized; they float first.
+        ("session.screen0.maxDisableMove", "false"),
+        ("session.screen0.maxDisableResize", "false"),
+        // Focus moves between windows whatever output they are on.
+        ("session.screen0.focusSameHead", "false"),
+        // IPC clients may run commands.
+        ("session.screen0.allowRemoteActions", "true"),
+        // vaht lays text out at 96 dots per inch.
+        ("session.dpi", "96"),
+    ];
+
+    /// The settings of workspace warping, which matter only while it is on.
+    const WARPING_DETAILS: [&str; 4] = [
+        "workspacewarpinghorizontal",
+        "workspacewarpingvertical",
+        "workspacewarpinghorizontaloffset",
+        "workspacewarpingverticaloffset",
+    ];
+
+    /// Marks used the resources that ask for what vaht does anyway, and
+    /// the details of workspace warping when it is off.
+    fn accept_what_vaht_does(&mut self) {
+        for (name, value) in Self::WHAT_VAHT_DOES {
+            self.resources.accept_default(name, value);
+        }
+        let is_warping_off = self
+            .resources
+            .value(&format!("{SCREEN}workspacewarping"))
+            .is_some_and(|value| value.eq_ignore_ascii_case("false"));
+        if is_warping_off {
+            for detail in Self::WARPING_DETAILS {
+                self.resources.get(&format!("{SCREEN}{detail}"));
+            }
+        }
     }
 
     /// The `[focus]` section.
@@ -601,6 +653,25 @@ session.screen0.toolbar.widthPercent:\t80
             [(7, Reason::Dropped), (8, Reason::Dropped)],
             "the tabs and the opaque alpha"
         );
+    }
+
+    #[test]
+    fn settings_asking_for_what_vaht_does_need_nothing() {
+        let init = "session.screen0.workspacewarping:\tfalse\n\
+                    session.screen0.workspacewarpinghorizontaloffset:\t1\n\
+                    session.dpi:\t96\n\
+                    session.screen0.noFocusWhileTypingDelay:\t250\n";
+        let mut report = Report::default();
+        let document =
+            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        assert_eq!(document.to_string(), "");
+        let notes: Vec<String> = report.notes().iter().map(ToString::to_string).collect();
+        assert_eq!(
+            notes.len(),
+            1,
+            "only the typing delay vaht lacks: {notes:?}"
+        );
+        assert!(notes[0].contains("noFocusWhileTypingDelay"), "{notes:?}");
     }
 
     #[test]
