@@ -1,6 +1,10 @@
 # vaht's built-in settings: what applies to each key that
 # ~/.config/vaht/settings.toml leaves out. Every key is optional.
 
+# The theme: themes/<name>.toml in this directory, or in
+# /usr/share/vaht/themes. Without it, the built-in theme.
+# theme = "name"
+
 [focus]
 # click: a window takes focus when clicked. sloppy: when the pointer
 # enters it, keeping it while the pointer is on the desktop.

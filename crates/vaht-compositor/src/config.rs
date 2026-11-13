@@ -17,6 +17,7 @@ mod matcher;
 mod rules;
 mod settings;
 mod source;
+mod theme;
 mod unique_map;
 mod watch;
 
@@ -24,12 +25,15 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use vaht_ui::Theme;
+
 pub(crate) use self::bindings::{Bindings, KeyChord, Modifiers, MouseButton, MouseContext};
 pub(crate) use self::command::{Action, Command, ResizeFrom, WindowManagerAction};
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::rules::Rules;
 pub(crate) use self::settings::{FocusModel, Settings};
 pub(crate) use self::source::ConfigSource;
+pub(crate) use self::theme::ThemeFile;
 
 /// One configuration file and vaht's built-in version of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +76,8 @@ pub struct Config {
     pub(crate) settings: Settings,
     /// What happens to particular windows (`rules.toml`).
     pub(crate) rules: Rules,
+    /// How everything vaht draws looks: the theme `settings.toml` names.
+    pub(crate) theme: Theme,
 }
 
 impl Config {
@@ -100,10 +106,16 @@ impl Config {
     /// that is not valid, with the line and column of the problem.
     pub fn load(directory: &Path) -> Result<Self, ConfigError> {
         let [bindings, settings, rules] = Self::FILES;
+        let settings: Settings = settings.read(directory)?;
+        let theme = match &settings.theme {
+            Some(name) => ThemeFile::find(directory, name)?.read()?,
+            None => Theme::built_in(),
+        };
         Ok(Self {
             bindings: bindings.read(directory)?,
-            settings: settings.read(directory)?,
+            settings,
             rules: rules.read(directory)?,
+            theme,
         })
     }
 
@@ -120,6 +132,7 @@ impl Config {
                 .expect("the built-in bindings are valid (tested)"),
             settings: Settings::default(),
             rules: Rules::default(),
+            theme: Theme::built_in(),
         }
     }
 }
@@ -149,12 +162,28 @@ pub enum ConfigError {
         /// What is wrong.
         message: String,
     },
+
+    /// The settings name a theme by something other than a plain name.
+    #[error("not a theme name: {name:?} (a theme is themes/<name>.toml)")]
+    ThemeName {
+        /// The name as written.
+        name: String,
+    },
+
+    /// The theme the settings name exists nowhere vaht looks.
+    #[error("no theme `{name}`: looked for {}", searched.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(" and "))]
+    MissingTheme {
+        /// The theme's name.
+        name: String,
+        /// Where vaht looked.
+        searched: Vec<PathBuf>,
+    },
 }
 
 impl ConfigError {
     /// Describes `error`, found in `text` read from `path`, by line and
     /// column.
-    fn invalid(path: PathBuf, text: &str, error: &toml::de::Error) -> Self {
+    pub(crate) fn invalid(path: PathBuf, text: &str, error: &toml::de::Error) -> Self {
         let offset = error.span().map_or(0, |span| span.start);
         let before = text.get(..offset).unwrap_or(text);
         let line = before.matches('\n').count() + 1;

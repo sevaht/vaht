@@ -1,0 +1,70 @@
+# vaht's built-in theme, after the nacitar_fbstyle Fluxbox style by nacitar
+# sevaht: dark grey gradients, white haloed text, a thin grey border.
+#
+# A theme gives a style to each element in each state, in four layers, each
+# overriding the one before: [default], [state.<state>], [<element>], and
+# [<element>.<state>]. Elements: window.titlebar, window.label,
+# window.button, window.handle, window.grip, window.border, taskbar,
+# taskbar.button, taskbar.workspace, taskbar.clock,
+# taskbar.window-list.entry, taskbar.window-list.empty. States: focused,
+# unfocused, pressed.
+
+[default]
+font = { family = "DejaVu Sans", size = 8, weight = "bold" }
+text_effect = { halo = "black" }
+text_color = "white"
+glyph_color = "white"
+justify = "center"
+texture = { gradient = "vertical", from = "grey30", to = "grey5" }
+padding = [0, 0, 0, 0]
+border = { width = 0, color = "grey60" }
+
+[state.focused]
+texture = { gradient = "vertical", from = "grey55", to = "grey5" }
+
+[state.unfocused]
+text_color = "grey55"
+glyph_color = "grey55"
+
+[state.pressed]
+texture = { gradient = "cross-diagonal", from = "grey20", to = "grey40", bevel = "sunken" }
+
+[window.titlebar]
+height = 20
+
+[window.label]
+padding = [0, 4, 0, 4]
+
+[window.button]
+padding = [5, 5, 5, 5]
+
+[window.border]
+border = { width = 1, color = "grey60" }
+
+[window.handle]
+height = 1
+texture = { gradient = "vertical", from = "white", to = "grey60", bevel = "raised" }
+
+[window.grip]
+texture = { gradient = "vertical", from = "white", to = "grey60", bevel = "raised" }
+
+[taskbar]
+height = 20
+
+[taskbar.button]
+padding = [5, 5, 5, 5]
+
+[taskbar.workspace]
+padding = [0, 8, 0, 8]
+
+[taskbar.clock]
+padding = [0, 8, 0, 8]
+
+[taskbar.window-list.entry]
+padding = [0, 10, 0, 10]
+
+[taskbar.window-list.entry.focused]
+texture = { gradient = "vertical", from = "grey55", to = "grey5", bevel = "raised" }
+
+[taskbar.window-list.entry.unfocused]
+texture = { gradient = "vertical", from = "grey30", to = "grey5", bevel = "sunken" }

@@ -29,11 +29,16 @@ pub fn run(directory: &Path) -> ExitCode {
     }
 }
 
-/// Prints every built-in configuration file, each under a header naming it.
+/// Prints every built-in configuration file, each under a header naming it,
+/// then the built-in theme, to copy into `themes/<name>.toml`.
 #[must_use]
 pub fn print_defaults() -> ExitCode {
     for file in Config::FILES {
         terminal::print(&format!("# ===== {} =====\n{}", file.name, file.defaults));
     }
+    terminal::print(&format!(
+        "# ===== themes/<name>.toml: the built-in theme =====\n{}",
+        vaht_ui::Theme::BUILT_IN
+    ));
     ExitCode::SUCCESS
 }

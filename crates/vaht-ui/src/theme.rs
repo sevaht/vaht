@@ -10,14 +10,18 @@
 //! 4. one element in one state.
 //!
 //! These replace Fluxbox's wildcard resource matching. Drawing never cascades:
-//! it looks the resolved style up.
+//! it looks the resolved style up. Theme files are TOML (`theme/file.rs`
+//! reads them); the built-in theme is one too, `theme/built_in.toml`, after
+//! the `nacitar_fbstyle` Fluxbox style.
+
+mod file;
 
 use std::collections::HashMap;
 
 use crate::color::Color;
 use crate::geometry::Insets;
 use crate::text::{Font, FontWeight, Justify, TextEffect, TextStyle};
-use crate::texture::{Bevel, GradientDirection, Texture};
+use crate::texture::Texture;
 
 /// Something a theme styles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::EnumIter)]
@@ -34,6 +38,45 @@ pub enum ThemeElement {
     Grip,
     /// The line around a window.
     Border,
+    /// The taskbar's background.
+    Taskbar,
+    /// A taskbar button, such as the next-workspace arrow.
+    TaskbarButton,
+    /// The name of the workspace shown, on the taskbar.
+    TaskbarWorkspace,
+    /// The clock on the taskbar.
+    TaskbarClock,
+    /// One window's entry in the taskbar's window list.
+    WindowListEntry,
+    /// The window list when it lists no window.
+    WindowListEmpty,
+}
+
+impl ThemeElement {
+    /// Returns the element's name in theme files, a dotted path.
+    #[must_use]
+    pub const fn path(self) -> &'static str {
+        match self {
+            Self::Titlebar => "window.titlebar",
+            Self::Label => "window.label",
+            Self::Button => "window.button",
+            Self::Handle => "window.handle",
+            Self::Grip => "window.grip",
+            Self::Border => "window.border",
+            Self::Taskbar => "taskbar",
+            Self::TaskbarButton => "taskbar.button",
+            Self::TaskbarWorkspace => "taskbar.workspace",
+            Self::TaskbarClock => "taskbar.clock",
+            Self::WindowListEntry => "taskbar.window-list.entry",
+            Self::WindowListEmpty => "taskbar.window-list.empty",
+        }
+    }
+
+    /// Returns the element named `path` in theme files.
+    #[must_use]
+    pub fn at_path(path: &str) -> Option<Self> {
+        <Self as strum::IntoEnumIterator>::iter().find(|element| element.path() == path)
+    }
 }
 
 /// The state a widget is drawn in.
@@ -47,6 +90,33 @@ pub enum WidgetState {
     Pressed,
 }
 
+impl WidgetState {
+    /// Returns the state's name in theme files.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Focused => "focused",
+            Self::Unfocused => "unfocused",
+            Self::Pressed => "pressed",
+        }
+    }
+
+    /// Returns the state named `name` in theme files.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        <Self as strum::IntoEnumIterator>::iter().find(|state| state.name() == name)
+    }
+}
+
+/// A line drawn around an element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct BorderStyle {
+    /// How thick, in pixels; 0 for none.
+    pub width: u32,
+    /// Its color.
+    pub color: Color,
+}
+
 /// How one element looks in one state, every property decided.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Style {
@@ -58,6 +128,11 @@ pub struct Style {
     pub glyph_color: Color,
     /// Space between the edges and the content.
     pub padding: Insets,
+    /// The line around it.
+    pub border: BorderStyle,
+    /// The height of a bar, in pixels; `None` where the element is not a
+    /// bar, or the bar takes the default.
+    pub height: Option<u32>,
 }
 
 impl Style {
@@ -78,6 +153,8 @@ impl Style {
             },
             glyph_color: Color::WHITE,
             padding: Insets::default(),
+            border: BorderStyle::default(),
+            height: None,
         }
     }
 }
@@ -99,6 +176,10 @@ pub struct StylePatch {
     pub glyph_color: Option<Color>,
     /// The padding, if this layer sets it.
     pub padding: Option<Insets>,
+    /// The border, if this layer sets it.
+    pub border: Option<BorderStyle>,
+    /// The bar height, if this layer sets it.
+    pub height: Option<u32>,
 }
 
 impl StylePatch {
@@ -125,10 +206,16 @@ impl StylePatch {
         if let Some(padding) = self.padding {
             style.padding = padding;
         }
+        if let Some(border) = self.border {
+            style.border = border;
+        }
+        if let Some(height) = self.height {
+            style.height = Some(height);
+        }
     }
 }
 
-/// Sizes a theme sets that belong to no single element.
+/// Sizes the compositor lays windows and bars out by, from the theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Metrics {
     /// The height of a window's titlebar.
@@ -137,10 +224,12 @@ pub struct Metrics {
     pub border_width: u32,
     /// The height of the strip along a window's bottom edge.
     pub handle_height: u32,
+    /// The height of the taskbar.
+    pub taskbar_height: u32,
 }
 
 /// A theme as written: four layers of patches, not yet resolved.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ThemeLayers {
     /// Applies to everything.
     pub default: StylePatch,
@@ -150,8 +239,6 @@ pub struct ThemeLayers {
     pub by_element: HashMap<ThemeElement, StylePatch>,
     /// Applies to one element in one state.
     pub by_element_state: HashMap<(ThemeElement, WidgetState), StylePatch>,
-    /// The theme's sizes.
-    pub metrics: Metrics,
 }
 
 /// A resolved theme: a complete style for every element in every state.
@@ -159,11 +246,15 @@ pub struct ThemeLayers {
 pub struct Theme {
     /// The style of each element in each state.
     styles: HashMap<(ThemeElement, WidgetState), Style>,
-    /// The theme's sizes.
-    metrics: Metrics,
 }
 
 impl Theme {
+    /// The height of a bar whose theme sets none, in pixels.
+    pub const DEFAULT_BAR_HEIGHT: u32 = 20;
+
+    /// The built-in theme, as a theme file.
+    pub const BUILT_IN: &str = include_str!("theme/built_in.toml");
+
     /// Resolves `layers`, applying them in cascade order.
     #[must_use]
     pub fn resolve(layers: &ThemeLayers) -> Self {
@@ -183,17 +274,21 @@ impl Theme {
                 styles.insert((element, state), style);
             }
         }
-        Self {
-            styles,
-            metrics: layers.metrics,
-        }
+        Self { styles }
     }
 
     /// Returns the built-in theme: dark grey gradients with white, haloed
     /// text, after the `nacitar_fbstyle` Fluxbox style.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the built-in theme file is invalid; a unit test makes sure
+    /// it is not.
     #[must_use]
     pub fn built_in() -> Self {
-        Self::resolve(&built_in_layers())
+        Self::resolve(
+            &ThemeLayers::from_toml(Self::BUILT_IN).expect("the built-in theme is valid (tested)"),
+        )
     }
 
     /// Returns how `element` looks in `state`.
@@ -208,143 +303,19 @@ impl Theme {
             .expect("resolution styles every element in every state")
     }
 
-    /// Returns the theme's sizes.
+    /// Returns the sizes the compositor lays windows and bars out by: the
+    /// focused styles' heights and border width.
     #[must_use]
-    pub const fn metrics(&self) -> Metrics {
-        self.metrics
+    pub fn metrics(&self) -> Metrics {
+        let focused = |element| self.style(element, WidgetState::Focused);
+        let bar = |element| focused(element).height.unwrap_or(Self::DEFAULT_BAR_HEIGHT);
+        Metrics {
+            titlebar_height: bar(ThemeElement::Titlebar),
+            border_width: focused(ThemeElement::Border).border.width,
+            handle_height: focused(ThemeElement::Handle).height.unwrap_or(0),
+            taskbar_height: bar(ThemeElement::Taskbar),
+        }
     }
-}
-
-/// The built-in theme's greys, named by the X11 names its original style
-/// used (`grey55` is 55% white).
-mod grey {
-    use crate::color::Color;
-
-    /// `grey5`.
-    pub(super) const GREY_5: Color = Color::rgb(13, 13, 13);
-    /// `grey20`.
-    pub(super) const GREY_20: Color = Color::rgb(51, 51, 51);
-    /// `grey30`.
-    pub(super) const GREY_30: Color = Color::rgb(77, 77, 77);
-    /// `grey40`.
-    pub(super) const GREY_40: Color = Color::rgb(102, 102, 102);
-    /// `grey55`.
-    pub(super) const GREY_55: Color = Color::rgb(140, 140, 140);
-    /// `grey60`.
-    pub(super) const GREY_60: Color = Color::rgb(153, 153, 153);
-}
-
-/// The layers of the built-in theme.
-fn built_in_layers() -> ThemeLayers {
-    ThemeLayers {
-        default: StylePatch {
-            texture: Some(Texture::gradient(
-                GradientDirection::Vertical,
-                grey::GREY_30,
-                grey::GREY_5,
-            )),
-            font: Some(Font {
-                family: "DejaVu Sans".to_owned(),
-                size_points: 8,
-                weight: FontWeight::Bold,
-                is_italic: false,
-            }),
-            text_color: Some(Color::WHITE),
-            text_effect: Some(TextEffect::Halo(Color::BLACK)),
-            justify: Some(Justify::Center),
-            glyph_color: Some(Color::WHITE),
-            padding: Some(Insets::uniform(0)),
-        },
-        by_state: built_in_state_patches(),
-        by_element: built_in_element_patches(),
-        by_element_state: HashMap::new(),
-        metrics: Metrics {
-            titlebar_height: 20,
-            border_width: 1,
-            handle_height: 1,
-        },
-    }
-}
-
-/// The built-in theme's patches by state: a lighter focused gradient, grey
-/// unfocused text, and a sunken cross-diagonal look while pressed.
-fn built_in_state_patches() -> HashMap<WidgetState, StylePatch> {
-    HashMap::from([
-        (
-            WidgetState::Focused,
-            StylePatch {
-                texture: Some(Texture::gradient(
-                    GradientDirection::Vertical,
-                    grey::GREY_55,
-                    grey::GREY_5,
-                )),
-                ..StylePatch::default()
-            },
-        ),
-        (
-            WidgetState::Unfocused,
-            StylePatch {
-                text_color: Some(grey::GREY_55),
-                glyph_color: Some(grey::GREY_55),
-                ..StylePatch::default()
-            },
-        ),
-        (
-            WidgetState::Pressed,
-            StylePatch {
-                texture: Some(
-                    Texture::gradient(
-                        GradientDirection::CrossDiagonal,
-                        grey::GREY_20,
-                        grey::GREY_40,
-                    )
-                    .with_bevel(Bevel::Sunken),
-                ),
-                ..StylePatch::default()
-            },
-        ),
-    ])
-}
-
-/// The built-in theme's patches by element: raised white handles and grips,
-/// a grey border, and padding around button pictures and titles.
-fn built_in_element_patches() -> HashMap<ThemeElement, StylePatch> {
-    let handle = StylePatch {
-        texture: Some(
-            Texture::gradient(GradientDirection::Vertical, Color::WHITE, grey::GREY_60)
-                .with_bevel(Bevel::Raised),
-        ),
-        ..StylePatch::default()
-    };
-    HashMap::from([
-        (ThemeElement::Handle, handle.clone()),
-        (ThemeElement::Grip, handle),
-        (
-            ThemeElement::Border,
-            StylePatch {
-                texture: Some(Texture::solid(grey::GREY_60)),
-                ..StylePatch::default()
-            },
-        ),
-        (
-            ThemeElement::Button,
-            StylePatch {
-                padding: Some(Insets::uniform(5)),
-                ..StylePatch::default()
-            },
-        ),
-        (
-            ThemeElement::Label,
-            StylePatch {
-                padding: Some(Insets {
-                    left: 4,
-                    right: 4,
-                    ..Insets::default()
-                }),
-                ..StylePatch::default()
-            },
-        ),
-    ])
 }
 
 #[cfg(test)]
@@ -361,11 +332,6 @@ mod tests {
             by_state: HashMap::new(),
             by_element: HashMap::new(),
             by_element_state: HashMap::new(),
-            metrics: Metrics {
-                titlebar_height: 20,
-                border_width: 1,
-                handle_height: 1,
-            },
         }
     }
 
@@ -444,6 +410,33 @@ mod tests {
             texture(WidgetState::Focused),
             texture(WidgetState::Unfocused)
         );
-        assert_eq!(texture(WidgetState::Pressed).bevel, Bevel::Sunken);
+        assert_eq!(
+            texture(WidgetState::Pressed).bevel,
+            crate::texture::Bevel::Sunken
+        );
+    }
+
+    #[test]
+    fn the_metrics_come_from_the_bars_and_the_border() {
+        let metrics = Theme::built_in().metrics();
+        assert_eq!(
+            metrics,
+            Metrics {
+                titlebar_height: 20,
+                border_width: 1,
+                handle_height: 1,
+                taskbar_height: 20,
+            }
+        );
+    }
+
+    #[test]
+    fn every_element_and_state_has_a_name_that_finds_it() {
+        for element in <ThemeElement as strum::IntoEnumIterator>::iter() {
+            assert_eq!(ThemeElement::at_path(element.path()), Some(element));
+        }
+        for state in <WidgetState as strum::IntoEnumIterator>::iter() {
+            assert_eq!(WidgetState::named(state.name()), Some(state));
+        }
     }
 }

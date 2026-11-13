@@ -251,6 +251,11 @@ impl Frame {
         }
     }
 
+    /// Marks the frame for painting again, as when the theme changed.
+    pub(crate) fn invalidate(&mut self) {
+        self.titlebar.invalidate();
+    }
+
     /// Paints the titlebar to fit `geometry`, if anything changed.
     pub(crate) fn paint(
         &mut self,
@@ -326,6 +331,7 @@ mod tests {
         titlebar_height: 20,
         border_width: 1,
         handle_height: 1,
+        taskbar_height: 20,
     };
 
     /// The frame around a 100 by 50 window whose content is at (10, 40).

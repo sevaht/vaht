@@ -23,6 +23,7 @@ tracing-journald.workspace = true
 tracing-subscriber.workspace = true
 vaht-compositor.workspace = true
 vaht-import.workspace = true
+vaht-ui.workspace = true
 xdg.workspace = true
 
 [dev-dependencies]

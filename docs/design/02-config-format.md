@@ -182,6 +182,8 @@ rest by name, so a setting never silently does nothing:
   `minimize`, `maximize`, `close`).
 - `[workspaces]`: `names`, at least one.
 - `[session]`: `autostart`.
+- `theme`: the name of a theme in `themes/` (§10); without it, the built-in
+  theme.
 
 A window is placed when its client first commits a size, so the smart
 strategies know how large it is.
@@ -610,6 +612,24 @@ exactly what each element gets.
     has fewer than 200 downloads), so vaht doesn't add a dependency for it (X2).
   - `vaht import` keeps names as written, so my converted theme still says
     `grey55`.
+
+**Built so far.**
+- `settings.toml`'s `theme = "<name>"` reads `themes/<name>.toml` from the
+  configuration directory, then from `/usr/share/vaht/themes/`. The file is
+  watched like the others: editing it restyles every open window.
+- Elements: the window's six, and `taskbar`, `taskbar.button`,
+  `taskbar.workspace`, `taskbar.clock`, `taskbar.window-list.entry` and
+  `taskbar.window-list.empty`. States: `focused`, `unfocused`, `pressed`.
+- Properties: `texture` (solid or gradient, with a bevel), `font`,
+  `text_color`, `text_effect`, `justify`, `glyph_color`, `padding`,
+  `border` and `height`. Window borders take their color and width from
+  `window.border`'s `border`.
+- Properties, states and elements still to come are refused by name, at
+  their line in the file.
+- The built-in theme is itself a theme file (`vaht-ui`'s
+  `theme/built_in.toml`), printed by `vaht check --print-defaults`.
+- A theme file is a whole theme: what it leaves out takes vaht's fallback,
+  not the built-in theme's value.
 
 ### 10.2 `nacitar_fbstyle`, converted
 

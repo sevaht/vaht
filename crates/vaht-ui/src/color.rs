@@ -1,4 +1,7 @@
-//! Colors, as themes write them.
+//! Colors, as themes write them: `#rrggbb`, `#rrggbbaa`, or an X11 color
+//! name such as `grey55` or `SteelBlue`, as X.Org's `rgb.txt` names them.
+
+mod x11;
 
 use std::fmt;
 use std::str::FromStr;
@@ -41,6 +44,22 @@ impl Color {
         }
     }
 
+    /// Returns the X11 color `name`, matched as `XParseColor` does: in any
+    /// letter case, spaces ignored (`dark slate gray` is `DarkSlateGray`).
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        let key: String = name
+            .chars()
+            .filter(|character| *character != ' ')
+            .map(|character| character.to_ascii_lowercase())
+            .collect();
+        x11::NAMED_COLORS
+            .binary_search_by(|(known, _)| (*known).cmp(key.as_str()))
+            .ok()
+            .and_then(|index| x11::NAMED_COLORS.get(index))
+            .map(|&(_, color)| color)
+    }
+
     /// Returns the color as tiny-skia takes it.
     #[must_use]
     pub fn to_skia(self) -> tiny_skia::Color {
@@ -66,12 +85,14 @@ impl fmt::Display for Color {
 impl FromStr for Color {
     type Err = ParseColorError;
 
-    /// Parses `#rrggbb` or `#rrggbbaa`.
+    /// Parses `#rrggbb`, `#rrggbbaa`, or an X11 color name.
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let invalid = || ParseColorError {
             text: text.to_owned(),
         };
-        let digits = text.strip_prefix('#').ok_or_else(invalid)?;
+        let Some(digits) = text.strip_prefix('#') else {
+            return Self::named(text).ok_or_else(invalid);
+        };
         if !matches!(digits.len(), 6 | 8) || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(invalid());
         }
@@ -96,7 +117,7 @@ impl FromStr for Color {
 
 /// Text that is not a color vaht understands.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("not a color: {text:?} (expected #rrggbb or #rrggbbaa)")]
+#[error("not a color: {text:?} (expected #rrggbb, #rrggbbaa or an X11 color name)")]
 pub struct ParseColorError {
     /// The text as given.
     pub text: String,
@@ -104,6 +125,8 @@ pub struct ParseColorError {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     #[test]
@@ -119,9 +142,28 @@ mod tests {
         }
     }
 
+    #[rstest]
+    #[case::grey("grey55", Color::rgb(140, 140, 140))]
+    #[case::mixed_case("SteelBlue", Color::rgb(70, 130, 180))]
+    #[case::spaced("dark slate gray", Color::rgb(47, 79, 79))]
+    #[case::first("alice blue", Color::rgb(240, 248, 255))]
+    #[case::last("YellowGreen", Color::rgb(154, 205, 50))]
+    fn x11_names_parse_as_xparsecolor_reads_them(#[case] name: &str, #[case] expected: Color) {
+        assert_eq!(name.parse(), Ok(expected));
+    }
+
+    #[test]
+    fn the_x11_table_is_sorted_for_searching() {
+        assert!(
+            x11::NAMED_COLORS
+                .windows(2)
+                .all(|pair| pair[0].0 < pair[1].0)
+        );
+    }
+
     #[test]
     fn malformed_colors_are_rejected() {
-        for text in ["8c8c8c", "#8c8c8", "#8c8c8cz", "#gggggg", ""] {
+        for text in ["8c8c8c", "#8c8c8", "#8c8c8cz", "#gggggg", "", "greyish"] {
             assert!(text.parse::<Color>().is_err(), "{text:?} parsed");
         }
     }

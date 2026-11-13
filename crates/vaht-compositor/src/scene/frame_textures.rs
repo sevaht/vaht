@@ -16,7 +16,6 @@ use smithay::backend::renderer::element::memory::{
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::backend::renderer::{ImportMem, Renderer};
 use smithay::utils::{Buffer as BufferCoordinates, Physical, Point, Rectangle, Scale, Transform};
-use vaht_ui::texture::Fill;
 use vaht_ui::{Theme, ThemeElement, WidgetState};
 
 use super::SceneElement;
@@ -181,12 +180,9 @@ impl FrameTexture {
         }
     }
 
-    /// Returns the border color the theme gives windows in `state`: the
-    /// border's fill, or the start of its gradient.
+    /// Returns the border color the theme gives windows in `state`.
     fn border_color(theme: &Theme, state: WidgetState) -> [f32; 4] {
-        let color = match theme.style(ThemeElement::Border, state).texture.fill {
-            Fill::Solid(color) | Fill::Gradient { from: color, .. } => color,
-        };
+        let color = theme.style(ThemeElement::Border, state).border.color;
         [color.red, color.green, color.blue, color.alpha].map(|channel| f32::from(channel) / 255.0)
     }
 }

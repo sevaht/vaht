@@ -483,14 +483,18 @@ impl WindowManager {
             return;
         }
         self.output = output;
-        let metrics = self.metrics;
+        self.refit_placed_windows();
+    }
+
+    /// Lays windows out with frames sized by `metrics` from now on, and
+    /// paints every frame again: the theme changed. A floating window's
+    /// content stays where it is; the others are placed again.
+    pub(crate) fn restyle(&mut self, metrics: Metrics) {
+        self.metrics = metrics;
         for window in self.windows.iter_mut() {
-            let placement = window.placement().clone();
-            if window.is_placed() && placement != Placement::Floating {
-                window.place(placement, output, metrics);
-            }
+            window.invalidate_frame();
         }
-        self.is_redraw_needed = true;
+        self.refit_placed_windows();
     }
 
     /// Paints every window's frame that changed.
@@ -516,6 +520,19 @@ impl WindowManager {
     /// Returns whether anything shown changed since the last call.
     pub(crate) const fn take_redraw(&mut self) -> bool {
         std::mem::replace(&mut self.is_redraw_needed, false)
+    }
+
+    /// Places maximized, tiled and fullscreen windows again, in the output's
+    /// areas and with frames sized as they are now.
+    fn refit_placed_windows(&mut self) {
+        let (output, metrics) = (self.output, self.metrics);
+        for window in self.windows.iter_mut() {
+            let placement = window.placement().clone();
+            if window.is_placed() && placement != Placement::Floating {
+                window.place(placement, output, metrics);
+            }
+        }
+        self.is_redraw_needed = true;
     }
 
     /// Returns the window with `id` to change it; the change shows.
@@ -778,6 +795,7 @@ mod tests {
         titlebar_height: 20,
         border_width: 1,
         handle_height: 1,
+        taskbar_height: 20,
     };
 
     /// A 1920 × 1080 output, `panel` pixels of it at the bottom taken by a
@@ -1019,6 +1037,28 @@ mod tests {
             floating_area,
             "a floating window stays"
         );
+    }
+
+    #[test]
+    fn a_new_theme_keeps_floating_content_still_and_refits_maximized_windows() {
+        let mut desk = Desk::new();
+        let floating = desk.open();
+        let content = desk.window(floating).content_area();
+        let maximized = desk.open();
+        desk.run(&action("maximize"));
+        let taller = Metrics {
+            titlebar_height: 40,
+            ..METRICS
+        };
+        desk.manager.restyle(taller);
+        desk.settle();
+        assert_eq!(desk.window(floating).content_area(), content);
+        assert_eq!(
+            desk.window(floating).outer_area(taller).size.h,
+            content.size.h + 40 + 3,
+            "the frame grew around it"
+        );
+        assert_eq!(desk.window(maximized).outer_area(taller), output(0).usable);
     }
 
     #[test]

@@ -86,11 +86,15 @@ fn with_no_log_file_or_journal_messages_go_to_standard_error() {
 }
 
 /// Runs `vaht check` (with `extra` arguments) on a configuration directory
-/// holding `bindings`, if any.
-fn check(bindings: Option<&str>, extra: &[&str]) -> Output {
+/// holding `files`, each a path in it and its contents.
+fn check(files: &[(&str, &str)], extra: &[&str]) -> Output {
     let config = tempfile::tempdir().expect("a temporary directory");
-    if let Some(bindings) = bindings {
-        std::fs::write(config.path().join("bindings.toml"), bindings).expect("written");
+    for (name, contents) in files {
+        let path = config.path().join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("the file's directory is made");
+        }
+        std::fs::write(path, contents).expect("written");
     }
     let logs = log_directory();
     let mut arguments = vec!["check", "--config-directory"];
@@ -110,7 +114,10 @@ fn check(bindings: Option<&str>, extra: &[&str]) -> Output {
 
 #[test]
 fn check_accepts_a_valid_configuration() {
-    let output = check(Some("[keys]\n\"Super+T\" = \"exec kitty\"\n"), &[]);
+    let output = check(
+        &[("bindings.toml", "[keys]\n\"Super+T\" = \"exec kitty\"\n")],
+        &[],
+    );
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("is valid"));
 }
@@ -118,7 +125,10 @@ fn check_accepts_a_valid_configuration() {
 #[test]
 fn check_names_the_file_line_and_column_of_a_problem() {
     let output = check(
-        Some("[keys]\n\"Super+T\" = \"exec kitty\"\n\"Super+Q\" = \"quit\"\n"),
+        &[(
+            "bindings.toml",
+            "[keys]\n\"Super+T\" = \"exec kitty\"\n\"Super+Q\" = \"quit\"\n",
+        )],
         &[],
     );
     assert!(!output.status.success());
@@ -128,12 +138,34 @@ fn check_names_the_file_line_and_column_of_a_problem() {
 }
 
 #[test]
+fn check_reads_the_theme_the_settings_name() {
+    let output = check(
+        &[
+            ("settings.toml", "theme = \"mine\"\n"),
+            (
+                "themes/mine.toml",
+                "[window.titlebar]\nheight = 30\n[window.lable]\nheight = 1\n",
+            ),
+        ],
+        &[],
+    );
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("themes/mine.toml:3:"), "{error}");
+    assert!(error.contains("`window.lable` is no element"), "{error}");
+    let missing = check(&[("settings.toml", "theme = \"absent\"\n")], &[]);
+    let error = String::from_utf8_lossy(&missing.stderr);
+    assert!(error.contains("no theme `absent`"), "{error}");
+}
+
+#[test]
 fn check_prints_the_built_in_files() {
-    let output = check(None, &["--print-defaults"]);
+    let output = check(&[], &["--print-defaults"]);
     assert!(output.status.success());
     let printed = String::from_utf8_lossy(&output.stdout);
     assert!(printed.contains("# ===== bindings.toml ====="), "{printed}");
     assert!(printed.contains("\"Alt+F4\" = \"close\""), "{printed}");
+    assert!(printed.contains("the built-in theme ====="), "{printed}");
 }
 
 #[test]

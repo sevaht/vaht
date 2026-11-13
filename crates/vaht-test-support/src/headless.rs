@@ -70,7 +70,11 @@ impl HeadlessVaht {
     pub fn start_with_config(executable: &Path, files: &[(&str, &str)]) -> Self {
         let config = tempfile::tempdir().expect("a temporary configuration directory");
         for (name, contents) in files {
-            std::fs::write(config.path().join(name), contents).expect("the file is written");
+            let path = config.path().join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("the file's directory is made");
+            }
+            std::fs::write(path, contents).expect("the file is written");
         }
         // Socket paths are limited to about 108 bytes, so the runtime
         // directory must be short: the system's temporary directory is.

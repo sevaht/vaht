@@ -28,6 +28,7 @@ vaht-ui.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 rstest.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

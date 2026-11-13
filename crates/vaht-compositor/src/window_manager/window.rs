@@ -279,6 +279,11 @@ impl Window {
         self.frame.set_buttons(buttons);
     }
 
+    /// Marks the frame for painting again, as when the theme changed.
+    pub(crate) fn invalidate_frame(&mut self) {
+        self.frame.invalidate();
+    }
+
     /// Paints the frame, sized by `metrics`, if anything changed.
     pub(crate) fn paint_frame(
         &mut self,

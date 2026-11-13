@@ -49,7 +49,7 @@ use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::shell::xdg::{PopupSurface, ToplevelSurface};
 use smithay::wayland::virtual_keyboard::VirtualKeyboardKeyEvent;
-use vaht_ui::{Theme, Typesetter};
+use vaht_ui::Typesetter;
 
 use crate::backend::{Backend, BackendChoice, BackendError};
 use crate::capture::ScreenCapture;
@@ -94,8 +94,6 @@ pub struct Compositor {
     pub(crate) popups: PopupManager,
     /// The mapped layer surfaces.
     pub(crate) layers: Layers,
-    /// How everything vaht draws looks.
-    theme: Theme,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
     /// Draws screenshots for capture clients.
@@ -212,7 +210,6 @@ impl Compositor {
             Config::built_in()
         });
 
-        let theme = Theme::built_in();
         let whole = backend.output_geometry();
         let window_manager = WindowManager::new(
             config.settings.workspaces.names(),
@@ -220,7 +217,7 @@ impl Compositor {
                 whole,
                 usable: whole,
             },
-            theme.metrics(),
+            config.theme.metrics(),
         );
         let launcher = Launcher::new(listener.socket_name().to_os_string(), &ledger);
         let mut compositor = Self {
@@ -234,7 +231,6 @@ impl Compositor {
             frame_textures: FrameTextures::default(),
             popups: PopupManager::default(),
             layers: Layers::default(),
-            theme,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
             physical_keymap,
@@ -287,6 +283,9 @@ impl Compositor {
         match self.config_source.load() {
             Ok(config) => {
                 self.window_manager.apply_settings(&config.settings);
+                if config.theme != self.config.theme {
+                    self.window_manager.restyle(config.theme.metrics());
+                }
                 self.config = config;
                 tracing::info!(
                     directory = %self.config_source.directory().display(),
@@ -337,9 +336,9 @@ impl Compositor {
     /// the same as the screen would.
     pub(crate) fn prepare_frames(&mut self) {
         self.window_manager
-            .paint_frames(&self.theme, &mut self.typesetter);
+            .paint_frames(&self.config.theme, &mut self.typesetter);
         self.frame_textures
-            .update(&self.window_manager, &self.theme, &self.ledger);
+            .update(&self.window_manager, &self.config.theme, &self.ledger);
     }
 
     /// Starts managing the window of a new xdg-shell toplevel.

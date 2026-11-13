@@ -18,6 +18,8 @@ use crate::window_manager::{
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Settings {
+    /// The theme: `themes/<name>.toml`; the built-in theme when absent.
+    pub(crate) theme: Option<String>,
     /// Which window gets keyboard focus, and when windows rise.
     pub(crate) focus: FocusSettings,
     /// Where new windows go.

@@ -1,9 +1,10 @@
 //! Noticing that a configuration file changed, without polling (02 §2).
 //!
-//! One inotify watch on the configuration directory is registered with the
-//! event loop. The directory is watched rather than its files, because
-//! editors save by writing a new file and renaming it over the old one,
-//! which a watch on the old file would never see.
+//! One inotify instance watches the configuration directory, and its
+//! `themes` directory when there is one, and is registered with the event
+//! loop. Directories are watched rather than files, because editors save by
+//! writing a new file and renaming it over the old one, which a watch on
+//! the old file would never see.
 
 use std::path::Path;
 
@@ -11,7 +12,7 @@ use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
 
-use super::ConfigFile;
+use super::{ConfigFile, ThemeFile};
 use crate::Compositor;
 use crate::event_source::EventSource;
 use crate::resources::ResourceLedger;
@@ -51,11 +52,16 @@ impl ConfigWatch {
         inotify
             .add_watch(directory, Self::EVENTS)
             .map_err(WatchError::Watch)?;
+        // Without a themes directory yet, its creation is a change like any
+        // other, and the next reload watches it.
+        let themes = inotify
+            .add_watch(&directory.join(ThemeFile::DIRECTORY), Self::EVENTS)
+            .ok();
         let source = EventSource::insert(
             handle,
             ledger,
             Generic::new(inotify, Interest::READ, Mode::Level),
-            |_, inotify, compositor| {
+            move |_, inotify, compositor| {
                 let events = match inotify.read_events() {
                     Ok(events) => events,
                     Err(nix::errno::Errno::EAGAIN) => return Ok(PostAction::Continue),
@@ -69,12 +75,26 @@ impl ConfigWatch {
                         .mask
                         .intersects(AddWatchFlags::IN_DELETE_SELF | AddWatchFlags::IN_MOVE_SELF)
                 });
-                let file_changed = events
-                    .iter()
-                    .any(|event| event.name.as_deref().is_some_and(ConfigFile::is_named));
+                let file_changed = events.iter().any(|event| {
+                    let name = event.name.as_deref();
+                    if Some(event.wd) == themes {
+                        name.is_some_and(|name| {
+                            Path::new(name).extension() == Some("toml".as_ref())
+                        })
+                    } else {
+                        name.is_some_and(|name| {
+                            ConfigFile::is_named(name) || name == ThemeFile::DIRECTORY
+                        })
+                    }
+                });
+                // A themes directory appearing or going needs a new watch.
+                let themes_moved = events.iter().any(|event| {
+                    Some(event.wd) != themes
+                        && event.name.as_deref() == Some(ThemeFile::DIRECTORY.as_ref())
+                });
                 if directory_gone || file_changed {
                     compositor.config_source.note_change(
-                        directory_gone,
+                        directory_gone || themes_moved,
                         &compositor.loop_handle,
                         &compositor.ledger,
                     );

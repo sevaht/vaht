@@ -22,8 +22,8 @@ pub(crate) struct ConfigSource {
     directory: PathBuf,
     /// Watches the directory, while it exists.
     watch: Option<ConfigWatch>,
-    /// Whether the directory was removed or renamed, so the watch sees
-    /// nothing any more and must be renewed.
+    /// Whether the directory, or its themes directory, came or went since
+    /// the watch began, so the watch must be renewed.
     is_watch_stale: bool,
     /// Reloads the configuration once a burst of file changes settles.
     reload_timer: Option<Timer<Compositor>>,
@@ -82,16 +82,16 @@ impl ConfigSource {
         }
     }
 
-    /// Notes that a configuration file changed, or with `is_directory_gone`
-    /// that the directory itself went away, and schedules a reload once
-    /// things settle.
+    /// Notes that a configuration or theme file changed, and with
+    /// `needs_new_watch` that the directory or its themes directory came or
+    /// went, and schedules a reload once things settle.
     pub(crate) fn note_change(
         &mut self,
-        is_directory_gone: bool,
+        needs_new_watch: bool,
         handle: &LoopHandle<'static, Compositor>,
         ledger: &ResourceLedger,
     ) {
-        self.is_watch_stale |= is_directory_gone;
+        self.is_watch_stale |= needs_new_watch;
         match Timer::once(
             handle,
             ledger,
