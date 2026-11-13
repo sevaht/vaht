@@ -15,18 +15,15 @@
 //! the clock is set, which a moment that moved further away (the clock
 //! set back) needs.
 //!
-//! A time zone change is heard from timedated, which `timedatectl` and
-//! desktop settings ask to change it, and which announces it on the system
-//! bus, while timedated runs. While it does not (it exits when idle, and
-//! the bus starts it again on demand), or once the bus is lost, the clock
-//! watches the zone file (`/etc/localtime`, which every change replaces)
-//! instead, and from the start, until timedated is known to run: one
-//! source at a time, so vaht is not woken by writes to `/etc` while
-//! timedated speaks for the zone. Nothing is polled: the bus
-//! announces timedated starting and stopping (`NameOwnerChanged`), and the
-//! subscription to its news stays in place across both. jiff, which
-//! otherwise checks for a new zone only every few minutes, is then told to
-//! read it again.
+//! A time zone change is heard two ways, both events, never polled. The
+//! zone file (`/etc/localtime`, which every change replaces) is watched
+//! from the start and all along, so a zone changed without timedated (by
+//! hand, by another tool) shows too. timedated, which `timedatectl` and
+//! desktop settings ask to change it, also announces it on the system bus
+//! while it runs; the subscription to its news stays in place as it starts
+//! and stops (`NameOwnerChanged`). A change heard both ways is worked out
+//! twice, which costs nothing. jiff, which otherwise checks for a new zone
+//! only every few minutes, is told to read it again.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -195,7 +192,7 @@ pub(crate) struct WallClock<State: 'static> {
     _alarm_source: EventSource<State>,
     /// What timedated says.
     _zone_news: StreamSource<State>,
-    /// The zone file's watch, while timedated does not speak for the zone.
+    /// The zone file's watch; none only if the file cannot be watched.
     zone_watch: Option<EventSource<State>>,
     /// The alarm, armed at the next moment.
     alarm: Rc<TimerFd>,
@@ -274,8 +271,7 @@ impl<State: 'static> WallClock<State> {
             ledger: ledger.clone(),
             hooks,
         };
-        // Until timedated is known to run, the file speaks for the zone, so
-        // no change goes unseen while the bus is asked.
+        // All along, timedated or not: a zone set without it shows too.
         clock.watch_zone_file();
         Ok(clock)
     }
@@ -306,14 +302,11 @@ impl<State: 'static> WallClock<State> {
         self.alarm.unset().map_err(WallClockError::Arm)
     }
 
-    /// Watches the zone file while timedated does not speak for the zone.
+    /// Notes what timedated is doing; the zone file stays watched either
+    /// way, and is watched again if that failed before.
     fn hear(&mut self, news: ZoneNews) {
         match news {
-            ZoneNews::Started => {
-                if self.zone_watch.take().is_some() {
-                    tracing::debug!("timedated runs; the zone file is left alone");
-                }
-            }
+            ZoneNews::Started => tracing::debug!("timedated runs; its news is heard too"),
             ZoneNews::Stopped | ZoneNews::Unheard => self.watch_zone_file(),
             ZoneNews::Changed => {}
         }
@@ -611,18 +604,11 @@ mod tests {
     }
 
     #[test]
-    fn with_timedated_its_news_is_heard_and_the_zone_file_left_alone() {
+    fn with_timedated_its_news_is_heard_and_the_zone_file_watched_too() {
         let mut world = World::new();
         world.start_timedated();
         world.start_clock();
-        assert!(world.watches_zone_file(), "until timedated is known to run");
-        world.dispatch_until(|probe| {
-            probe
-                .clock
-                .as_ref()
-                .is_some_and(|clock| clock.zone_watch.is_none())
-        });
-        assert!(!world.watches_zone_file(), "no file watch beside timedated");
+        assert!(world.watches_zone_file());
         // Announce until heard: the subscription may not be in place yet.
         let deadline = Instant::now() + PATIENCE;
         while world.probe.calls == 0 && Instant::now() < deadline {
@@ -630,7 +616,14 @@ mod tests {
             world.settle();
         }
         assert!(world.probe.calls >= 1, "the announcement was heard");
-        assert!(!world.watches_zone_file());
+        assert!(world.watches_zone_file(), "kept beside timedated");
+        let calls = world.probe.calls;
+        world.replace_zone_file();
+        world.dispatch_until(|probe| probe.calls > calls);
+        assert!(
+            world.probe.calls > calls,
+            "a zone set without timedated shows while it runs"
+        );
     }
 
     #[test]
@@ -657,57 +650,24 @@ mod tests {
     }
 
     #[test]
-    fn the_zone_file_is_watched_while_timedated_is_stopped() {
+    fn a_timedated_started_after_the_clock_is_heard() {
         let mut world = World::new();
-        world.start_timedated();
         world.start_clock();
-        world.dispatch_until(|probe| {
-            probe
-                .clock
-                .as_ref()
-                .is_some_and(|clock| clock.zone_watch.is_none())
-        });
-        assert!(!world.watches_zone_file(), "timedated runs");
-        world.probe.timedated = None;
-        world.dispatch_until(|probe| {
-            probe
-                .clock
-                .as_ref()
-                .is_some_and(|clock| clock.zone_watch.is_some())
-        });
-        assert!(world.watches_zone_file(), "timedated stopped");
         world.start_timedated();
-        world.dispatch_until(|probe| {
-            probe
-                .clock
-                .as_ref()
-                .is_some_and(|clock| clock.zone_watch.is_none())
-        });
-        assert!(!world.watches_zone_file(), "timedated runs again");
-        let calls = world.probe.calls;
         let deadline = Instant::now() + PATIENCE;
-        while world.probe.calls == calls && Instant::now() < deadline {
+        while world.probe.calls == 0 && Instant::now() < deadline {
             world.announce_zone();
             world.settle();
         }
-        assert!(
-            world.probe.calls > calls,
-            "a timedated started after the clock is heard, as one the bus starts on demand"
-        );
+        assert!(world.probe.calls > 0, "as one the bus starts on demand");
+        assert!(world.watches_zone_file());
     }
 
     #[test]
-    fn losing_the_bus_falls_back_to_the_zone_file() {
+    fn losing_the_bus_leaves_the_zone_file_watched() {
         let mut world = World::new();
         world.start_timedated();
         world.start_clock();
-        world.dispatch_until(|probe| {
-            probe
-                .clock
-                .as_ref()
-                .is_some_and(|clock| clock.zone_watch.is_none())
-        });
-        assert!(!world.watches_zone_file());
         world.bus.stop();
         world.dispatch_until(|probe| {
             probe
@@ -715,7 +675,10 @@ mod tests {
                 .as_ref()
                 .is_some_and(|clock| clock.zone_watch.is_some())
         });
-        assert!(world.watches_zone_file(), "the file stands in for the bus");
+        assert!(
+            world.watches_zone_file(),
+            "the file still speaks for the zone"
+        );
     }
 
     #[rstest]
