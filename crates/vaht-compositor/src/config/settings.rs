@@ -260,6 +260,33 @@ impl Default for WorkspaceSettings {
 pub(crate) struct MenuSettings {
     /// How long the pointer rests on a submenu's item before it opens.
     submenu_delay_ms: u64,
+    /// How typing in an open menu finds an item.
+    pub(crate) search: MenuSearch,
+}
+
+/// How typing in an open menu finds an item (Fluxbox's `menuSearch`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum MenuSearch {
+    /// Typing finds nothing.
+    Off,
+    /// The first item whose label starts with what was typed.
+    #[default]
+    ItemStart,
+    /// The first item whose label has what was typed anywhere in it.
+    Anywhere,
+}
+
+impl MenuSearch {
+    /// Returns whether `label` is found by `typed`, in any letter case.
+    pub(crate) fn finds(self, label: &str, typed: &str) -> bool {
+        let (label, typed) = (label.to_lowercase(), typed.to_lowercase());
+        match self {
+            Self::Off => false,
+            Self::ItemStart => label.starts_with(&typed),
+            Self::Anywhere => label.contains(&typed),
+        }
+    }
 }
 
 impl MenuSettings {
@@ -274,6 +301,7 @@ impl Default for MenuSettings {
     fn default() -> Self {
         Self {
             submenu_delay_ms: 200,
+            search: MenuSearch::ItemStart,
         }
     }
 }

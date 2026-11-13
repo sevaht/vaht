@@ -28,6 +28,7 @@ use vaht_ui::{Panel, Theme, Typesetter};
 pub(crate) use self::content::{MenuContent, MenuGeometry};
 pub(crate) use self::model::{MenuBuilder, MenuChoice, MenuItem, MenuModel};
 use crate::Compositor;
+use crate::config::MenuSearch;
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
 use crate::scene::{MenuTexture, SceneElement};
@@ -44,6 +45,10 @@ pub(crate) enum MenuKey {
     Back,
     /// Opens the highlighted submenu.
     Forward,
+    /// Typed a letter: the search goes on with it.
+    Type(char),
+    /// Backspace: the search goes back a letter.
+    Erase,
     /// Opens the highlighted submenu, or chooses the highlighted item.
     Choose,
     /// Closes every menu.
@@ -62,7 +67,11 @@ impl MenuKey {
             Keysym::Right | Keysym::KP_Right => Self::Forward,
             Keysym::Return | Keysym::KP_Enter | Keysym::space => Self::Choose,
             Keysym::Escape => Self::Close,
-            _ => Self::Other,
+            Keysym::BackSpace => Self::Erase,
+            _ => keysym
+                .key_char()
+                .filter(|character| !character.is_control())
+                .map_or(Self::Other, Self::Type),
         }
     }
 }
@@ -80,6 +89,10 @@ pub(crate) struct MenuStack {
     /// The menu and item a button was pressed on, which its release
     /// chooses.
     pressed: Option<(usize, usize)>,
+    /// How typing finds an item.
+    search_mode: MenuSearch,
+    /// What was typed in the last menu, to find an item by.
+    search: String,
 }
 
 /// One open menu.
@@ -119,8 +132,22 @@ impl MenuStack {
         self.push(model, at, None, style);
     }
 
+    /// Returns no menus, typing finding items as `mode` says.
+    pub(crate) fn with_search(mode: MenuSearch) -> Self {
+        Self {
+            search_mode: mode,
+            ..Self::default()
+        }
+    }
+
+    /// Makes typing find items as `mode` says.
+    pub(crate) const fn set_search(&mut self, mode: MenuSearch) {
+        self.search_mode = mode;
+    }
+
     /// Closes every menu.
     pub(crate) fn close(&mut self) {
+        self.search.clear();
         self.menus.clear();
         self.submenu_timer = None;
         self.pressed = None;
@@ -202,7 +229,19 @@ impl MenuStack {
         key: MenuKey,
         style: (&Theme, &mut Typesetter),
     ) -> Option<MenuChoice> {
+        if !matches!(key, MenuKey::Type(_) | MenuKey::Erase) {
+            self.search.clear();
+        }
         match key {
+            MenuKey::Type(character) => {
+                self.search_for(character);
+                None
+            }
+            MenuKey::Erase => {
+                self.search.pop();
+                self.highlight_found();
+                None
+            }
             MenuKey::Up | MenuKey::Down => {
                 let step = if key == MenuKey::Up { -1 } else { 1 };
                 if let Some(menu) = self.menus.last_mut() {
@@ -360,6 +399,36 @@ impl MenuStack {
             .map(|(level, menu)| (level, menu.panel.hit_at(menu.geometry.panel_point(point))))
     }
 
+    /// Goes on with the search with `character`, if an item of the last
+    /// menu is found by it; as in Fluxbox, a letter finding nothing is not
+    /// kept.
+    fn search_for(&mut self, character: char) {
+        self.search.push(character);
+        if !self.highlight_found() {
+            self.search.pop();
+        }
+    }
+
+    /// Highlights the first selectable item of the last menu the search
+    /// finds; returns whether one was found. An empty search finds nothing
+    /// and changes nothing.
+    fn highlight_found(&mut self) -> bool {
+        let (mode, typed) = (self.search_mode, self.search.as_str());
+        let Some(menu) = self.menus.last_mut() else {
+            return false;
+        };
+        if typed.is_empty() {
+            return false;
+        }
+        let found = menu.panel.content().model().items.iter().position(|item| {
+            item.is_selectable() && item.label().is_some_and(|label| mode.finds(label, typed))
+        });
+        if found.is_some() {
+            menu.panel.update_if(|content| content.set_hovered(found));
+        }
+        found.is_some()
+    }
+
     /// Returns the selectable item `step` (1 down, -1 up) from the
     /// highlighted one in `content`, wrapping around; the first or last when
     /// none is highlighted.
@@ -445,6 +514,37 @@ mod tests {
     /// Returns the item highlighted in menu `level`.
     fn hovered(stack: &MenuStack, level: usize) -> Option<usize> {
         stack.menus[level].panel.content().hovered()
+    }
+
+    #[test]
+    fn typing_highlights_the_item_found_and_keeps_only_letters_that_find_one() {
+        let (theme, mut typesetter) = style();
+        let mut stack = MenuStack::with_search(MenuSearch::ItemStart);
+        stack.open(
+            model(),
+            (100, 100).into(),
+            bounds(),
+            (&theme, &mut typesetter),
+        );
+        let mut key = |stack: &mut MenuStack, key| stack.key(key, (&theme, &mut typesetter));
+        key(&mut stack, MenuKey::Type('M'));
+        assert_eq!(hovered(&stack, 0), Some(2), "More, in any letter case");
+        key(&mut stack, MenuKey::Type('x'));
+        assert_eq!(stack.search, "M", "x finds nothing, so it is not kept");
+        key(&mut stack, MenuKey::Erase);
+        key(&mut stack, MenuKey::Type('r'));
+        assert_eq!(hovered(&stack, 0), Some(0), "Reload");
+        key(&mut stack, MenuKey::Type('w'));
+        assert_eq!(hovered(&stack, 0), Some(0), "inert words are never found");
+        let mut anywhere = MenuStack::with_search(MenuSearch::Anywhere);
+        anywhere.open(
+            model(),
+            (100, 100).into(),
+            bounds(),
+            (&theme, &mut typesetter),
+        );
+        anywhere.key(MenuKey::Type('o'), (&theme, &mut typesetter));
+        assert_eq!(hovered(&anywhere, 0), Some(0), "Reload has an o");
     }
 
     #[test]

@@ -573,8 +573,11 @@ items = [
   output; a submenu opens beside its item after `[menus] submenu_delay_ms`
   or at once on a click; releasing a button on an item chooses it; a press
   elsewhere closes the menus and goes on. Keys: Up, Down, Left, Right,
-  Enter, Escape. Not yet: `pipe`, `icon`, the `themes`, `layer`, `alpha`,
-  `outputs` and `profiles` lists, type-to-search, and the GTK presenter.
+  Enter, Escape, and typing: `[menus] search` (`item-start`, `anywhere` or
+  `off`, from Fluxbox's `menuSearch`) highlights the first item found by
+  what was typed, a letter finding nothing is not kept, and Backspace takes
+  one back. Not yet: `pipe`, `icon`, the `outputs` and `profiles` lists,
+  and the GTK presenter.
 - **Dropped:**
   - Fluxbox's `[config]` editor menu: settings are reached through
     `set-setting`.

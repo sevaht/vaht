@@ -87,6 +87,10 @@ format = "%k:%M"
 [menus]
 # How long the pointer rests on a submenu's item before it opens.
 submenu_delay_ms = 200
+# What typing in an open menu highlights: the first item whose label starts
+# with what was typed (item-start), has it anywhere (anywhere), or nothing
+# (off). Backspace takes a letter back.
+search = "item-start"
 
 [wallpaper]
 # A PNG image drawn under everything, such as "~/Pictures/sky.png" ("~/" is

@@ -125,6 +125,22 @@ impl InitFile {
         if let Some(delay) = self.number(&format!("{SCREEN}menuDelay")) {
             self.set(&["menus", "submenu_delay_ms"], Value::from(delay));
         }
+        if let Some(search) = self.resources.get("session.menuSearch").cloned() {
+            let vaht = match search.value.to_ascii_lowercase().as_str() {
+                "nowhere" => Some("off"),
+                "itemstart" => Some("item-start"),
+                "somewhere" => Some("anywhere"),
+                _ => None,
+            };
+            match vaht {
+                Some(vaht) => self.set(&["menus", "search"], Value::from(vaht)),
+                None => self.note(
+                    report,
+                    search.line,
+                    format!("the menu search {}", search.value),
+                ),
+            }
+        }
         self.accept_what_vaht_does();
         self.report_unused(report);
         self.document
@@ -653,6 +669,15 @@ session.screen0.toolbar.widthPercent:\t80
             [(7, Reason::Dropped), (8, Reason::Dropped)],
             "the tabs and the opaque alpha"
         );
+    }
+
+    #[test]
+    fn the_menu_search_converts() {
+        let init = "session.menuSearch:\tsomewhere\n";
+        let mut report = Report::default();
+        let document =
+            InitFile::new(Resources::parse(Path::new("init"), init)).convert(&mut report);
+        assert_eq!(document.to_string(), "[menus]\nsearch = \"anywhere\"\n");
     }
 
     #[test]

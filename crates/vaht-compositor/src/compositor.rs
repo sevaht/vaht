@@ -263,7 +263,7 @@ impl Compositor {
             popups: PopupManager::default(),
             layers: Layers::default(),
             taskbar: Taskbar::new(&config.settings.taskbar),
-            menus: MenuStack::default(),
+            menus: MenuStack::with_search(config.settings.menus.search),
             backdrop: Backdrop::new(&config.settings.wallpaper, config_source.directory()),
             outline: Outline::default(),
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
@@ -348,6 +348,7 @@ impl Compositor {
             Ok(config) => {
                 // Menus are made from the configuration being replaced.
                 self.menus.close();
+                self.menus.set_search(config.settings.menus.search);
                 self.window_manager.apply_settings(&config.settings);
                 if config.settings.taskbar != self.config.settings.taskbar {
                     self.taskbar = Taskbar::new(&config.settings.taskbar);
