@@ -892,6 +892,7 @@ mod tests {
             let committed = CommittedState {
                 title: format!("window {window}"),
                 app_id: app_id.to_owned(),
+                icon_name: None,
                 geometry: Rectangle::from_size(size.into()),
                 size_limits: SizeLimits::default(),
             };

@@ -308,7 +308,9 @@ impl Sources {
                         "window.justify",
                     ],
                 }),
-                padding: Some([0, 10, 0, 10]),
+                // Half of iconbar.iconTextPadding (10 by default) each side
+                // of the title, as Fluxbox lays an entry out.
+                padding: Some([0, 5, 0, 5]),
                 ..Self::texture(&[])
             },
             ThemeElement::WindowListEmpty => Self {

@@ -9,6 +9,9 @@
 //! runs what it means ([`TaskbarHit`]). Other presses, and the wheel, go to
 //! the `taskbar` and `window-list-entry` mouse bindings.
 //!
+//! An entry shows its window's icon ([`IconStore`]): the one the window
+//! names, else its application's, found by app id.
+//!
 //! The clock wakes vaht when its text changes: at each minute, or each
 //! second if its format shows seconds, as the time of day has them, and
 //! whenever the time of day jumps ([`WallClock`]).
@@ -18,7 +21,8 @@ use smithay::backend::renderer::{ImportMem, Renderer};
 use smithay::reexports::calloop::LoopHandle;
 use smithay::utils::{Logical, Point, Rectangle, Scale};
 use vaht_ui::{
-    Glyph, Panel, PanelContent, SizePolicy, Theme, ThemeElement, Typesetter, Widget, WidgetState,
+    Glyph, IconEmphasis, IconStore, Panel, PanelContent, SizePolicy, Theme, ThemeElement,
+    Typesetter, Widget, WidgetIcon, WidgetState,
 };
 
 use crate::Compositor;
@@ -81,6 +85,8 @@ pub(crate) struct Taskbar {
     clock_shows_seconds: bool,
     /// Wakes vaht when the clock's text next changes.
     wall_clock: Option<WallClock<Compositor>>,
+    /// The entries' icons.
+    icons: IconStore,
 }
 
 impl Taskbar {
@@ -104,6 +110,7 @@ impl Taskbar {
             clock_shows_seconds: settings.clock.format.shows_seconds()
                 && settings.widgets.contains(&TaskbarWidget::Clock),
             wall_clock: None,
+            icons: IconStore::from_environment(),
         })
     }
 
@@ -157,8 +164,14 @@ impl Taskbar {
         theme: &Theme,
         typesetter: &mut Typesetter,
     ) {
-        self.area = self.area_in(view.whole, theme.metrics().taskbar_height);
-        let content = TaskbarContent::of(&view, &self.panel.content().widgets);
+        let height = theme.metrics().taskbar_height;
+        self.area = self.area_in(view.whole, height);
+        let icon_size = WidgetIcon::side(height);
+        let content = TaskbarContent::of(
+            &view,
+            &self.panel.content().widgets,
+            (&mut self.icons, icon_size),
+        );
         if *self.panel.content() != content {
             self.panel.update(|current| *current = content);
         }
@@ -173,6 +186,13 @@ impl Taskbar {
 
     /// Repaints the taskbar at the next prepare, as when the theme changed.
     pub(crate) fn invalidate(&mut self) {
+        self.panel.invalidate();
+    }
+
+    /// Looks icons up again at the next prepare, so icons installed or
+    /// changed since show.
+    pub(crate) fn forget_icons(&mut self) {
+        self.icons.forget();
         self.panel.invalidate();
     }
 
@@ -308,8 +328,11 @@ pub(crate) struct TaskbarContent {
 }
 
 impl TaskbarContent {
-    /// Returns what the taskbar of `widgets` shows of `view`.
-    fn of(view: &TaskbarView<'_>, widgets: &[TaskbarWidget]) -> Self {
+    /// Returns what the taskbar of `widgets` shows of `view`, its entries'
+    /// icons from `icons`' store at its size.
+    fn of(view: &TaskbarView<'_>, widgets: &[TaskbarWidget], icons: (&mut IconStore, u32)) -> Self {
+        let (store, icon_size) = icons;
+        let shows_icons = view.settings.window_list.icons && icon_size > 0;
         let manager = view.window_manager;
         let current = manager.current_workspace();
         let mut windows: Vec<&Window> = manager
@@ -329,6 +352,14 @@ impl TaskbarContent {
                     title: window.title().to_owned(),
                     is_focused: manager.focused() == Some(window.id()),
                     is_minimized: window.state().is_minimized,
+                    icon: shows_icons
+                        .then(|| {
+                            window
+                                .icon_name()
+                                .and_then(|name| store.named(name, icon_size))
+                                .or_else(|| store.app_icon(window.app_id(), icon_size))
+                        })
+                        .flatten(),
                 })
                 .collect(),
             entry_max_width: view.settings.window_list.entry_width.max,
@@ -392,8 +423,10 @@ struct WindowListEntry {
     /// Whether it has focus.
     is_focused: bool,
     /// Whether it is minimized: its title is then shown in parentheses, as
-    /// Fluxbox shows it.
+    /// Fluxbox shows it, and its icon faded.
     is_minimized: bool,
+    /// Its icon, if it shows one.
+    icon: Option<vaht_ui::Icon>,
 }
 
 impl WindowListEntry {
@@ -409,10 +442,21 @@ impl WindowListEntry {
         } else {
             WidgetState::Unfocused
         };
-        Widget::text(ThemeElement::WindowListEntry, title)
+        let entry = Widget::text(ThemeElement::WindowListEntry, title)
             .with_size(SizePolicy::Share { max: max_width })
             .with_button(TaskbarHit::Entry(self.window))
-            .with_state(state)
+            .with_state(state);
+        match &self.icon {
+            Some(icon) => entry.with_icon(WidgetIcon {
+                icon: icon.clone(),
+                emphasis: if self.is_minimized {
+                    IconEmphasis::Faded
+                } else {
+                    IconEmphasis::Full
+                },
+            }),
+            None => entry,
+        }
     }
 }
 
@@ -478,6 +522,7 @@ mod tests {
             title: "kitty".to_owned(),
             is_focused: false,
             is_minimized: true,
+            icon: None,
         };
         let widget = entry.widget(128);
         assert_eq!(

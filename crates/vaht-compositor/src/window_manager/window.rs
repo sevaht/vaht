@@ -164,6 +164,11 @@ impl Window {
         &self.committed.app_id
     }
 
+    /// Returns the name of the icon its client chose, if it named one.
+    pub(crate) fn icon_name(&self) -> Option<&str> {
+        self.committed.icon_name.as_deref()
+    }
+
     /// Returns where the content's top-left corner is.
     pub(crate) const fn location(&self) -> Point<i32, Logical> {
         self.location

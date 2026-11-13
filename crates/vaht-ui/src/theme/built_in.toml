@@ -61,7 +61,8 @@ padding = [0, 8, 0, 8]
 padding = [0, 8, 0, 8]
 
 [taskbar.window-list.entry]
-padding = [0, 10, 0, 10]
+# Half of Fluxbox's iconTextPadding (10) each side of the title.
+padding = [0, 5, 0, 5]
 
 [taskbar.window-list.entry.focused]
 texture = { gradient = "vertical", from = "grey55", to = "grey5", bevel = "raised" }

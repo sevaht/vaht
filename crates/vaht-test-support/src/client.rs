@@ -153,6 +153,26 @@ impl TestClient {
         self.roundtrip();
     }
 
+    /// Has every window name `icon` as its icon (xdg-toplevel-icon), and
+    /// waits until vaht has the commits.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn name_window_icons(&mut self, icon: &str) {
+        let handle = self.queue.handle();
+        for window in &self.state.windows {
+            let named = self.state.toplevel_icons.create_icon(&handle, NoEvents);
+            named.set_name(icon.to_owned());
+            self.state
+                .toplevel_icons
+                .set_icon(window.xdg_toplevel(), Some(&named));
+            named.destroy();
+            window.commit();
+        }
+        self.roundtrip();
+    }
+
     /// Closes every window and waits until vaht has processed it.
     ///
     /// # Panics

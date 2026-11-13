@@ -22,6 +22,7 @@ use smithay::reexports::wayland_server::{DisplayHandle, Resource as _};
 use smithay::utils::{Logical, Physical, Point, Scale};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
+use smithay::wayland::xdg_toplevel_icon::ToplevelIconCachedState;
 
 use crate::window_manager::{
     Axes, CommittedState, Ending, PlacementKind, RequestedState, SizeLimits,
@@ -62,9 +63,18 @@ impl Toplevel {
                 )
             })
             .unwrap_or_default();
+        let icon_name = with_states(self.wl_surface(), |states| {
+            states
+                .cached_state
+                .get::<ToplevelIconCachedState>()
+                .current()
+                .icon_name()
+                .map(str::to_owned)
+        });
         CommittedState {
             title,
             app_id,
+            icon_name,
             geometry: self.window.geometry(),
             size_limits: self.size_limits(),
         }

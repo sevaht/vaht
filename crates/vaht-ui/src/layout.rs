@@ -6,6 +6,7 @@
 //! widget drawn on top is the one that is clicked.
 
 use crate::geometry::{Point, Rect};
+use crate::icon::WidgetIcon;
 use crate::theme::{ThemeElement, WidgetState};
 use crate::widget::{Glyph, SizePolicy, Widget, WidgetKind};
 
@@ -35,6 +36,8 @@ pub struct Placed<Hit> {
     pub is_button: bool,
     /// The state it is drawn in, when not its panel's.
     pub state: Option<WidgetState>,
+    /// The icon shown left of its text, if any.
+    pub icon: Option<WidgetIcon>,
 }
 
 /// A widget tree placed in an area.
@@ -141,6 +144,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
             hit: widget.hit,
             is_button: widget.is_button,
             state: widget.state,
+            icon: widget.icon.clone(),
         });
         let (axis, children) = match &widget.kind {
             WidgetKind::Row(children) => (Axis::Horizontal, children),
@@ -168,7 +172,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
                 let wanted = match child.size {
                     SizePolicy::Fixed(length) => length,
                     SizePolicy::Square => axis.thickness(area),
-                    SizePolicy::Fit => self.natural_length(child, axis),
+                    SizePolicy::Fit => self.natural_length(child, axis, axis.thickness(area)),
                     SizePolicy::Share { .. } | SizePolicy::Fill { .. } => 0,
                 };
                 let granted = wanted.min(remaining);
@@ -224,11 +228,18 @@ impl<Hit: Copy> Placer<'_, Hit> {
         lengths
     }
 
-    /// Returns how much room `widget` needs along `axis` when fitted.
-    fn natural_length(&mut self, widget: &Widget<Hit>, axis: Axis) -> u32 {
+    /// Returns how much room `widget` needs along `axis` when fitted, in a
+    /// container `thickness` across.
+    fn natural_length(&mut self, widget: &Widget<Hit>, axis: Axis, thickness: u32) -> u32 {
         match &widget.kind {
             WidgetKind::Text(text) => match axis {
-                Axis::Horizontal => (self.fit_width)(text, widget.element),
+                Axis::Horizontal => {
+                    let icon = widget
+                        .icon
+                        .as_ref()
+                        .map_or(0, |_| WidgetIcon::span(thickness));
+                    (self.fit_width)(text, widget.element) + icon
+                }
                 // A text line's height is its container's; columns of text
                 // give each line a fixed size instead.
                 Axis::Vertical => 0,
@@ -237,7 +248,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
                 .iter()
                 .map(|child| match child.size {
                     SizePolicy::Fixed(length) => length,
-                    SizePolicy::Fit => self.natural_length(child, axis),
+                    SizePolicy::Fit => self.natural_length(child, axis, thickness),
                     SizePolicy::Square | SizePolicy::Share { .. } | SizePolicy::Fill { .. } => 0,
                 })
                 .sum(),

@@ -53,6 +53,9 @@ widgets = ["workspace-previous", "workspace-name", "workspace-next", "window-lis
 show = { workspace = "current" }
 # Entries share the list equally, each at most this wide, in pixels.
 entry_width = { max = 128 }
+# Whether entries show their application's icon: the one the window names,
+# else its desktop entry's, from the hicolor theme or pixmaps.
+icons = true
 
 [taskbar.clock]
 # strftime: %k:%M is the hour, space-padded, and the minutes.

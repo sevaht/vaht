@@ -36,6 +36,7 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::virtual_pointer::VirtualPointerManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
+use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager;
 
 use crate::Compositor;
 
@@ -87,6 +88,9 @@ pub(crate) struct ProtocolStates {
     /// `zwp_virtual_keyboard_manager_v1`: key input from programs. Held only
     /// to keep the global alive.
     _virtual_keyboard: VirtualKeyboardManagerState,
+    /// `xdg_toplevel_icon_manager_v1`: windows naming their icon, which
+    /// their commits carry. Held only to keep the global alive.
+    _toplevel_icon: XdgToplevelIconManager,
 }
 
 impl ProtocolStates {
@@ -123,6 +127,7 @@ impl ProtocolStates {
                 display,
                 |_client| true,
             ),
+            _toplevel_icon: XdgToplevelIconManager::new::<Compositor>(display),
         }
     }
 }

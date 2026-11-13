@@ -419,6 +419,11 @@ impl InitFile {
         }
         self.resources
             .accept_default(&format!("{SCREEN}iconbar.alignment"), "Relative");
+        self.convert_flag("iconbar.usePixmap", &["taskbar", "window_list", "icons"]);
+        // The theme's taskbar.window-list.entry padding is half of it each
+        // side; another value is reported, for the theme to change.
+        self.resources
+            .accept_default(&format!("{SCREEN}iconbar.iconTextPadding"), "10");
     }
 
     /// Notes that what `init` says on line `line` is not in vaht yet.
@@ -581,6 +586,7 @@ session.screen0.toolbar.maxOver:\ttrue
 session.screen0.strftimeFormat:\t%H:%M:%S
 session.screen0.iconbar.mode:\t{static groups} (workspace) (minimized=no)
 session.screen0.iconbar.iconWidth:\t200
+session.screen0.iconbar.usePixmap:\tfalse
 session.screen0.toolbar.widthPercent:\t100
 ";
         let mut report = Report::default();
@@ -592,7 +598,7 @@ session.screen0.toolbar.widthPercent:\t100
              widgets = [\"workspace-previous\", \"window-list\", \"clock\"]\n\n\
              [taskbar.clock]\nformat = \"%H:%M:%S\"\n\n\
              [taskbar.window_list]\nshow = { workspace = \"current\", minimized = false }\n\
-             entry_width = { max = 200 }\n"
+             entry_width = { max = 200 }\nicons = false\n"
         );
         let notes: Vec<String> = report.notes().iter().map(ToString::to_string).collect();
         assert_eq!(notes.len(), 1, "{notes:?}");

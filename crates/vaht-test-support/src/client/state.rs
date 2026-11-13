@@ -15,6 +15,8 @@ use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1:
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1};
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1};
+use smithay_client_toolkit::reexports::protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1;
+use smithay_client_toolkit::reexports::protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_v1::XdgToplevelIconV1;
 use smithay_client_toolkit::reexports::protocols_wlr::virtual_pointer::v1::client::zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1;
 use smithay_client_toolkit::reexports::protocols_wlr::virtual_pointer::v1::client::zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
@@ -57,6 +59,8 @@ pub(super) struct ClientState {
     pub(super) capture_sources: ExtOutputImageCaptureSourceManagerV1,
     /// Captures them.
     pub(super) capture: ExtImageCopyCaptureManagerV1,
+    /// Gives windows icons.
+    pub(super) toplevel_icons: XdgToplevelIconManagerV1,
     /// Shared-memory buffers.
     pub(super) shm: Shm,
     /// Where buffers are allocated.
@@ -107,6 +111,7 @@ impl ClientState {
                 "ext_output_image_capture_source_manager_v1",
             ),
             capture: bind(globals, handle, "ext_image_copy_capture_manager_v1"),
+            toplevel_icons: bind(globals, handle, "xdg_toplevel_icon_manager_v1"),
             pool: SlotPool::new(pool_size, &shm).expect("a shared-memory pool"),
             shm,
             windows: Vec::new(),
@@ -184,6 +189,8 @@ ignore_events!(
     ExtOutputImageCaptureSourceManagerV1,
     ExtImageCaptureSourceV1,
     ExtImageCopyCaptureManagerV1,
+    XdgToplevelIconManagerV1,
+    XdgToplevelIconV1,
 );
 
 /// User data of the seat's keyboard: records where keyboard focus is.

@@ -7,6 +7,7 @@
 //! when the widget is clicked. A *button* also looks pressed while held; a
 //! plain hit region (a title to drag, say) never changes look.
 
+use crate::icon::WidgetIcon;
 use crate::theme::{ThemeElement, WidgetState};
 
 /// One node of a panel's content.
@@ -25,6 +26,8 @@ pub struct Widget<Hit> {
     /// The state it is drawn in, when not its panel's: a focused window's
     /// entry among unfocused ones.
     pub state: Option<WidgetState>,
+    /// The icon shown left of its text, if any.
+    pub icon: Option<WidgetIcon>,
 }
 
 impl<Hit> Widget<Hit> {
@@ -83,6 +86,13 @@ impl<Hit> Widget<Hit> {
         self
     }
 
+    /// Returns the widget showing `icon` left of its text.
+    #[must_use]
+    pub fn with_icon(mut self, icon: WidgetIcon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
     /// Returns the widget drawn in `state` rather than its panel's.
     #[must_use]
     pub const fn with_state(mut self, state: WidgetState) -> Self {
@@ -108,6 +118,7 @@ impl<Hit> Widget<Hit> {
             hit: None,
             is_button: false,
             state: None,
+            icon: None,
         }
     }
 }

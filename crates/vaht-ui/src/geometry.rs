@@ -135,6 +135,18 @@ impl Rect {
         }
     }
 
+    /// Returns the rectangle less its leftmost `width` pixels, never below
+    /// zero size.
+    #[must_use]
+    pub fn without_left(self, width: u32) -> Self {
+        let taken = width.min(self.width);
+        Self {
+            x: self.x.saturating_add_unsigned(taken),
+            width: self.width - taken,
+            ..self
+        }
+    }
+
     /// Converts the rectangle for tiny-skia; `None` when it covers no
     /// pixels.
     pub(crate) fn to_skia(self) -> Option<tiny_skia::Rect> {

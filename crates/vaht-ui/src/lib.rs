@@ -14,6 +14,7 @@ mod canvas;
 pub mod color;
 pub mod corner;
 pub mod geometry;
+pub mod icon;
 pub mod layout;
 pub mod panel;
 pub mod text;
@@ -27,6 +28,8 @@ pub use color::Color;
 pub use corner::{Corner, CornerArc, CornerRadii};
 #[doc(inline)]
 pub use geometry::{Insets, Point, Rect, Size};
+#[doc(inline)]
+pub use icon::{Icon, IconEmphasis, IconStore, WidgetIcon};
 #[doc(inline)]
 pub use panel::{Panel, PanelContent};
 #[doc(inline)]

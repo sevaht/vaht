@@ -191,8 +191,11 @@ rest by name, so a setting never silently does nothing:
 - `[taskbar]`: `enabled`, `edge` (`top` or `bottom`), `reserve_space`,
   `widgets` (`workspace-previous`, `workspace-name`, `workspace-next`,
   `window-list`, `clock`; `tray` is refused until it exists),
-  `[taskbar.window_list]` with `show` (a matcher) and
-  `entry_width = { max }`, and `[taskbar.clock]` with `format`, checked
+  `[taskbar.window_list]` with `show` (a matcher),
+  `entry_width = { max }` and `icons` (each entry's icon: the one the
+  window names over xdg-toplevel-icon, else its desktop entry's `Icon`,
+  found in the `hicolor` theme or `pixmaps`; PNG and SVG; from
+  `iconbar.usePixmap`), and `[taskbar.clock]` with `format`, checked
   when read. The taskbar spans the output; clicking an arrow shows the
   workspace before or after, clicking an entry brings its window forward
   or, if it has focus, minimizes it, and the `taskbar` and

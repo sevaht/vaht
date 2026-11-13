@@ -116,6 +116,8 @@ pub(crate) struct WindowListSettings {
     pub(crate) show: WindowMatcher,
     /// How wide an entry may be.
     pub(crate) entry_width: EntryWidth,
+    /// Whether entries show their application's icon.
+    pub(crate) icons: bool,
 }
 
 impl Default for WindowListSettings {
@@ -123,6 +125,7 @@ impl Default for WindowListSettings {
         Self {
             show: WindowMatcher::on_current_workspace(),
             entry_width: EntryWidth::default(),
+            icons: true,
         }
     }
 }

@@ -4,12 +4,13 @@
 //! through it.
 
 use tiny_skia::{
-    GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, Rect as SkiaRect, Shader, SpreadMode,
-    Stroke, Transform,
+    FilterQuality, GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, PixmapPaint,
+    Rect as SkiaRect, Shader, SpreadMode, Stroke, Transform,
 };
 
 use crate::color::Color;
 use crate::geometry::Rect;
+use crate::icon::WidgetIcon;
 use crate::layout::{Content, Layout, Placed};
 use crate::text::Typesetter;
 use crate::texture::{Bevel, Fill, GradientDirection, Texture};
@@ -49,13 +50,43 @@ impl<'pixmap> Canvas<'pixmap> {
         for placed in layout.placed() {
             let style = theme.style(placed.element, state_of(placed));
             self.fill_texture(style.texture, placed.rect);
-            let inner = placed.rect.inset(style.padding);
+            let mut inner = placed.rect.inset(style.padding);
+            if let Some(icon) = &placed.icon {
+                self.draw_icon(icon, WidgetIcon::square_in(placed.rect));
+                inner = inner.without_left(WidgetIcon::span(placed.rect.height));
+            }
             match &placed.content {
                 Content::Text(text) => typesetter.draw(self.pixmap, text, &style.text, inner),
                 Content::Glyph(glyph) => self.draw_glyph(*glyph, style.glyph_color, inner),
                 Content::Background => {}
             }
         }
+    }
+
+    /// Draws `icon` scaled into `square`.
+    fn draw_icon(&mut self, icon: &WidgetIcon, square: Rect) {
+        let source = icon.icon.pixels();
+        if square.width == 0 || source.width() == 0 {
+            return;
+        }
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "icon sizes are far below 2^24, where f32 stays exact"
+        )]
+        let scale = square.width as f32 / source.width() as f32;
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "panel coordinates are far below 2^24, where f32 stays exact"
+        )]
+        let transform =
+            Transform::from_row(scale, 0.0, 0.0, scale, square.x as f32, square.y as f32);
+        let paint = PixmapPaint {
+            opacity: icon.emphasis.opacity(),
+            quality: FilterQuality::Bicubic,
+            ..PixmapPaint::default()
+        };
+        self.pixmap
+            .draw_pixmap(0, 0, source.as_ref(), &paint, transform, None);
     }
 
     /// Fills `rect` with `texture`'s fill, then draws its bevel.

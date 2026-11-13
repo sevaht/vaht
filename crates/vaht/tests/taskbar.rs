@@ -6,6 +6,7 @@ use std::path::Path;
 
 use vaht_test_support::{
     BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR,
+    solid_png,
 };
 
 /// The executable cargo built for these tests.
@@ -177,4 +178,78 @@ fn a_clock_showing_seconds_ticks_each_second() {
         last = now;
     }
     assert_eq!(ticks, 3, "the clock's text changed every second");
+}
+
+/// The test client's icon, as its desktop entry names it.
+const ICON: [u8; 3] = [0xff, 0x00, 0xff];
+
+/// The icon a window names itself.
+const NAMED_ICON: [u8; 3] = [0x00, 0xff, 0xff];
+
+/// Starts vaht with the test theme, a window list, `settings` added, and an
+/// icon for the test client's app id; opens a window.
+fn start_with_icon(settings: &str) -> (HeadlessVaht, TestClient) {
+    let settings = format!("theme = \"test\"\n[taskbar]\nwidgets = [\"window-list\"]\n{settings}");
+    let png = solid_png(32, ICON);
+    let named_png = solid_png(32, NAMED_ICON);
+    let vaht = HeadlessVaht::start_with_files(
+        Path::new(EXECUTABLE),
+        &[
+            ("settings.toml", settings.as_bytes()),
+            ("themes/test.toml", THEME.as_bytes()),
+        ],
+        &[
+            (
+                "applications/vaht.test.desktop",
+                b"[Desktop Entry]\nName=Test\nIcon=vaht-test-icon\n",
+            ),
+            ("icons/hicolor/32x32/apps/vaht-test-icon.png", &png),
+            ("icons/hicolor/32x32/apps/vaht-named-icon.png", &named_png),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    (vaht, client)
+}
+
+#[test]
+fn an_entry_shows_its_application_s_icon_left_of_its_title() {
+    let (_vaht, mut client) = start_with_icon("");
+    let screenshot = client.screenshot();
+    let middle = screenshot.height() - HEIGHT / 2;
+    assert_eq!(screenshot.rgb(0, middle), FOCUSED, "the entry's edge");
+    assert_eq!(screenshot.rgb(1, middle), ICON, "the icon, a pixel in");
+    assert_eq!(
+        screenshot.rgb(HEIGHT - 2, middle),
+        ICON,
+        "as tall as the bar, less a pixel each side"
+    );
+    assert_eq!(
+        screenshot.rgb(HEIGHT, middle),
+        FOCUSED,
+        "then the entry again"
+    );
+    assert_eq!(
+        screenshot.rgb(9, screenshot.height() - HEIGHT),
+        FOCUSED,
+        "a pixel above it"
+    );
+}
+
+#[test]
+fn entries_can_leave_icons_out() {
+    let (_vaht, mut client) = start_with_icon("[taskbar.window_list]\nicons = false\n");
+    let screenshot = client.screenshot();
+    assert_eq!(screenshot.rgb(9, screenshot.height() - HEIGHT / 2), FOCUSED);
+}
+
+#[test]
+fn the_icon_a_window_names_comes_before_its_application_s() {
+    let (_vaht, mut client) = start_with_icon("");
+    client.name_window_icons("vaht-named-icon");
+    let screenshot = client.screenshot();
+    assert_eq!(
+        screenshot.rgb(9, screenshot.height() - HEIGHT / 2),
+        NAMED_ICON
+    );
 }

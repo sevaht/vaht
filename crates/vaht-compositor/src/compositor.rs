@@ -301,6 +301,10 @@ impl Compositor {
                         taskbar.invalidate();
                     }
                 }
+                // A reload is when icons installed or changed since show.
+                if let Some(taskbar) = &mut self.taskbar {
+                    taskbar.forget_icons();
+                }
                 self.config = config;
                 self.schedule_clock();
                 tracing::info!(

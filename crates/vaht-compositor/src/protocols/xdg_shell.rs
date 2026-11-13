@@ -8,6 +8,7 @@ use smithay::utils::Serial;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
+use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler;
 
 use crate::Compositor;
 use crate::window_manager::{ClientRequest, HorizontalEdge, ResizeEdges, VerticalEdge, WindowDrag};
@@ -109,3 +110,7 @@ const fn resize_edges(edge: xdg_toplevel::ResizeEdge) -> Option<ResizeEdges> {
         vertical,
     })
 }
+
+/// A window's icon is part of its next commit, where the window's
+/// `Toplevel` reads it; nothing needs doing when it is set.
+impl XdgToplevelIconHandler for Compositor {}

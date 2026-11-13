@@ -18,6 +18,9 @@ pub(crate) struct CommittedState {
     pub(crate) title: String,
     /// The application id (or X11 class); empty when the client set none.
     pub(crate) app_id: String,
+    /// The name of the icon the client chose for the window, if it named
+    /// one (xdg-toplevel-icon).
+    pub(crate) icon_name: Option<String>,
     /// The content area within the client's surface: its size, and where
     /// it starts past any shadow the client draws around it.
     pub(crate) geometry: Rectangle<i32, Logical>,

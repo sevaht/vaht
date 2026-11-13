@@ -26,7 +26,8 @@ const CLIENT_RESOURCES: [&str; 7] = [
 ];
 
 /// A `vaht --backend headless` process with private directories: its
-/// socket, its configuration and its log never meet the developer's own.
+/// socket, its configuration, its data (icons, desktop entries) and its log
+/// never meet the developer's own.
 ///
 /// Dropping it kills vaht, so a failing test never leaves one running.
 #[derive(Debug)]
@@ -37,6 +38,8 @@ pub struct HeadlessVaht {
     runtime: tempfile::TempDir,
     /// Its configuration directory; removed with the value.
     config: tempfile::TempDir,
+    /// Its only XDG data directory; removed with the value.
+    _data: tempfile::TempDir,
     /// Where it logs; removed with the value.
     logs: tempfile::TempDir,
     /// The socket clients connect to.
@@ -68,14 +71,43 @@ impl HeadlessVaht {
     /// not accept clients in time.
     #[must_use]
     pub fn start_with_config(executable: &Path, files: &[(&str, &str)]) -> Self {
-        let config = tempfile::tempdir().expect("a temporary configuration directory");
-        for (name, contents) in files {
-            let path = config.path().join(name);
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).expect("the file's directory is made");
+        let files: Vec<(&str, &[u8])> = files
+            .iter()
+            .map(|(name, text)| (*name, text.as_bytes()))
+            .collect();
+        Self::start_with_files(executable, &files, &[])
+    }
+
+    /// Starts `executable` headless with configuration files `config` and
+    /// data files `data` (such as `icons/hicolor/32x32/apps/x.png`), each a
+    /// path in its directory and its contents, and waits until it accepts
+    /// clients. The data directory is vaht's only one: it sees none of the
+    /// machine's icons or desktop entries.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the files cannot be written, or vaht cannot start or does
+    /// not accept clients in time.
+    #[must_use]
+    pub fn start_with_files(
+        executable: &Path,
+        config: &[(&str, &[u8])],
+        data: &[(&str, &[u8])],
+    ) -> Self {
+        let write_all = |directory: &Path, files: &[(&str, &[u8])]| {
+            for (name, contents) in files {
+                let path = directory.join(name);
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).expect("the file's directory is made");
+                }
+                std::fs::write(path, contents).expect("the file is written");
             }
-            std::fs::write(path, contents).expect("the file is written");
-        }
+        };
+        let config_directory = tempfile::tempdir().expect("a temporary configuration directory");
+        write_all(config_directory.path(), config);
+        let data_directory = tempfile::tempdir().expect("a temporary data directory");
+        write_all(data_directory.path(), data);
+        let config = config_directory;
         // Socket paths are limited to about 108 bytes, so the runtime
         // directory must be short: the system's temporary directory is.
         let runtime = tempfile::Builder::new()
@@ -95,6 +127,8 @@ impl HeadlessVaht {
             .env("XDG_RUNTIME_DIR", runtime.path())
             .env("VAHT_LOG_DIRECTORY", logs.path())
             .env("VAHT_CONFIG_DIRECTORY", config.path())
+            .env("XDG_DATA_HOME", data_directory.path())
+            .env("XDG_DATA_DIRS", data_directory.path())
             // No D-Bus bus of the machine's: one that is not there.
             .env("DBUS_SYSTEM_BUS_ADDRESS", Self::absent_bus(runtime.path()))
             .env("DBUS_SESSION_BUS_ADDRESS", Self::absent_bus(runtime.path()))
@@ -110,6 +144,7 @@ impl HeadlessVaht {
             socket: PathBuf::new(),
             runtime,
             config,
+            _data: data_directory,
             logs,
         };
         let line = vaht.wait_for_log(|log| {
