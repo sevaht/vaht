@@ -33,6 +33,7 @@ mod toplevels;
 mod window_manager;
 
 pub use backend::{BackendChoice, BackendError, RenderError};
+pub use client::ListenError;
 pub use compositor::{Compositor, RunError, RunOptions};
 pub use config::{Config, ConfigError, ConfigFile};
 pub use signals::ProcessSignals;

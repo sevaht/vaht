@@ -22,13 +22,9 @@
 //! (R-X3). The event loop only watches a duplicate of the display's
 //! descriptor to wake up, and clients are dispatched after every wake-up.
 
-use std::ffi::OsString;
 use std::fmt;
 use std::io;
-use std::num::NonZeroU32;
-use std::os::fd::AsFd as _;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use smithay::backend::input::{
@@ -43,8 +39,7 @@ use smithay::input::keyboard::{
 };
 use smithay::input::pointer::{ButtonEvent, Focus, GrabStartData, MotionEvent};
 use smithay::input::{Seat, SeatState};
-use smithay::reexports::calloop::generic::Generic;
-use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, Mode, PostAction};
+use smithay::reexports::calloop::{EventLoop, LoopHandle};
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _, Weak};
@@ -53,13 +48,12 @@ use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
 use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::shell::xdg::{PopupSurface, ToplevelSurface};
-use smithay::wayland::socket::ListeningSocketSource;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardKeyEvent;
 use vaht_ui::{Theme, Typesetter};
 
 use crate::backend::{Backend, BackendChoice, BackendError};
 use crate::capture::ScreenCapture;
-use crate::client::ClientState;
+use crate::client::{ClientListener, ListenError};
 use crate::config::{
     Action, Command, Config, ConfigSource, FocusModel, KeyChord, Modifiers, ResizeFrom,
 };
@@ -72,7 +66,7 @@ use crate::layers::{Layers, OutputLayers};
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::{FrameTextures, PointerTarget, Scene, WindowTarget};
-use crate::signals::{ProcessSignals, SignalRequest};
+use crate::signals::ProcessSignals;
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::window_manager::{
     ClientRequest, FramePart, OutputArea, Window, WindowDrag, WindowId, WindowManager,
@@ -125,30 +119,20 @@ pub struct Compositor {
     /// Where the configuration comes from, and when it is read again.
     pub(crate) config_source: ConfigSource,
     /// Starts programs and reaps them.
-    launcher: Launcher,
+    pub(crate) launcher: Launcher,
     /// Registers timers and other sources with the event loop.
     pub(crate) loop_handle: LoopHandle<'static, Self>,
     /// When vaht started; frame times are measured from it.
     pub(crate) start_time: Instant,
     /// False once vaht has been asked to stop.
     is_running: bool,
-    /// The name of the socket clients connect to (`WAYLAND_DISPLAY`).
-    socket_name: OsString,
-    /// The listening socket, the display's wake-up descriptor, and the
-    /// signals vaht handles.
-    _event_sources: [EventSource<Self>; 3],
+    /// The socket clients connect to.
+    listener: ClientListener,
+    /// The signals vaht handles, registered with the event loop.
+    _signals: EventSource<Self>,
 }
 
 impl Compositor {
-    /// How long a held key waits before repeating; repeating key bindings
-    /// use it too.
-    pub(crate) const KEY_REPEAT_DELAY: Duration = Duration::from_millis(200);
-
-    /// How often a held key repeats, per second; repeating key bindings
-    /// use it too, unless they set their own rate.
-    pub(crate) const KEY_REPEAT_RATE: NonZeroU32 =
-        NonZeroU32::new(25).expect("the key repeat rate is not zero");
-
     /// Runs vaht until it is asked to stop: by its host window closing, by
     /// a termination signal among `signals`, or by the `exit` action.
     ///
@@ -161,7 +145,7 @@ impl Compositor {
         let mut display: Display<Self> = Display::new().map_err(RunError::Display)?;
         let mut compositor = Self::new(&event_loop.handle(), &display, options, signals)?;
         tracing::info!(
-            socket = %compositor.socket_name.to_string_lossy(),
+            socket = %compositor.listener.socket_name().to_string_lossy(),
             "accepting clients; start them with WAYLAND_DISPLAY set to the socket"
         );
         resources::log_process_usage("at start");
@@ -215,7 +199,10 @@ impl Compositor {
             );
         }
 
-        let (socket_name, event_sources) = Self::listen(handle, display, &ledger, signals)?;
+        let listener = ClientListener::open(handle, display, &ledger)?;
+        let signals = signals
+            .watch(handle, &ledger)
+            .map_err(RunError::WatchSignals)?;
         let config_source = ConfigSource::new(options.config_directory);
         let config = config_source.load().unwrap_or_else(|error| {
             tracing::error!(
@@ -235,7 +222,7 @@ impl Compositor {
             },
             theme.metrics(),
         );
-        let launcher = Launcher::new(socket_name.clone(), &ledger);
+        let launcher = Launcher::new(listener.socket_name().to_os_string(), &ledger);
         let mut compositor = Self {
             display_handle,
             ledger,
@@ -261,8 +248,8 @@ impl Compositor {
             loop_handle: handle.clone(),
             start_time: Instant::now(),
             is_running: true,
-            socket_name,
-            _event_sources: event_sources,
+            listener,
+            _signals: signals,
         };
         compositor
             .config_source
@@ -1053,64 +1040,6 @@ impl Compositor {
         true
     }
 
-    /// Accepts a client that connected to the socket.
-    fn accept_client(&self, stream: std::os::unix::net::UnixStream) {
-        let state = Arc::new(ClientState::new(&self.ledger));
-        if let Err(error) = self.display_handle.clone().insert_client(stream, state) {
-            tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                "could not accept a client"
-            );
-        }
-    }
-
-    /// Opens the socket clients connect to, and registers it, the display's
-    /// wake-up descriptor and `signals` with the event loop. Returns the
-    /// socket's name and the registrations.
-    fn listen(
-        handle: &LoopHandle<'static, Self>,
-        display: &Display<Self>,
-        ledger: &ResourceLedger,
-        signals: ProcessSignals,
-    ) -> Result<(OsString, [EventSource<Self>; 3]), RunError> {
-        let socket = ListeningSocketSource::new_auto().map_err(RunError::Listen)?;
-        let socket_name = socket.socket_name().to_os_string();
-        let listening = EventSource::insert(handle, ledger, socket, |stream, (), compositor| {
-            compositor.accept_client(stream);
-        })
-        .map_err(|error| RunError::RegisterSource(error.error))?;
-        // Readiness only wakes the loop; `run` dispatches the clients.
-        let display_descriptor = display
-            .as_fd()
-            .try_clone_to_owned()
-            .map_err(RunError::DuplicateDisplayDescriptor)?;
-        let display_wakeup = EventSource::insert(
-            handle,
-            ledger,
-            Generic::new(display_descriptor, Interest::READ, Mode::Level),
-            |_, _, _| Ok(PostAction::Continue),
-        )
-        .map_err(|error| RunError::RegisterSource(error.error))?;
-        // A termination request stops vaht cleanly: clients are told, and
-        // the exit resource report is written.
-        let signals = EventSource::insert(
-            handle,
-            ledger,
-            signals.into_source(),
-            |event, (), compositor| match SignalRequest::of(event.signal()) {
-                Some(SignalRequest::Stop) => {
-                    tracing::info!(signal = ?event.signal(), "asked to stop");
-                    compositor.stop();
-                }
-                Some(SignalRequest::Reload) => compositor.reload_configuration(),
-                Some(SignalRequest::ReapPrograms) => compositor.launcher.reap(),
-                None => {}
-            },
-        )
-        .map_err(|error| RunError::RegisterSource(error.error))?;
-        Ok((socket_name, [listening, display_wakeup, signals]))
-    }
-
     /// Creates the seat with its keyboard and pointer.
     fn create_seat(
         state: &mut SeatState<Self>,
@@ -1119,8 +1048,8 @@ impl Compositor {
         let mut seat = state.new_wl_seat(display, "seat0");
         seat.add_keyboard(
             XkbConfig::default(),
-            i32::try_from(Self::KEY_REPEAT_DELAY.as_millis()).expect("the delay is short"),
-            i32::try_from(Self::KEY_REPEAT_RATE.get()).expect("the rate is small"),
+            i32::try_from(Input::KEY_REPEAT_DELAY.as_millis()).expect("the delay is short"),
+            i32::try_from(Input::KEY_REPEAT_RATE.get()).expect("the rate is small"),
         )
         .map_err(RunError::Keyboard)?;
         seat.add_pointer();
@@ -1132,7 +1061,7 @@ impl fmt::Debug for Compositor {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("Compositor")
-            .field("socket_name", &self.socket_name)
+            .field("socket_name", &self.listener.socket_name())
             .field("windows", &self.window_manager.window_count())
             .field("focused", &self.window_manager.focused())
             .finish_non_exhaustive()
@@ -1159,13 +1088,13 @@ pub enum RunError {
     #[error("could not create the Wayland display")]
     Display(#[source] smithay::reexports::wayland_server::backend::InitError),
 
-    /// No socket for clients could be opened.
-    #[error("could not open a socket for clients")]
-    Listen(#[source] smithay::reexports::wayland_server::BindError),
+    /// vaht could not listen for clients.
+    #[error("could not listen for clients")]
+    Listen(#[from] ListenError),
 
-    /// The display's descriptor could not be duplicated for the event loop.
-    #[error("could not watch the Wayland display for client activity")]
-    DuplicateDisplayDescriptor(#[source] io::Error),
+    /// The signals vaht handles could not be registered.
+    #[error("could not watch for signals")]
+    WatchSignals(#[source] calloop::Error),
 
     /// The keyboard's keymap could not be compiled.
     #[error("could not set up the keyboard")]
@@ -1178,10 +1107,6 @@ pub enum RunError {
     /// No backend could start.
     #[error("could not start a backend")]
     Backend(#[from] BackendError),
-
-    /// A source could not be registered with the event loop.
-    #[error("could not register with the event loop")]
-    RegisterSource(#[source] calloop::Error),
 
     /// Waiting for events failed.
     #[error("could not wait for events")]

@@ -10,14 +10,19 @@
 //! [`ProcessSignals::block`] belongs at the top of `main`, and the compositor
 //! then reads the blocked signals as ordinary events.
 //!
-//! Programs vaht starts do not inherit the blocked mask: the standard
-//! library clears it in the child before `exec` (a UI test checks this).
+//! Programs vaht starts do not inherit the blocked mask: the launcher
+//! spawns them with an empty one (a binding test checks this).
 
 use calloop::signals::{Signal, Signals};
+use smithay::reexports::calloop::LoopHandle;
+
+use crate::Compositor;
+use crate::event_source::EventSource;
+use crate::resources::ResourceLedger;
 
 /// What a signal asks of vaht.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SignalRequest {
+enum SignalRequest {
     /// Stop cleanly (SIGTERM, SIGINT).
     Stop,
     /// Read the configuration again (SIGHUP).
@@ -29,7 +34,7 @@ pub(crate) enum SignalRequest {
 impl SignalRequest {
     /// Returns what `signal` asks for; only the signals [`ProcessSignals`]
     /// blocks ever arrive.
-    pub(crate) fn of(signal: Signal) -> Option<Self> {
+    fn of(signal: Signal) -> Option<Self> {
         if matches!(signal, Signal::SIGTERM | Signal::SIGINT) {
             Some(Self::Stop)
         } else if signal == Signal::SIGHUP {
@@ -75,8 +80,29 @@ impl ProcessSignals {
         })
     }
 
-    /// Returns the event source the compositor registers.
-    pub(crate) fn into_source(self) -> Signals {
-        self.signals
+    /// Registers the signals with the event loop, which then acts on each
+    /// as its [`SignalRequest`] says. A termination request stops vaht
+    /// cleanly: clients are told, and the exit resource report is written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the event loop refuses the registration.
+    pub(crate) fn watch(
+        self,
+        handle: &LoopHandle<'static, Compositor>,
+        ledger: &ResourceLedger,
+    ) -> Result<EventSource<Compositor>, calloop::Error> {
+        EventSource::insert(handle, ledger, self.signals, |event, (), compositor| {
+            match SignalRequest::of(event.signal()) {
+                Some(SignalRequest::Stop) => {
+                    tracing::info!(signal = ?event.signal(), "asked to stop");
+                    compositor.stop();
+                }
+                Some(SignalRequest::Reload) => compositor.reload_configuration(),
+                Some(SignalRequest::ReapPrograms) => compositor.launcher.reap(),
+                None => {}
+            }
+        })
+        .map_err(|error| error.error)
     }
 }

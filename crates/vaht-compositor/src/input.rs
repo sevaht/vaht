@@ -126,6 +126,15 @@ pub(crate) struct Input {
 }
 
 impl Input {
+    /// How long a held key waits before repeating; repeating key bindings
+    /// use it too.
+    pub(crate) const KEY_REPEAT_DELAY: Duration = Duration::from_millis(200);
+
+    /// How often a held key repeats, per second; repeating key bindings
+    /// use it too, unless they set their own rate.
+    pub(crate) const KEY_REPEAT_RATE: NonZeroU32 =
+        NonZeroU32::new(25).expect("the key repeat rate is not zero");
+
     /// Decides whose a key event is: the client's, or vaht's, with the
     /// command a bound press runs. `chord` is the press
     /// with its modifiers, if the key has a keysym. A bound press's release
@@ -211,11 +220,11 @@ impl Input {
         event_loop: (&LoopHandle<'static, Compositor>, &ResourceLedger),
     ) {
         let (handle, ledger) = event_loop;
-        let interval = Duration::from_secs(1) / rate.unwrap_or(Compositor::KEY_REPEAT_RATE).get();
+        let interval = Duration::from_secs(1) / rate.unwrap_or(Self::KEY_REPEAT_RATE).get();
         let started = RepeatingTimer::start(
             handle,
             ledger,
-            Compositor::KEY_REPEAT_DELAY,
+            Self::KEY_REPEAT_DELAY,
             interval,
             move |compositor: &mut Compositor| {
                 let window = compositor.window_manager.focused();
