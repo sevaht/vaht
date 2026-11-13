@@ -14,6 +14,7 @@
 //! registrations ([`event_source`]).
 
 mod backend;
+mod bus;
 mod capture;
 mod client;
 mod compositor;

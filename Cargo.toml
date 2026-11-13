@@ -22,10 +22,12 @@ publish = false
 [workspace.dependencies]
 anyhow = "1"
 # The version Smithay uses, so the two unify into one event loop type.
-calloop = { version = "0.14.5", features = ["signals"] }
+calloop = { version = "0.14.5", features = ["executor", "signals"] }
 clap = { version = "4", features = ["derive", "env"] }
 cosmic-text = "0.19"
 file-rotate = "0.8"
+# `StreamExt`, to read D-Bus signal streams; zbus already depends on it.
+futures-util = { version = "0.3", default-features = false }
 jiff = "0.2"
 nix = { version = "0.31", features = ["inotify", "process", "signal", "time"] }
 procfs = "0.18"
@@ -48,6 +50,9 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-journald = "0.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# D-Bus: system services (timedated) and, later, the tray. Its own runtime
+# (the default) keeps tokio out; vaht polls its futures on the event loop.
+zbus = "6.2"
 vaht-compositor = { path = "crates/vaht-compositor" }
 vaht-import = { path = "crates/vaht-import" }
 vaht-ui = { path = "crates/vaht-ui" }

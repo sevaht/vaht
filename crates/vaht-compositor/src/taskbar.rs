@@ -25,7 +25,7 @@ use crate::Compositor;
 use crate::config::{TaskbarEdge, TaskbarSettings, TaskbarWidget};
 use crate::resources::ResourceLedger;
 use crate::scene::{PanelTexture, SceneElement};
-use crate::wall_clock::{SYSTEM_ZONE_FILE, WallClock};
+use crate::wall_clock::{WallClock, ZoneSources};
 use crate::window_manager::{Area, Window, WindowId, WindowManager};
 
 /// What clicking the taskbar can report.
@@ -224,7 +224,7 @@ impl Taskbar {
             let started = WallClock::start(
                 handle,
                 ledger,
-                SYSTEM_ZONE_FILE.as_ref(),
+                &ZoneSources::system(),
                 Compositor::show_time_change,
             );
             match started {

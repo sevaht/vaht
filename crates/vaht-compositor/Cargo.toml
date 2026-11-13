@@ -14,6 +14,7 @@ publish.workspace = true
 
 [dependencies]
 calloop.workspace = true
+futures-util.workspace = true
 jiff.workspace = true
 nix.workspace = true
 procfs.workspace = true
@@ -25,6 +26,7 @@ thiserror.workspace = true
 toml.workspace = true
 tracing.workspace = true
 vaht-ui.workspace = true
+zbus.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

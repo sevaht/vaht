@@ -6,14 +6,21 @@
 //! fire; dropping it removes the source. A window that owns its auto-raise
 //! [`Timer`] therefore cannot leave a timer firing after it closes. Each
 //! registration is counted in the [`ResourceLedger`].
+//!
+//! Asynchronous work (a D-Bus signal stream) runs on the event loop too: a
+//! [`StreamSource`] polls a stream there and hands each item to its owner's
+//! callback, and dropping it drops the stream.
 
 use std::cell::Cell;
 use std::fmt;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::time::Duration;
 
+use calloop::futures::{Scheduler, executor};
 use calloop::timer::{TimeoutAction, Timer as LoopTimer};
 use calloop::{InsertError, LoopHandle, RegistrationToken};
+use futures_util::{Stream, StreamExt};
 
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 
@@ -166,6 +173,64 @@ impl<State: 'static> RepeatingTimer<State> {
     }
 }
 
+/// A stream polled on the event loop, each item handed to a callback, until
+/// the stream ends or this is dropped.
+#[derive(Debug)]
+pub struct StreamSource<State: 'static> {
+    /// The executor polling the stream, registered with the loop.
+    _executor: EventSource<State>,
+}
+
+impl<State: 'static> StreamSource<State> {
+    /// Polls `stream` on the loop, calling `callback` with each item.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the executor cannot be created or registered.
+    pub fn start<Item: 'static>(
+        handle: &LoopHandle<'static, State>,
+        ledger: &ResourceLedger,
+        stream: impl Stream<Item = Item> + 'static,
+        mut callback: impl FnMut(Item, &mut State) + 'static,
+    ) -> Result<Self, calloop::Error> {
+        // The executor runs futures to one output each, so each future
+        // waits for one item and hands the stream back with it, to be
+        // scheduled again.
+        let (executor, scheduler) = executor::<NextItem<Item>>()?;
+        let stream: PendingStream<Item> = Box::pin(stream);
+        Self::schedule_next(&scheduler, stream);
+        let source = EventSource::insert(
+            handle,
+            ledger,
+            executor,
+            move |(item, stream), (), state| {
+                if let Some(item) = item {
+                    callback(item, state);
+                    Self::schedule_next(&scheduler, stream);
+                }
+            },
+        )
+        .map_err(|error| error.error)?;
+        Ok(Self { _executor: source })
+    }
+
+    /// Schedules waiting for `stream`'s next item.
+    fn schedule_next<Item: 'static>(
+        scheduler: &Scheduler<NextItem<Item>>,
+        mut stream: PendingStream<Item>,
+    ) {
+        // The executor is gone only once the source is dropped, and with
+        // it the wish for more items.
+        let _ = scheduler.schedule(async move { (stream.next().await, stream) });
+    }
+}
+
+/// A stream whose items a [`StreamSource`] waits for.
+type PendingStream<Item> = Pin<Box<dyn Stream<Item = Item>>>;
+
+/// A stream's next item, if it has not ended, and the stream.
+type NextItem<Item> = (Option<Item>, PendingStream<Item>);
+
 #[cfg(test)]
 mod tests {
     use calloop::EventLoop;
@@ -260,6 +325,30 @@ mod tests {
             .dispatch(TIMER_WAIT, &mut events)
             .expect("dispatch");
         assert_eq!(events, Events::new(), "a cancelled timer never fires");
+    }
+
+    #[test]
+    fn a_stream_source_hands_over_each_item_until_the_stream_ends() {
+        let mut event_loop: EventLoop<'static, Events> =
+            EventLoop::try_new().expect("an event loop");
+        let ledger = ResourceLedger::new();
+        let items = futures_util::stream::iter(["first", "second"]);
+        let source = StreamSource::start(
+            &event_loop.handle(),
+            &ledger,
+            items,
+            |item, events: &mut Events| events.push(item),
+        )
+        .expect("the stream registers");
+        let mut events = Events::new();
+        for _ in 0..3 {
+            event_loop
+                .dispatch(Duration::ZERO, &mut events)
+                .expect("dispatch");
+        }
+        assert_eq!(events, ["first", "second"]);
+        drop(source);
+        assert_eq!(ledger.count(ResourceKind::EventSource).live, 0);
     }
 
     #[test]

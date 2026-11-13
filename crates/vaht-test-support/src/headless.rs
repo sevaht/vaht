@@ -95,6 +95,9 @@ impl HeadlessVaht {
             .env("XDG_RUNTIME_DIR", runtime.path())
             .env("VAHT_LOG_DIRECTORY", logs.path())
             .env("VAHT_CONFIG_DIRECTORY", config.path())
+            // No D-Bus bus of the machine's: one that is not there.
+            .env("DBUS_SYSTEM_BUS_ADDRESS", Self::absent_bus(runtime.path()))
+            .env("DBUS_SESSION_BUS_ADDRESS", Self::absent_bus(runtime.path()))
             .env_remove("VAHT_LOG")
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("DISPLAY")
@@ -209,6 +212,12 @@ impl HeadlessVaht {
         ExitReport {
             log: self.read_log(),
         }
+    }
+
+    /// Returns the D-Bus address of a bus that is not there, in `runtime`:
+    /// vaht then reaches none of the machine's buses.
+    fn absent_bus(runtime: &Path) -> String {
+        format!("unix:path={}", runtime.join("no-bus").display())
     }
 
     /// Returns the log so far.
