@@ -661,6 +661,8 @@ mod tests {
             item_height: 20,
             border_width: 1,
             corners: CornerRadii::SQUARE,
+            bullet: vaht_ui::theme::Bullet::Triangle,
+            bullet_side: vaht_ui::MarkSide::Right,
         },
     };
 

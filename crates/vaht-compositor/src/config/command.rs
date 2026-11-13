@@ -101,6 +101,17 @@ pub(crate) enum Command {
 }
 
 impl Command {
+    /// Returns the names of the menus `custom-menu` opens in this command,
+    /// its parts included.
+    pub(crate) fn custom_menus(&self) -> Vec<&str> {
+        match self {
+            Self::Run(Action::OpenMenu(MenuRequest::Custom(name))) => vec![name.as_str()],
+            Self::Run(_) => Vec::new(),
+            Self::Sequence(commands) => commands.iter().flat_map(Self::custom_menus).collect(),
+            Self::Repeat { command, .. } => command.custom_menus(),
+        }
+    }
+
     /// Returns whether this command repeats while its key is held.
     pub(crate) const fn repeats(&self) -> bool {
         matches!(self, Self::Repeat { .. })

@@ -49,6 +49,10 @@ enum Property {
     CornerRadius,
     /// `corners`.
     Corners,
+    /// `bullet`.
+    Bullet,
+    /// `bullet_position`.
+    BulletPosition,
 }
 
 impl Property {
@@ -58,7 +62,13 @@ impl Property {
     const fn is_own_geometry(self) -> bool {
         matches!(
             self,
-            Self::Padding | Self::Border | Self::Height | Self::CornerRadius | Self::Corners
+            Self::Padding
+                | Self::Border
+                | Self::Height
+                | Self::CornerRadius
+                | Self::Corners
+                | Self::Bullet
+                | Self::BulletPosition
         )
     }
 
@@ -76,6 +86,8 @@ impl Property {
             Self::Height => "height",
             Self::CornerRadius => "corner_radius",
             Self::Corners => "corners",
+            Self::Bullet => "bullet",
+            Self::BulletPosition => "bullet_position",
         }
     }
 }
@@ -373,12 +385,15 @@ impl Sources {
             ThemeElement::MenuItem if is_hovered => Self {
                 font: Some(&["menu.hilite.font", "menu.frame.font"]),
                 text_color: Some(&["menu.hilite.textColor"]),
+                // A chosen toggle's square is the highlight's color.
+                glyph_color: Some(&["menu.hilite.color"]),
                 justify: Some(&["menu.hilite.justify", "menu.frame.justify"]),
                 parent: Some(ThemeElement::MenuFrame),
                 ..Self::texture(&["menu.hilite"])
             },
             ThemeElement::MenuItem => Self {
                 font: Some(&["menu.frame.font"]),
+                glyph_color: Some(&["menu.hilite.color"]),
                 text_color: Some(if state == WidgetState::Disabled {
                     &["menu.frame.disableColor"]
                 } else {
@@ -532,6 +547,9 @@ impl StyleFile {
                     cell.insert(Property::Padding, Written(Value::Array(array)));
                 }
                 self.add_sizes(&mut cell, element, state, report);
+                if element == ThemeElement::MenuItem {
+                    self.add_bullet(&mut cell);
+                }
                 cells.push((element, state, cell));
             }
         }
@@ -648,6 +666,29 @@ impl StyleFile {
                 Some((property, Written(value)))
             })
             .collect()
+    }
+
+    /// Adds a menu item's bullet to `cell`: `menu.bullet` (a word found
+    /// anywhere in it; none by default) and its side, `menu.bullet.position`
+    /// (left unless it says right), as fluxland reads them.
+    fn add_bullet(&mut self, cell: &mut Cell) {
+        let bullet = self
+            .database
+            .get("menu.bullet")
+            .map(str::to_ascii_lowercase)
+            .and_then(|value| {
+                ["empty", "square", "triangle", "diamond"]
+                    .into_iter()
+                    .find(|word| value.contains(word))
+            })
+            .unwrap_or("empty");
+        let is_right = self
+            .database
+            .get("menu.bullet.position")
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("right"));
+        cell.insert(Property::Bullet, Written(Value::from(bullet)));
+        let side = if is_right { "right" } else { "left" };
+        cell.insert(Property::BulletPosition, Written(Value::from(side)));
     }
 
     /// Adds the `resource` (`window.roundCorners`, `menu.roundCorners`) to
@@ -1269,6 +1310,8 @@ menu.bullet:\tsquare
                     Property::Height => got.height == want.height,
                     Property::CornerRadius => got.corner_radius == want.corner_radius,
                     Property::Corners => got.rounded_corners == want.rounded_corners,
+                    Property::Bullet => got.bullet == want.bullet,
+                    Property::BulletPosition => got.bullet_side == want.bullet_side,
                 };
                 assert!(
                     matches,
@@ -1370,8 +1413,28 @@ menu.bullet:\tsquare
             "{notes}"
         );
         assert!(
-            notes.contains("menu.bullet: not in vaht's menus yet"),
-            "{notes}"
+            !notes.contains("menu.bullet"),
+            "the bullet converts: {notes}"
+        );
+    }
+
+    #[test]
+    fn a_menu_bullet_converts_with_its_side_and_the_check_color() {
+        let (_, theme, _) = convert(
+            "menu.bullet: Triangle\nmenu.bullet.position: right\nmenu.hilite.color: #112233\n",
+        );
+        let resolved = Theme::resolve(&ThemeLayers::from_toml(&theme).expect("a valid theme"));
+        let metrics = resolved.metrics().menu;
+        assert_eq!(metrics.bullet, vaht_ui::theme::Bullet::Triangle, "{theme}");
+        assert_eq!(metrics.bullet_side, vaht_ui::MarkSide::Right);
+        let item = resolved.style(ThemeElement::MenuItem, WidgetState::Focused);
+        assert_eq!(item.glyph_color, Color::rgb(0x11, 0x22, 0x33));
+        let (_, plain, _) = convert("menu.frame.textColor: white\n");
+        let resolved = Theme::resolve(&ThemeLayers::from_toml(&plain).expect("a valid theme"));
+        assert_eq!(
+            resolved.metrics().menu.bullet,
+            vaht_ui::theme::Bullet::Empty,
+            "Fluxbox shows no bullet unless the style says"
         );
     }
 

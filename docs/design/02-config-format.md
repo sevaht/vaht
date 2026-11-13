@@ -575,7 +575,10 @@ items = [
   default. Menus open with their corner at the pointer and stay on the
   output; a submenu opens beside its item after `[menus] submenu_delay_ms`
   or at once on a click; releasing a button on an item chooses it; a press
-  elsewhere closes the menus and goes on. Keys: Up, Down, Left, Right,
+  elsewhere closes the menus and goes on. A menu stays in the usable
+  area, off the taskbar; the action that opened it, run again while it is
+  open, closes it, as in fluxland. A `custom-menu` naming no menu is an
+  error when the files are read. Keys: Up, Down, Left, Right,
   Enter, Escape, and typing: `[menus] search` (`item-start`, `anywhere` or
   `off`, from Fluxbox's `menuSearch`) highlights the first item found by
   what was typed, a letter finding nothing is not kept, and Backspace takes
@@ -670,6 +673,11 @@ exactly what each element gets.
   - text: `font = { family, size, weight, style }`, `text_color`,
     `text_effect` (`{ halo = color }` or `{ shadow = color, offset = [x, y] }`),
     `justify`;
+  - menu items: `bullet` (`empty`, `triangle`, `square`, `diamond`: a
+    submenu's mark, in the text color) and `bullet_position` (`left` or
+    `right`: where it and a chosen toggle's check go; the check takes
+    `glyph_color`), from Fluxbox's `menu.bullet`, `menu.bullet.position`
+    and `menu.hilite.color`;
   - box: `border = { width, color }`, `padding = [top, right, bottom, left]`,
     `corner_radius`, `corners`, `alpha`;
   - sizes: `height` for bars and items;

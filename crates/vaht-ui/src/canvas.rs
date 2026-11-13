@@ -15,7 +15,7 @@ use crate::layout::{Content, Layout, Placed};
 use crate::text::{TextStyle, Typesetter};
 use crate::texture::{Bevel, Fill, GradientDirection, Texture};
 use crate::theme::{Theme, WidgetState};
-use crate::widget::{Glyph, TextField};
+use crate::widget::{Glyph, MarkSide, TextField};
 
 /// The opacity of a bevel's light and dark edges: enough to read as relief
 /// on any fill without hiding it.
@@ -57,14 +57,21 @@ impl<'pixmap> Canvas<'pixmap> {
             }
             if let Some(mark) = placed.mark {
                 let side = placed.rect.height.min(placed.rect.width);
-                let square = Rect::new(
-                    placed.rect.x
-                        + i32::try_from(placed.rect.width - side).expect("panel widths fit in i32"),
-                    placed.rect.y,
-                    side,
-                    side,
-                );
-                self.draw_glyph(mark, style.glyph_color, square);
+                let offset = match placed.mark_side {
+                    MarkSide::Left => 0,
+                    MarkSide::Right => {
+                        i32::try_from(placed.rect.width - side).expect("panel widths fit in i32")
+                    }
+                };
+                let square = Rect::new(placed.rect.x + offset, placed.rect.y, side, side);
+                // A chosen item's check is the glyph color; a bullet is the
+                // text's, as Fluxbox draws them.
+                let color = if mark == Glyph::Check {
+                    style.glyph_color
+                } else {
+                    style.text.color
+                };
+                self.draw_glyph(mark, color, square);
             }
             match &placed.content {
                 Content::Text(text) => typesetter.draw(self.pixmap, text, &style.text, inner),
@@ -205,9 +212,23 @@ impl<'pixmap> Canvas<'pixmap> {
     /// way, or a check's square, half as wide as the square, as Fluxbox marks
     /// a chosen menu item. `None` for a glyph that is stroked.
     fn filled(glyph: Glyph, left: f32, top: f32, side: f32) -> Option<tiny_skia::Path> {
-        let (tip, base) = match glyph {
-            Glyph::ArrowLeft => (left + side / 4.0, left + side * 3.0 / 4.0),
-            Glyph::ArrowRight => (left + side * 3.0 / 4.0, left + side / 4.0),
+        // Fluxbox's bullet triangle is a third of the square, centered.
+        let third = side / 3.0;
+        let (middle_x, middle_y) = (left + side / 2.0, top + side / 2.0);
+        let (tip, base, half_height) = match glyph {
+            Glyph::ArrowLeft => (left + side / 4.0, left + side * 3.0 / 4.0, side / 2.0),
+            Glyph::ArrowRight => (left + side * 3.0 / 4.0, left + side / 4.0, side / 2.0),
+            Glyph::BulletRight => (middle_x + third / 2.0, middle_x - third / 2.0, third / 2.0),
+            Glyph::BulletLeft => (middle_x - third / 2.0, middle_x + third / 2.0, third / 2.0),
+            Glyph::BulletDiamond => {
+                let mut path = PathBuilder::new();
+                path.move_to(middle_x - 3.0, middle_y);
+                path.line_to(middle_x, middle_y - 3.0);
+                path.line_to(middle_x + 3.0, middle_y);
+                path.line_to(middle_x, middle_y + 3.0);
+                path.close();
+                return path.finish();
+            }
             Glyph::Check => {
                 let quarter = side / 4.0;
                 return Some(PathBuilder::from_rect(SkiaRect::from_xywh(
@@ -217,14 +238,19 @@ impl<'pixmap> Canvas<'pixmap> {
                     side / 2.0,
                 )?));
             }
-            Glyph::Close | Glyph::Maximize | Glyph::Minimize | Glyph::Shade | Glyph::Stick => {
+            Glyph::Close
+            | Glyph::Maximize
+            | Glyph::Minimize
+            | Glyph::Shade
+            | Glyph::Stick
+            | Glyph::BulletSquare => {
                 return None;
             }
         };
         let mut path = PathBuilder::new();
-        path.move_to(tip, top + side / 2.0);
-        path.line_to(base, top);
-        path.line_to(base, top + side);
+        path.move_to(tip, middle_y);
+        path.line_to(base, middle_y - half_height);
+        path.line_to(base, middle_y + half_height);
         path.close();
         path.finish()
     }
@@ -290,7 +316,21 @@ impl<'pixmap> Canvas<'pixmap> {
                         .expect("a square of positive side"),
                 );
             }
-            Glyph::ArrowLeft | Glyph::ArrowRight | Glyph::Check => {}
+            Glyph::BulletSquare => {
+                // A one-pixel outline, half the square, as Fluxbox's.
+                let quarter = (side / 4.0).floor() + 0.5;
+                if let Some(square) =
+                    SkiaRect::from_xywh(left + quarter, top + quarter, side / 2.0, side / 2.0)
+                {
+                    path.push_rect(square);
+                }
+            }
+            Glyph::ArrowLeft
+            | Glyph::ArrowRight
+            | Glyph::Check
+            | Glyph::BulletRight
+            | Glyph::BulletLeft
+            | Glyph::BulletDiamond => {}
         }
         if let Some(path) = path.finish() {
             let mut paint = Paint::default();

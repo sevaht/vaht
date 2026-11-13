@@ -93,6 +93,11 @@ texture = "parent"
 # An item-high square each side of the text, as Fluxbox keeps: a toggle's
 # or a submenu's mark goes in the right one.
 padding = [0, 20, 0, 21]
+# A submenu's bullet: empty, triangle, square or diamond; it, and a chosen
+# toggle's check (in the glyph color), go on the bullet_position side.
+bullet = "triangle"
+bullet_position = "right"
+glyph_color = "grey55"
 
 [menu.item.hovered]
 texture = { gradient = "vertical", from = "grey55", to = "grey5", bevel = "raised" }

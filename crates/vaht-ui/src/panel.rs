@@ -432,4 +432,40 @@ mod tests {
         let at_start = dark_columns(crate::widget::TextField::new(text, 0));
         assert_eq!(at_start.first(), Some(&2), "the cursor at the left edge");
     }
+
+    /// One item-high row with a check on the left.
+    struct Checked;
+
+    impl PanelContent for Checked {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            Widget::text(ThemeElement::MenuItem, "x")
+                .with_mark_on(Glyph::Check, crate::widget::MarkSide::Left)
+        }
+
+        fn state(&self) -> WidgetState {
+            WidgetState::Focused
+        }
+    }
+
+    #[test]
+    fn a_mark_goes_on_its_side_in_the_glyph_color() {
+        let layers = crate::theme::ThemeLayers::from_toml(
+            "[default]\ntexture = { solid = \"black\" }\nglyph_color = \"red\"\n",
+        )
+        .expect("a valid theme");
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(Checked, Size::new(100, 20));
+        assert!(panel.paint(&Theme::resolve(&layers), &mut typesetter));
+        let red_at = |x| {
+            let pixel = panel
+                .pixels()
+                .and_then(|pixels| pixels.pixel(x, 10))
+                .expect("inside the panel");
+            pixel.red() == 255 && pixel.green() == 0
+        };
+        assert!(red_at(10), "the check, in the left square");
+        assert!(!red_at(90), "nothing at the right end");
+    }
 }

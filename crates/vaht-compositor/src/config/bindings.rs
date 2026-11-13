@@ -49,6 +49,13 @@ pub(crate) struct ButtonBindings<'bindings> {
 }
 
 impl Bindings {
+    /// Returns every command bound, keys' and the mouse's.
+    pub(crate) fn commands(&self) -> impl Iterator<Item = &Command> {
+        self.keys
+            .values()
+            .chain(self.mouse.values().flat_map(|bindings| bindings.0.values()))
+    }
+
     /// Returns what `chord` is bound to.
     pub(crate) fn key(&self, chord: KeyChord) -> Option<&Command> {
         self.keys.get(&chord)

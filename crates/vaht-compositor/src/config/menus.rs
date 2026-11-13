@@ -31,6 +31,20 @@ impl Menus {
     /// The menu `workspace-menu` opens.
     pub(crate) const WORKSPACE: &str = "workspace";
 
+    /// Returns every command the menus' items run.
+    pub(crate) fn commands(&self) -> impl Iterator<Item = &Command> {
+        self.by_name.values().flat_map(|menu| {
+            menu.items.iter().filter_map(|entry| match entry {
+                MenuEntry::Command { command, .. } => Some(command),
+                MenuEntry::Submenu { .. }
+                | MenuEntry::Toggle { .. }
+                | MenuEntry::Generate { .. }
+                | MenuEntry::Separator
+                | MenuEntry::Inert { .. } => None,
+            })
+        })
+    }
+
     /// Returns the menu named `name`, if there is one.
     pub(crate) fn get(&self, name: &str) -> Option<&MenuDefinition> {
         self.by_name.get(name)

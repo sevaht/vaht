@@ -16,12 +16,13 @@ use std::fmt;
 
 use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 
-use super::{BorderStyle, StylePatch, ThemeElement, ThemeLayers, WidgetState};
+use super::{BorderStyle, Bullet, StylePatch, ThemeElement, ThemeLayers, WidgetState};
 use crate::color::Color;
 use crate::corner::{Corner, CornerSet};
 use crate::geometry::Insets;
 use crate::text::{Font, FontWeight, Justify, TextEffect};
 use crate::texture::{Bevel, GradientDirection, Texture};
+use crate::widget::MarkSide;
 
 /// Style properties of 02 §10.1 that vaht does not have yet.
 const PLANNED_PROPERTIES: [&str; 3] = ["alpha", "submenu_indicator", "interlaced"];
@@ -273,6 +274,10 @@ impl StylePatch {
             "height" => self.height = Some(map.next_value()?),
             "corner_radius" => self.corner_radius = Some(map.next_value()?),
             "corners" => self.rounded_corners = Some(map.next_value::<CornersFile>()?.0),
+            "bullet" => self.bullet = Some(map.next_value::<BulletName>()?.into_bullet()),
+            "bullet_position" => {
+                self.bullet_side = Some(map.next_value::<SideName>()?.into_side());
+            }
             planned if PLANNED_PROPERTIES.contains(&planned) => {
                 return Err(refuse(
                     map,
@@ -394,6 +399,52 @@ impl TextureFile {
                 "a texture is { solid = color } or { gradient = direction, from = color, \
                  to = color }, either with a bevel",
             ),
+        }
+    }
+}
+
+/// A submenu bullet as written.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum BulletName {
+    /// None.
+    Empty,
+    /// A triangle.
+    Triangle,
+    /// A square's outline.
+    Square,
+    /// A diamond.
+    Diamond,
+}
+
+impl BulletName {
+    /// Returns the bullet.
+    const fn into_bullet(self) -> Bullet {
+        match self {
+            Self::Empty => Bullet::Empty,
+            Self::Triangle => Bullet::Triangle,
+            Self::Square => Bullet::Square,
+            Self::Diamond => Bullet::Diamond,
+        }
+    }
+}
+
+/// A side as written.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum SideName {
+    /// The left.
+    Left,
+    /// The right.
+    Right,
+}
+
+impl SideName {
+    /// Returns the side.
+    const fn into_side(self) -> MarkSide {
+        match self {
+            Self::Left => MarkSide::Left,
+            Self::Right => MarkSide::Right,
         }
     }
 }

@@ -126,13 +126,41 @@ impl Config {
             Some(name) => ThemeFile::find(directory, name)?.read()?,
             None => Theme::built_in(),
         };
-        Ok(Self {
+        let config = Self {
             bindings: bindings.read(directory)?,
             settings,
             rules: rules.read(directory)?,
             menus: menus.read(directory)?,
             theme,
-        })
+        };
+        config.check_custom_menus()?;
+        Ok(config)
+    }
+
+    /// Makes sure every `custom-menu` names a menu `menus.toml` has.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first one that does not, and the file naming it.
+    fn check_custom_menus(&self) -> Result<(), ConfigError> {
+        let named = [
+            (
+                "bindings.toml",
+                self.bindings.commands().collect::<Vec<_>>(),
+            ),
+            ("menus.toml", self.menus.commands().collect::<Vec<_>>()),
+        ];
+        for (file, commands) in named {
+            for name in commands.iter().flat_map(|command| command.custom_menus()) {
+                if self.menus.get(name).is_none() {
+                    return Err(ConfigError::UnknownMenu {
+                        file,
+                        name: name.to_owned(),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Returns how everything vaht draws looks: the theme the settings
@@ -185,6 +213,15 @@ pub enum ConfigError {
         column: usize,
         /// What is wrong.
         message: String,
+    },
+
+    /// A `custom-menu` names a menu `menus.toml` does not have.
+    #[error("{file}: `custom-menu {name}` names no [menu.{name}] in menus.toml")]
+    UnknownMenu {
+        /// The file naming it.
+        file: &'static str,
+        /// The menu's name.
+        name: String,
     },
 
     /// A file could not be written.
@@ -240,6 +277,28 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    #[test]
+    fn a_custom_menu_must_be_one_menus_toml_has() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        std::fs::write(
+            directory.path().join("bindings.toml"),
+            "[keys]\nF1 = \"custom-menu games\"\n",
+        )
+        .expect("written");
+        let error = Config::load(directory.path()).expect_err("no such menu");
+        assert_eq!(
+            error.to_string(),
+            "bindings.toml: `custom-menu games` names no [menu.games] in menus.toml"
+        );
+        std::fs::write(
+            directory.path().join("menus.toml"),
+            "[menu.root]\nitems = []\n[menu.window]\nitems = []\n\
+             [menu.workspace]\nitems = []\n[menu.games]\nitems = []\n",
+        )
+        .expect("written");
+        Config::load(directory.path()).expect("the menu is there now");
+    }
 
     #[test]
     fn a_missing_directory_gives_the_valid_built_in_files() {

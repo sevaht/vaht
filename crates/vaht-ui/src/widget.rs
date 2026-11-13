@@ -28,9 +28,11 @@ pub struct Widget<Hit> {
     pub state: Option<WidgetState>,
     /// The icon shown left of its text, if any.
     pub icon: Option<WidgetIcon>,
-    /// The mark shown at its right end, in a square as tall as it: a
-    /// submenu's arrow, a chosen item's check.
+    /// The mark shown at one end, in a square as tall as it: a submenu's
+    /// bullet, a chosen item's check.
     pub mark: Option<Glyph>,
+    /// Which end the mark is at.
+    pub mark_side: MarkSide,
 }
 
 impl<Hit> Widget<Hit> {
@@ -109,8 +111,16 @@ impl<Hit> Widget<Hit> {
 
     /// Returns the widget showing `mark` at its right end.
     #[must_use]
-    pub const fn with_mark(mut self, mark: Glyph) -> Self {
+    pub const fn with_mark(self, mark: Glyph) -> Self {
+        self.with_mark_on(mark, MarkSide::Right)
+    }
+
+    /// Returns the widget showing `mark` at the end `side` says. A check
+    /// is drawn in the style's glyph color, other marks in its text color.
+    #[must_use]
+    pub const fn with_mark_on(mut self, mark: Glyph, side: MarkSide) -> Self {
         self.mark = Some(mark);
+        self.mark_side = side;
         self
     }
 
@@ -141,6 +151,7 @@ impl<Hit> Widget<Hit> {
             state: None,
             icon: None,
             mark: None,
+            mark_side: MarkSide::Right,
         }
     }
 }
@@ -185,6 +196,16 @@ pub enum SizePolicy {
     },
 }
 
+/// Which end of a widget its mark is at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum MarkSide {
+    /// The left end.
+    Left,
+    /// The right end.
+    #[default]
+    Right,
+}
+
 /// A button picture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Glyph {
@@ -204,6 +225,15 @@ pub enum Glyph {
     ArrowRight,
     /// A filled square: a chosen menu item.
     Check,
+    /// A menu's submenu bullet: a triangle a third of its square, pointing
+    /// right (Fluxbox's `triangle`, on the right).
+    BulletRight,
+    /// The same, pointing left (on the left).
+    BulletLeft,
+    /// A square's outline, half its square (Fluxbox's `square`).
+    BulletSquare,
+    /// A small diamond (Fluxbox's `diamond`).
+    BulletDiamond,
 }
 
 /// A line of text being edited, and where its cursor is.

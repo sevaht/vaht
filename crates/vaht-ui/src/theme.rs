@@ -23,6 +23,7 @@ use crate::corner::{CornerRadii, CornerSet};
 use crate::geometry::Insets;
 use crate::text::{Font, FontWeight, Justify, TextEffect, TextStyle};
 use crate::texture::Texture;
+use crate::widget::{Glyph, MarkSide};
 
 /// Something a theme styles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::EnumIter)]
@@ -161,6 +162,38 @@ pub struct Style {
     pub corner_radius: u32,
     /// Which corners are rounded.
     pub rounded_corners: CornerSet,
+    /// A menu item's submenu bullet.
+    pub bullet: Bullet,
+    /// Which side of a menu item its bullet, and a toggle's check, are on.
+    pub bullet_side: MarkSide,
+}
+
+/// A menu's submenu bullet (Fluxbox's `menu.bullet`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Bullet {
+    /// None.
+    Empty,
+    /// A triangle pointing outward.
+    #[default]
+    Triangle,
+    /// A square's outline.
+    Square,
+    /// A small diamond.
+    Diamond,
+}
+
+impl Bullet {
+    /// Returns the picture of this bullet on `side`; none for no bullet.
+    #[must_use]
+    pub const fn glyph(self, side: MarkSide) -> Option<Glyph> {
+        match (self, side) {
+            (Self::Empty, _) => None,
+            (Self::Triangle, MarkSide::Right) => Some(Glyph::BulletRight),
+            (Self::Triangle, MarkSide::Left) => Some(Glyph::BulletLeft),
+            (Self::Square, _) => Some(Glyph::BulletSquare),
+            (Self::Diamond, _) => Some(Glyph::BulletDiamond),
+        }
+    }
 }
 
 impl Style {
@@ -191,6 +224,8 @@ impl Style {
             height: None,
             corner_radius: 0,
             rounded_corners: CornerSet::ALL,
+            bullet: Bullet::Triangle,
+            bullet_side: MarkSide::Right,
         }
     }
 }
@@ -220,6 +255,10 @@ pub struct StylePatch {
     pub corner_radius: Option<u32>,
     /// Which corners are rounded, if this layer says.
     pub rounded_corners: Option<CornerSet>,
+    /// The submenu bullet, if this layer sets it.
+    pub bullet: Option<Bullet>,
+    /// The bullet's side, if this layer sets it.
+    pub bullet_side: Option<MarkSide>,
 }
 
 impl StylePatch {
@@ -255,6 +294,12 @@ impl StylePatch {
         if let Some(radius) = self.corner_radius {
             style.corner_radius = radius;
         }
+        if let Some(bullet) = self.bullet {
+            style.bullet = bullet;
+        }
+        if let Some(side) = self.bullet_side {
+            style.bullet_side = side;
+        }
         if let Some(corners) = self.rounded_corners {
             style.rounded_corners = corners;
         }
@@ -289,6 +334,10 @@ pub struct MenuMetrics {
     pub border_width: u32,
     /// How round a menu's corners are.
     pub corners: CornerRadii,
+    /// A submenu item's bullet.
+    pub bullet: Bullet,
+    /// Which side bullets and checks are on.
+    pub bullet_side: MarkSide,
 }
 
 /// A theme as written: four layers of patches, not yet resolved.
@@ -383,6 +432,8 @@ impl Theme {
                 item_height: bar(ThemeElement::MenuItem),
                 border_width: focused(ThemeElement::MenuFrame).border.width,
                 corners: focused(ThemeElement::MenuFrame).corner_radii(),
+                bullet: focused(ThemeElement::MenuItem).bullet,
+                bullet_side: focused(ThemeElement::MenuItem).bullet_side,
             },
         }
     }
@@ -502,6 +553,8 @@ mod tests {
                     item_height: 20,
                     border_width: 1,
                     corners: CornerRadii::of(8, <crate::Corner as strum::IntoEnumIterator>::iter()),
+                    bullet: Bullet::Triangle,
+                    bullet_side: MarkSide::Right,
                 },
             }
         );

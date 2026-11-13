@@ -969,8 +969,14 @@ impl Compositor {
     }
 
     /// Opens the menu `request` names, its corner at the pointer, about
-    /// `window` (the window menu's; the focused window when none).
+    /// `window` (the window menu's; the focused window when none); asked
+    /// again while it is open, as fluxland does, it closes.
     fn open_menu(&mut self, request: &MenuRequest, window: Option<WindowId>) {
+        if self.menus.is_opened_by(request) {
+            self.menus.close();
+            self.schedule_render();
+            return;
+        }
         let window = window.or_else(|| self.window_manager.focused());
         let builder = MenuBuilder::new(&self.config.menus, &self.window_manager, window)
             .with_themes(
@@ -989,13 +995,15 @@ impl Compositor {
             return;
         };
         let at = self.pointer_location().to_i32_round();
-        let bounds = self.backend.output_geometry();
+        // Off the taskbar, as fluxland keeps menus in the usable area.
+        let bounds = self.output_area().usable;
         self.menus.open(
             model,
             at,
             bounds,
             (&self.config.theme, &mut self.typesetter),
         );
+        self.menus.mark_opened_by(request.clone());
         self.schedule_render();
     }
 

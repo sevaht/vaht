@@ -28,7 +28,7 @@ use vaht_ui::{Panel, Theme, Typesetter};
 pub(crate) use self::content::{MenuContent, MenuGeometry};
 pub(crate) use self::model::{MenuBuilder, MenuChoice, MenuItem, MenuModel};
 use crate::Compositor;
-use crate::config::MenuSearch;
+use crate::config::{MenuRequest, MenuSearch};
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
 use crate::scene::{MenuTexture, SceneElement};
@@ -89,6 +89,8 @@ pub(crate) struct MenuStack {
     /// The menu and item a button was pressed on, which its release
     /// chooses.
     pressed: Option<(usize, usize)>,
+    /// The action that opened the menus, if one did.
+    opened_by: Option<MenuRequest>,
     /// How typing finds an item.
     search_mode: MenuSearch,
     /// What was typed in the last menu, to find an item by.
@@ -145,8 +147,19 @@ impl MenuStack {
         self.search_mode = mode;
     }
 
+    /// Notes that `request` opened the menus.
+    pub(crate) fn mark_opened_by(&mut self, request: MenuRequest) {
+        self.opened_by = Some(request);
+    }
+
+    /// Returns whether the menus open now were opened by `request`.
+    pub(crate) fn is_opened_by(&self, request: &MenuRequest) -> bool {
+        self.is_open() && self.opened_by.as_ref() == Some(request)
+    }
+
     /// Closes every menu.
     pub(crate) fn close(&mut self) {
+        self.opened_by = None;
         self.search.clear();
         self.menus.clear();
         self.submenu_timer = None;

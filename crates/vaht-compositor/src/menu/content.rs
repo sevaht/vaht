@@ -2,8 +2,8 @@
 //!
 //! [`MenuContent`] is a menu's panel content: the title, then a row per
 //! item, laid out by vaht-ui with the theme's `menu.*` elements, the
-//! highlighted item `hovered`, an inert one `disabled`, a submenu's arrow
-//! and a chosen toggle's check at the right. [`MenuGeometry`] says where the
+//! highlighted item `hovered`, an inert one `disabled`, a submenu's bullet
+//! and a chosen toggle's check on the theme's bullet side. [`MenuGeometry`] says where the
 //! menu's outline, the line under its title and its separators go, as plain
 //! colored rectangles around and over the panel, with arcs at rounded
 //! corners, as a window frame's lines are.
@@ -140,16 +140,20 @@ impl PanelContent for MenuContent {
                         .with_size(row)
                         .with_hit(index);
                     if *mark == Some(true) {
-                        widget.with_mark(Glyph::Check)
+                        widget.with_mark_on(Glyph::Check, self.metrics.bullet_side)
                     } else {
                         widget
                     }
                 }
                 MenuItem::Submenu { label, .. } => {
-                    Widget::text(ThemeElement::MenuItem, label.clone())
+                    let widget = Widget::text(ThemeElement::MenuItem, label.clone())
                         .with_size(row)
-                        .with_hit(index)
-                        .with_mark(Glyph::ArrowRight)
+                        .with_hit(index);
+                    let side = self.metrics.bullet_side;
+                    match self.metrics.bullet.glyph(side) {
+                        Some(bullet) => widget.with_mark_on(bullet, side),
+                        None => widget,
+                    }
                 }
             };
             children.push(if self.hovered == Some(index) {

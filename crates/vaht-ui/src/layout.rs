@@ -8,7 +8,7 @@
 use crate::geometry::{Point, Rect};
 use crate::icon::WidgetIcon;
 use crate::theme::{ThemeElement, WidgetState};
-use crate::widget::{Glyph, SizePolicy, TextField, Widget, WidgetKind};
+use crate::widget::{Glyph, MarkSide, SizePolicy, TextField, Widget, WidgetKind};
 
 /// What a placed widget draws inside its rectangle.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,8 +40,10 @@ pub struct Placed<Hit> {
     pub state: Option<WidgetState>,
     /// The icon shown left of its text, if any.
     pub icon: Option<WidgetIcon>,
-    /// The mark shown at its right end, if any.
+    /// The mark shown at one end, if any.
     pub mark: Option<Glyph>,
+    /// Which end.
+    pub mark_side: MarkSide,
 }
 
 /// A widget tree placed in an area.
@@ -151,6 +153,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
             state: widget.state,
             icon: widget.icon.clone(),
             mark: widget.mark,
+            mark_side: widget.mark_side,
         });
         let (axis, children) = match &widget.kind {
             WidgetKind::Row(children) => (Axis::Horizontal, children),
