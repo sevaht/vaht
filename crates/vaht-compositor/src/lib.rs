@@ -31,6 +31,7 @@ mod shared_memory;
 mod signals;
 mod taskbar;
 mod toplevels;
+mod wall_clock;
 mod window_manager;
 
 pub use backend::{BackendChoice, BackendError, RenderError};

@@ -76,7 +76,9 @@ RUST.md §4). The compositor crate has two halves:
   `FrameTextures` (frame pixels as the renderer takes them), `Layers`,
   `Input` (key filtering, button presses, double clicks, repeat and
   auto-raise timers), the `Taskbar` (a panel whose content it reads from
-  the window manager and the clock as frames are prepared),
+  the window manager and the clock as frames are prepared; its
+  `WallClock` wakes it at each minute by the time of day, and whenever the
+  clock is set, the system resumes or the time zone changes),
   the backend and the protocol states. It routes events and carries out
   the window manager's decisions; it decides nothing about windows.
 

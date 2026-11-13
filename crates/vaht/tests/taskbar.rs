@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use vaht_test_support::{BUTTON_LEFT, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR};
+use vaht_test_support::{BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
@@ -144,4 +144,35 @@ fn without_a_taskbar_windows_maximize_over_the_whole_output() {
         maximized.height() - 2,
         "only the border below it"
     );
+}
+
+#[test]
+fn a_clock_showing_seconds_ticks_each_second() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[(
+            "settings.toml",
+            "[taskbar]\nwidgets = [\"clock\"]\n[taskbar.clock]\nformat = \"%H:%M:%S\"\n",
+        )],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    let before = client.screenshot();
+    let taskbar = Bounds {
+        left: 0,
+        top: before.height() - HEIGHT,
+        right: before.width() - 1,
+        bottom: before.height() - 1,
+    };
+    let mut ticks = 0;
+    let mut last = before;
+    // Three ticks: each re-arms the clock from the tick before it.
+    for _ in 0..3 {
+        std::thread::sleep(std::time::Duration::from_millis(1_100));
+        let now = client.screenshot();
+        if now.differs_within(&last, taskbar) {
+            ticks += 1;
+        }
+        last = now;
+    }
+    assert_eq!(ticks, 3, "the clock's text changed every second");
 }

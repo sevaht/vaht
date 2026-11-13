@@ -614,6 +614,13 @@ impl Compositor {
         }
     }
 
+    /// Draws the time anew, and wakes vaht when it next changes: the
+    /// taskbar's clock's moment came, or the time of day jumped.
+    pub(crate) fn show_time_change(&mut self) {
+        self.schedule_render();
+        self.schedule_clock();
+    }
+
     /// Wakes vaht when the taskbar's clock next changes, if it shows one.
     fn schedule_clock(&mut self) {
         if let Some(taskbar) = &mut self.taskbar {

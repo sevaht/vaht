@@ -9,12 +9,11 @@
 //! runs what it means ([`TaskbarHit`]). Other presses, and the wheel, go to
 //! the `taskbar` and `window-list-entry` mouse bindings.
 //!
-//! The clock wakes vaht when its text changes: each minute, or each second
-//! if its format shows seconds.
+//! The clock wakes vaht when its text changes: at each minute, or each
+//! second if its format shows seconds, as the time of day has them, and
+//! whenever the time of day jumps ([`WallClock`]).
 
-use std::time::Duration;
-
-use jiff::Zoned;
+use jiff::{RoundMode, Timestamp, ToSpan, Unit, Zoned, ZonedRound};
 use smithay::backend::renderer::{ImportMem, Renderer};
 use smithay::reexports::calloop::LoopHandle;
 use smithay::utils::{Logical, Point, Rectangle, Scale};
@@ -24,9 +23,9 @@ use vaht_ui::{
 
 use crate::Compositor;
 use crate::config::{TaskbarEdge, TaskbarSettings, TaskbarWidget};
-use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
 use crate::scene::{PanelTexture, SceneElement};
+use crate::wall_clock::{SYSTEM_ZONE_FILE, WallClock};
 use crate::window_manager::{Area, Window, WindowId, WindowManager};
 
 /// What clicking the taskbar can report.
@@ -81,7 +80,7 @@ pub(crate) struct Taskbar {
     /// Whether its clock shows seconds, and so ticks each second.
     clock_shows_seconds: bool,
     /// Wakes vaht when the clock's text next changes.
-    clock_timer: Option<Timer<Compositor>>,
+    wall_clock: Option<WallClock<Compositor>>,
 }
 
 impl Taskbar {
@@ -104,7 +103,7 @@ impl Taskbar {
             texture: PanelTexture::new(),
             clock_shows_seconds: settings.clock.format.shows_seconds()
                 && settings.widgets.contains(&TaskbarWidget::Clock),
-            clock_timer: None,
+            wall_clock: None,
         })
     }
 
@@ -217,37 +216,56 @@ impl Taskbar {
         event_loop: (&LoopHandle<'static, Compositor>, &ResourceLedger),
     ) {
         if !self.panel.content().widgets.contains(&TaskbarWidget::Clock) {
+            self.wall_clock = None;
             return;
         }
-        let delay = Self::until_clock_changes(now, self.clock_shows_seconds);
-        let (handle, ledger) = event_loop;
-        let tick = Timer::once(handle, ledger, delay, |compositor: &mut Compositor| {
-            compositor.schedule_render();
-            let now = Zoned::now();
-            if let Some(taskbar) = &mut compositor.taskbar {
-                taskbar.schedule_clock(&now, (&compositor.loop_handle, &compositor.ledger));
+        if self.wall_clock.is_none() {
+            let (handle, ledger) = event_loop;
+            let started = WallClock::start(
+                handle,
+                ledger,
+                SYSTEM_ZONE_FILE.as_ref(),
+                Compositor::show_time_change,
+            );
+            match started {
+                Ok(wall_clock) => self.wall_clock = Some(wall_clock),
+                Err(error) => {
+                    tracing::warn!(
+                        error = &error as &dyn std::error::Error,
+                        "the clock cannot tick"
+                    );
+                    return;
+                }
             }
-        });
-        match tick {
-            Ok(timer) => self.clock_timer = Some(timer),
-            Err(error) => tracing::warn!(
+        }
+        let next = Self::next_clock_change(now, self.clock_shows_seconds);
+        if let Some(wall_clock) = &self.wall_clock
+            && let Err(error) = wall_clock.ring_at(next)
+        {
+            tracing::warn!(
                 error = &error as &dyn std::error::Error,
                 "could not schedule the clock"
-            ),
+            );
         }
     }
 
-    /// Returns how long after `now` a clock's text next changes: at the next
+    /// Returns when a clock's text next changes after `now`: at the next
     /// whole second if it `shows_seconds`, else at the next whole minute.
-    fn until_clock_changes(now: &Zoned, shows_seconds: bool) -> Duration {
-        let into_second = Duration::from_nanos(u64::try_from(now.subsec_nanosecond()).unwrap_or(0));
-        let (period, into_period) = if shows_seconds {
-            (Duration::from_secs(1), into_second)
+    fn next_clock_change(now: &Zoned, shows_seconds: bool) -> Timestamp {
+        let unit = if shows_seconds {
+            Unit::Second
         } else {
-            let seconds = Duration::from_secs(u64::try_from(now.second()).unwrap_or(0));
-            (Duration::from_secs(60), seconds + into_second)
+            Unit::Minute
         };
-        period.saturating_sub(into_period)
+        let start = now
+            .round(ZonedRound::new().smallest(unit).mode(RoundMode::Trunc))
+            .expect("truncating a time to a whole minute or second stays in range");
+        let next = if shows_seconds {
+            start.checked_add(1.second())
+        } else {
+            start.checked_add(1.minute())
+        };
+        next.expect("a time a minute ahead is in range").timestamp()
     }
 
     /// Returns global `pixel` in the taskbar's own pixels.
@@ -468,16 +486,19 @@ mod tests {
     }
 
     #[rstest]
-    #[case::minutes(false, Duration::from_millis(17_750))]
-    #[case::seconds(true, Duration::from_millis(750))]
+    #[case::minutes(false, "2026-11-13T09:42:00Z")]
+    #[case::seconds(true, "2026-11-13T09:41:43Z")]
     fn the_clock_wakes_vaht_when_its_text_changes(
         #[case] shows_seconds: bool,
-        #[case] expected: Duration,
+        #[case] expected: &str,
     ) {
         let now = jiff::civil::date(2026, 11, 13)
             .at(9, 41, 42, 250_000_000)
             .to_zoned(jiff::tz::TimeZone::UTC)
             .expect("a valid time");
-        assert_eq!(Taskbar::until_clock_changes(&now, shows_seconds), expected);
+        assert_eq!(
+            Taskbar::next_clock_change(&now, shows_seconds),
+            expected.parse::<Timestamp>().expect("a timestamp")
+        );
     }
 }
