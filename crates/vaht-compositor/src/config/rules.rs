@@ -75,7 +75,8 @@ struct Rule {
 }
 
 /// Whether a window may come forward, with focus, when its program asks
-/// (xdg-activation), not only when the user does.
+/// (xdg-activation), not only when the user does; and whether it takes
+/// focus when it opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum FocusStealing {

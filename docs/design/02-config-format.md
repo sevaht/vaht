@@ -502,8 +502,10 @@ focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
   taskbar; `set-layer` moves one), and `focus_stealing` (`allow`: the
   window comes forward whenever its program asks, as Steam's tray menu
   needs, from `[FocusProtection] {Gain}`; `deny`: never by its program's
-  asking; `default`: when the focused program made the token, recently;
-  a new window's first focus is the settings' either way). They apply
+  asking; `default`: when the focused program made the token, recently.
+  It decides a new window's first focus too: `allow` takes it even when
+  `focus_new_windows` is off, `deny` gives it back to the window that had
+  it). They apply
   when the window first
   gets its place. The other keys are refused until their features exist.
   `vaht import fluxbox` converts `apps` (workspaces counted from 0 there)

@@ -39,7 +39,7 @@ use self::windows::Windows;
 use self::workspaces::Workspaces;
 pub(crate) use self::workspaces::{Workspace, WorkspaceTarget};
 use crate::config::{
-    Config, CycleOrder, FrameSettings, Settings, WindowCycle, WindowManagerAction,
+    Config, CycleOrder, FocusStealing, FrameSettings, Settings, WindowCycle, WindowManagerAction,
 };
 use crate::resources::ResourceLedger;
 
@@ -724,6 +724,13 @@ impl WindowManager {
         {
             window.set_focus_stealing(focus_stealing);
         }
+        // Its first focus too: Fluxbox's [FocusProtection] {Gain} and
+        // {Refuse} decide it over focusNewWindows.
+        match rule.focus_stealing {
+            Some(FocusStealing::Allow) => self.focus(Some(id)),
+            Some(FocusStealing::Deny) => self.give_focus_back(id),
+            Some(FocusStealing::Default) | None => {}
+        }
         // A rule may have sent the new window out of sight.
         self.focus_most_recent();
     }
@@ -911,6 +918,24 @@ impl WindowManager {
         if let Some(window) = window.filter(|id| self.windows.get(*id).is_some()) {
             self.endings.push((window, ending));
         }
+    }
+
+    /// Takes focus from `window`, a new window whose rule refuses it, and
+    /// gives it back to the most recently focused other window shown.
+    fn give_focus_back(&mut self, window: WindowId) {
+        if self.focused() != Some(window) {
+            return;
+        }
+        self.focus.forget(window);
+        let current = self.workspaces.current();
+        let others = self
+            .windows
+            .shown_top_down(current)
+            .map(Window::id)
+            .filter(|id| *id != window)
+            .collect::<Vec<_>>();
+        let most_recent = self.focus.by_recency(others).first().copied();
+        self.focus(most_recent);
     }
 
     /// Gives focus to the window that had it most recently among those
@@ -1147,6 +1172,39 @@ mod tests {
         );
         desk.close(second);
         assert_eq!(desk.manager.focused(), Some(first));
+    }
+
+    /// A desk whose rules say `focus_stealing = policy` for app `rude`, and
+    /// whose settings say whether new windows take focus.
+    fn desk_with_focus_rule(policy: &str, focus_new_windows: bool) -> Desk {
+        let mut config = Config::built_in();
+        config.settings.focus.focus_new_windows = focus_new_windows;
+        config.rules = toml::from_str(&format!(
+            "[[rule]]\nmatch = {{ app_id = \"rude\" }}\nfocus_stealing = \"{policy}\"\n"
+        ))
+        .expect("valid rules");
+        Desk::with_config(config)
+    }
+
+    #[test]
+    fn a_rule_refusing_focus_gives_it_back_to_the_window_that_had_it() {
+        let mut desk = desk_with_focus_rule("deny", true);
+        let first = desk.open();
+        let rude = desk.open_app("rude", (300, 200));
+        assert_ne!(desk.manager.focused(), Some(rude));
+        assert_eq!(desk.manager.focused(), Some(first));
+        let polite = desk.open();
+        assert_eq!(desk.manager.focused(), Some(polite), "others still take it");
+    }
+
+    #[test]
+    fn a_rule_allowing_focus_takes_it_when_new_windows_do_not() {
+        let mut desk = desk_with_focus_rule("allow", false);
+        let first = desk.open();
+        let rude = desk.open_app("rude", (300, 200));
+        assert_eq!(desk.manager.focused(), Some(rude), "taken from {first}");
+        desk.open();
+        assert_eq!(desk.manager.focused(), Some(rude), "others do not take it");
     }
 
     #[test]
