@@ -19,7 +19,7 @@ use std::num::NonZeroUsize;
 use smithay::utils::{Logical, Point, Rectangle, Size};
 
 use super::matcher::WindowMatcher;
-use crate::window_manager::{Axes, Placement, TileCell, Window, Workspace};
+use crate::window_manager::{Axes, Placement, StackLayer, TileCell, Window, Workspace};
 
 /// Every rule, in order.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
@@ -67,6 +67,17 @@ struct Rule {
     /// Whether what shows through them, where they are translucent, is
     /// only the wallpaper, not the windows below.
     pseudo_transparent: Option<bool>,
+    /// The stacking layer they open in.
+    #[serde(default, deserialize_with = "deserialize_layer")]
+    layer: Option<StackLayer>,
+}
+
+/// Reads a layer's name.
+fn deserialize_layer<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<StackLayer>, D::Error> {
+    let name: String = serde::Deserialize::deserialize(deserializer)?;
+    name.parse().map(Some).map_err(serde::de::Error::custom)
 }
 
 impl Rule {
@@ -80,6 +91,7 @@ impl Rule {
             position: self.position,
             size: self.size,
             pseudo_transparent: self.pseudo_transparent,
+            layer: self.layer,
         }
     }
 }
@@ -101,6 +113,8 @@ pub(crate) struct RuleSettings {
     size: Option<[u16; 2]>,
     /// Whether only the wallpaper shows through it.
     pub(crate) pseudo_transparent: Option<bool>,
+    /// The stacking layer it opens in.
+    pub(crate) layer: Option<StackLayer>,
 }
 
 impl RuleSettings {
@@ -121,6 +135,7 @@ impl RuleSettings {
             position: later.position.or(self.position),
             size: later.size.or(self.size),
             pseudo_transparent: later.pseudo_transparent.or(self.pseudo_transparent),
+            layer: later.layer.or(self.layer),
         }
     }
 }

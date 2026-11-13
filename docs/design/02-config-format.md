@@ -495,8 +495,11 @@ focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
   <width> <height>`), `position = { anchor, offset }`, `size` (the frame's
   size, as fluxland's `[Dimensions]` was) and `pseudo_transparent` (where
   the window is translucent, only the wallpaper shows through: a copy of
-  the wallpaper under its content hides the windows below). They apply
-  when the window first
+  the wallpaper under its content hides the windows below) and `layer`
+  (`above-dock`, `dock`, `top`, `normal`, `bottom`, `desktop`: Fluxbox's
+  layers; a window is always above those of lower layers, raising and
+  lowering stay within its own, and `above-dock` windows are over the
+  taskbar; `set-layer` moves one). They apply when the window first
   gets its place. The other keys are refused until their features exist.
   `vaht import fluxbox` converts `apps` (workspaces counted from 0 there)
   and reports the rest.
@@ -556,8 +559,8 @@ items = [
   - `icon` (optional on any item).
 - **Built so far:** `command`, `submenu`, `toggle` (`shade`, `stick`,
   `maximize`, `minimize`, `fullscreen`), `generate` (`workspaces`,
-  `send-to-workspace`, `window-list`, `alpha`; `inline = true` lists in
-  place),
+  `send-to-workspace`, `window-list`, `alpha`, `layer`; `inline = true`
+  lists in place),
   `separator`, and a bare `label` (drawn disabled). The actions
   `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`,
   `custom-menu <name>` and `hide-menus`, bound as Fluxbox binds them by

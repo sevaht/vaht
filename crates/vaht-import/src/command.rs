@@ -131,6 +131,9 @@ impl FluxboxCommand<'_> {
             "reconfigure" | "reconfig" => plain("reload"),
             "exit" | "quit" => plain("exit"),
             "setalpha" => with("set-alpha"),
+            "setlayer" => Self::layer(arguments)
+                .map(|layer| format!("set-layer {layer}"))
+                .ok_or_else(|| Untranslated::not_yet(format!("SetLayer {arguments}"))),
             "rundialog" => plain("run-dialog"),
             "commanddialog" => plain("command-dialog"),
             "rootmenu" => plain("root-menu"),
@@ -153,6 +156,26 @@ impl FluxboxCommand<'_> {
                     .to_owned(),
             )),
         }
+    }
+
+    /// Fluxbox's layers, by name (lowercase) and number, and vaht's names.
+    const LAYERS: [(&str, &str, &str); 6] = [
+        ("abovedock", "2", "above-dock"),
+        ("dock", "4", "dock"),
+        ("top", "6", "top"),
+        ("normal", "8", "normal"),
+        ("bottom", "10", "bottom"),
+        ("desktop", "12", "desktop"),
+    ];
+
+    /// Returns vaht's name for the Fluxbox layer `text` names, by name or
+    /// number.
+    pub(crate) fn layer(text: &str) -> Option<&'static str> {
+        let text = text.trim().to_ascii_lowercase();
+        Self::LAYERS
+            .iter()
+            .find(|(name, number, _)| *name == text || *number == text)
+            .map(|(_, _, vaht)| *vaht)
     }
 
     /// The programs that show a run window: Fluxbox's and fluxland's.
@@ -324,6 +347,8 @@ mod tests {
     #[case::fluxland_snap("SnapStep left", r#""snap-step left""#)]
     #[case::run_dialog("RunDialog", r#""run-dialog""#)]
     #[case::set_alpha("SetAlpha 200 +10", r#""set-alpha 200 +10""#)]
+    #[case::set_layer("SetLayer AboveDock", r#""set-layer above-dock""#)]
+    #[case::set_layer_by_number("SetLayer 10", r#""set-layer bottom""#)]
     #[case::command_dialog("CommandDialog", r#""command-dialog""#)]
     #[case::fbrun("Exec fbrun", r#""run-dialog""#)]
     #[case::fluxland_run("ExecCommand fluxland-run -f 'Sans 10'", r#""run-dialog""#)]

@@ -15,7 +15,7 @@ use smithay::utils::{Logical, Point, Rectangle, Size};
 
 use super::matcher::WindowMatcher;
 use crate::window_manager::{
-    AlphaChange, Axes, Direction, HorizontalEdge, ResizeEdges, TileCell, VerticalEdge,
+    AlphaChange, Axes, Direction, HorizontalEdge, ResizeEdges, StackLayer, TileCell, VerticalEdge,
     WorkspaceTarget,
 };
 
@@ -37,7 +37,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "restart",
     "save-settings",
     "send-to-output",
-    "set-layer",
     "set-setting",
     "set-theme",
     "set-title",
@@ -307,6 +306,9 @@ pub(crate) enum WindowManagerAction {
     /// Minimizes every window on the workspace, or restores them if they
     /// all are.
     ShowDesktop,
+    /// Moves the window to a stacking layer (`set-layer <layer>`:
+    /// above-dock, dock, top, normal, bottom or desktop).
+    SetLayer(StackLayer),
     /// Changes the window's opacity (`set-alpha [<both> | <focused>
     /// <unfocused>]`, each 0 to 255 or a change like `+10`; nothing goes
     /// back to the settings').
@@ -471,6 +473,7 @@ impl WindowManagerAction {
             }),
             "tile" => Self::cell(arguments).map(Self::Tile),
             "set-alpha" => AlphaChange::parse(arguments).map(Self::SetAlpha),
+            "set-layer" => arguments.parse().map(Self::SetLayer),
             "move" => Self::pair(name, arguments).map(|(x, y)| Self::Move((x, y).into())),
             "move-to" => Self::pair(name, arguments).map(|(x, y)| Self::MoveTo((x, y).into())),
             "resize" => Self::pair(name, arguments).map(|(x, y)| Self::Resize((x, y).into())),
@@ -558,6 +561,7 @@ impl fmt::Display for WindowManagerAction {
             Self::PreviousWindow(_) => formatter.write_str("previous-window"),
             Self::ShowDesktop => formatter.write_str("show-desktop"),
             Self::SetAlpha(change) => write!(formatter, "{change}"),
+            Self::SetLayer(layer) => write!(formatter, "set-layer {layer}"),
         }
     }
 }

@@ -3,8 +3,9 @@
 //! Composition is the single walk over what is visible: drawing uses its
 //! elements, and hit-testing ([`Scene::target_at`]) walks the same layers
 //! and windows in the same order, so what is clicked is always what is seen
-//! (01 §9). From the top: the overlay and top layers, the taskbar, the
-//! windows, then the bottom and background layers, then the wallpaper. Each
+//! (01 §9). From the top: the overlay and top layers, the windows in the
+//! above-dock stacking layer, the taskbar, the other windows, then the
+//! bottom and background layers, then the wallpaper. Each
 //! window contributes its client surfaces, then, if it is pseudo-transparent,
 //! the piece of wallpaper beneath them, then the frame vaht draws.
 //!
@@ -211,12 +212,13 @@ impl<'state> Scene<'state> {
                 })
         };
         layer(self.layers_above_windows(), false)
+            .or_else(|| self.window_at(point, true).map(PointerTarget::Window))
             .or_else(|| {
                 self.shown_taskbar()
                     .filter(|taskbar| taskbar.covers(point))
                     .map(|taskbar| PointerTarget::Taskbar(taskbar.hit_at(point)))
             })
-            .or_else(|| self.window_at(point).map(PointerTarget::Window))
+            .or_else(|| self.window_at(point, false).map(PointerTarget::Window))
             .or_else(|| layer(&BELOW_WINDOWS, true))
     }
 
@@ -231,12 +233,35 @@ impl<'state> Scene<'state> {
         let mut elements = self.drawn.menus.render_elements(renderer, scale);
         elements.extend(self.drawn.outline.render_elements(scale));
         self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
+        self.push_windows(&mut elements, renderer, scale, true);
         elements.extend(
             self.shown_taskbar()
                 .and_then(|taskbar| taskbar.render_element(renderer, scale)),
         );
+        self.push_windows(&mut elements, renderer, scale, false);
+        self.push_layers(&mut elements, renderer, &BELOW_WINDOWS, scale);
+        elements.extend(self.drawn.backdrop.render_element(renderer, scale));
+        elements
+    }
+
+    /// Appends the elements of the windows shown, topmost first: those in
+    /// the above-dock layer, over the taskbar, when `is_above_dock`, else
+    /// the rest.
+    fn push_windows<R>(
+        &self,
+        elements: &mut Vec<SceneElement<R>>,
+        renderer: &mut R,
+        scale: Scale<f64>,
+        is_above_dock: bool,
+    ) where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
         let metrics = self.window_manager.metrics();
-        for (window, toplevel) in self.windows() {
+        let windows = self
+            .windows()
+            .filter(|(window, _)| self.window_manager.is_above_dock(window.id()) == is_above_dock);
+        for (window, toplevel) in windows {
             if window.shows_content() {
                 let origin = window.surface_origin().to_physical_precise_round(scale);
                 elements.extend(
@@ -266,9 +291,6 @@ impl<'state> Scene<'state> {
                 ));
             }
         }
-        self.push_layers(&mut elements, renderer, &BELOW_WINDOWS, scale);
-        elements.extend(self.drawn.backdrop.render_element(renderer, scale));
-        elements
     }
 
     /// Returns whether the topmost window shown is fullscreen: it then
@@ -300,10 +322,14 @@ impl<'state> Scene<'state> {
     }
 
     /// Returns the topmost shown window's client surface or frame at
-    /// `point`.
-    fn window_at(&self, point: Point<f64, Logical>) -> Option<WindowTarget> {
+    /// `point`, among those in the above-dock layer when `is_above_dock`,
+    /// else among the rest.
+    fn window_at(&self, point: Point<f64, Logical>, is_above_dock: bool) -> Option<WindowTarget> {
         let metrics = self.window_manager.metrics();
-        self.windows().find_map(|(window, toplevel)| {
+        let windows = self
+            .windows()
+            .filter(|(window, _)| self.window_manager.is_above_dock(window.id()) == is_above_dock);
+        windows.into_iter().find_map(|(window, toplevel)| {
             let id = window.id();
             let surface_origin = window.surface_origin();
             if window.shows_content()

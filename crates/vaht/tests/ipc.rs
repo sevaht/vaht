@@ -117,3 +117,24 @@ fn connections_leave_nothing_behind() {
     report.assert_nothing_left_behind();
     assert!(!socket.exists(), "the socket is removed as vaht stops");
 }
+
+#[test]
+fn a_window_in_a_lower_layer_stays_under_when_raised() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(2);
+    let top = windows(&vaht)[0].id;
+    let id = top.to_string();
+    for command in [["set-layer", "bottom"], ["raise", ""]] {
+        let mut arguments = vec!["run", "--window", &id, command[0]];
+        arguments.extend(command[1..].iter().filter(|word| !word.is_empty()));
+        let output = message(&vaht, &arguments);
+        assert!(output.status.success(), "{output:?}");
+    }
+    let order: Vec<u64> = windows(&vaht).iter().map(|window| window.id).collect();
+    assert_eq!(
+        order.last(),
+        Some(&top),
+        "under the normal window: {order:?}"
+    );
+}

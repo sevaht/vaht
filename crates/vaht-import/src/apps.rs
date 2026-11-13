@@ -8,6 +8,7 @@ use std::path::Path;
 
 use toml_edit::{ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 
+use crate::command::FluxboxCommand;
 use crate::pattern::{self, ClientPattern};
 use crate::report::{Reason, Report};
 
@@ -226,6 +227,12 @@ impl<'text> AppsFile<'text> {
                     _ => not_yet(),
                 }
             }
+            "layer" => match FluxboxCommand::layer(value) {
+                Some(layer) => {
+                    block.rule.insert("layer", Item::Value(Value::from(layer)));
+                }
+                None => not_yet(),
+            },
             "dimensions" => match Self::pair(value) {
                 Some((width, height)) if width > 0 && height > 0 => {
                     block.rule.insert(

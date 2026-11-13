@@ -302,6 +302,7 @@ impl MenuFiles {
             "raise" | "lower" | "close" | "kill" => command(&line.tag),
             "sendto" => item(&[("generate", Value::from("send-to-workspace"))]),
             "alpha" => item(&[("generate", Value::from("alpha"))]),
+            "layer" => item(&[("generate", Value::from("layer"))]),
             "encoding" | "endencoding" => {
                 note(Reason::Dropped, "the encoding: menus.toml is UTF-8")
             }

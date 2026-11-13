@@ -11,6 +11,7 @@ mod stack;
 use std::collections::HashMap;
 
 use self::stack::Stack;
+pub(crate) use self::stack::StackLayer;
 use super::window::{Frame, Window, WindowId};
 use super::workspaces::Workspace;
 use crate::resources::ResourceLedger;
@@ -92,5 +93,16 @@ impl Windows {
     /// Moves the window with `id` above all others; returns whether it exists.
     pub(crate) fn raise(&mut self, id: WindowId) -> bool {
         self.stack.raise(id)
+    }
+
+    /// Moves the window with `id` to the top of `layer`; returns whether it
+    /// exists.
+    pub(crate) fn set_layer(&mut self, id: WindowId, layer: StackLayer) -> bool {
+        self.stack.set_layer(id, layer)
+    }
+
+    /// Returns the layer of the window with `id`.
+    pub(crate) fn layer_of(&self, id: WindowId) -> Option<StackLayer> {
+        self.stack.layer_of(id)
     }
 }

@@ -12,7 +12,7 @@ use crate::config::{
     Action, Command, MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowManagerAction,
     WindowToggle,
 };
-use crate::window_manager::{AlphaChange, WindowId, WindowManager, WorkspaceTarget};
+use crate::window_manager::{AlphaChange, StackLayer, WindowId, WindowManager, WorkspaceTarget};
 
 /// A menu: its title and items.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -276,6 +276,22 @@ impl<'state> MenuBuilder<'state> {
                             choice: MenuChoice::Activate(window.id()),
                             mark: None,
                         }
+                    })
+                    .collect()
+            }
+            MenuGenerator::Layer => {
+                let current = self.window.and_then(|window| manager.layer_of(window));
+                StackLayer::ALL
+                    .iter()
+                    .map(|(layer, _, label)| MenuItem::Choice {
+                        label: (*label).to_owned(),
+                        choice: MenuChoice::Run {
+                            command: Command::Run(Action::WindowManager(
+                                WindowManagerAction::SetLayer(*layer),
+                            )),
+                            window: self.window,
+                        },
+                        mark: Some(current == Some(*layer)),
                     })
                     .collect()
             }

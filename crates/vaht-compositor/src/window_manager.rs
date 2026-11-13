@@ -34,6 +34,7 @@ pub(crate) use self::window::{
     ResizeEdges, ResizeStyle, SizeLimits, SnapStep, TileCell, TitlebarButton, TitlebarLayout,
     VerticalEdge, Window, WindowAlpha, WindowDrag,
 };
+pub(crate) use self::windows::StackLayer;
 use self::windows::Windows;
 use self::workspaces::Workspaces;
 pub(crate) use self::workspaces::{Workspace, WorkspaceTarget};
@@ -128,6 +129,17 @@ impl WindowManager {
         } else {
             ResizeStyle::Outline
         }
+    }
+
+    /// Returns whether `window` is in the above-dock layer: over the
+    /// taskbar.
+    pub(crate) fn is_above_dock(&self, window: WindowId) -> bool {
+        self.windows.layer_of(window) == Some(StackLayer::AboveDock)
+    }
+
+    /// Returns the layer `window` is in.
+    pub(crate) fn layer_of(&self, window: WindowId) -> Option<StackLayer> {
+        self.windows.layer_of(window)
     }
 
     /// Returns how opaque `window` is drawn, 0.0 to 1.0.
@@ -411,6 +423,13 @@ impl WindowManager {
                 self.cycle_focus(windows, CycleDirection::Backward);
             }
             WindowManagerAction::ShowDesktop => self.show_desktop(),
+            WindowManagerAction::SetLayer(layer) => {
+                if let Some(window) = window
+                    && self.windows.set_layer(window, *layer)
+                {
+                    self.is_redraw_needed = true;
+                }
+            }
             WindowManagerAction::SetAlpha(change) => {
                 let defaults = self.default_alpha;
                 if let Some(target) = window.and_then(|window| self.window_mut(window)) {
@@ -678,6 +697,9 @@ impl WindowManager {
         }
         if let Some(is_pseudo_transparent) = rule.pseudo_transparent {
             window.set_pseudo_transparent(is_pseudo_transparent);
+        }
+        if let Some(layer) = rule.layer {
+            self.windows.set_layer(id, layer);
         }
         // A rule may have sent the new window out of sight.
         self.focus_most_recent();
