@@ -76,6 +76,10 @@ pin_right = []
 # strftime: %k:%M is the hour, space-padded, and the minutes.
 format = "%k:%M"
 
+[menus]
+# How long the pointer rests on a submenu's item before it opens.
+submenu_delay_ms = 200
+
 [session]
 # Command lines run once when vaht starts, as exec runs them.
 autostart = []

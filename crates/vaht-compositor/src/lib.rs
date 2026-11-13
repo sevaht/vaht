@@ -25,6 +25,7 @@ mod grab;
 mod input;
 mod launcher;
 mod layers;
+mod menu;
 mod protocols;
 pub mod resources;
 mod scene;

@@ -56,18 +56,19 @@ use crate::backend::{Backend, BackendChoice, BackendError};
 use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::{
-    Action, Command, Config, ConfigSource, FocusModel, KeyChord, Modifiers, ResizeFrom,
-    WindowManagerAction,
+    Action, Command, Config, ConfigSource, FocusModel, KeyChord, MenuGenerator, MenuRequest, Menus,
+    Modifiers, ResizeFrom, WindowManagerAction,
 };
 use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
 use crate::grab::{GrabKind, WindowGrab};
-use crate::input::{self, AfterClick, ButtonPress, Input, PressOutcome};
+use crate::input::{self, AfterClick, ButtonPress, Input, KeyPress, PressOutcome};
 use crate::launcher::Launcher;
 use crate::layers::{Layers, OutputLayers};
+use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack};
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceKind, ResourceLedger};
-use crate::scene::{FrameTextures, PointerTarget, Scene, WindowTarget};
+use crate::scene::{FrameTextures, Panels, PointerTarget, Scene, WindowTarget};
 use crate::signals::ProcessSignals;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
 use crate::toplevels::{Toplevel, Toplevels};
@@ -101,6 +102,8 @@ pub struct Compositor {
     pub(crate) layers: Layers,
     /// The taskbar, if the settings want one.
     pub(crate) taskbar: Option<Taskbar>,
+    /// The menus open.
+    pub(crate) menus: MenuStack,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
     /// Draws screenshots for capture clients.
@@ -239,6 +242,7 @@ impl Compositor {
             popups: PopupManager::default(),
             layers: Layers::default(),
             taskbar: Taskbar::new(&config.settings.taskbar),
+            menus: MenuStack::default(),
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
             physical_keymap,
@@ -271,7 +275,10 @@ impl Compositor {
             &self.window_manager,
             &self.toplevels,
             &self.frame_textures,
-            self.taskbar.as_ref(),
+            Panels {
+                taskbar: self.taskbar.as_ref(),
+                menus: &self.menus,
+            },
             self.output_layers(),
         )
     }
@@ -292,6 +299,8 @@ impl Compositor {
         self.config_source.watch(&self.loop_handle, &self.ledger);
         match self.config_source.load() {
             Ok(config) => {
+                // Menus are made from the configuration being replaced.
+                self.menus.close();
                 self.window_manager.apply_settings(&config.settings);
                 if config.settings.taskbar != self.config.settings.taskbar {
                     self.taskbar = Taskbar::new(&config.settings.taskbar);
@@ -335,7 +344,10 @@ impl Compositor {
             &self.window_manager,
             &self.toplevels,
             &self.frame_textures,
-            self.taskbar.as_ref(),
+            Panels {
+                taskbar: self.taskbar.as_ref(),
+                menus: &self.menus,
+            },
             OutputLayers::new(&output, self.backend.output_geometry()),
         );
         if let Err(error) = self.backend.render(&scene) {
@@ -371,6 +383,7 @@ impl Compositor {
             };
             taskbar.prepare(view, &self.config.theme, &mut self.typesetter);
         }
+        self.menus.prepare(&self.config.theme, &mut self.typesetter);
     }
 
     /// Starts managing the window of a new xdg-shell toplevel.
@@ -837,7 +850,59 @@ impl Compositor {
             Action::SetEnvironment { name, value } => {
                 self.launcher.set_environment(name.clone(), value.clone());
             }
+            Action::OpenMenu(request) => self.open_menu(request, context.window),
+            Action::HideMenus => {
+                self.menus.close();
+                self.schedule_render();
+            }
         }
+    }
+
+    /// Opens the menu `request` names, its corner at the pointer, about
+    /// `window` (the window menu's; the focused window when none).
+    fn open_menu(&mut self, request: &MenuRequest, window: Option<WindowId>) {
+        let window = window.or_else(|| self.window_manager.focused());
+        let builder = MenuBuilder::new(&self.config.menus, &self.window_manager, window);
+        let model = match request {
+            MenuRequest::Root => builder.build(Menus::ROOT),
+            MenuRequest::Window => window.and_then(|_| builder.build(Menus::WINDOW)),
+            MenuRequest::Workspace => builder.build(Menus::WORKSPACE),
+            MenuRequest::WindowList => Some(builder.generated(MenuGenerator::WindowList, None)),
+            MenuRequest::Custom(name) => builder.build(name),
+        };
+        let Some(model) = model else {
+            tracing::warn!(?request, "no such menu, or no window for it");
+            return;
+        };
+        let at = self.pointer_location().to_i32_round();
+        let bounds = self.backend.output_geometry();
+        self.menus.open(
+            model,
+            at,
+            bounds,
+            (&self.config.theme, &mut self.typesetter),
+        );
+        self.schedule_render();
+    }
+
+    /// Opens the submenu of the item highlighted in the last menu: the
+    /// pointer has rested on it.
+    pub(crate) fn open_highlighted_submenu(&mut self) {
+        self.menus
+            .open_highlighted_submenu((&self.config.theme, &mut self.typesetter));
+        self.schedule_render();
+    }
+
+    /// Does what the menu item chosen does.
+    fn choose_from_menu(&mut self, choice: MenuChoice) {
+        tracing::debug!(?choice, "menu item chosen");
+        match choice {
+            MenuChoice::Run { command, window } => {
+                self.execute(&command, &mut ExecutionContext::for_window(window));
+            }
+            MenuChoice::Activate(window) => self.window_manager.activate(window),
+        }
+        self.schedule_render();
     }
 
     /// Starts moving the context's window with the pointer, or resizing it
@@ -923,28 +988,50 @@ impl Compositor {
                 compositor.filter_key(keycode, state, modifiers, &keysym)
             },
         );
-        if let Some(Some(command)) = bound {
-            self.run_key_binding(keycode, command);
+        match bound {
+            Some(Some(KeyPress::Binding(command))) => self.run_key_binding(keycode, command),
+            Some(Some(KeyPress::Menu(key))) => {
+                let chosen = self
+                    .menus
+                    .key(key, (&self.config.theme, &mut self.typesetter));
+                self.schedule_render();
+                if let Some(choice) = chosen {
+                    self.choose_from_menu(choice);
+                }
+            }
+            Some(None) | None => {}
         }
     }
 
     /// Decides whether a key event is vaht's: a bound press, or the release
-    /// of one. Returns the bound press's command.
+    /// of one, or any key while a menu is open. Returns what the press does.
     fn filter_key(
         &mut self,
         keycode: Keycode,
         state: KeyState,
         modifiers: &ModifiersState,
         keysym: &KeysymHandle<'_>,
-    ) -> FilterResult<Option<Command>> {
+    ) -> FilterResult<Option<KeyPress>> {
         let held = Modifiers::held(modifiers);
         if state == KeyState::Released && held == Modifiers::default() {
             self.window_manager.modifiers_released();
         }
+        if self.menus.is_open() && state == KeyState::Pressed {
+            // Keys are the menus' while one is open, their releases too.
+            self.input.claim_release(keycode);
+            return FilterResult::Intercept(Some(KeyPress::Menu(MenuKey::of(
+                keysym.modified_sym(),
+            ))));
+        }
         let chord = keysym
             .raw_latin_sym_or_raw_current_sym()
             .map(|key| KeyChord::new(held, key));
-        self.input.key(keycode, state, chord, &self.config.bindings)
+        match self.input.key(keycode, state, chord, &self.config.bindings) {
+            FilterResult::Forward => FilterResult::Forward,
+            FilterResult::Intercept(command) => {
+                FilterResult::Intercept(command.map(KeyPress::Binding))
+            }
+        }
     }
 
     /// Runs a bound key's `command` for the focused window, and starts
@@ -973,7 +1060,21 @@ impl Compositor {
             self.schedule_clock();
             self.schedule_render();
         }
-        let target = self.scene().target_at(location);
+        if self.menus.is_open()
+            && self.menus.follow_pointer(
+                location,
+                self.config.settings.menus.submenu_delay(),
+                (&self.loop_handle, &self.ledger),
+            )
+        {
+            self.schedule_render();
+        }
+        // Over a menu, no client has the pointer.
+        let target = if self.menus.covers(location) {
+            None
+        } else {
+            self.scene().target_at(location)
+        };
         let pointer = self
             .seat
             .get_pointer()
@@ -1031,6 +1132,15 @@ impl Compositor {
             ButtonState::Released => {
                 self.window_manager.release_titlebar_button(location);
                 self.release_taskbar_button(location);
+                if self.menus.is_open() {
+                    let chosen = self
+                        .menus
+                        .release(location, (&self.config.theme, &mut self.typesetter));
+                    self.schedule_render();
+                    if let Some(choice) = chosen {
+                        self.choose_from_menu(choice);
+                    }
+                }
             }
         }
         // A client clicked has keyboard focus by the time it hears of it.
@@ -1053,6 +1163,15 @@ impl Compositor {
     /// border.
     fn press_button(&mut self, button: u32, location: Point<f64, Logical>, serial: Serial) {
         self.window_manager.finish_cycle();
+        if self.menus.is_open() {
+            // A press on a menu is the menu's; elsewhere it closes the
+            // menus and goes on to what is there.
+            let is_on_menu = self.menus.press(location);
+            self.schedule_render();
+            if is_on_menu {
+                return;
+            }
+        }
         let target = self.scene().target_at(location);
         let is_on_titlebar_button = match &target {
             Some(PointerTarget::Window(WindowTarget::Frame {

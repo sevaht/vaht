@@ -55,6 +55,17 @@ impl<'pixmap> Canvas<'pixmap> {
                 self.draw_icon(icon, WidgetIcon::square_in(placed.rect));
                 inner = inner.without_left(WidgetIcon::span(placed.rect.height));
             }
+            if let Some(mark) = placed.mark {
+                let side = placed.rect.height.min(placed.rect.width);
+                let square = Rect::new(
+                    placed.rect.x
+                        + i32::try_from(placed.rect.width - side).expect("panel widths fit in i32"),
+                    placed.rect.y,
+                    side,
+                    side,
+                );
+                self.draw_glyph(mark, style.glyph_color, square);
+            }
             match &placed.content {
                 Content::Text(text) => typesetter.draw(self.pixmap, text, &style.text, inner),
                 Content::Glyph(glyph) => self.draw_glyph(*glyph, style.glyph_color, inner),

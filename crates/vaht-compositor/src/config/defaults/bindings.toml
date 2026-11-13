@@ -38,8 +38,12 @@
 "Super+F2" = "send-to-workspace 2"
 "Super+F3" = "send-to-workspace 3"
 "Super+F4" = "send-to-workspace 4"
+"Alt+space" = "window-menu"
 
 [mouse.desktop]
+"Left" = "hide-menus"
+"Middle" = "workspace-menu"
+"Right" = "root-menu"
 "ScrollUp" = "workspace previous"
 "ScrollDown" = "workspace next"
 
@@ -56,3 +60,4 @@
 "Double+Left" = "maximize"
 "Drag+Left" = "start-moving"
 "Middle" = "lower"
+"Right" = "window-menu"

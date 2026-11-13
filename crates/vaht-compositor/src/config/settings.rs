@@ -36,6 +36,8 @@ pub(crate) struct Settings {
     pub(crate) workspaces: WorkspaceSettings,
     /// The taskbar.
     pub(crate) taskbar: TaskbarSettings,
+    /// Menus.
+    pub(crate) menus: MenuSettings,
     /// Starting the session.
     pub(crate) session: SessionSettings,
 }
@@ -224,6 +226,30 @@ impl Default for WorkspaceSettings {
             names: (1..=4)
                 .map(|number| format!("Workspace {number}"))
                 .collect(),
+        }
+    }
+}
+
+/// Menus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct MenuSettings {
+    /// How long the pointer rests on a submenu's item before it opens.
+    submenu_delay_ms: u64,
+}
+
+impl MenuSettings {
+    /// Returns how long the pointer rests on a submenu's item before it
+    /// opens.
+    pub(crate) const fn submenu_delay(self) -> Duration {
+        Duration::from_millis(self.submenu_delay_ms)
+    }
+}
+
+impl Default for MenuSettings {
+    fn default() -> Self {
+        Self {
+            submenu_delay_ms: 200,
         }
     }
 }

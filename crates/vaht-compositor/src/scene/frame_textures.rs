@@ -12,10 +12,10 @@ use std::collections::HashMap;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::backend::renderer::{ImportMem, Renderer};
-use smithay::utils::{Logical, Rectangle, Scale};
+use smithay::utils::Scale;
 use vaht_ui::{Color, Corner, CornerArc, Theme, ThemeElement};
 
-use super::{PanelTexture, SceneElement};
+use super::{CornerTexture, PanelTexture, SceneElement};
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 use crate::window_manager::{Frame, FrameGeometry, WindowId, WindowManager};
 
@@ -167,57 +167,5 @@ impl FrameTexture {
     /// Returns `color` as solid buffers take it.
     fn to_render_color(color: Color) -> [f32; 4] {
         [color.red, color.green, color.blue, color.alpha].map(|channel| f32::from(channel) / 255.0)
-    }
-}
-
-/// One corner's arc, painted when it changes.
-#[derive(Debug)]
-struct CornerTexture {
-    /// The arc last painted; none before the first.
-    arc: Option<CornerArc>,
-    /// Its pixels; empty for a square corner.
-    texture: PanelTexture,
-    /// Counts the arcs painted, so the texture knows new pixels.
-    generation: u64,
-}
-
-impl CornerTexture {
-    /// Creates a corner with no arc yet.
-    fn new() -> Self {
-        Self {
-            arc: None,
-            texture: PanelTexture::new(),
-            generation: 0,
-        }
-    }
-
-    /// Paints `arc`, if it is not the one painted already.
-    fn update(&mut self, arc: CornerArc) {
-        if self.arc == Some(arc) {
-            return;
-        }
-        self.arc = Some(arc);
-        if let Some(pixels) = arc.paint() {
-            self.generation += 1;
-            self.texture.upload_pixels(&pixels, self.generation);
-        }
-    }
-
-    /// Returns the element that draws the arc in `square`; none for a
-    /// square corner.
-    fn render_element<R>(
-        &self,
-        renderer: &mut R,
-        square: Rectangle<i32, Logical>,
-        scale: Scale<f64>,
-    ) -> Option<SceneElement<R>>
-    where
-        R: Renderer + ImportMem,
-        R::TextureId: Send + Clone + 'static,
-    {
-        if square.is_empty() {
-            return None;
-        }
-        self.texture.render_element(renderer, square.loc, scale)
     }
 }

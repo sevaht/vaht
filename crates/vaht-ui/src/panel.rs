@@ -103,6 +103,17 @@ impl<Content: PanelContent> Panel<Content> {
         self.invalidate();
     }
 
+    /// Changes the content with `change`, which returns whether it changed
+    /// anything; only then is the panel laid out and painted again. Returns
+    /// what `change` did.
+    pub fn update_if(&mut self, change: impl FnOnce(&mut Content) -> bool) -> bool {
+        let changed = change(&mut self.content);
+        if changed {
+            self.invalidate();
+        }
+        changed
+    }
+
     /// Resizes the panel.
     pub fn resize(&mut self, size: Size) {
         if size != self.size {

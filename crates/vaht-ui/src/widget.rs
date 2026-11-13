@@ -28,6 +28,9 @@ pub struct Widget<Hit> {
     pub state: Option<WidgetState>,
     /// The icon shown left of its text, if any.
     pub icon: Option<WidgetIcon>,
+    /// The mark shown at its right end, in a square as tall as it: a
+    /// submenu's arrow, a chosen item's check.
+    pub mark: Option<Glyph>,
 }
 
 impl<Hit> Widget<Hit> {
@@ -93,6 +96,13 @@ impl<Hit> Widget<Hit> {
         self
     }
 
+    /// Returns the widget showing `mark` at its right end.
+    #[must_use]
+    pub const fn with_mark(mut self, mark: Glyph) -> Self {
+        self.mark = Some(mark);
+        self
+    }
+
     /// Returns the widget drawn in `state` rather than its panel's.
     #[must_use]
     pub const fn with_state(mut self, state: WidgetState) -> Self {
@@ -119,6 +129,7 @@ impl<Hit> Widget<Hit> {
             is_button: false,
             state: None,
             icon: None,
+            mark: None,
         }
     }
 }

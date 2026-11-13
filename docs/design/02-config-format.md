@@ -539,6 +539,18 @@ items = [
   - `pipe` (a command whose output is a menu in this same TOML form);
   - `separator`;
   - `icon` (optional on any item).
+- **Built so far:** `command`, `submenu`, `toggle` (`shade`, `stick`,
+  `maximize`, `minimize`, `fullscreen`), `generate` (`workspaces`,
+  `send-to-workspace`, `window-list`; `inline = true` lists in place),
+  `separator`, and a bare `label` (drawn disabled). The actions
+  `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`,
+  `custom-menu <name>` and `hide-menus`, bound as Fluxbox binds them by
+  default. Menus open with their corner at the pointer and stay on the
+  output; a submenu opens beside its item after `[menus] submenu_delay_ms`
+  or at once on a click; releasing a button on an item chooses it; a press
+  elsewhere closes the menus and goes on. Keys: Up, Down, Left, Right,
+  Enter, Escape. Not yet: `pipe`, `icon`, the `themes`, `layer`, `alpha`,
+  `outputs` and `profiles` lists, type-to-search, and the GTK presenter.
 - **Dropped:**
   - Fluxbox's `[config]` editor menu: settings are reached through
     `set-setting`.

@@ -19,6 +19,11 @@ impl Workspace {
     pub(crate) const fn numbered(number: NonZeroUsize) -> Self {
         Self(number.get() - 1)
     }
+
+    /// Returns the workspace's 1-based number.
+    pub(crate) const fn number(self) -> NonZeroUsize {
+        NonZeroUsize::MIN.saturating_add(self.0)
+    }
 }
 
 /// Writes the 1-based number, as users count workspaces.
@@ -96,6 +101,11 @@ impl Workspaces {
     /// Returns the workspace shown.
     pub(crate) const fn current(&self) -> Workspace {
         self.current
+    }
+
+    /// Returns every workspace, first to last.
+    pub(crate) fn all(&self) -> impl Iterator<Item = Workspace> {
+        (0..self.count()).map(Workspace)
     }
 
     /// Returns how many workspaces there are.

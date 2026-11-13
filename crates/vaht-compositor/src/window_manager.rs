@@ -124,6 +124,13 @@ impl WindowManager {
         self.workspaces.current()
     }
 
+    /// Returns every workspace, first to last, with its name.
+    pub(crate) fn workspaces(&self) -> impl Iterator<Item = (Workspace, &str)> {
+        self.workspaces
+            .all()
+            .map(|workspace| (workspace, self.workspaces.name(workspace)))
+    }
+
     /// Returns the name of the workspace shown.
     pub(crate) fn current_workspace_name(&self) -> &str {
         self.workspaces.name(self.workspaces.current())

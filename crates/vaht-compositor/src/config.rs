@@ -7,13 +7,14 @@
 //! `vaht check --print-defaults` prints: defaults are written down once,
 //! as configuration (K3).
 //!
-//! Today the directory holds `bindings.toml`, `settings.toml` and
-//! `rules.toml`; the other files of 02 §2 join them with the features they
-//! configure.
+//! Today the directory holds `bindings.toml`, `settings.toml`,
+//! `rules.toml` and `menus.toml`; the other files of 02 §2 join them with
+//! the features they configure.
 
 mod bindings;
 mod command;
 mod matcher;
+mod menus;
 mod rules;
 mod settings;
 mod source;
@@ -28,8 +29,9 @@ use std::path::{Path, PathBuf};
 use vaht_ui::Theme;
 
 pub(crate) use self::bindings::{Bindings, KeyChord, Modifiers, MouseButton, MouseContext};
-pub(crate) use self::command::{Action, Command, ResizeFrom, WindowManagerAction};
+pub(crate) use self::command::{Action, Command, MenuRequest, ResizeFrom, WindowManagerAction};
 pub(crate) use self::matcher::WindowMatcher;
+pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};
 pub(crate) use self::rules::Rules;
 pub(crate) use self::settings::{
     FocusModel, FrameSettings, Settings, TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget,
@@ -79,13 +81,15 @@ pub struct Config {
     pub(crate) settings: Settings,
     /// What happens to particular windows (`rules.toml`).
     pub(crate) rules: Rules,
+    /// The menus (`menus.toml`).
+    pub(crate) menus: Menus,
     /// How everything vaht draws looks: the theme `settings.toml` names.
     pub(crate) theme: Theme,
 }
 
 impl Config {
     /// Every configuration file vaht reads.
-    pub const FILES: [ConfigFile; 3] = [
+    pub const FILES: [ConfigFile; 4] = [
         ConfigFile {
             name: "bindings.toml",
             defaults: include_str!("config/defaults/bindings.toml"),
@@ -98,6 +102,10 @@ impl Config {
             name: "rules.toml",
             defaults: include_str!("config/defaults/rules.toml"),
         },
+        ConfigFile {
+            name: "menus.toml",
+            defaults: include_str!("config/defaults/menus.toml"),
+        },
     ];
 
     /// Reads and validates the configuration in `directory`; a missing file,
@@ -108,7 +116,7 @@ impl Config {
     /// Returns the first problem found: a file that cannot be read, or one
     /// that is not valid, with the line and column of the problem.
     pub fn load(directory: &Path) -> Result<Self, ConfigError> {
-        let [bindings, settings, rules] = Self::FILES;
+        let [bindings, settings, rules, menus] = Self::FILES;
         let settings: Settings = settings.read(directory)?;
         let theme = match &settings.theme {
             Some(name) => ThemeFile::find(directory, name)?.read()?,
@@ -118,6 +126,7 @@ impl Config {
             bindings: bindings.read(directory)?,
             settings,
             rules: rules.read(directory)?,
+            menus: menus.read(directory)?,
             theme,
         })
     }
@@ -129,12 +138,13 @@ impl Config {
     /// Panics if a built-in file is invalid; a unit test makes sure none is.
     #[must_use]
     pub fn built_in() -> Self {
-        let [bindings, _, _] = Self::FILES;
+        let [bindings, _, _, menus] = Self::FILES;
         Self {
             bindings: toml::from_str(bindings.defaults)
                 .expect("the built-in bindings are valid (tested)"),
             settings: Settings::default(),
             rules: Rules::default(),
+            menus: toml::from_str(menus.defaults).expect("the built-in menus are valid (tested)"),
             theme: Theme::built_in(),
         }
     }

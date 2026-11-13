@@ -23,6 +23,7 @@ use crate::Compositor;
 use crate::config::{Bindings, Command, Config, KeyChord, Modifiers, MouseButton, MouseContext};
 use crate::event_source::{RepeatingTimer, Timer};
 use crate::execution::ExecutionContext;
+use crate::menu::MenuKey;
 use crate::resources::ResourceLedger;
 use crate::scene::{PointerTarget, WindowTarget};
 use crate::taskbar::TaskbarHit;
@@ -102,6 +103,15 @@ pub(crate) enum PressOutcome {
     },
 }
 
+/// What a key press vaht takes does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum KeyPress {
+    /// Runs a key binding's command.
+    Binding(Command),
+    /// Acts on the open menus.
+    Menu(MenuKey),
+}
+
 /// What a press on a window or the desktop does after focusing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AfterClick {
@@ -147,6 +157,13 @@ impl Input {
     /// use it too, unless they set their own rate.
     pub(crate) const KEY_REPEAT_RATE: NonZeroU32 =
         NonZeroU32::new(25).expect("the key repeat rate is not zero");
+
+    /// Takes the release of `keycode` from clients, as its press was vaht's
+    /// (an open menu's).
+    pub(crate) fn claim_release(&mut self, keycode: Keycode) {
+        self.key_repeat = None;
+        self.suppressed_keys.insert(keycode);
+    }
 
     /// Decides whose a key event is: the client's, or vaht's, with the
     /// command a bound press runs. `chord` is the press

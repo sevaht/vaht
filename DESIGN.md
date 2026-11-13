@@ -80,7 +80,10 @@ RUST.md §4). The compositor crate has two halves:
   `WallClock` wakes it at each minute by the time of day, and whenever the
   clock is set, the system resumes or the time zone changes: timedated's
   D-Bus signal while timedated runs, else a watch on `/etc/localtime`,
-  switched as the bus announces timedated starting and stopping),
+  switched as the bus announces timedated starting and stopping), the
+  `MenuStack` (the open menus: built as they open from `menus.toml` and
+  the window manager's state into a `MenuModel`, drawn as panels with an
+  outline like a frame's),
   the backend and the protocol states. It routes events and carries out
   the window manager's decisions; it decides nothing about windows.
 

@@ -1,0 +1,148 @@
+//! Menu tests: menus opened by bindings, used with the pointer and the
+//! keyboard, and checked by screenshots and what their items run.
+
+use std::path::Path;
+
+use vaht_test_support::{
+    BUTTON_LEFT, BUTTON_RIGHT, HeadlessVaht, Screenshot, TestClient, keys, wait_for_file,
+};
+
+/// The executable cargo built for these tests.
+const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
+
+/// Where the menu is opened: right-clicked on the desktop.
+const OPENED_AT: (u32, u32) = (300, 300);
+
+/// The built-in theme's menu sizes: the outline, the title and an item.
+const BORDER: u32 = 1;
+/// The title's height.
+const TITLE_HEIGHT: u32 = 20;
+/// An item's height.
+const ITEM_HEIGHT: u32 = 20;
+
+/// The built-in theme's menu body: black.
+const MENU_BODY: [u8; 3] = [0, 0, 0];
+
+/// Starts vaht with a root menu whose one item touches `marker`.
+fn start(marker: &Path) -> (HeadlessVaht, TestClient) {
+    let menus = format!(
+        "[menu.root]\ntitle = \"test\"\nitems = [\n\
+         {{ label = \"Touch\", command = \"exec touch '{}'\" }},\n\
+         {{ label = \"Other\", command = \"exec true\" }},\n]\n\
+         [menu.window]\nitems = []\n[menu.workspace]\nitems = []\n",
+        marker.display()
+    );
+    let vaht = HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("menus.toml", &menus)]);
+    let client = TestClient::connect(vaht.socket());
+    (vaht, client)
+}
+
+/// Returns a point in the left part of the menu's item `index`, clear of
+/// its text.
+const fn item_point(index: u32) -> (u32, u32) {
+    let (x, y) = OPENED_AT;
+    (
+        x + BORDER + 5,
+        y + BORDER + TITLE_HEIGHT + BORDER + index * ITEM_HEIGHT + ITEM_HEIGHT / 2,
+    )
+}
+
+/// Returns the color at `point`.
+fn at(screenshot: &Screenshot, point: (u32, u32)) -> [u8; 3] {
+    screenshot.rgb(point.0, point.1)
+}
+
+#[test]
+fn a_right_click_on_the_desktop_opens_the_root_menu_and_an_item_runs_its_command() {
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let marker = files.path().join("touched");
+    let (_vaht, mut client) = start(&marker);
+    let before = client.screenshot();
+    assert_ne!(at(&before, item_point(0)), MENU_BODY, "no menu yet");
+    client.click(OPENED_AT.0, OPENED_AT.1, BUTTON_RIGHT);
+    let opened = client.screenshot();
+    assert_eq!(
+        at(&opened, item_point(0)),
+        MENU_BODY,
+        "the menu, at the pointer"
+    );
+    client.move_pointer_to(item_point(0).0, item_point(0).1);
+    let hovered = client.screenshot();
+    assert_ne!(
+        at(&hovered, item_point(0)),
+        MENU_BODY,
+        "the item under the pointer is highlighted"
+    );
+    assert_eq!(at(&hovered, item_point(1)), MENU_BODY, "the other is not");
+    client.click(item_point(0).0, item_point(0).1, BUTTON_LEFT);
+    wait_for_file(&marker, |_| true);
+    let closed = client.screenshot();
+    assert_eq!(
+        at(&closed, item_point(0)),
+        at(&before, item_point(0)),
+        "and the menu closed"
+    );
+}
+
+#[test]
+fn the_keyboard_moves_through_a_menu_and_escape_closes_it() {
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let marker = files.path().join("touched");
+    let (_vaht, mut client) = start(&marker);
+    let before = client.screenshot();
+    client.click(OPENED_AT.0, OPENED_AT.1, BUTTON_RIGHT);
+    client.type_chord(&[keys::DOWN]);
+    let highlighted = client.screenshot();
+    assert_ne!(
+        at(&highlighted, item_point(0)),
+        MENU_BODY,
+        "Down highlights the first item"
+    );
+    client.type_chord(&[keys::ESCAPE]);
+    let closed = client.screenshot();
+    assert_eq!(
+        at(&closed, item_point(0)),
+        at(&before, item_point(0)),
+        "Escape closed it"
+    );
+    assert!(!marker.exists(), "nothing was chosen");
+}
+
+#[test]
+fn a_click_elsewhere_closes_the_menu() {
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let marker = files.path().join("touched");
+    let (_vaht, mut client) = start(&marker);
+    let before = client.screenshot();
+    client.click(OPENED_AT.0, OPENED_AT.1, BUTTON_RIGHT);
+    client.click(900, 700, BUTTON_LEFT);
+    let closed = client.screenshot();
+    assert_eq!(at(&closed, item_point(0)), at(&before, item_point(0)));
+}
+
+#[test]
+fn the_window_menu_toggles_the_window_it_was_opened_on() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let content = client
+        .screenshot()
+        .bounds_of(vaht_test_support::WINDOW_COLOR)
+        .expect("shown");
+    let titlebar = (content.left + 30, content.top - BORDER - 10);
+    client.click(titlebar.0, titlebar.1, BUTTON_RIGHT);
+    // The built-in window menu has no title: its first item, Shade, is
+    // first, just inside its outline.
+    let shade = (
+        titlebar.0 + BORDER + 5,
+        titlebar.1 + BORDER + ITEM_HEIGHT / 2,
+    );
+    client.click(shade.0, shade.1, BUTTON_LEFT);
+    assert_eq!(
+        client
+            .screenshot()
+            .bounds_of(vaht_test_support::WINDOW_COLOR),
+        None,
+        "shaded: the content is rolled up"
+    );
+}

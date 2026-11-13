@@ -12,7 +12,9 @@
 //! shown and where, the [`Toplevels`] draw and hit-test their surfaces,
 //! [`FrameTextures`] draws their frames, and the [`Taskbar`] itself.
 
+mod corner_texture;
 mod frame_textures;
+mod menu_texture;
 mod panel_texture;
 
 use smithay::backend::renderer::element::AsRenderElements as _;
@@ -24,9 +26,12 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
 
+pub(crate) use self::corner_texture::CornerTexture;
 pub(crate) use self::frame_textures::FrameTextures;
+pub(crate) use self::menu_texture::MenuTexture;
 pub(crate) use self::panel_texture::PanelTexture;
 use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, OutputLayers};
+use crate::menu::MenuStack;
 use crate::taskbar::{Taskbar, TaskbarHit};
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::window_manager::{FramePart, Window, WindowId, WindowManager};
@@ -141,26 +146,38 @@ pub(crate) struct Scene<'state> {
     frame_textures: &'state FrameTextures,
     /// The taskbar, if there is one.
     taskbar: Option<&'state Taskbar>,
+    /// The menus open.
+    menus: &'state MenuStack,
     /// The output's layer surfaces.
     layers: OutputLayers<'state>,
 }
 
+/// What vaht draws itself, over the windows: the taskbar and the menus.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Panels<'state> {
+    /// The taskbar, if there is one.
+    pub(crate) taskbar: Option<&'state Taskbar>,
+    /// The menus open.
+    pub(crate) menus: &'state MenuStack,
+}
+
 impl<'state> Scene<'state> {
     /// Creates the scene of the windows `window_manager` shows, drawn from
-    /// their `toplevels` and `frame_textures`, under the `taskbar`, between
+    /// their `toplevels` and `frame_textures`, under vaht's `panels`, between
     /// the output's `layers`.
     pub(crate) const fn new(
         window_manager: &'state WindowManager,
         toplevels: &'state Toplevels,
         frame_textures: &'state FrameTextures,
-        taskbar: Option<&'state Taskbar>,
+        panels: Panels<'state>,
         layers: OutputLayers<'state>,
     ) -> Self {
         Self {
             window_manager,
             toplevels,
             frame_textures,
-            taskbar,
+            taskbar: panels.taskbar,
+            menus: panels.menus,
             layers,
         }
     }
@@ -205,7 +222,8 @@ impl<'state> Scene<'state> {
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
-        let mut elements = Vec::new();
+        // Menus are above everything, even the overlay layer.
+        let mut elements = self.menus.render_elements(renderer, scale);
         self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
         elements.extend(
             self.shown_taskbar()

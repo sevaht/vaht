@@ -26,18 +26,15 @@ const PLANNED_ACTIONS: &[&str] = &[
     "apply-profile",
     "arrange",
     "command-dialog",
-    "custom-menu",
     "cycle-primary-output",
     "cycle-profile",
     "focus-direction",
     "go-to-marked-window",
-    "hide-menus",
     "key-mode",
     "mark-window",
     "reload-theme",
     "rename-workspace",
     "restart",
-    "root-menu",
     "run-dialog",
     "save-settings",
     "send-to-output",
@@ -50,9 +47,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "toggle-frame",
     "toggle-taskbar",
     "tray-item-menu",
-    "window-list-menu",
-    "window-menu",
-    "workspace-menu",
 ];
 
 /// Structured command forms of 02 §4 that vaht does not have yet.
@@ -231,6 +225,25 @@ pub(crate) enum Action {
         /// Its value.
         value: String,
     },
+    /// Opens a menu at the pointer, closing any open.
+    OpenMenu(MenuRequest),
+    /// Closes every menu.
+    HideMenus,
+}
+
+/// Which menu an action opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MenuRequest {
+    /// `[menu.root]` (`root-menu`).
+    Root,
+    /// `[menu.window]`, about the window (`window-menu`).
+    Window,
+    /// `[menu.workspace]` (`workspace-menu`).
+    Workspace,
+    /// Every window (`window-list-menu`).
+    WindowList,
+    /// `[menu.<name>]` (`custom-menu <name>`).
+    Custom(String),
 }
 
 /// An action on windows, workspaces or focus: everything the window
@@ -313,6 +326,15 @@ impl Action {
             "start-moving" => without_arguments(Self::StartMoving),
             "start-resizing" => ResizeFrom::parse(arguments).map(Self::StartResizing),
             "reload" => without_arguments(Self::Reload),
+            "root-menu" => without_arguments(Self::OpenMenu(MenuRequest::Root)),
+            "window-menu" => without_arguments(Self::OpenMenu(MenuRequest::Window)),
+            "workspace-menu" => without_arguments(Self::OpenMenu(MenuRequest::Workspace)),
+            "window-list-menu" => without_arguments(Self::OpenMenu(MenuRequest::WindowList)),
+            "custom-menu" if arguments.is_empty() => {
+                Err("`custom-menu` needs the menu's name, as [menu.<name>] has it".to_owned())
+            }
+            "custom-menu" => Ok(Self::OpenMenu(MenuRequest::Custom(arguments.to_owned()))),
+            "hide-menus" => without_arguments(Self::HideMenus),
             "exit" => without_arguments(Self::Exit),
             "set-environment" => {
                 let (variable, value) = arguments
@@ -402,6 +424,12 @@ impl fmt::Display for Action {
             Self::SetEnvironment { name, value } => {
                 write!(formatter, "set-environment {name} {value}")
             }
+            Self::OpenMenu(MenuRequest::Root) => formatter.write_str("root-menu"),
+            Self::OpenMenu(MenuRequest::Window) => formatter.write_str("window-menu"),
+            Self::OpenMenu(MenuRequest::Workspace) => formatter.write_str("workspace-menu"),
+            Self::OpenMenu(MenuRequest::WindowList) => formatter.write_str("window-list-menu"),
+            Self::OpenMenu(MenuRequest::Custom(name)) => write!(formatter, "custom-menu {name}"),
+            Self::HideMenus => formatter.write_str("hide-menus"),
         }
     }
 }
@@ -731,7 +759,7 @@ mod tests {
 
     #[rstest]
     #[case::unknown_action("\"explode\"", "unknown action `explode`")]
-    #[case::planned_action("\"root-menu\"", "not available in vaht yet")]
+    #[case::planned_action("\"run-dialog\"", "not available in vaht yet")]
     #[case::maximize_both_by_name("\"maximize both\"", "nothing, horizontal or vertical")]
     #[case::one_number("\"move 10\"", "two whole numbers")]
     #[case::cell_outside("\"tile 600 0 500 1000\"", "within 0 to 1000")]

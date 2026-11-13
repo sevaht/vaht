@@ -31,7 +31,7 @@ use smithay::wayland::image_copy_capture::{
 use crate::Compositor;
 use crate::layers::OutputLayers;
 use crate::resources::{ResourceKind, Tracked};
-use crate::scene::{self, Scene};
+use crate::scene::{self, Panels, Scene};
 use crate::shared_memory::{self, SharedMemoryError};
 
 /// Draws captures; separate from the backend's renderer, so captures look
@@ -198,7 +198,10 @@ impl ImageCopyCaptureHandler for Compositor {
             &self.window_manager,
             &self.toplevels,
             &self.frame_textures,
-            self.taskbar.as_ref(),
+            Panels {
+                taskbar: self.taskbar.as_ref(),
+                menus: &self.menus,
+            },
             OutputLayers::new(output, self.backend.output_geometry()),
         );
         self.capture

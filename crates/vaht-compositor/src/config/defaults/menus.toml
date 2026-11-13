@@ -1,0 +1,52 @@
+# vaht's built-in menus, used when ~/.config/vaht/menus.toml does not
+# exist. A menus.toml replaces all of them, so copy what you want to keep:
+#     vaht check --print-defaults
+#
+# Each [menu.<name>] has an optional title and its items, top to bottom.
+# root-menu opens [menu.root], window-menu [menu.window], workspace-menu
+# [menu.workspace], and custom-menu <name> any other.
+#
+# Items:
+#   { label = "...", command = "..." }     runs a command, as bindings write it
+#   { label = "...", submenu = "<name>" }  opens [menu.<name>]
+#   { toggle = "shade" }                   toggles the window's shade, stick,
+#                                          maximize, minimize or fullscreen
+#   { generate = "workspaces" }            lists workspaces, send-to-workspace
+#                                          or window-list, in a submenu, or in
+#                                          place with inline = true
+#   { separator = true }                   a line
+#   { label = "..." }                      text that does nothing
+
+[menu.root]
+title = "vaht"
+items = [
+    { label = "Terminal", command = "exec xterm" },
+    { separator = true },
+    { generate = "workspaces" },
+    { generate = "window-list" },
+    { separator = true },
+    { label = "Reload", command = "reload" },
+    { label = "Exit", command = "exit" },
+]
+
+[menu.window]
+items = [
+    { toggle = "shade" },
+    { toggle = "stick" },
+    { toggle = "maximize" },
+    { toggle = "minimize" },
+    { label = "Raise", command = "raise" },
+    { label = "Lower", command = "lower" },
+    { generate = "send-to-workspace" },
+    { separator = true },
+    { label = "Close", command = "close" },
+]
+
+[menu.workspace]
+title = "Workspaces"
+items = [
+    { generate = "workspaces", inline = true },
+    { separator = true },
+    { label = "New Workspace", command = "add-workspace" },
+    { label = "Remove Last", command = "remove-last-workspace" },
+]

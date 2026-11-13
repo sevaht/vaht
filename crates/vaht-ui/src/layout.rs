@@ -38,6 +38,8 @@ pub struct Placed<Hit> {
     pub state: Option<WidgetState>,
     /// The icon shown left of its text, if any.
     pub icon: Option<WidgetIcon>,
+    /// The mark shown at its right end, if any.
+    pub mark: Option<Glyph>,
 }
 
 /// A widget tree placed in an area.
@@ -145,6 +147,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
             is_button: widget.is_button,
             state: widget.state,
             icon: widget.icon.clone(),
+            mark: widget.mark,
         });
         let (axis, children) = match &widget.kind {
             WidgetKind::Row(children) => (Axis::Horizontal, children),
