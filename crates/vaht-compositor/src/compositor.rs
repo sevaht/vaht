@@ -40,6 +40,7 @@ use smithay::input::keyboard::{
 };
 use smithay::input::pointer::{ButtonEvent, Focus, GrabStartData, MotionEvent};
 use smithay::input::{Seat, SeatState};
+use smithay::output::Output;
 use smithay::reexports::calloop::{EventLoop, LoopHandle};
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -79,7 +80,7 @@ use crate::tooltip::Tooltip;
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::tray::TrayAction;
 use crate::window_manager::{
-    ClientRequest, FramePart, OutputArea, Window, WindowDrag, WindowId, WindowManager,
+    ClientRequest, FramePart, OutputArea, OutputAreas, Window, WindowDrag, WindowId, WindowManager,
     WorkspaceTarget,
 };
 
@@ -249,13 +250,9 @@ impl Compositor {
         });
 
         let outputs = backend.outputs();
-        let whole = outputs.primary_geometry();
         let window_manager = WindowManager::new(
             &config.settings,
-            OutputArea {
-                whole,
-                usable: whole,
-            },
+            Self::bare_output_areas(&outputs),
             config.theme.metrics(),
         );
         let mut launcher = Launcher::new(
@@ -724,7 +721,10 @@ impl Compositor {
             return;
         };
         // The positioner works relative to the popup's parent.
-        let mut target = self.outputs.primary_geometry();
+        let mut target = self
+            .outputs
+            .at(location.to_f64())
+            .map_or_else(|| self.outputs.primary_geometry(), Outputs::geometry);
         target.loc -= get_popup_toplevel_coords(&kind);
         target.loc -= location;
         popup.with_pending_state(|state| {
@@ -732,17 +732,40 @@ impl Compositor {
         });
     }
 
-    /// Returns the parts of the output windows can be placed in: all of
-    /// it, and what panels leave free.
-    fn output_area(&self) -> OutputArea {
-        let whole = self.outputs.primary_geometry();
-        let usable = self.output_layers().usable_area();
-        OutputArea {
-            whole,
-            usable: self.taskbar.as_ref().map_or(usable, |taskbar| {
-                taskbar.reserve(usable, whole, self.config.theme.metrics().taskbar_height)
-            }),
+    /// Returns the parts of each output windows can be placed in: all of
+    /// it, and what panels leave free; the taskbar is on the primary one.
+    fn output_areas(&self) -> OutputAreas {
+        let area_of = |output: &Output| {
+            let whole = Outputs::geometry(output);
+            OutputArea {
+                whole,
+                usable: OutputLayers::new(output, whole).usable_area(),
+            }
+        };
+        let mut primary = area_of(self.outputs.primary());
+        if let Some(taskbar) = &self.taskbar {
+            primary.usable = taskbar.reserve(
+                primary.usable,
+                primary.whole,
+                self.config.theme.metrics().taskbar_height,
+            );
         }
+        OutputAreas::new(primary, self.outputs.others().map(area_of).collect())
+    }
+
+    /// Returns each of `outputs` whole, before panels take any of it.
+    fn bare_output_areas(outputs: &Outputs) -> OutputAreas {
+        let area_of = |output: &Output| {
+            let whole = Outputs::geometry(output);
+            OutputArea {
+                whole,
+                usable: whole,
+            }
+        };
+        OutputAreas::new(
+            area_of(outputs.primary()),
+            outputs.others().map(area_of).collect(),
+        )
     }
 
     /// Draws the time anew, and wakes vaht when it next changes: the
@@ -865,8 +888,8 @@ impl Compositor {
 
     /// Tells the window manager where windows can be placed now.
     fn refresh_output_area(&mut self) {
-        let output = self.output_area();
-        self.window_manager.set_output_area(output);
+        let outputs = self.output_areas();
+        self.window_manager.set_output_areas(outputs);
     }
 
     /// Gives the seat's keyboard to the focused window, unless a layer
@@ -1036,8 +1059,9 @@ impl Compositor {
             return;
         };
         let at = self.pointer_location().to_i32_round();
-        // Off the taskbar, as fluxland keeps menus in the usable area.
-        let bounds = self.output_area().usable;
+        // Off the taskbar, as fluxland keeps menus in the usable area of
+        // the output the pointer is on.
+        let bounds = self.output_areas().at(at).usable;
         self.menus.open(
             model,
             at,
@@ -1249,8 +1273,12 @@ impl Compositor {
 
     /// Shows the tooltip for what the pointer has rested on.
     pub(crate) fn show_tooltip(&mut self) {
-        let pointer = self.pointer_location().to_i32_round();
-        let bounds = self.outputs.primary_geometry();
+        let pointer = self.pointer_location();
+        let bounds = self
+            .outputs
+            .at(pointer)
+            .map_or_else(|| self.outputs.primary_geometry(), Outputs::geometry);
+        let pointer = pointer.to_i32_round();
         self.tooltip
             .show(pointer, bounds, (&self.config.theme, &mut self.typesetter));
         tracing::debug!("tooltip shown");

@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-use vaht_test_support::{BUTTON_LEFT, HeadlessVaht, TestClient, WINDOW_COLOR};
+use vaht_test_support::{
+    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, TestClient, WINDOW_COLOR, keys,
+};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
@@ -56,5 +58,47 @@ fn a_window_moved_past_the_first_output_shows_on_the_second() {
     assert_eq!(
         client.screenshot_of("HEADLESS-2").bounds_of(WINDOW_COLOR),
         Some(content)
+    );
+}
+
+#[test]
+fn a_window_opens_on_the_output_the_pointer_is_on() {
+    let (_vaht, mut client) = two_outputs();
+    client.move_pointer_to(FIRST_WIDTH + 100, 100);
+    client.open_windows(1);
+    assert_eq!(
+        client.screenshot_of("HEADLESS-1").bounds_of(WINDOW_COLOR),
+        None
+    );
+    assert!(
+        client
+            .screenshot_of("HEADLESS-2")
+            .bounds_of(WINDOW_COLOR)
+            .is_some(),
+        "the window opened on the second output"
+    );
+}
+
+#[test]
+fn a_window_maximizes_on_its_own_output() {
+    let (_vaht, mut client) = two_outputs();
+    client.move_pointer_to(FIRST_WIDTH + 100, 100);
+    client.open_windows(1);
+    client.type_chord(&[keys::LEFT_SUPER, keys::UP]);
+    let second = client.screenshot_of("HEADLESS-2");
+    // The taskbar is on the first output, so all of the second is usable.
+    let whole = Bounds {
+        left: 0,
+        top: 0,
+        right: second.width() - 1,
+        bottom: second.height() - 1,
+    };
+    assert_eq!(
+        second.bounds_of(WINDOW_COLOR),
+        Some(BUILT_IN_METRICS.content_within(whole))
+    );
+    assert_eq!(
+        client.screenshot_of("HEADLESS-1").bounds_of(WINDOW_COLOR),
+        None
     );
 }

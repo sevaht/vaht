@@ -42,6 +42,11 @@ impl Outputs {
         Self::geometry(&self.primary)
     }
 
+    /// Returns every output but the primary one.
+    pub(crate) fn others(&self) -> impl Iterator<Item = &Output> {
+        self.others.iter()
+    }
+
     /// Returns every output, the primary one first.
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Output> {
         std::iter::once(&self.primary).chain(&self.others)

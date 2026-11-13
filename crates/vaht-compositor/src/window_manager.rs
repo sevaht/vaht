@@ -14,6 +14,7 @@
 //! rule here is tested on its own, by unit and property tests below.
 
 mod focus;
+mod output_areas;
 mod placement_strategy;
 mod snap_zones;
 mod window;
@@ -26,6 +27,7 @@ use vaht_ui::{Theme, Typesetter};
 
 pub(crate) use self::focus::CycleDirection;
 use self::focus::Focus;
+pub(crate) use self::output_areas::OutputAreas;
 pub(crate) use self::placement_strategy::{ColumnDirection, PlacementStrategy, Room, RowDirection};
 use self::snap_zones::{LayoutPicker, SnapTarget};
 pub(crate) use self::window::AlphaChange;
@@ -53,6 +55,9 @@ struct DragSnap {
     window: WindowId,
     /// Where it would go, if anywhere.
     target: Option<SnapTarget>,
+    /// The usable area of the output the pointer is on, which the target
+    /// is a part of.
+    usable: Area,
     /// The layout picker, if it shows, and the layout and cell under the
     /// pointer.
     picker: Option<(LayoutPicker, Option<(usize, usize)>)>,
@@ -108,8 +113,8 @@ pub(crate) struct WindowManager {
     snap_minimized: Option<WindowId>,
     /// The window whose titlebar button the pointer holds down, if any.
     held_titlebar: Option<WindowId>,
-    /// Where windows can be placed.
-    output: OutputArea,
+    /// Where windows can be placed on each output.
+    outputs: OutputAreas,
     /// The theme's frame sizes.
     theme_metrics: Metrics,
     /// What frames show, from the settings.
@@ -135,7 +140,7 @@ impl WindowManager {
     /// Creates a window manager with no windows, its workspaces and frames
     /// as `settings` say, placing windows on `output` with frames sized by
     /// the theme's `metrics`.
-    pub(crate) fn new(settings: &Settings, output: OutputArea, metrics: Metrics) -> Self {
+    pub(crate) fn new(settings: &Settings, outputs: OutputAreas, metrics: Metrics) -> Self {
         let frame = settings.windows.frame.clone();
         Self {
             windows: Windows::default(),
@@ -143,7 +148,7 @@ impl WindowManager {
             focus: Focus::default(),
             snap_minimized: None,
             held_titlebar: None,
-            output,
+            outputs,
             theme_metrics: metrics,
             metrics: frame.frame_metrics(metrics),
             frame,
@@ -611,7 +616,7 @@ impl WindowManager {
             self.drag_snap = None;
             return;
         }
-        let usable = self.output.usable;
+        let usable = self.outputs.at(pointer).usable;
         let distance = i32::from(self.snapping.zone_distance);
         let zone = SnapTarget::at(pointer, usable, distance);
         let was_picking = self
@@ -643,6 +648,7 @@ impl WindowManager {
         let snap = DragSnap {
             window,
             target,
+            usable,
             picker,
         };
         if self.drag_snap.as_ref() != Some(&snap) {
@@ -654,7 +660,7 @@ impl WindowManager {
     /// Returns where the window being moved would snap, with its id.
     pub(crate) fn snap_preview(&self) -> Option<(WindowId, Area)> {
         let snap = self.drag_snap.as_ref()?;
-        Some((snap.window, snap.target?.area_in(self.output.usable)))
+        Some((snap.window, snap.target?.area_in(snap.usable)))
     }
 
     /// Returns the layout picker shown, the layouts and the cell under the
@@ -727,13 +733,13 @@ impl WindowManager {
         self.is_redraw_needed = true;
     }
 
-    /// Places windows on `output` from now on; maximized, tiled and
-    /// fullscreen windows follow it at once, as when a panel appears.
-    pub(crate) fn set_output_area(&mut self, output: OutputArea) {
-        if output == self.output {
+    /// Places windows on `outputs` from now on; maximized, tiled and
+    /// fullscreen windows follow at once, as when a panel appears.
+    pub(crate) fn set_output_areas(&mut self, outputs: OutputAreas) {
+        if outputs == self.outputs {
             return;
         }
-        self.output = output;
+        self.outputs = outputs;
         self.refit_placed_windows();
     }
 
@@ -774,13 +780,14 @@ impl WindowManager {
         std::mem::replace(&mut self.is_redraw_needed, false)
     }
 
-    /// Places maximized, tiled and fullscreen windows again, in the output's
-    /// areas and with frames sized as they are now.
+    /// Places maximized, tiled and fullscreen windows again, each in its
+    /// output's areas and with frames sized as they are now.
     fn refit_placed_windows(&mut self) {
-        let (output, metrics) = (self.output, self.metrics);
+        let metrics = self.metrics;
         for window in self.windows.iter_mut() {
             let placement = window.placement().clone();
             if window.is_placed() && placement != Placement::Floating {
+                let output = self.outputs.for_area(window.outer_area(metrics));
                 window.place(placement, output, metrics);
             }
         }
@@ -795,9 +802,14 @@ impl WindowManager {
     }
 
     /// Gives the window `id` its first place, by `config`'s placement
-    /// settings and rules, among the windows already shown.
+    /// settings and rules, among the windows already shown, on the output
+    /// the `pointer` is on.
     fn place_new_window(&mut self, id: WindowId, config: &Config, pointer: Point<i32, Logical>) {
-        let (metrics, output, current) = (self.metrics, self.output, self.workspaces.current());
+        let (metrics, output, current) = (
+            self.metrics,
+            self.outputs.at(pointer),
+            self.workspaces.current(),
+        );
         let room = Room {
             usable: output.usable,
             occupied: self
@@ -879,11 +891,11 @@ impl WindowManager {
         window: Option<WindowId>,
         change: impl FnOnce(Placement, Area) -> Placement,
     ) {
-        let output = self.output;
+        let outputs = self.outputs.clone();
         self.change_window(window, |target, metrics| {
             let current = target.outer_area(metrics);
             let placement = change(target.placement().clone(), current);
-            target.place(placement, output, metrics);
+            target.place(placement, outputs.for_area(current), metrics);
         });
     }
 
@@ -899,11 +911,12 @@ impl WindowManager {
             }
             return;
         }
-        let (metrics, usable) = (self.metrics, self.output.usable);
+        let metrics = self.metrics;
         let Some(target) = window.and_then(|id| self.windows.get(id)) else {
             return;
         };
         let current = target.outer_area(metrics);
+        let usable = self.outputs.for_area(current).usable;
         match target
             .placement()
             .clone()
@@ -1086,14 +1099,15 @@ impl WindowManager {
     }
 
     /// Returns the edges a move of `window` snaps to within `distance`
-    /// pixels: the usable area's, and the other shown windows'.
+    /// pixels: the outputs' usable areas', and the other shown windows'.
     fn edge_snap_for(&self, window: WindowId, distance: u16) -> EdgeSnap {
         let others = self
             .shown_top_down()
             .filter(|other| other.id() != window)
             .map(|other| other.outer_area(self.metrics))
             .collect();
-        EdgeSnap::new(distance, self.output.usable, others)
+        let usable = self.outputs.iter().map(|output| output.usable).collect();
+        EdgeSnap::new(distance, usable, others)
     }
 }
 
@@ -1134,6 +1148,11 @@ mod tests {
         OutputArea { whole, usable }
     }
 
+    /// Only the output [`output`] makes.
+    fn only(panel: i32) -> OutputAreas {
+        OutputAreas::new(output(panel), Vec::new())
+    }
+
     /// A window manager with the built-in configuration, whose clients do
     /// exactly what they are asked.
     struct Desk {
@@ -1161,7 +1180,7 @@ mod tests {
         /// An empty desk with `config`.
         fn with_config(config: Config) -> Self {
             Self {
-                manager: WindowManager::new(&config.settings, output(0), METRICS),
+                manager: WindowManager::new(&config.settings, only(0), METRICS),
                 config,
                 ledger: ResourceLedger::new(),
                 committed: HashMap::new(),
@@ -1401,7 +1420,7 @@ mod tests {
         desk.run(&action("tile 500 500 500 500"));
         let floating = desk.open();
         let floating_area = desk.outer(floating);
-        desk.manager.set_output_area(output(30));
+        desk.manager.set_output_areas(only(30));
         desk.settle();
         let usable = output(30).usable;
         assert_eq!(desk.outer(maximized), usable);
@@ -1854,7 +1873,7 @@ mod tests {
                     }
                 }
                 Event::ReleaseModifiers => self.manager.modifiers_released(),
-                Event::Panel(height) => self.manager.set_output_area(output(*height)),
+                Event::Panel(height) => self.manager.set_output_areas(only(*height)),
                 Event::Drag(position, drag, x, y) => {
                     if let Some(window) = self.nth(*position) {
                         let pointer = self.outer(window).loc.to_f64() + Point::from((5.0, 5.0));
@@ -1882,7 +1901,7 @@ mod tests {
                 "every window is stacked once"
             );
             assert!(manager.workspaces.contains(current));
-            let usable = manager.output.usable;
+            let usable = manager.outputs.primary().usable;
             for window in manager.windows_top_down() {
                 assert!(
                     manager.workspaces.contains(window.workspace()),
@@ -1903,7 +1922,7 @@ mod tests {
                         );
                     }
                     Placement::Fullscreen { .. } => {
-                        assert_eq!(window.content_area(), manager.output.whole);
+                        assert_eq!(window.content_area(), manager.outputs.primary().whole);
                     }
                     Placement::Floating | Placement::Maximized { .. } => {}
                 }

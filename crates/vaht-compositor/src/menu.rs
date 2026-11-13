@@ -476,7 +476,7 @@ mod tests {
 
     use super::*;
     use crate::config::{Action, Command, Config, Menus};
-    use crate::window_manager::{OutputArea, WindowManager};
+    use crate::window_manager::{OutputArea, OutputAreas, WindowManager};
 
     /// A 1920 × 1080 output.
     fn bounds() -> Area {
@@ -683,7 +683,11 @@ mod tests {
             whole: bounds(),
             usable: bounds(),
         };
-        let manager = WindowManager::new(&config.settings, output, config.theme.metrics());
+        let manager = WindowManager::new(
+            &config.settings,
+            OutputAreas::new(output, Vec::new()),
+            config.theme.metrics(),
+        );
         let builder = MenuBuilder::new(&config.menus, &manager, None);
         let workspace = builder.build(Menus::WORKSPACE).expect("built in");
         let marks: Vec<Option<bool>> = workspace

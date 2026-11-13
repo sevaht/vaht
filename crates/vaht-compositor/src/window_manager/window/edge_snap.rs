@@ -1,9 +1,10 @@
 //! Snapping a moved window's edges to nearby edges (Fluxbox's
 //! `edgeSnapThreshold`).
 //!
-//! An edge of the window within [`EdgeSnap`]'s distance of the usable
-//! area's edge, or of another window's edge beside it, jumps to it, so
-//! windows line up against the output and each other without pixel hunting.
+//! An edge of the window within [`EdgeSnap`]'s distance of an output's
+//! usable area's edge, or of another window's edge, beside it, jumps to
+//! it, so windows line up against the outputs and each other without pixel
+//! hunting.
 
 use smithay::utils::{Logical, Point};
 
@@ -14,19 +15,20 @@ use super::placement::Area;
 pub(crate) struct EdgeSnap {
     /// How close an edge must come to snap, in pixels; 0 for never.
     distance: i32,
-    /// The usable area: the window's edges snap to the inside of its edges.
-    usable: Area,
-    /// Other windows' areas: the window's edges snap to theirs.
-    others: Vec<Area>,
+    /// The outputs' usable areas and other windows' areas: the window's
+    /// edges snap to theirs.
+    areas: Vec<Area>,
 }
 
 impl EdgeSnap {
-    /// Snaps within `distance` pixels to `usable`'s edges and `others`'.
-    pub(crate) fn new(distance: u16, usable: Area, others: Vec<Area>) -> Self {
+    /// Snaps within `distance` pixels to the edges of the `usable` areas
+    /// and of the `others`.
+    pub(crate) fn new(distance: u16, usable: Vec<Area>, others: Vec<Area>) -> Self {
+        let mut areas = usable;
+        areas.extend(others);
         Self {
             distance: i32::from(distance),
-            usable,
-            others,
+            areas,
         }
     }
 
@@ -36,17 +38,15 @@ impl EdgeSnap {
             return area.loc;
         }
         let horizontal_lines = self
-            .others
+            .areas
             .iter()
             .filter(|other| Self::spans_overlap(other.loc.y, other.size.h, area.loc.y, area.size.h))
-            .flat_map(|other| [other.loc.x, other.loc.x + other.size.w])
-            .chain([self.usable.loc.x, self.usable.loc.x + self.usable.size.w]);
+            .flat_map(|other| [other.loc.x, other.loc.x + other.size.w]);
         let vertical_lines = self
-            .others
+            .areas
             .iter()
             .filter(|other| Self::spans_overlap(other.loc.x, other.size.w, area.loc.x, area.size.w))
-            .flat_map(|other| [other.loc.y, other.loc.y + other.size.h])
-            .chain([self.usable.loc.y, self.usable.loc.y + self.usable.size.h]);
+            .flat_map(|other| [other.loc.y, other.loc.y + other.size.h]);
         Point::from((
             area.loc.x + self.shift(area.loc.x, area.size.w, horizontal_lines),
             area.loc.y + self.shift(area.loc.y, area.size.h, vertical_lines),
@@ -86,7 +86,11 @@ mod tests {
     /// Snapping within 10 pixels in a 1000×600 area, beside a window at
     /// 500, 100, 200 × 200.
     fn snapping() -> EdgeSnap {
-        EdgeSnap::new(10, area(0, 0, 1000, 600), vec![area(500, 100, 200, 200)])
+        EdgeSnap::new(
+            10,
+            vec![area(0, 0, 1000, 600)],
+            vec![area(500, 100, 200, 200)],
+        )
     }
 
     #[rstest]
@@ -102,7 +106,7 @@ mod tests {
 
     #[test]
     fn zero_distance_never_snaps() {
-        let snap = EdgeSnap::new(0, area(0, 0, 1000, 600), Vec::new());
+        let snap = EdgeSnap::new(0, vec![area(0, 0, 1000, 600)], Vec::new());
         assert_eq!(snap.snap(area(1, 1, 10, 10)).x, 1);
     }
 }
