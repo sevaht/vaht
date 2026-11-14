@@ -22,6 +22,11 @@ pub struct Arguments {
     #[arg(long, env = "VAHT_BACKEND", value_enum, default_value_t)]
     pub backend: BackendArgument,
 
+    /// Does not start Xwayland, whatever the settings say: no X11
+    /// programs.
+    #[arg(long)]
+    pub no_xwayland: bool,
+
     /// The directory of the configuration files; by default
     /// `$XDG_CONFIG_HOME/vaht`, normally `~/.config/vaht`.
     #[arg(long, env = "VAHT_CONFIG_DIRECTORY", global = true)]
@@ -41,6 +46,7 @@ impl Arguments {
             config_directory: self.config_directory(),
             // Found on PATH, if the running program cannot be.
             executable: std::env::current_exe().unwrap_or_else(|_| PathBuf::from(PROGRAM_NAME)),
+            allows_xwayland: !self.no_xwayland,
         }
     }
 

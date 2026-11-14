@@ -2,10 +2,12 @@
 //!
 //! A [`Toplevel`] translates both ways between the protocol and the window
 //! manager's values: it reads a commit as a [`CommittedState`], and carries
-//! out a [`RequestedState`] or an [`Ending`]. Today every toplevel is an
-//! xdg-shell surface; X11 windows will become a second case here, and
-//! nothing outside this module will need to know which one a window is
-//! (01 §4.1).
+//! out a [`RequestedState`] or an [`Ending`]. A toplevel is an xdg-shell
+//! surface or an X11 window (through Xwayland); nothing outside this module
+//! needs to know which (01 §4.1). The differences it hides: an X11 window
+//! is told its position whenever it moves, its title and class are X
+//! properties, and it is killed by the process its `_NET_WM_PID` names,
+//! never by its connection's, which is Xwayland's.
 
 use std::time::Duration;
 
@@ -23,9 +25,12 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource as _};
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
 use smithay::wayland::compositor::with_states;
+use smithay::wayland::seat::WaylandFocus as _;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
 use smithay::wayland::xdg_toplevel_icon::ToplevelIconCachedState;
+use smithay::xwayland::X11Surface;
 
+use crate::focus_target::FocusTarget;
 use crate::outputs::Outputs;
 use crate::window_manager::{
     Axes, ClientIcon, CommittedState, Ending, PlacementKind, RequestedState, SizeLimits,
@@ -39,6 +44,9 @@ pub(crate) struct Toplevel {
     /// The icon picture last read, with the buffer it was read from, so an
     /// unchanged icon is not read again.
     read_icon: Option<(WlBuffer, vaht_ui::Icon)>,
+    /// The area an X11 window was last told it covers, so it is told only
+    /// when that changes.
+    told_area: Option<Rectangle<i32, Logical>>,
 }
 
 impl Toplevel {
@@ -47,17 +55,43 @@ impl Toplevel {
         Self {
             window: SurfaceWindow::new_wayland_window(surface),
             read_icon: None,
+            told_area: None,
         }
     }
 
-    /// Returns the root surface of the window.
-    pub(crate) fn wl_surface(&self) -> &WlSurface {
-        self.xdg().wl_surface()
+    /// Wraps an X11 window that asked to be mapped.
+    pub(crate) fn from_x11(surface: X11Surface) -> Self {
+        Self {
+            window: SurfaceWindow::new_x11_window(surface),
+            read_icon: None,
+            told_area: None,
+        }
+    }
+
+    /// Returns the root surface of the window; an X11 window has none
+    /// until Xwayland pairs it with one.
+    pub(crate) fn wl_surface(&self) -> Option<WlSurface> {
+        self.window.wl_surface().map(std::borrow::Cow::into_owned)
     }
 
     /// Returns whether `surface` is this window's root surface.
     pub(crate) fn has_surface(&self, surface: &WlSurface) -> bool {
-        self.wl_surface() == surface
+        self.window
+            .wl_surface()
+            .is_some_and(|own| own.as_ref() == surface)
+    }
+
+    /// Returns the X11 side of the window, if it is an X11 window.
+    pub(crate) fn x11(&self) -> Option<&X11Surface> {
+        self.window.x11_surface()
+    }
+
+    /// Returns what gets the keyboard when the window has the focus.
+    pub(crate) fn focus_target(&self) -> FocusTarget {
+        match self.window.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => FocusTarget::Surface(toplevel.wl_surface().clone()),
+            WindowSurface::X11(surface) => FocusTarget::X11(Box::new(surface.clone())),
+        }
     }
 
     /// Returns what the client last committed; `read` reads the picture
@@ -66,6 +100,20 @@ impl Toplevel {
         &mut self,
         read: impl FnOnce(&WlBuffer) -> Option<vaht_ui::Icon>,
     ) -> CommittedState {
+        if let Some(surface) = self.x11() {
+            // An X11 window's class is what Fluxbox and its rules match,
+            // as a Wayland window's app id is.
+            return CommittedState {
+                title: surface.title(),
+                app_id: surface.class(),
+                icon: None,
+                geometry: self.window.geometry(),
+                size_limits: self.size_limits(),
+            };
+        }
+        let Some(root) = self.wl_surface() else {
+            return CommittedState::default();
+        };
         let (title, app_id) = self
             .with_attributes(|attributes| {
                 (
@@ -74,7 +122,7 @@ impl Toplevel {
                 )
             })
             .unwrap_or_default();
-        let (icon_name, icon_buffer) = with_states(self.wl_surface(), |states| {
+        let (icon_name, icon_buffer) = with_states(&root, |states| {
             let mut cached = states.cached_state.get::<ToplevelIconCachedState>();
             let icon = cached.current();
             (
@@ -188,13 +236,43 @@ impl Toplevel {
 
     /// Sends the first configure, which a client waits for before drawing.
     pub(crate) fn configure_if_unconfigured(&self) {
-        if !self.xdg().is_initial_configure_sent() {
-            self.xdg().send_configure();
+        if let Some(xdg) = self.xdg()
+            && !xdg.is_initial_configure_sent()
+        {
+            xdg.send_configure();
         }
     }
 
-    /// Asks the client to make its window as `requested` says.
-    pub(crate) fn request(&self, requested: &RequestedState) {
+    /// Tells an X11 window that its content now covers `area` (global
+    /// coordinates), unless it was told so last: an X11 program places its
+    /// menus by where it thinks its window is. A Wayland window needs no
+    /// telling.
+    pub(crate) fn place(&mut self, area: Rectangle<i32, Logical>) {
+        let Some(surface) = self.x11() else {
+            return;
+        };
+        if self.told_area == Some(area) || area.size.w <= 0 || area.size.h <= 0 {
+            return;
+        }
+        if let Err(error) = surface.configure(area) {
+            tracing::debug!(%error, "an X11 window could not be told where it is");
+            return;
+        }
+        self.told_area = Some(area);
+    }
+
+    /// Asks the client to make its window as `requested` says; an X11
+    /// window's content is at `location` (global coordinates).
+    pub(crate) fn request(&mut self, requested: &RequestedState, location: Point<i32, Logical>) {
+        if let Some(surface) = self.x11().cloned() {
+            Self::request_x11(&surface, requested);
+            let size = requested.size.unwrap_or_else(|| surface.geometry().size);
+            self.place(Rectangle::new(location, size));
+            return;
+        }
+        let Some(xdg) = self.xdg() else {
+            return;
+        };
         let (maximized, fullscreen, tiled) = match requested.placement {
             PlacementKind::Floating => (false, false, [false; 4]),
             PlacementKind::Maximized(axes) => {
@@ -215,7 +293,7 @@ impl Toplevel {
             xdg_toplevel::State::TiledTop,
             xdg_toplevel::State::TiledBottom,
         ];
-        self.xdg().with_pending_state(|state| {
+        xdg.with_pending_state(|state| {
             let mut set = |flag: xdg_toplevel::State, is_on: bool| {
                 if is_on {
                     state.states.set(flag);
@@ -235,6 +313,24 @@ impl Toplevel {
         self.send_configure_if_ready();
     }
 
+    /// Tells an X11 window the states `requested` asks for: maximized,
+    /// fullscreen, focused.
+    fn request_x11(surface: &X11Surface, requested: &RequestedState) {
+        let (maximized, fullscreen) = match requested.placement {
+            PlacementKind::Maximized(axes) => (axes == Axes::Both, false),
+            PlacementKind::Fullscreen => (false, true),
+            PlacementKind::Floating | PlacementKind::Tiled => (false, false),
+        };
+        let results = [
+            surface.set_maximized(maximized),
+            surface.set_fullscreen(fullscreen),
+            surface.set_activated(requested.is_activated),
+        ];
+        if let Some(Err(error)) = results.into_iter().find(Result::is_err) {
+            tracing::debug!(%error, "an X11 window could not be told its state");
+        }
+    }
+
     /// Answers a request the window manager did not act on: xdg-shell
     /// requires a configure in reply even when nothing changes.
     pub(crate) fn acknowledge(&self) {
@@ -243,25 +339,45 @@ impl Toplevel {
 
     /// Ends the window as `ending` says.
     pub(crate) fn end(&self, ending: Ending, display: &DisplayHandle) {
-        match ending {
-            Ending::Close => self.xdg().send_close(),
-            Ending::Kill => self.kill_program(display),
+        match (ending, self.window.underlying_surface()) {
+            (Ending::Close, WindowSurface::Wayland(xdg)) => xdg.send_close(),
+            (Ending::Close, WindowSurface::X11(surface)) => {
+                if let Err(error) = surface.close() {
+                    tracing::warn!(%error, "an X11 window could not be asked to close");
+                }
+            }
+            (Ending::Kill, _) => self.kill_program(display),
         }
     }
 
-    /// Ends the client's program at once (SIGKILL), as Fluxbox's `Kill`
-    /// does: the program is the one the kernel says is at the other end of
-    /// the client's socket. A window of vaht's own is never killed.
-    fn kill_program(&self, display: &DisplayHandle) {
-        let Ok(client) = display.get_client(self.wl_surface().id()) else {
-            return;
-        };
-        let pid = match client.get_credentials(display) {
-            Ok(credentials) => credentials.pid,
+    /// Returns the process that owns the window: for an X11 window, the
+    /// one its `_NET_WM_PID` names; for a Wayland window, the one the
+    /// kernel says is at the other end of the client's socket.
+    fn program(&self, display: &DisplayHandle) -> Option<i32> {
+        if let Some(surface) = self.x11() {
+            return surface
+                .pid()
+                .and_then(|pid| i32::try_from(pid).ok())
+                .or_else(|| {
+                    tracing::warn!("an X11 window names no process (_NET_WM_PID)");
+                    None
+                });
+        }
+        let client = display.get_client(self.wl_surface()?.id()).ok()?;
+        match client.get_credentials(display) {
+            Ok(credentials) => Some(credentials.pid),
             Err(error) => {
                 tracing::warn!(%error, "could not learn which program owns a window");
-                return;
+                None
             }
+        }
+    }
+
+    /// Ends the window's program at once (SIGKILL), as Fluxbox's `Kill`
+    /// does. A window of vaht's own is never killed.
+    fn kill_program(&self, display: &DisplayHandle) {
+        let Some(pid) = self.program(display) else {
+            return;
         };
         if pid <= 0 || u32::try_from(pid).is_ok_and(|pid| pid == std::process::id()) {
             tracing::warn!(pid, "not killing the program of a window of vaht's own");
@@ -275,7 +391,16 @@ impl Toplevel {
 
     /// Returns the content sizes the client accepts.
     fn size_limits(&self) -> SizeLimits {
-        with_states(self.wl_surface(), |states| {
+        if let Some(surface) = self.x11() {
+            return SizeLimits::from_client(
+                surface.min_size().unwrap_or_default(),
+                surface.max_size().unwrap_or_default(),
+            );
+        }
+        let Some(root) = self.wl_surface() else {
+            return SizeLimits::default();
+        };
+        with_states(&root, |states| {
             let mut cached = states.cached_state.get::<SurfaceCachedState>();
             let current = cached.current();
             SizeLimits::from_client(current.min_size, current.max_size)
@@ -285,15 +410,18 @@ impl Toplevel {
     /// Sends pending changes, once the client has had its first configure;
     /// before that, they go out with it.
     fn send_configure_if_ready(&self) {
-        if self.xdg().is_initial_configure_sent() {
-            self.xdg().send_pending_configure();
+        if let Some(xdg) = self.xdg()
+            && xdg.is_initial_configure_sent()
+        {
+            xdg.send_pending_configure();
         }
     }
 
-    /// Returns the xdg-shell side of the window.
-    fn xdg(&self) -> &ToplevelSurface {
+    /// Returns the xdg-shell side of the window, if it is a Wayland window.
+    fn xdg(&self) -> Option<&ToplevelSurface> {
         match self.window.underlying_surface() {
-            WindowSurface::Wayland(toplevel) => toplevel,
+            WindowSurface::Wayland(toplevel) => Some(toplevel),
+            WindowSurface::X11(_) => None,
         }
     }
 
@@ -302,7 +430,8 @@ impl Toplevel {
         &self,
         read: impl FnOnce(&smithay::wayland::shell::xdg::XdgToplevelSurfaceRoleAttributes) -> T,
     ) -> Option<T> {
-        with_states(self.wl_surface(), |states| {
+        let root = self.wl_surface()?;
+        with_states(&root, |states| {
             states
                 .data_map
                 .get::<XdgToplevelSurfaceData>()

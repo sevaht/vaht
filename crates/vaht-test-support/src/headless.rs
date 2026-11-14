@@ -26,6 +26,15 @@ const CLIENT_RESOURCES: [&str; 8] = [
     "layer-surface",
 ];
 
+/// Whether a headless vaht runs Xwayland.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Xwayland {
+    /// Not started: the test needs no X11 programs.
+    Off,
+    /// Started, for X11 clients.
+    On,
+}
+
 /// Files to write, each a path in its directory and its contents.
 type Files<'files> = &'files [(&'files str, &'files [u8])];
 
@@ -57,6 +66,10 @@ impl HeadlessVaht {
     /// What vaht logs in tests: debug detail, plus the per-frame line that
     /// [`Self::wait_for_disconnections`] waits for.
     const LOG_FILTER: &str = "debug,vaht_compositor::compositor=trace";
+
+    /// How long vaht has to stop when a test is done with it, before it is
+    /// killed.
+    const STOP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(5);
 
     /// Starts `executable` (the `vaht` binary) headless with the built-in
     /// configuration, and waits until it accepts clients.
@@ -101,7 +114,7 @@ impl HeadlessVaht {
         config: &[(&str, &[u8])],
         data: &[(&str, &[u8])],
     ) -> Self {
-        Self::launch(executable, (config, data), &[])
+        Self::launch(executable, (config, data), &[], Xwayland::Off)
     }
 
     /// Starts `executable` headless with outputs of `sizes` (such as
@@ -119,7 +132,38 @@ impl HeadlessVaht {
             executable,
             (files, &[]),
             &[("VAHT_HEADLESS_OUTPUTS", sizes)],
+            Xwayland::Off,
         )
+    }
+
+    /// Starts `executable` headless with Xwayland, so X11 programs run,
+    /// and configuration `files`; waits until it accepts clients.
+    /// [`Self::x_display`] waits for Xwayland.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the files cannot be written, or vaht cannot start or does
+    /// not accept clients in time.
+    #[must_use]
+    pub fn start_with_xwayland(executable: &Path, files: &[(&str, &[u8])]) -> Self {
+        Self::launch(executable, (files, &[]), &[], Xwayland::On)
+    }
+
+    /// Waits until Xwayland is ready, and returns its display, such as
+    /// `:1`, for an X11 client's `DISPLAY`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if Xwayland is not ready in time.
+    #[must_use]
+    pub fn x_display(&self) -> String {
+        self.wait_for_log(|log| {
+            let line = log
+                .lines()
+                .find(|line| line.contains("Xwayland is ready"))?;
+            let number = line.split("display=").nth(1)?.split_whitespace().next()?;
+            Some(format!(":{number}"))
+        })
     }
 
     /// Starts `executable` headless with the outputs the file at
@@ -142,6 +186,7 @@ impl HeadlessVaht {
             executable,
             (files, &[]),
             &[("VAHT_HEADLESS_OUTPUTS_FILE", &path)],
+            Xwayland::Off,
         )
     }
 
@@ -152,7 +197,12 @@ impl HeadlessVaht {
         executable: &Path,
         (config, data): (Files<'_>, Files<'_>),
         environment: &[(&str, &str)],
+        xwayland: Xwayland,
     ) -> Self {
+        let extra_arguments: &[&str] = match xwayland {
+            Xwayland::Off => &["--no-xwayland"],
+            Xwayland::On => &[],
+        };
         let write_all = |directory: &Path, files: &[(&str, &[u8])]| {
             for (name, contents) in files {
                 let path = directory.join(name);
@@ -184,6 +234,7 @@ impl HeadlessVaht {
                 "--log",
                 Self::LOG_FILTER,
             ])
+            .args(extra_arguments)
             .env("XDG_RUNTIME_DIR", runtime.path())
             .env("VAHT_LOG_DIRECTORY", logs.path())
             .env("VAHT_CONFIG_DIRECTORY", config.path())
@@ -367,9 +418,27 @@ impl HeadlessVaht {
 
 impl Drop for HeadlessVaht {
     fn drop(&mut self) {
-        // Errors mean it has already exited, which is what drop wants.
-        let _ = self.process.kill();
-        let _ = self.process.wait();
+        // Asked to stop, vaht cleans up after itself (Xwayland's lock and
+        // socket files among it); killed outright, it would leave them
+        // behind. It is killed only if it does not stop in time.
+        let Ok(raw) = i32::try_from(self.process.id()) else {
+            return;
+        };
+        let pid = Pid::from_raw(raw);
+        if kill(pid, Signal::SIGTERM).is_err() {
+            // It has already exited.
+            let _ = self.process.wait();
+            return;
+        }
+        let (exited, exit) = mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            let _ = nix::sys::wait::waitpid(pid, None);
+            let _ = exited.send(());
+        });
+        if exit.recv_timeout(Self::STOP_PATIENCE).is_err() {
+            let _ = kill(pid, Signal::SIGKILL);
+        }
+        let _ = waiter.join();
     }
 }
 

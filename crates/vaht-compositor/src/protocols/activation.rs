@@ -20,6 +20,7 @@ use smithay::wayland::xdg_activation::{
 
 use crate::Compositor;
 use crate::config::FocusStealing;
+use crate::toplevels::Toplevel;
 use crate::window_manager::Window;
 
 /// How long after its making a token still activates a window.
@@ -43,11 +44,8 @@ impl XdgActivationHandler for Compositor {
             .window_manager
             .focused()
             .and_then(|focused| self.toplevels.get(focused))
-            .and_then(|focused| {
-                self.display_handle
-                    .get_client(focused.wl_surface().id())
-                    .ok()
-            })
+            .and_then(Toplevel::wl_surface)
+            .and_then(|surface| self.display_handle.get_client(surface.id()).ok())
             .map(|client| client.id());
         let is_from_focus = focused_client.is_some() && token_data.client_id == focused_client;
         let is_asked_for = is_from_focus && token_data.timestamp.elapsed() < ACTIVATION_PATIENCE;

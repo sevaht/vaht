@@ -16,6 +16,7 @@ mod metrics;
 mod picture;
 mod screenshot;
 mod wait;
+mod x11_client;
 
 pub use client::{
     BUTTON_LEFT, BUTTON_RIGHT, KeyboardFocus, TestClient, TestLayer, WINDOW_COLOR, WINDOW_SIZE,
@@ -26,3 +27,4 @@ pub use metrics::{BUILT_IN_METRICS, ThemeMetrics};
 pub use picture::{solid_png, solid_xcursor};
 pub use screenshot::{Bounds, Screenshot};
 pub use wait::wait_for_file;
+pub use x11_client::X11Client;

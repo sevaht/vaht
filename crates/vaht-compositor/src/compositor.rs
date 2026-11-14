@@ -44,8 +44,8 @@ use smithay::output::Output;
 use smithay::reexports::calloop::{EventLoop, LoopHandle};
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _, Weak};
-use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial};
+use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
+use smithay::utils::{IsAlive as _, Logical, Point, Rectangle, SERIAL_COUNTER, Serial};
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
 use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::selection::primary_selection::set_primary_focus;
@@ -58,6 +58,7 @@ use crate::backend::{
 };
 use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
+use crate::config::FocusStealing;
 use crate::config::{
     Action, Command, Config, ConfigSource, FocusModel, KeyChord, MenuGenerator, MenuRequest, Menus,
     Modifiers, ResizeFrom, SettingOverrides, ThemeFile, WindowManagerAction,
@@ -65,6 +66,7 @@ use crate::config::{
 use crate::cursor::Cursor;
 use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
+use crate::focus_target::FocusTarget;
 use crate::grab::{GrabKind, WindowGrab};
 use crate::input::{self, AfterClick, ButtonPress, Input, KeyPress, PressOutcome};
 use crate::ipc::IpcServer;
@@ -83,9 +85,11 @@ use crate::tooltip::Tooltip;
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::tray::TrayAction;
 use crate::window_manager::{
-    ClientRequest, FramePart, OutputArea, OutputAreas, Window, WindowDrag, WindowId, WindowManager,
-    WorkspaceTarget,
+    ClientRequest, FramePart, OutputArea, OutputAreas, PlacementKind, Window, WindowDrag, WindowId,
+    WindowManager, WorkspaceTarget,
 };
+use crate::xwayland::XwaylandServer;
+use smithay::xwayland::{X11Surface, X11Wm};
 
 /// The running compositor.
 pub struct Compositor {
@@ -103,6 +107,9 @@ pub struct Compositor {
     pub(crate) outputs: Outputs,
     /// The pointer's picture, for outputs vaht draws the pointer on.
     pub(crate) cursor: Cursor,
+    /// Xwayland, for X11 programs, unless the settings turn it off or it
+    /// could not start.
+    pub(crate) xwayland: Option<XwaylandServer>,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -139,7 +146,7 @@ pub struct Compositor {
     /// The surface keyboard focus was last given to: the seat's focus as
     /// vaht set it. Held weakly, so it never keeps a gone client's surface,
     /// and the buffers it holds, alive.
-    keyboard_focus: Option<Weak<WlSurface>>,
+    pub(crate) keyboard_focus: Option<FocusTarget>,
     /// Key and button state between events: repeats, double clicks.
     input: Input,
     /// Whether a client released a surface or a capture session since the
@@ -232,6 +239,7 @@ impl Compositor {
             .get_keyboard()
             .expect("create_seat adds a keyboard")
             .keymap_file();
+        let allows_xwayland = options.allows_xwayland;
         let mut backend = Backend::start(options.backend, handle, &display_handle, &ledger)?;
         if let Some(formats) = backend.dmabuf_formats() {
             protocols.dmabuf_global = Some(
@@ -284,6 +292,7 @@ impl Compositor {
             backend,
             outputs,
             cursor: Cursor::from_environment(),
+            xwayland: None,
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -319,6 +328,7 @@ impl Compositor {
             .config_source
             .watch(&compositor.loop_handle, &compositor.ledger);
         compositor.start_taskbar_services();
+        compositor.start_xwayland(allows_xwayland);
         for command_line in &compositor.config.settings.session.autostart {
             compositor.launcher.run(command_line);
         }
@@ -360,6 +370,7 @@ impl Compositor {
                 outline: &self.outline,
                 tooltip: &self.tooltip,
                 snap: &self.snap_overlay,
+                xwayland: self.xwayland.as_ref(),
             },
             self.layer_maps(),
         )
@@ -490,6 +501,171 @@ impl Compositor {
         self.handle_output_events(events);
     }
 
+    /// Starts Xwayland, unless the settings, or `allows`, turn it off.
+    fn start_xwayland(&mut self, allows: bool) {
+        if !allows {
+            tracing::info!("Xwayland is off (--no-xwayland)");
+            return;
+        }
+        if !self.config.settings.xwayland.enabled {
+            tracing::info!("Xwayland is off ([xwayland] enabled)");
+            return;
+        }
+        match XwaylandServer::start(&self.loop_handle, &self.display_handle, &self.ledger) {
+            Ok(server) => self.xwayland = Some(server),
+            Err(error) => tracing::warn!(error, "no X11 programs"),
+        }
+    }
+
+    /// Becomes the window manager of Xwayland, ready on `socket` for
+    /// `display_number`, whose Wayland client is `client`; programs started
+    /// from now on find it in `DISPLAY`.
+    pub(crate) fn xwayland_ready(
+        &mut self,
+        socket: std::os::unix::net::UnixStream,
+        display_number: u32,
+        client: smithay::reexports::wayland_server::Client,
+    ) {
+        let mut wm = match X11Wm::start_wm(
+            self.loop_handle.clone(),
+            &self.display_handle,
+            socket,
+            client,
+        ) {
+            Ok(wm) => wm,
+            Err(error) => {
+                tracing::warn!(%error, "could not become Xwayland's window manager");
+                return;
+            }
+        };
+        let frame = self.cursor.default_frame();
+        let narrow = |value: u32| u16::try_from(value).unwrap_or(u16::MAX);
+        if let Err(error) = wm.set_cursor(
+            &frame.pixels,
+            (narrow(frame.size.0), narrow(frame.size.1)).into(),
+            (narrow(frame.hotspot.0), narrow(frame.hotspot.1)).into(),
+        ) {
+            tracing::debug!(%error, "X programs keep Xwayland's own pointer");
+        }
+        if let Some(server) = &mut self.xwayland {
+            server.manage(wm, display_number);
+            if let Some(name) = server.display_name() {
+                self.launcher.set_environment("DISPLAY".to_owned(), name);
+            }
+        }
+    }
+
+    /// Starts managing the X11 window `surface`, which asked to be mapped.
+    pub(crate) fn add_x11_window(&mut self, surface: X11Surface) {
+        let window = self
+            .window_manager
+            .add_window(&self.config.settings, &self.ledger);
+        self.toplevels
+            .insert(window, Toplevel::from_x11(surface), &self.ledger);
+        // An X11 window's size and class are known already: it is placed
+        // now, as an xdg-shell window is at its first commit.
+        self.commit_toplevel(window);
+        self.schedule_render();
+    }
+
+    /// Stops showing the X11 window `surface`, unmapped or gone.
+    pub(crate) fn forget_x11_window(&mut self, surface: &X11Surface) {
+        if self
+            .xwayland
+            .as_mut()
+            .is_some_and(|server| server.forget_unmanaged(surface))
+        {
+            self.schedule_render();
+            return;
+        }
+        if let Some(window) = self.toplevels.remove_x11(surface) {
+            self.window_manager.remove_window(window);
+            self.settle();
+            self.schedule_render();
+        }
+    }
+
+    /// Answers the X11 window `surface` asking to cover `asked`: a window
+    /// vaht does not manage yet goes where it asks; a managed floating one
+    /// takes the size it asks where it is; any other keeps its place.
+    pub(crate) fn answer_x11_configure(
+        &mut self,
+        surface: &X11Surface,
+        asked: Rectangle<i32, Logical>,
+    ) {
+        let Some(window) = self.toplevels.window_of_x11(surface) else {
+            if let Err(error) = surface.configure(asked) {
+                tracing::debug!(%error, "an X11 window could not be configured");
+            }
+            return;
+        };
+        let Some(managed) = self.window_manager.window(window) else {
+            return;
+        };
+        let area = if managed.placement().kind() == PlacementKind::Floating {
+            Rectangle::new(managed.content_area().loc, asked.size)
+        } else {
+            managed.content_area()
+        };
+        // X expects an answer, even one that changes nothing.
+        if let Err(error) = surface.configure(area) {
+            tracing::debug!(%error, "an X11 window could not be configured");
+        }
+    }
+
+    /// Passes the X11 window `surface`'s `request` on to the window manager.
+    pub(crate) fn honor_x11_request(&mut self, surface: &X11Surface, request: ClientRequest) {
+        if let Some(window) = self.toplevels.window_of_x11(surface) {
+            self.window_manager.honor(window, request);
+            self.settle();
+        }
+    }
+
+    /// Starts `drag` on the X11 window `surface`, as its program asks (its
+    /// own title bar dragged), while a button pressed on it is held.
+    pub(crate) fn start_x11_drag(&mut self, surface: &X11Surface, drag: WindowDrag) {
+        let Some(window) = self.toplevels.window_of_x11(surface) else {
+            return;
+        };
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let Some(start) = pointer.grab_start_data() else {
+            return;
+        };
+        let is_on_window = start.focus.as_ref().is_some_and(|(focus, _)| {
+            self.toplevels
+                .get(window)
+                .is_some_and(|toplevel| toplevel.has_surface(focus))
+        });
+        if is_on_window {
+            self.start_window_grab(window, drag, start, SERIAL_COUNTER.next_serial());
+        }
+    }
+
+    /// Brings the X11 window `surface` forward, as its program asks, if
+    /// its focus-stealing rule allows: an X program moving between its own
+    /// windows (the one active is an X11 window) is asked for.
+    pub(crate) fn activate_x11_window(
+        &mut self,
+        surface: &X11Surface,
+        currently_active: Option<&X11Surface>,
+    ) {
+        let Some(window) = self.toplevels.window_of_x11(surface) else {
+            return;
+        };
+        let is_asked_for =
+            currently_active.is_some() && matches!(self.keyboard_focus, Some(FocusTarget::X11(_)));
+        let policy = self
+            .window_manager
+            .window(window)
+            .map_or(FocusStealing::Default, Window::focus_stealing);
+        if policy.honors(is_asked_for) {
+            self.window_manager.activate(window);
+            self.settle();
+        }
+    }
+
     /// Follows the backend's outputs changing, as `events` say.
     pub(crate) fn handle_output_events(&mut self, events: Vec<OutputEvent>) {
         for event in events {
@@ -558,6 +734,7 @@ impl Compositor {
                 outline: &self.outline,
                 tooltip: &self.tooltip,
                 snap: &self.snap_overlay,
+                xwayland: self.xwayland.as_ref(),
             },
             LayerMaps::new(&self.outputs),
         );
@@ -1033,8 +1210,18 @@ impl Compositor {
         self.refresh_output_area();
         let updates = self.window_manager.take_client_updates();
         for (window, requested) in &updates.states {
-            if let Some(toplevel) = self.toplevels.get(*window) {
-                toplevel.request(requested);
+            let location = self
+                .window_manager
+                .window(*window)
+                .map(|window| window.content_area().loc);
+            if let (Some(toplevel), Some(location)) = (self.toplevels.get_mut(*window), location) {
+                toplevel.request(requested, location);
+            }
+        }
+        // An X11 window is told where it is whenever it moves.
+        for window in self.window_manager.windows_top_down() {
+            if let Some(toplevel) = self.toplevels.get_mut(window.id()) {
+                toplevel.place(window.content_area());
             }
         }
         for (window, ending) in updates.endings {
@@ -1063,28 +1250,34 @@ impl Compositor {
     /// Gives the seat's keyboard to the focused window, unless a layer
     /// surface holds it (a launcher keeps it), if that changed.
     fn sync_keyboard_focus(&mut self) {
-        let window_surface = self
+        let window_target = self
             .window_manager
             .focused()
             .and_then(|window| self.toplevels.get(window))
-            .map(|toplevel| toplevel.wl_surface().clone());
-        let surface = self.layers.keyboard().cloned().or(window_surface);
-        // A focused surface that is gone reads as `Some(None)`, unlike any
-        // surface or none, so its client's focus is always cleared.
+            .map(Toplevel::focus_target);
+        let target = self
+            .layers
+            .keyboard()
+            .cloned()
+            .map(FocusTarget::Surface)
+            .or(window_target);
+        // A focused target that is gone reads as `Some(None)`, unlike any
+        // target or none, so its client's focus is always cleared.
         let given = self
             .keyboard_focus
             .as_ref()
-            .map(|given| given.upgrade().ok());
-        if given == surface.clone().map(Some) {
+            .map(|given| given.alive().then(|| given.clone()));
+        if given == target.clone().map(Some) {
             return;
         }
-        self.keyboard_focus = surface.as_ref().map(WlSurface::downgrade);
+        self.keyboard_focus.clone_from(&target);
         // Smithay clears the focus of a destroyed surface without telling
         // SeatHandler::focus_changed, so the clipboard focus is set here too:
         // otherwise it keeps the last focused client's state alive after
         // that client disconnects.
-        let client = surface
+        let client = target
             .as_ref()
+            .and_then(FocusTarget::surface)
             .and_then(|surface| self.display_handle.get_client(surface.id()).ok());
         set_data_device_focus(&self.display_handle, &self.seat, client.clone());
         set_primary_focus(&self.display_handle, &self.seat, client);
@@ -1092,7 +1285,7 @@ impl Compositor {
             .seat
             .get_keyboard()
             .expect("the seat gets a keyboard at startup");
-        keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
+        keyboard.set_focus(self, target, SERIAL_COUNTER.next_serial());
     }
 
     /// Updates the window whose root surface is `root` after a commit of
@@ -1105,9 +1298,17 @@ impl Compositor {
             return;
         };
         toplevel.on_commit();
-        if !is_root {
-            return;
+        if is_root {
+            self.commit_toplevel(window);
         }
+    }
+
+    /// Tells the window manager what `window`'s client committed, and
+    /// carries out what it decides.
+    fn commit_toplevel(&mut self, window: WindowId) {
+        let Some(toplevel) = self.toplevels.get_mut(window) else {
+            return;
+        };
         let backend = &mut self.backend;
         let committed = toplevel.committed_state(|buffer| backend.read_icon(buffer));
         let pointer = self.pointer_location().to_i32_round();
@@ -1653,6 +1854,7 @@ impl Compositor {
                 self.layers.click(&surface);
                 return;
             }
+            PressOutcome::ClickUnmanaged => return,
             PressOutcome::ClickTaskbar { window, then } => (window, then),
             PressOutcome::Click {
                 window,
@@ -1789,6 +1991,9 @@ pub struct RunOptions {
     pub config_directory: PathBuf,
     /// vaht's own program, which shows its dialogs (`vaht dialog run`).
     pub executable: PathBuf,
+    /// Whether Xwayland may start, if the settings want it; off for runs
+    /// that need no X11 programs, such as most tests.
+    pub allows_xwayland: bool,
 }
 
 /// Why vaht could not start or keep running.

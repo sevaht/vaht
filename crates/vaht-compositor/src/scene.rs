@@ -27,6 +27,7 @@ use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
+use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Physical, Point, Scale};
@@ -47,6 +48,7 @@ use crate::taskbar::{Taskbar, TaskbarHit};
 use crate::tooltip::Tooltip;
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::window_manager::{FramePart, Window, WindowId, WindowManager};
+use crate::xwayland::XwaylandServer;
 
 /// What is drawn where nothing else is, the wallpaper included: a dark
 /// grey, [`Backdrop`]'s own background.
@@ -104,6 +106,14 @@ pub(crate) enum PointerTarget {
     Window(WindowTarget),
     /// The taskbar: one of its widgets, or its background.
     Taskbar(Option<TaskbarHit>),
+    /// An X11 program's override-redirect window: its menu, tooltip or
+    /// drop-down.
+    Unmanaged {
+        /// The surface under the pointer.
+        surface: WlSurface,
+        /// That surface's origin, in global coordinates.
+        origin: Point<f64, Logical>,
+    },
     /// A layer surface.
     Layer {
         /// The surface under the pointer (the layer surface, or one of its
@@ -123,7 +133,7 @@ impl PointerTarget {
     pub(crate) const fn window(&self) -> Option<WindowId> {
         match self {
             Self::Window(target) => Some(target.window()),
-            Self::Taskbar(_) | Self::Layer { .. } => None,
+            Self::Taskbar(_) | Self::Layer { .. } | Self::Unmanaged { .. } => None,
         }
     }
 
@@ -132,7 +142,9 @@ impl PointerTarget {
     pub(crate) const fn binding_window(&self) -> Option<WindowId> {
         match self {
             Self::Taskbar(Some(hit)) => hit.window(),
-            Self::Window(_) | Self::Taskbar(None) | Self::Layer { .. } => self.window(),
+            Self::Window(_) | Self::Taskbar(None) | Self::Layer { .. } | Self::Unmanaged { .. } => {
+                self.window()
+            }
         }
     }
 
@@ -145,7 +157,8 @@ impl PointerTarget {
             })
             | Self::Layer {
                 surface, origin, ..
-            } => Some((surface.clone(), *origin)),
+            }
+            | Self::Unmanaged { surface, origin } => Some((surface.clone(), *origin)),
             Self::Window(WindowTarget::Frame { .. }) | Self::Taskbar(_) => None,
         }
     }
@@ -184,6 +197,8 @@ pub(crate) struct Drawn<'state> {
     pub(crate) outline: &'state Outline,
     /// The tooltip, if one shows.
     pub(crate) tooltip: &'state Tooltip,
+    /// X11 programs' override-redirect windows, when Xwayland runs.
+    pub(crate) xwayland: Option<&'state XwaylandServer>,
     /// Where a moved window would snap, and the layout picker.
     pub(crate) snap: &'state SnapOverlay,
 }
@@ -242,7 +257,8 @@ impl<'state> Scene<'state> {
                     is_below_windows,
                 })
         };
-        layer(self.layers_above_windows(), false)
+        self.unmanaged_at(point)
+            .or_else(|| layer(self.layers_above_windows(), false))
             .or_else(|| self.window_at(point, true).map(PointerTarget::Window))
             .or_else(|| {
                 self.shown_taskbar()
@@ -270,6 +286,20 @@ impl<'state> Scene<'state> {
         elements.extend(self.drawn.menus.render_elements(renderer, scale));
         elements.extend(self.drawn.outline.render_elements(renderer, scale));
         elements.extend(self.drawn.snap.picker_element(renderer, scale));
+        // An X program's menus and tooltips are over every window.
+        for window in self
+            .drawn
+            .xwayland
+            .into_iter()
+            .flat_map(XwaylandServer::unmanaged)
+        {
+            // Its geometry is its own; where it is on screen is where X
+            // last placed it.
+            let origin = window.last_configure().loc.to_physical_precise_round(scale);
+            let surface_elements: Vec<WaylandSurfaceRenderElement<R>> =
+                window.render_elements(renderer, origin, scale, 1.0);
+            elements.extend(surface_elements.into_iter().map(SceneElement::Surface));
+        }
         self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
         self.push_windows(&mut elements, renderer, scale, true);
         elements.extend(
@@ -413,6 +443,28 @@ impl<'state> Scene<'state> {
             let part = window.frame_geometry(metrics).part_at(point)?;
             Some(WindowTarget::Frame { window: id, part })
         })
+    }
+
+    /// Returns the override-redirect window under `point`, topmost first.
+    fn unmanaged_at(&self, point: Point<f64, Logical>) -> Option<PointerTarget> {
+        self.drawn
+            .xwayland
+            .into_iter()
+            .flat_map(XwaylandServer::unmanaged)
+            .find_map(|window| {
+                // The point is relative to the window; the origin comes
+                // back in global coordinates.
+                let corner = window.last_configure().loc;
+                let (surface, origin) = window.surface_under(
+                    point - corner.to_f64(),
+                    corner,
+                    WindowSurfaceType::ALL,
+                )?;
+                Some(PointerTarget::Unmanaged {
+                    surface,
+                    origin: origin.to_f64(),
+                })
+            })
     }
 
     /// Appends the elements of the layer surfaces in `layers`.

@@ -11,6 +11,7 @@ mod toplevel;
 use std::collections::HashMap;
 
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::xwayland::X11Surface;
 
 pub(crate) use self::toplevel::Toplevel;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
@@ -42,6 +43,22 @@ impl Toplevels {
             .iter()
             .find(|(_, (toplevel, _))| toplevel.has_surface(surface))
             .map(|(window, _)| *window)
+    }
+
+    /// Returns the window of the X11 window `surface`, if vaht manages it.
+    pub(crate) fn window_of_x11(&self, surface: &X11Surface) -> Option<WindowId> {
+        self.by_window
+            .iter()
+            .find(|(_, (toplevel, _))| toplevel.x11() == Some(surface))
+            .map(|(window, _)| *window)
+    }
+
+    /// Forgets the toplevel of the X11 window `surface`, which is gone or
+    /// unmapped; returns the window it stood for.
+    pub(crate) fn remove_x11(&mut self, surface: &X11Surface) -> Option<WindowId> {
+        let window = self.window_of_x11(surface)?;
+        self.by_window.remove(&window);
+        Some(window)
     }
 
     /// Records that `toplevel` stands for `window`.

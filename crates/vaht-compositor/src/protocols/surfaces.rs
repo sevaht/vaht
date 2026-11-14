@@ -12,6 +12,8 @@ use smithay::wayland::compositor::{
 use smithay::wayland::fractional_scale::{FractionalScaleHandler, with_fractional_scale};
 use smithay::wayland::shm::{ShmHandler, ShmState};
 
+use smithay::xwayland::XWaylandClientData;
+
 use crate::Compositor;
 use crate::client::ClientState;
 
@@ -21,9 +23,14 @@ impl CompositorHandler for Compositor {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
+        // vaht inserts every client with a ClientState, but Smithay inserts
+        // Xwayland's with its own.
+        if let Some(xwayland) = client.get_data::<XWaylandClientData>() {
+            return &xwayland.compositor_state;
+        }
         &client
             .get_data::<ClientState>()
-            .expect("every client is inserted with a ClientState")
+            .expect("every other client is inserted with a ClientState")
             .compositor_state
     }
 

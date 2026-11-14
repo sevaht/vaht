@@ -47,6 +47,8 @@ pub(crate) struct Settings {
     pub(crate) ipc: IpcSettings,
     /// Starting the session.
     pub(crate) session: SessionSettings,
+    /// X11 programs.
+    pub(crate) xwayland: XwaylandSettings,
 }
 
 /// Which window gets keyboard focus, and when windows rise.
@@ -448,6 +450,20 @@ impl Default for IpcSettings {
         Self {
             allow_commands: true,
         }
+    }
+}
+
+/// X11 programs, through Xwayland.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct XwaylandSettings {
+    /// Whether vaht starts Xwayland, so X11 programs run; read at start.
+    pub(crate) enabled: bool,
+}
+
+impl Default for XwaylandSettings {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 

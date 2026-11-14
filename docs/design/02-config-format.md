@@ -206,6 +206,16 @@ rest by name, so a setting never silently does nothing:
   `center`, `tile`, `stretch`). It is decoded once, painted once for each
   output, at its size, and drawn beneath everything; where it does not reach, and with no
   image, the desktop is dark grey. `per_workspace` is not built.
+- `[xwayland]` `enabled` (on by default; read at start): vaht starts
+  Xwayland and is its window manager, and programs it starts find it in
+  `DISPLAY`. X11 windows are windows like any other (rules match their
+  class as `app_id`, `close` sends `WM_DELETE_WINDOW`, `kill` ends the
+  process their `_NET_WM_PID` names); their menus and tooltips
+  (override-redirect windows) show over every window. The clipboard and
+  primary selection pass both ways. `vaht --no-xwayland` overrides the
+  setting (tests use it). Not yet: `resources` (`~/.Xresources`) and input
+  emulation (fluxland's `session.xwayland.*`), exact X Shape clipping and
+  the pointer kept in step during moves (04 §8).
 - `theme`: the name of a theme in `themes/` (§10); without it, the built-in
   theme.
 - `[taskbar]`: `enabled`, `output` (the name of the output it shows on,

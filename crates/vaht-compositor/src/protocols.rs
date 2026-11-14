@@ -38,6 +38,7 @@ use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::virtual_pointer::VirtualPointerManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager;
+use smithay::wayland::xwayland_shell::XWaylandShellState;
 
 use crate::Compositor;
 
@@ -75,6 +76,8 @@ pub(crate) struct ProtocolStates {
         FractionalScaleManagerState,
         SinglePixelBufferState,
     ),
+    /// `xwayland_shell_v1`: Xwayland pairing X11 windows with surfaces.
+    pub(crate) xwayland_shell: XWaylandShellState,
     /// `wp_cursor_shape_manager_v1`: clients naming the pointer's picture
     /// (`text`, `pointer`…) rather than drawing it. Held only to keep the
     /// global.
@@ -124,6 +127,7 @@ impl ProtocolStates {
             ),
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
             _cursor_shape: CursorShapeManagerState::new::<Compositor>(display),
+            xwayland_shell: XWaylandShellState::new::<Compositor>(display),
             output_capture_source: OutputCaptureSourceState::new::<Compositor>(display),
             image_copy_capture: ImageCopyCaptureState::new::<Compositor>(display),
             // TODO(security): every client may inject input, as on other

@@ -84,6 +84,9 @@ pub(crate) enum PressOutcome {
     /// pressed: the press is its client's alone, and the surface may take
     /// the keyboard.
     ClickLayer(WlSurface),
+    /// An X program's menu or tooltip was pressed: the press is its
+    /// program's, and focus stays where it is.
+    ClickUnmanaged,
     /// The taskbar was pressed; focus stays where it is.
     ClickTaskbar {
         /// The window whose entry was pressed, which a binding acts on.
@@ -217,6 +220,9 @@ impl Input {
     /// recorded.
     pub(crate) fn press(&mut self, press: &ButtonPress<'_>, config: &Config) -> PressOutcome {
         let target = press.target;
+        if let Some(PointerTarget::Unmanaged { .. }) = target {
+            return PressOutcome::ClickUnmanaged;
+        }
         if let Some(PointerTarget::Layer {
             surface,
             is_below_windows: false,
@@ -349,7 +355,8 @@ impl Input {
             Some(
                 PointerTarget::Window(WindowTarget::Surface { .. })
                 | PointerTarget::Taskbar(_)
-                | PointerTarget::Layer { .. },
+                | PointerTarget::Layer { .. }
+                | PointerTarget::Unmanaged { .. },
             )
             | None => AfterClick::PassToClient,
         }
@@ -521,6 +528,7 @@ mod tests {
             PressOutcome::Click { then, raises, .. } => (then, raises),
             PressOutcome::ClickTaskbar { then, .. } => (then, false),
             PressOutcome::ClickLayer(_) => panic!("no layer surface was pressed"),
+            PressOutcome::ClickUnmanaged => panic!("no X11 menu was pressed"),
         }
     }
 

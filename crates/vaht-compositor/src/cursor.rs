@@ -273,6 +273,16 @@ impl Cursor {
         }
     }
 
+    /// Returns the default arrow's first picture, for Xwayland's root
+    /// window: what X programs show where they set no cursor.
+    pub(crate) fn default_frame(&mut self) -> CursorFrame {
+        self.theme
+            .frames(CursorIcon::Default)
+            .frame_at(Duration::ZERO)
+            .1
+            .clone()
+    }
+
     /// Shows what a client asked for from now on.
     pub(crate) fn set_status(&mut self, status: CursorImageStatus) {
         self.status = status;

@@ -319,10 +319,13 @@ impl MouseContext {
                 ..
             })
             | None => &[Self::Desktop],
-            Some(PointerTarget::Layer {
-                is_below_windows: false,
-                ..
-            }) => &[],
+            Some(
+                PointerTarget::Layer {
+                    is_below_windows: false,
+                    ..
+                }
+                | PointerTarget::Unmanaged { .. },
+            ) => &[],
         }
     }
 }

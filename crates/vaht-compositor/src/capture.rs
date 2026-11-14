@@ -200,6 +200,7 @@ impl ImageCopyCaptureHandler for Compositor {
                 outline: &self.outline,
                 tooltip: &self.tooltip,
                 snap: &self.snap_overlay,
+                xwayland: self.xwayland.as_ref(),
             },
             LayerMaps::new(&self.outputs),
         );

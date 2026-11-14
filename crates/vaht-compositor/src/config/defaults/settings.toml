@@ -149,3 +149,7 @@ allow_commands = true
 [session]
 # Command lines run once when vaht starts, as exec runs them.
 autostart = []
+
+[xwayland]
+# Whether vaht starts Xwayland, so X11 programs run; read at start.
+enabled = true

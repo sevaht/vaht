@@ -7,6 +7,7 @@ use smithay::input::pointer::{CursorImageStatus, Focus};
 use smithay::input::tablet::TabletSeatHandler;
 
 use crate::backend::Backend;
+use crate::focus_target::FocusTarget;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::Resource as _;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -20,7 +21,7 @@ use smithay::wayland::selection::data_device::{
 use crate::Compositor;
 
 impl SeatHandler for Compositor {
-    type KeyboardFocus = WlSurface;
+    type KeyboardFocus = FocusTarget;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
@@ -39,10 +40,12 @@ impl SeatHandler for Compositor {
         self.schedule_render();
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&FocusTarget>) {
         // The clipboard follows keyboard focus: only the focused client may
         // read it.
-        let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
+        let client = focused
+            .and_then(FocusTarget::surface)
+            .and_then(|surface| self.display_handle.get_client(surface.id()).ok());
         set_data_device_focus(&self.display_handle, seat, client);
     }
 }
