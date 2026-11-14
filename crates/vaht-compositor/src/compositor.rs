@@ -2992,6 +2992,18 @@ impl Compositor {
 
     /// Moves the pointer to `location`, telling the surface under it.
     pub(crate) fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
+        // With strict sloppy focus, what was under the pointer where it
+        // was, as the windows are stacked now: moving within one window
+        // never moves focus, however it came there.
+        let was_over = (self.config.settings.focus.model == FocusModel::StrictSloppy)
+            .then(|| {
+                let from = self.pointer_location();
+                self.scene()
+                    .target_at(from)
+                    .as_ref()
+                    .and_then(PointerTarget::window)
+            })
+            .flatten();
         let whole = Outputs::geometry(self.taskbar_output());
         if let Some(taskbar) = &mut self.taskbar
             && taskbar.follow_pointer(location, whole, (&self.loop_handle, &self.ledger))
@@ -3022,6 +3034,7 @@ impl Compositor {
             .expect("the seat gets a pointer at startup");
         if let Some(window) = target.as_ref().and_then(PointerTarget::window)
             && !pointer.is_grabbed()
+            && was_over != Some(window)
         {
             self.pointer_entered(window);
         }
@@ -3043,7 +3056,7 @@ impl Compositor {
     /// with auto-raise raises it once the pointer has rested there a while.
     fn pointer_entered(&mut self, window: WindowId) {
         let focus = self.config.settings.focus;
-        if focus.model != FocusModel::Sloppy || self.window_manager.focused() == Some(window) {
+        if !focus.model.follows_pointer() || self.window_manager.focused() == Some(window) {
             return;
         }
         self.window_manager.focus(Some(window));

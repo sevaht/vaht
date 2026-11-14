@@ -423,6 +423,7 @@ impl InitFile {
             let vaht = match model.value.as_str() {
                 "ClickFocus" | "ClickToFocus" => Some("click"),
                 "MouseFocus" | "SloppyFocus" => Some("sloppy"),
+                "StrictMouseFocus" => Some("strict-sloppy"),
                 _ => None,
             };
             match vaht {

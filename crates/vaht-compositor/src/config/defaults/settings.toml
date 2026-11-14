@@ -7,7 +7,9 @@
 
 [focus]
 # click: a window takes focus when clicked. sloppy: when the pointer
-# enters it, keeping it while the pointer is on the desktop.
+# enters it, keeping it while the pointer is on the desktop. strict-sloppy:
+# only when the pointer moves into it, never when it comes under the
+# pointer.
 model = "click"
 raise_on_click = true
 # With sloppy focus: raise the window the pointer rests on, after a delay.

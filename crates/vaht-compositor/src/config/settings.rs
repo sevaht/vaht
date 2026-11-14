@@ -121,6 +121,18 @@ pub(crate) enum FocusModel {
     /// A window takes focus when the pointer enters it, and keeps it while
     /// the pointer is on the desktop (Fluxbox's `MouseFocus`).
     Sloppy,
+    /// As sloppy, but a window takes focus only when the pointer moves
+    /// into it from elsewhere: one raised, opened or moved under the
+    /// pointer does not, however the pointer moves within it after
+    /// (Fluxbox's `StrictMouseFocus`).
+    StrictSloppy,
+}
+
+impl FocusModel {
+    /// Returns whether the pointer moves focus.
+    pub(crate) const fn follows_pointer(self) -> bool {
+        matches!(self, Self::Sloppy | Self::StrictSloppy)
+    }
 }
 
 /// Where new windows go.

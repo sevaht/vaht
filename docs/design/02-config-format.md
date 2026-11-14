@@ -172,8 +172,12 @@ autostart = ["~/.config/vaht/autostart"]
 `settings.toml` accepts the sections whose features exist, and refuses the
 rest by name, so a setting never silently does nothing:
 
-- `[focus]`: `model` (`click` or `sloppy`; `strict-sloppy` is not built),
-  `raise_on_click`, `auto_raise`, `auto_raise_delay_ms`, `focus_new_windows`.
+- `[focus]`: `model` (`click`, `sloppy`, or `strict-sloppy`: as sloppy,
+  but a window takes focus only when the pointer moves into it from
+  elsewhere, never one raised or moved under it, however the pointer
+  moves within it after; Fluxbox's `StrictMouseFocus`, which `vaht import`
+  converts), `raise_on_click`, `auto_raise`, `auto_raise_delay_ms`,
+  `focus_new_windows`.
 - `[placement]`: every strategy and both directions; `column-min-overlap`
   was added for Fluxbox's `ColMinOverlapPlacement`. The smart strategies
   try only corners flush against edges, so `row` and `row-min-overlap`

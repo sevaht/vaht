@@ -158,3 +158,70 @@ fn a_window_moved_near_the_output_edge_snaps_to_it() {
         "the frame's left edge is the output's"
     );
 }
+
+#[test]
+fn with_strict_sloppy_focus_a_window_moved_under_the_pointer_does_not_take_focus() {
+    let focused_after_moving_within = |model: &str| -> u64 {
+        let (vaht, mut client) = start(&format!("[focus]\nmodel = \"{model}\"\n"));
+        client.open_windows(2);
+        let screenshot = client.screenshot();
+        let content = screenshot.bounds_of(WINDOW_COLOR).expect("shown");
+        let [first, _] = windows_along(&screenshot, content.top)[..] else {
+            panic!("two windows side by side");
+        };
+        client.move_pointer_to(first.0 + 20, content.top + 20);
+        let windows = |vaht: &HeadlessVaht| -> Vec<vaht_ipc::WindowInfo> {
+            let output = std::process::Command::new(EXECUTABLE)
+                .args(["msg", "--json", "windows"])
+                .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+                .output()
+                .expect("vaht msg runs");
+            match serde_json::from_slice(&output.stdout).expect("a reply") {
+                vaht_ipc::Reply::Windows { windows } => windows,
+                other @ (vaht_ipc::Reply::Version { .. }
+                | vaht_ipc::Reply::Done { .. }
+                | vaht_ipc::Reply::Workspaces { .. }
+                | vaht_ipc::Reply::Outputs { .. }
+                | vaht_ipc::Reply::Error { .. }) => panic!("not windows: {other:?}"),
+            }
+        };
+        let listed = windows(&vaht);
+        let entered = listed
+            .iter()
+            .find(|window| window.is_focused)
+            .expect("one")
+            .id;
+        let other = listed
+            .iter()
+            .find(|window| window.id != entered)
+            .expect("two")
+            .id;
+        // The other window comes over the pointer, without it moving.
+        for command in ["tile 0 0 500 1000", "raise"] {
+            let output = std::process::Command::new(EXECUTABLE)
+                .args(["msg", "run", "--window", &other.to_string(), command])
+                .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+                .output()
+                .expect("vaht msg runs");
+            assert!(output.status.success(), "{output:?}");
+        }
+        client.move_pointer_to(first.0 + 22, content.top + 22);
+        let focused = windows(&vaht)
+            .iter()
+            .find(|window| window.is_focused)
+            .expect("one")
+            .id;
+        assert_ne!(focused, 0);
+        if focused == entered { 1 } else { 2 }
+    };
+    assert_eq!(
+        focused_after_moving_within("sloppy"),
+        2,
+        "sloppy: the one under it"
+    );
+    assert_eq!(
+        focused_after_moving_within("strict-sloppy"),
+        1,
+        "strict: the one the pointer entered"
+    );
+}
