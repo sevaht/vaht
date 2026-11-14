@@ -175,9 +175,12 @@ pub enum ImportSource {
 /// The `--backend` values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum BackendArgument {
-    /// In a window of the running compositor, when there is one.
+    /// In a window of the running compositor, when there is one; else on
+    /// the hardware.
     #[default]
     Automatic,
+    /// On the hardware, from a virtual terminal.
+    Drm,
     /// Nowhere: frames are drawn in memory. For tests.
     Headless,
 }
@@ -186,6 +189,7 @@ impl From<BackendArgument> for BackendChoice {
     fn from(argument: BackendArgument) -> Self {
         match argument {
             BackendArgument::Automatic => Self::Automatic,
+            BackendArgument::Drm => Self::Drm,
             BackendArgument::Headless => Self::Headless,
         }
     }

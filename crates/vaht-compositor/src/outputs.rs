@@ -15,7 +15,7 @@ use smithay::output::Output;
 use smithay::utils::{Logical, Point, Rectangle, Transform};
 
 use self::arrangement::Arrangement;
-use crate::config::{OutputIdentity, OutputMode, OutputProfile, OutputSettings};
+use crate::config::{OutputIdentity, OutputMode, OutputPlan, OutputProfile, OutputSettings, Vrr};
 
 /// What only the backend can do to an output.
 pub(crate) trait OutputControl {
@@ -73,6 +73,51 @@ impl Outputs {
         };
         Self::lay_out_in_a_row(0, outputs.iter());
         outputs
+    }
+
+    /// No output yet: a placeholder no client sees holds the layout until
+    /// a monitor is plugged in.
+    pub(crate) fn waiting() -> Self {
+        let placeholder = Output::new(
+            "NONE".to_owned(),
+            smithay::output::PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: smithay::output::Subpixel::Unknown,
+                make: "vaht".to_owned(),
+                model: "placeholder".to_owned(),
+                serial_number: String::new(),
+            },
+        );
+        placeholder.change_current_state(
+            Some(smithay::output::Mode {
+                size: (1920, 1080).into(),
+                refresh: 60_000,
+            }),
+            None,
+            None,
+            Some((0, 0).into()),
+        );
+        Self {
+            primary: placeholder,
+            others: Vec::new(),
+            connected: Vec::new(),
+            profile: None,
+            chosen_primary: None,
+        }
+    }
+
+    /// Returns the `vrr` setting `output` follows now: its entry's, under
+    /// the profile applied.
+    pub(crate) fn vrr_of(&self, output: &Output, settings: &OutputSettings) -> Vrr {
+        let profile = self
+            .profile
+            .as_deref()
+            .and_then(|name| settings.profile(name));
+        let identity = Self::identity(output);
+        match settings.plan(profile, identity.as_identity()) {
+            OutputPlan::Follows(entry) => entry.vrr,
+            OutputPlan::Unlisted | OutputPlan::Off => Vrr::default(),
+        }
     }
 
     /// Returns the name of the profile applied, if one is.
@@ -621,6 +666,20 @@ position = [0, 0]
         assert_eq!(outputs.others().count(), 0);
         let changes = outputs.connect(output("NEW", 1024, 768), &settings, &mut backend);
         assert_eq!(changes.primary.as_deref(), Some("NEW"));
+    }
+
+    #[test]
+    fn starting_without_a_monitor_waits_for_one() {
+        let mut outputs = Outputs::waiting();
+        assert_eq!(outputs.connected().count(), 0);
+        let mut backend = FakeBackend::default();
+        let changes = outputs.connect(
+            output("FIRST", 1280, 720),
+            &OutputSettings::default(),
+            &mut backend,
+        );
+        assert_eq!(changes.primary.as_deref(), Some("FIRST"));
+        assert_eq!(outputs.iter().count(), 1, "the placeholder is gone");
     }
 
     #[test]

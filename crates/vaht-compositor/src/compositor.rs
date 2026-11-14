@@ -53,7 +53,9 @@ use smithay::wayland::shell::xdg::{PopupSurface, ToplevelSurface};
 use smithay::wayland::virtual_keyboard::VirtualKeyboardKeyEvent;
 use vaht_ui::Typesetter;
 
-use crate::backend::{Backend, BackendChoice, BackendError, OutputEvent};
+use crate::backend::{
+    Backend, BackendChoice, BackendError, OutputEvent, TopWindow, virtual_terminal,
+};
 use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::{
@@ -431,12 +433,59 @@ impl Compositor {
         }
     }
 
+    /// Follows udev's news of a GPU on the DRM backend: added, changed (a
+    /// monitor plugged or unplugged) or removed.
+    pub(crate) fn drm_device_event(&mut self, event: smithay::backend::udev::UdevEvent) {
+        let events = match &mut self.backend {
+            Backend::Drm(backend) => backend.device_event(event),
+            Backend::Winit(_) | Backend::Headless(_) => Vec::new(),
+        };
+        self.handle_output_events(events);
+    }
+
+    /// Follows the seat taking the devices away (`is_active` false: another
+    /// terminal is shown) or giving them back.
+    pub(crate) fn drm_session(&mut self, is_active: bool) {
+        let events = match &mut self.backend {
+            Backend::Drm(backend) if is_active => backend.resume(),
+            Backend::Drm(backend) => {
+                backend.pause();
+                Vec::new()
+            }
+            Backend::Winit(_) | Backend::Headless(_) => Vec::new(),
+        };
+        self.handle_output_events(events);
+    }
+
+    /// Follows a monitor showing its frame on GPU `node`'s CRTC `crtc`.
+    pub(crate) fn drm_frame_shown(
+        &mut self,
+        node: smithay::backend::drm::DrmNode,
+        crtc: smithay::reexports::drm::control::crtc::Handle,
+    ) {
+        if let Backend::Drm(backend) = &mut self.backend {
+            backend.frame_shown(node, crtc);
+        }
+    }
+
+    /// Follows a monitor's wait after an unchanged frame ending, on GPU
+    /// `node`'s CRTC `crtc`.
+    pub(crate) fn drm_wait_over(
+        &mut self,
+        node: smithay::backend::drm::DrmNode,
+        crtc: smithay::reexports::drm::control::crtc::Handle,
+    ) {
+        if let Backend::Drm(backend) = &mut self.backend {
+            backend.wait_over(node, crtc);
+        }
+    }
+
     /// Follows the headless backend's outputs file (at `path`) changing:
     /// simulated monitors plugged in, unplugged or changed.
     pub(crate) fn reread_headless_outputs(&mut self, path: &Path) {
         let events = match &mut self.backend {
             Backend::Headless(backend) => backend.reread_output_file(path),
-            Backend::Winit(_) => Vec::new(),
+            Backend::Winit(_) | Backend::Drm(_) => Vec::new(),
         };
         self.handle_output_events(events);
     }
@@ -497,6 +546,7 @@ impl Compositor {
     /// drawing.
     pub(crate) fn render(&mut self) {
         self.prepare_frames();
+        self.update_vrr();
         let scene = Scene::new(
             &self.window_manager,
             &self.toplevels,
@@ -540,6 +590,34 @@ impl Compositor {
             self.schedule_render();
         }
         tracing::trace!("frame drawn");
+    }
+
+    /// Turns each monitor's variable refresh on or off as its `vrr` setting
+    /// says, with a fullscreen window on top there or not.
+    fn update_vrr(&mut self) {
+        let Backend::Drm(backend) = &mut self.backend else {
+            return;
+        };
+        for output in self.outputs.iter() {
+            let area = Outputs::geometry(output);
+            let is_fullscreen = self
+                .window_manager
+                .shown_top_down()
+                .find(|window| {
+                    self.outputs
+                        .most_overlapping(window.content_area())
+                        .is_some_and(|on| on == output)
+                        && area.intersection(window.content_area()).is_some()
+                })
+                .is_some_and(|window| window.placement().is_fullscreen());
+            let top = if is_fullscreen {
+                TopWindow::Fullscreen
+            } else {
+                TopWindow::Other
+            };
+            let vrr = self.outputs.vrr_of(output, &self.config.outputs);
+            backend.set_vrr(output, vrr, top);
+        }
     }
 
     /// Brings every frame's pixels up to date with what it shows; drawing a
@@ -1327,6 +1405,11 @@ impl Compositor {
                     self.choose_from_menu(choice);
                 }
             }
+            Some(Some(KeyPress::SwitchTerminal(terminal))) => {
+                if let Backend::Drm(backend) = &mut self.backend {
+                    backend.switch_terminal(terminal);
+                }
+            }
             Some(None) | None => {}
         }
     }
@@ -1343,6 +1426,15 @@ impl Compositor {
         let held = Modifiers::held(modifiers);
         if state == KeyState::Released && held == Modifiers::default() {
             self.window_manager.modifiers_released();
+        }
+        // Switching terminals comes before everything, so a stuck menu or
+        // binding never traps the user on vaht's terminal.
+        if state == KeyState::Pressed
+            && matches!(self.backend, Backend::Drm(_))
+            && let Some(terminal) = virtual_terminal(keysym.modified_sym())
+        {
+            self.input.claim_release(keycode);
+            return FilterResult::Intercept(Some(KeyPress::SwitchTerminal(terminal)));
         }
         if self.menus.is_open() && state == KeyState::Pressed {
             // Keys are the menus' while one is open, their releases too.

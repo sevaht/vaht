@@ -1,8 +1,10 @@
 //! The executable, exercised the way a user runs it.
 //!
 //! These runs have no host compositor (the display variables are removed),
-//! so starting vaht stops at choosing a backend. That exercises everything
-//! up to the backend without opening windows on the developer's screen.
+//! so starting vaht goes for the hardware, and libseat is pointed at a
+//! backend that does not exist, so taking the seat fails without touching
+//! the developer's seat. That exercises everything up to the backend
+//! without opening windows on the developer's screen or taking it over.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -11,7 +13,7 @@ use std::process::{Command, Output};
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 
 /// Part of the error vaht reports when it has nowhere to run.
-const NO_BACKEND_MESSAGE: &str = "no host compositor to run nested in";
+const NO_BACKEND_MESSAGE: &str = "could not take the seat";
 
 /// Runs the executable with `arguments`, logging only into `log_directory`
 /// so the tests never touch the real state directory, the journal or the
@@ -24,6 +26,8 @@ fn run_executable(arguments: &[&str], log_directory: &Path) -> Output {
         .env_remove("VAHT_LOG")
         .env_remove("WAYLAND_DISPLAY")
         .env_remove("DISPLAY")
+        // A libseat backend that does not exist: the seat is never taken.
+        .env("LIBSEAT_BACKEND", "vaht-test-none")
         .output()
         .expect("cargo builds the executable before running integration tests")
 }

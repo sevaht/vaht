@@ -110,6 +110,8 @@ pub(crate) enum KeyPress {
     Binding(Command),
     /// Acts on the open menus.
     Menu(MenuKey),
+    /// Switches to this virtual terminal (Ctrl+Alt+F1 and so on).
+    SwitchTerminal(i32),
 }
 
 /// What a press on a window or the desktop does after focusing.

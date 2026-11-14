@@ -1,11 +1,12 @@
 //! Where vaht's frames go and its input comes from.
 //!
-//! [`Backend`] is an enum of the ways vaht can run (rung 2 of R-M15): nested
-//! in a window of another compositor ([`WinitBackend`]), or without any
-//! screen for tests ([`HeadlessBackend`]); directly on the hardware (DRM,
-//! libinput) comes next. The rest of the compositor never knows which one it
-//! has.
+//! [`Backend`] is an enum of the ways vaht can run (rung 2 of R-M15):
+//! directly on the hardware from a virtual terminal ([`DrmBackend`]),
+//! nested in a window of another compositor ([`WinitBackend`]), or
+//! without any screen for tests ([`HeadlessBackend`]). The rest of the
+//! compositor never knows which one it has.
 
+mod drm;
 mod headless;
 mod winit;
 
@@ -20,6 +21,8 @@ use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::utils::{Rectangle, Transform};
 
+pub(crate) use self::drm::DrmBackend;
+pub(crate) use self::drm::plan::{TopWindow, virtual_terminal};
 pub(crate) use self::headless::HeadlessBackend;
 pub(crate) use self::winit::WinitBackend;
 use crate::Compositor;
@@ -41,6 +44,8 @@ pub enum BackendChoice {
     Automatic,
     /// No screen at all; frames are drawn in memory. For tests.
     Headless,
+    /// Directly on the hardware, from a virtual terminal.
+    Drm,
 }
 
 /// A change in the outputs a backend has.
@@ -65,6 +70,8 @@ pub(crate) enum Backend {
     Winit(Box<WinitBackend>),
     /// In memory only.
     Headless(Box<HeadlessBackend>),
+    /// On the hardware.
+    Drm(Box<DrmBackend>),
 }
 
 impl Backend {
@@ -93,7 +100,9 @@ impl Backend {
                     handle, display, ledger,
                 )?)))
             }
-            BackendChoice::Automatic => Err(BackendError::NoHostDisplay),
+            BackendChoice::Drm | BackendChoice::Automatic => Ok(Self::Drm(Box::new(
+                DrmBackend::new(handle, display, ledger)?,
+            ))),
         }
     }
 
@@ -102,6 +111,7 @@ impl Backend {
         match self {
             Self::Winit(backend) => backend.outputs(),
             Self::Headless(backend) => backend.outputs(),
+            Self::Drm(backend) => backend.outputs(),
         }
     }
 
@@ -110,6 +120,7 @@ impl Backend {
     pub(crate) const fn draws_pointer(&self) -> bool {
         match self {
             Self::Winit(_) | Self::Headless(_) => false,
+            Self::Drm(_) => true,
         }
     }
 
@@ -118,6 +129,7 @@ impl Backend {
         match self {
             Self::Winit(backend) => backend.schedule_render(),
             Self::Headless(backend) => backend.schedule_render(),
+            Self::Drm(backend) => backend.schedule_render(),
         }
     }
 
@@ -126,6 +138,7 @@ impl Backend {
         match self {
             Self::Winit(backend) => backend.release_unused_textures(),
             Self::Headless(backend) => backend.release_unused_textures(),
+            Self::Drm(backend) => backend.release_unused_textures(),
         }
     }
 
@@ -134,6 +147,7 @@ impl Backend {
     pub(crate) fn dmabuf_formats(&mut self) -> Option<Vec<Format>> {
         match self {
             Self::Winit(backend) => Some(backend.dmabuf_formats()),
+            Self::Drm(backend) => Some(backend.dmabuf_formats()),
             Self::Headless(_) => None,
         }
     }
@@ -143,6 +157,7 @@ impl Backend {
     pub(crate) fn import_dmabuf(&mut self, dmabuf: &Dmabuf) -> bool {
         match self {
             Self::Winit(backend) => backend.import_dmabuf(dmabuf),
+            Self::Drm(backend) => backend.import_dmabuf(dmabuf),
             Self::Headless(_) => false,
         }
     }
@@ -157,6 +172,10 @@ impl Backend {
         match self {
             Self::Winit(backend) => Self::read_icon_with(backend.renderer(), buffer),
             Self::Headless(backend) => Self::read_icon_with(backend.renderer(), buffer),
+            Self::Drm(backend) => backend
+                .renderer()
+                .ok()
+                .and_then(|mut renderer| Self::read_icon_with(&mut renderer, buffer)),
         }
     }
 
@@ -169,6 +188,7 @@ impl Backend {
         match self {
             Self::Winit(backend) => backend.render(scene),
             Self::Headless(backend) => backend.render(scene),
+            Self::Drm(backend) => backend.render(scene),
         }
     }
 
@@ -192,6 +212,7 @@ impl Backend {
                 scene,
                 output,
             ),
+            Self::Drm(backend) => backend.capture(scene, output),
         }
     }
 
@@ -220,6 +241,7 @@ impl OutputControl for Backend {
         match self {
             Self::Winit(backend) => backend.set_enabled(output, is_enabled),
             Self::Headless(backend) => backend.set_enabled(output, is_enabled),
+            Self::Drm(backend) => backend.set_enabled(output, is_enabled),
         }
     }
 
@@ -227,6 +249,7 @@ impl OutputControl for Backend {
         match self {
             Self::Winit(backend) => backend.set_transform(output, transform),
             Self::Headless(backend) => backend.set_transform(output, transform),
+            Self::Drm(backend) => backend.set_transform(output, transform),
         }
     }
 
@@ -234,6 +257,7 @@ impl OutputControl for Backend {
         match self {
             Self::Winit(backend) => backend.set_mode(output, mode),
             Self::Headless(backend) => backend.set_mode(output, mode),
+            Self::Drm(backend) => backend.set_mode(output, mode),
         }
     }
 }
@@ -241,12 +265,17 @@ impl OutputControl for Backend {
 /// Why no backend could start.
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
-    /// Neither `WAYLAND_DISPLAY` nor `DISPLAY` is set.
+    /// vaht cannot have the seat: it was not started from a virtual
+    /// terminal, or neither logind nor seatd runs.
     #[error(
-        "no host compositor to run nested in (WAYLAND_DISPLAY and DISPLAY are unset); \
-         running directly on a TTY needs the DRM backend, which vaht does not have yet"
+        "could not take the seat ({0}); run vaht from a virtual terminal, with \
+         logind or seatd running, or nested inside another compositor"
     )]
-    NoHostDisplay,
+    Seat(String),
+
+    /// No GPU could be used.
+    #[error("no GPU to draw with: {0}")]
+    Gpu(String),
 
     /// The window in the host compositor could not be opened.
     #[error("could not open a window in the host compositor: {reason}")]
@@ -312,4 +341,8 @@ pub enum RenderError {
     /// The frame could not be shown.
     #[error("could not show the frame")]
     Submit(#[source] smithay::backend::SwapBuffersError),
+
+    /// Drawing on a GPU for a monitor failed.
+    #[error("could not draw on the monitor: {0}")]
+    Hardware(String),
 }

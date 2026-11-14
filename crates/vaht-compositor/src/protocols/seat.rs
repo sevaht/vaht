@@ -2,8 +2,11 @@
 //! `wl_data_device_manager`.
 
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
+use smithay::input::keyboard::LedState;
 use smithay::input::pointer::{CursorImageStatus, Focus};
 use smithay::input::tablet::TabletSeatHandler;
+
+use crate::backend::Backend;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::Resource as _;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -23,6 +26,12 @@ impl SeatHandler for Compositor {
 
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.protocols.seat
+    }
+
+    fn led_state_changed(&mut self, _seat: &Seat<Self>, leds: LedState) {
+        if let Backend::Drm(backend) = &mut self.backend {
+            backend.set_keyboard_leds(leds);
+        }
     }
 
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {

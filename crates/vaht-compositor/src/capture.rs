@@ -162,6 +162,9 @@ impl ImageCopyCaptureHandler for Compositor {
         Some(BufferConstraints {
             size: mode.size.to_logical(1).to_buffer(1, Transform::Normal),
             shm: vec![Format::Argb8888, Format::Xrgb8888],
+            // Captures are copied into shared memory; GPU buffers are not
+            // offered yet.
+            dma: None,
         })
     }
 

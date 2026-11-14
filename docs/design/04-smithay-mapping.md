@@ -216,3 +216,54 @@ request setting the window position and the pointer together would end it).
 Test it with the ROTK launcher, and with `xdotool getmouselocation` during
 and after a drag, which should follow the real pointer.
 
+
+## 9. The DRM backend (built; not yet run on hardware)
+
+`vaht` with no host compositor (or `--backend drm`) takes the seat with
+libseat (logind or seatd), opens every GPU udev lists, and drives each
+monitor with a `DrmOutput`. Everything that decides is in
+`backend/drm/plan.rs` and tested without hardware (RUST.md R-TEST8); the
+rest only carries the decisions out.
+
+- **GPUs.** The primary GPU (the one udev calls primary, else the first)
+  composes. Every GPU with a render node is added to Smithay's `GpuManager`;
+  a display-only device (no render node, such as `simpledrm`) is drawn for
+  by the primary one. Smithay makes each GPU's EGL display and renderer
+  itself, so the backend has no `unsafe` code.
+- **Drivers.** vaht is GPU-agnostic; what one driver needs done differently
+  is in `GpuQuirks::for_driver`, keyed by the driver's name. Today:
+  NVIDIA's proprietary driver shows overlay planes wrongly, so windows are
+  not put on them there (Smithay's anvil does the same). AMD (`amdgpu`),
+  Intel and the rest use every plane. Machines in mind: the RTX 3080
+  Mobile laptop now (NVIDIA 615, one GPU) and a flagship AMD desktop to
+  come; each new quirk is a row in that function and its test.
+- **Monitors.** Each connector is scanned when its GPU appears, on udev's
+  change events (plugged and unplugged), and on resume. Outputs are named
+  by connector (`HDMI-A-1`) and carry the EDID's make, model and serial,
+  which `outputs.toml` matches. Modes come from `plan::choose_mode`: the
+  size asked at the refresh rate nearest the one asked (within half a hertz
+  counts as exact), the fastest of that size without one, the monitor's
+  preferred mode when it lacks the size. Colour is 10 bits per channel
+  where possible. VR headsets (`non-desktop`) are left alone.
+- **Frames.** Each output's `FrameState` (idle, due, queued, throttled)
+  follows its vertical blank: a frame asked for while one is on its way
+  waits for it, and a frame that changed nothing waits one refresh before
+  the next, so a client committing unchanged frames cannot make vaht spin.
+  Windows go on planes directly when they can (`FrameFlags::DEFAULT`).
+- **Variable refresh.** Each frame, `plan::wants_vrr` decides per output from
+  its `vrr` setting and whether a fullscreen window is on top there.
+- **The pointer** is drawn by vaht (`Kind::Cursor`, so it goes on the cursor
+  plane), from the xcursor theme.
+- **Terminals.** Ctrl+Alt+F1…F12 switch terminals, before any binding or
+  menu sees the key. Switching away pauses libinput and the GPUs; back,
+  they are resumed, monitors scanned again and every output drawn anew.
+- **Input** comes from libinput on the seat; keyboards' lights follow Caps,
+  Num and Scroll Lock.
+- **Not yet:** per-device input settings (tap to click, natural scrolling,
+  acceleration: fluxland's `session.input.*`, which my config does not
+  use); explicit sync (drm-syncobj), which NVIDIA needs for games and
+  Xwayland without flicker; DRM leasing for headsets; gamma; dmabuf
+  feedback per surface; presentation-time feedback.
+- **First run on hardware**, from a free terminal: `vaht` (log in
+  `~/.local/state/vaht/vaht.log`); Ctrl+Alt+F<n> back to the old terminal
+  at any time.
