@@ -58,6 +58,7 @@ mod toplevels;
 mod tray;
 mod wall_clock;
 mod window_manager;
+mod workspace_pager;
 mod xwayland;
 
 pub use backend::{BackendChoice, BackendError, RenderError};

@@ -54,7 +54,7 @@ re-renders its buffer only when its content changes.
 |---|---|---|
 | wlr-output-management | wlr-randr, kanshi, outside tools | **built** (§8.9), through the same output arrangement as `outputs.toml` and its profiles |
 | wlr-foreign-toplevel-management | Taskbars and docks outside the compositor | **built** (§8.6) |
-| ext-workspace | External pagers | niri implements it |
+| ext-workspace | External pagers | **built** (§8.10) |
 | ~~wlr-screencopy~~ | | dropped: the installed xdg-desktop-portal-wlr 0.8.4 and grim 1.5 use ext-image-copy-capture |
 | wlr-gamma-control | Night-light tools | **built** (§8.8) |
 | wlr-output-power-management | DPMS via `wlopm` | **built** (§8.7) |
@@ -259,7 +259,7 @@ listener end), and marks each client accepted there as sandboxed
 (`ClientState::is_unrestricted`). Sandboxed programs are not offered the
 globals that reach beyond their own windows: data control (every
 selection), the toplevel list and toplevel management, input methods,
-output management, power and gamma, session lock, screen capture, virtual
+output management, power and gamma, workspaces, session lock, screen capture, virtual
 pointer and keyboard, layer shell, and security contexts themselves. The
 test `a_sandboxed_program_is_offered_windows_but_not_the_privileged_globals`
 drives a sandbox engine's socket and lists what each side is offered.
@@ -323,6 +323,16 @@ applies again (kanshi applies its own again then too). A configuration
 made for outputs since changed is cancelled. The test
 `a_program_arranging_outputs_sees_them_and_moves_them` swaps two outputs,
 is cancelled, fails to turn both off, and turns one off.
+
+### 8.10 Pagers outside vaht
+
+`ext_workspace_manager_v1` (`workspace_pager.rs`): vaht's workspaces are
+shared by every output, as Fluxbox's are, so a pager gets one group on
+every output holding a handle per workspace (its number, name, place and
+whether it is shown). Any workspace can be activated, only the last
+removed, and the group can make one at the end, named; requests wait for
+the commit. The test `a_pager_outside_vaht_sees_and_switches_the_workspaces`
+switches, makes and removes workspaces through it.
 
 
 ## 9. The DRM backend (built; not yet run on hardware)

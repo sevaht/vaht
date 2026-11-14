@@ -24,6 +24,7 @@ mod surfaces;
 mod toplevel_management;
 mod virtual_input;
 mod window_hints;
+mod workspace_pager;
 mod xdg_shell;
 
 use smithay::input::SeatState;
@@ -80,6 +81,7 @@ use crate::client::ClientState;
 use crate::gamma::GammaControls;
 use crate::output_management::OutputManagement;
 use crate::output_power::OutputPower;
+use crate::workspace_pager::WorkspacePager;
 
 /// Smithay's state for every protocol global vaht advertises.
 pub(crate) struct ProtocolStates {
@@ -186,6 +188,9 @@ pub(crate) struct ProtocolStates {
     /// with `zwp_text_input_manager_v3` (input methods composing text for
     /// the focused window). Held only to keep the globals alive.
     _input_from_programs: InputFromPrograms,
+    /// `ext_workspace_manager_v1`: the workspaces as pagers see and
+    /// switch them.
+    pub(crate) workspace_pager: WorkspacePager,
     /// `wp_security_context_manager_v1`: sandbox engines giving their
     /// programs a socket of their own. Held only to keep the global alive.
     _security_context: SecurityContextState,
@@ -307,6 +312,7 @@ impl ProtocolStates {
                 ClientState::is_unrestricted,
             ),
             _input_from_programs: Self::input_from_programs(display),
+            workspace_pager: WorkspacePager::new(display),
             // A sandboxed program may not make a sandbox of its own.
             _security_context: SecurityContextState::new::<Compositor, _>(
                 display,

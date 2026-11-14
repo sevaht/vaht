@@ -18,6 +18,7 @@ mod input_method;
 mod metrics;
 mod output_configurator;
 mod output_power;
+mod pager;
 mod picture;
 mod sandbox;
 mod screenshot;
@@ -39,6 +40,7 @@ pub use output_configurator::{
     ConfigurationResult, ConfiguredHead, HeadChange, OutputConfigurator,
 };
 pub use output_power::OutputPowerControl;
+pub use pager::{PagedWorkspace, Pager};
 pub use picture::{solid_png, solid_xcursor};
 pub use sandbox::Sandbox;
 pub use screenshot::{Bounds, Screenshot};

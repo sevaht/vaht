@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-use vaht_test_support::{HeadlessVaht, ManagedWindow, TestClient, ToplevelManager, WindowList};
+use vaht_test_support::{
+    HeadlessVaht, ManagedWindow, PagedWorkspace, Pager, TestClient, ToplevelManager, WindowList,
+};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
@@ -74,5 +76,34 @@ fn a_taskbar_outside_vaht_sees_and_works_the_windows() {
     assert!(
         client.wait_for_close_requests(1),
         "the window was asked to close"
+    );
+}
+
+#[test]
+fn a_pager_outside_vaht_sees_and_switches_the_workspaces() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut pager = Pager::connect(vaht.socket());
+    let shown =
+        |workspaces: &[PagedWorkspace]| workspaces.iter().position(|(_, is_active)| *is_active);
+    let workspaces = pager.wait_for(|workspaces| workspaces.len() == 4);
+    assert_eq!(workspaces[0], ("Workspace 1".to_owned(), true));
+    assert_eq!(shown(&workspaces), Some(0));
+
+    pager.activate(2);
+    let workspaces = pager.wait_for(|workspaces| shown(workspaces) == Some(2));
+    assert_eq!(shown(&workspaces), Some(2));
+
+    pager.create("Extra");
+    let workspaces = pager.wait_for(|workspaces| workspaces.len() == 5);
+    assert_eq!(workspaces[4], ("Extra".to_owned(), false));
+
+    pager.remove(0);
+    pager.remove(4);
+    let workspaces = pager.wait_for(|workspaces| workspaces.len() == 4);
+    let names: Vec<&str> = workspaces.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4"],
+        "only the last can be removed"
     );
 }

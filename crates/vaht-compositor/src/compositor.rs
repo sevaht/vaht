@@ -114,6 +114,7 @@ use crate::window_manager::{
     Axes, ClientRequest, FramePart, OutputArea, OutputAreas, Placement, PlacementKind, Window,
     WindowDrag, WindowId, WindowManager, WorkspaceTarget,
 };
+use crate::workspace_pager::{WorkspaceFacts, WorkspaceRequest};
 use crate::xwayland::XwaylandServer;
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::xwayland::{X11Surface, X11Wm};
@@ -271,6 +272,7 @@ impl Compositor {
             // Last, so what clients changed just now is in it.
             compositor.publish_ipc_events();
             compositor.announce_outputs();
+            compositor.announce_workspaces();
             if let Err(error) = display.flush_clients() {
                 tracing::warn!(
                     error = &error as &dyn std::error::Error,
@@ -1568,6 +1570,50 @@ impl Compositor {
     /// Delivers one input event; absolute motion spans every output.
     pub(crate) fn handle_input<B: InputBackend>(&mut self, event: InputEvent<B>) {
         self.handle_input_within(event, None);
+    }
+
+    /// Tells pagers of the workspaces, if anything about them changed.
+    fn announce_workspaces(&mut self) {
+        let current = self.window_manager.current_workspace();
+        let last = self.window_manager.workspaces().count();
+        let workspaces = self
+            .window_manager
+            .workspaces()
+            .enumerate()
+            .map(|(index, (workspace, name))| WorkspaceFacts {
+                name: name.to_owned(),
+                is_active: workspace == current,
+                is_last: index + 1 == last,
+            })
+            .collect();
+        let outputs = self.outputs.iter().cloned().collect();
+        self.protocols
+            .workspace_pager
+            .follow(workspaces, outputs, &self.display_handle);
+    }
+
+    /// Carries out what a pager asked at its commit, in order.
+    pub(crate) fn carry_out_workspace_requests(&mut self, asked: Vec<WorkspaceRequest>) {
+        for request in asked {
+            match request {
+                WorkspaceRequest::Activate(index) => {
+                    if let Some(number) = std::num::NonZeroUsize::new(index + 1) {
+                        self.window_manager.run(
+                            &WindowManagerAction::Workspace(WorkspaceTarget::Numbered(number)),
+                            None,
+                        );
+                    }
+                }
+                WorkspaceRequest::Remove(index) => {
+                    if index + 1 == self.window_manager.workspaces().count() {
+                        self.window_manager
+                            .run(&WindowManagerAction::RemoveLastWorkspace, None);
+                    }
+                }
+                WorkspaceRequest::Create(name) => self.window_manager.add_workspace_named(&name),
+            }
+        }
+        self.schedule_render();
     }
 
     /// Tells programs arranging outputs of the outputs, if anything about

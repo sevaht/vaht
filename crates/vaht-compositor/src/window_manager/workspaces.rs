@@ -177,6 +177,12 @@ impl Workspaces {
         Workspace(self.count() - 1)
     }
 
+    /// Adds a workspace named `name` at the end, and returns it.
+    pub(crate) fn add_named(&mut self, name: &str) -> Workspace {
+        self.names.push(name.to_owned());
+        Workspace(self.count() - 1)
+    }
+
     /// Removes the last workspace, unless it is the only one, and returns
     /// it; the workspace before it is shown if it was.
     pub(crate) fn remove_last(&mut self) -> Option<Workspace> {

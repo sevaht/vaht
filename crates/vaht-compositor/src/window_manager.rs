@@ -244,6 +244,18 @@ impl WindowManager {
             .map(|workspace| (workspace, self.workspaces.name(workspace)))
     }
 
+    /// Adds a workspace at the end, named `name`, or as workspaces are by
+    /// default if `name` is empty.
+    pub(crate) fn add_workspace_named(&mut self, name: &str) {
+        let added = if name.is_empty() {
+            self.workspaces.add()
+        } else {
+            self.workspaces.add_named(name)
+        };
+        tracing::debug!(workspace = %added, "workspace added");
+        self.is_redraw_needed = true;
+    }
+
     /// Returns the name of the workspace shown.
     pub(crate) fn current_workspace_name(&self) -> &str {
         self.workspaces.name(self.workspaces.current())
