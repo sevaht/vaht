@@ -31,6 +31,7 @@ mod idle;
 mod input;
 mod input_emulation;
 mod ipc;
+mod key_chain;
 mod launcher;
 mod layers;
 mod menu;

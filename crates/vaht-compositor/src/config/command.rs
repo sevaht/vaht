@@ -16,6 +16,7 @@ use smithay::utils::{Logical, Point, Rectangle, Size};
 mod forms;
 
 pub(crate) use self::forms::{Condition, Delay, Toggle};
+use super::bindings::KeyChord;
 use super::matcher::WindowMatcher;
 use crate::window_manager::{
     AlphaChange, ArrangeStyle, Axes, Direction, HorizontalEdge, OutputTarget, ResizeEdges,
@@ -27,7 +28,6 @@ use crate::window_manager::{
 const PLANNED_ACTIONS: &[&str] = &[
     "activate-tray-item",
     "activate-window-list-entry",
-    "key-mode",
     "reload-theme",
     "restart",
     "set-setting",
@@ -111,29 +111,53 @@ pub(crate) enum Command {
 }
 
 impl Command {
-    /// Returns the names of the menus `custom-menu` opens in this command,
-    /// its parts included.
-    pub(crate) fn custom_menus(&self) -> Vec<&str> {
+    /// Returns every action this command can run, its parts' included.
+    pub(crate) fn actions(&self) -> Vec<&Action> {
         match self {
-            Self::Run(Action::OpenMenu(MenuRequest::Custom(name))) => vec![name.as_str()],
-            Self::Run(_) => Vec::new(),
-            Self::Sequence(commands) => commands.iter().flat_map(Self::custom_menus).collect(),
-            Self::Toggle(toggle) => toggle
-                .commands
-                .iter()
-                .flat_map(Self::custom_menus)
-                .collect(),
+            Self::Run(action) => vec![action],
+            Self::Sequence(commands) => commands.iter().flat_map(Self::actions).collect(),
+            Self::Toggle(toggle) => toggle.commands.iter().flat_map(Self::actions).collect(),
             Self::If {
                 then, otherwise, ..
             } => then
-                .custom_menus()
+                .actions()
                 .into_iter()
-                .chain(otherwise.iter().flat_map(|command| command.custom_menus()))
+                .chain(otherwise.iter().flat_map(|command| command.actions()))
                 .collect(),
             Self::Repeat { command, .. }
             | Self::ForEach { command, .. }
-            | Self::Delay(Delay { command, .. }) => command.custom_menus(),
+            | Self::Delay(Delay { command, .. }) => command.actions(),
         }
+    }
+
+    /// Returns the names of the menus `custom-menu` opens in this command,
+    /// its parts included.
+    pub(crate) fn custom_menus(&self) -> Vec<&str> {
+        self.actions()
+            .into_iter()
+            .filter_map(|action| {
+                if let Action::OpenMenu(MenuRequest::Custom(name)) = action {
+                    Some(name.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Returns the key modes `key-mode` switches to in this command, its
+    /// parts included.
+    pub(crate) fn key_modes(&self) -> Vec<&str> {
+        self.actions()
+            .into_iter()
+            .filter_map(|action| {
+                if let Action::KeyMode(mode) = action {
+                    Some(mode.name.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Returns whether this command repeats while its key is held.
@@ -406,6 +430,54 @@ pub(crate) enum Action {
     HideMenus,
     /// Turns the taskbar off, or on again.
     ToggleTaskbar,
+    /// Makes the keys bound in `[key_modes.<name>]` the only ones bound,
+    /// until the mode's end key goes back to `[keys]` (`key-mode <name>
+    /// [<end chord>]`, Escape unless given; `key-mode default` goes back).
+    KeyMode(KeyModeSwitch),
+}
+
+/// A switch to a key mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KeyModeSwitch {
+    /// The mode's name; [`Self::DEFAULT`] is `[keys]`.
+    pub(crate) name: String,
+    /// The key that goes back to `[keys]`, unless the mode binds it.
+    pub(crate) end: KeyChord,
+}
+
+impl KeyModeSwitch {
+    /// The name of the mode `[keys]` binds.
+    pub(crate) const DEFAULT: &str = "default";
+
+    /// Reads `<name> [<end chord>]`.
+    fn parse(arguments: &str) -> Result<Self, String> {
+        let mut words = arguments.split_whitespace();
+        let (Some(name), end, None) = (words.next(), words.next(), words.next()) else {
+            return Err(
+                "`key-mode` takes a mode's name, then optionally the key that ends it".to_owned(),
+            );
+        };
+        let end = end.map_or(Ok(KeyChord::escape()), KeyChord::parse)?;
+        Ok(Self {
+            name: name.to_owned(),
+            end,
+        })
+    }
+
+    /// Returns whether this goes back to `[keys]`.
+    pub(crate) fn is_default(&self) -> bool {
+        self.name == Self::DEFAULT
+    }
+}
+
+impl fmt::Display for KeyModeSwitch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.name)?;
+        if self.end != KeyChord::escape() {
+            write!(formatter, " {}", self.end)?;
+        }
+        Ok(())
+    }
 }
 
 /// Which menu an action opens.
@@ -560,6 +632,7 @@ impl Action {
             "custom-menu" => Ok(Self::OpenMenu(MenuRequest::Custom(arguments.to_owned()))),
             "hide-menus" => without_arguments(Self::HideMenus),
             "toggle-taskbar" => without_arguments(Self::ToggleTaskbar),
+            "key-mode" => KeyModeSwitch::parse(arguments).map(Self::KeyMode),
             "exit" => without_arguments(Self::Exit),
             "set-environment" => {
                 let (variable, value) = arguments
@@ -675,6 +748,7 @@ impl fmt::Display for Action {
             Self::OpenMenu(MenuRequest::Custom(name)) => write!(formatter, "custom-menu {name}"),
             Self::HideMenus => formatter.write_str("hide-menus"),
             Self::ToggleTaskbar => formatter.write_str("toggle-taskbar"),
+            Self::KeyMode(mode) => write!(formatter, "key-mode {mode}"),
         }
     }
 }

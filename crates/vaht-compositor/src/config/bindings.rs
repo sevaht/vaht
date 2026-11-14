@@ -3,6 +3,11 @@
 //! ```toml
 //! [keys]
 //! "Super+T" = "exec kitty"
+//! "Super+X Super+T" = "exec xterm"
+//! "Super+M" = "key-mode moving"
+//!
+//! [key_modes.moving]
+//! "Left" = "move -10 0"
 //!
 //! [mouse.titlebar]
 //! "Drag+Left" = "start-moving"
@@ -11,10 +16,13 @@
 //! lid-close = "exec swaylock"
 //! ```
 //!
-//! A key chord is modifiers joined by `+`, then an xkb key name. A mouse
+//! A key chord is modifiers joined by `+`, then an xkb key name; a chain
+//! is chords separated by spaces ([`key_table`]). A mouse
 //! trigger is modifiers, optionally `Double` or `Drag`, then a button. The
 //! file replaces the built-in bindings as a whole, as Fluxbox's `keys` file
 //! does, so what it says is everything that is bound.
+
+mod key_table;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -24,19 +32,25 @@ use serde::de::{self, Deserializer};
 use smithay::input::keyboard::ModifiersState;
 use smithay::input::keyboard::{Keysym, xkb};
 
-use super::command::Command;
+use super::command::{Command, KeyModeSwitch};
 use super::unique_map;
 use crate::scene::{PointerTarget, WindowTarget};
 use crate::taskbar::TaskbarHit;
 use crate::window_manager::{FramePart, GripSide};
 
+pub(crate) use self::key_table::KeyLookup;
+use self::key_table::KeyTable;
+
 /// Every binding.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Bindings {
-    /// Key chords and what they do.
-    #[serde(default, deserialize_with = "unique_map::deserialize")]
-    keys: HashMap<KeyChord, Command>,
+    /// Key chords and chains, and what they do.
+    #[serde(default)]
+    keys: KeyTable,
+    /// The keys bound in each key mode, by name, instead of `keys`.
+    #[serde(default, deserialize_with = "Bindings::deserialize_key_modes")]
+    key_modes: HashMap<String, KeyTable>,
     /// Mouse triggers and what they do, by where the pointer is.
     #[serde(default)]
     mouse: HashMap<MouseContext, MouseBindings>,
@@ -94,7 +108,8 @@ impl Bindings {
     /// Returns every command bound: keys', the mouse's and switches'.
     pub(crate) fn commands(&self) -> impl Iterator<Item = &Command> {
         self.keys
-            .values()
+            .commands()
+            .chain(self.key_modes.values().flat_map(KeyTable::commands))
             .chain(self.mouse.values().flat_map(|bindings| bindings.0.values()))
             .chain(self.switches.values())
     }
@@ -104,9 +119,31 @@ impl Bindings {
         self.switches.get(&flip)
     }
 
-    /// Returns what `chord` is bound to.
-    pub(crate) fn key(&self, chord: KeyChord) -> Option<&Command> {
-        self.keys.get(&chord)
+    /// Returns what `pressed`, chords pressed in turn, is bound to in the
+    /// key mode `mode` (`[keys]` if none, or if there is no such mode).
+    pub(crate) fn key(&self, mode: Option<&str>, pressed: &[KeyChord]) -> KeyLookup<'_> {
+        mode.and_then(|mode| self.key_modes.get(mode))
+            .unwrap_or(&self.keys)
+            .lookup(pressed)
+    }
+
+    /// Reads `[key_modes]`, refusing a mode named as `[keys]` is.
+    fn deserialize_key_modes<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<HashMap<String, KeyTable>, D::Error> {
+        let modes: HashMap<String, KeyTable> = serde::Deserialize::deserialize(deserializer)?;
+        if modes.contains_key(KeyModeSwitch::DEFAULT) {
+            return Err(de::Error::custom(format!(
+                "[key_modes.{0}] cannot be: `{0}` is the mode [keys] binds",
+                KeyModeSwitch::DEFAULT
+            )));
+        }
+        Ok(modes)
+    }
+
+    /// Returns whether the key mode `name` is bound.
+    pub(crate) fn has_key_mode(&self, name: &str) -> bool {
+        self.key_modes.contains_key(name)
     }
 
     /// Returns what turning the wheel `steps` (in 120ths of a notch,
@@ -199,7 +236,7 @@ impl Modifiers {
     fn split_from(text: &str) -> Result<(Self, Vec<&str>), String> {
         if text.trim() != text || text.contains(char::is_whitespace) {
             return Err(format!(
-                "`{text}`: key chains (several chords) are not available in vaht yet, and names \
+                "`{text}`: only keys chain (several chords, separated by spaces), and names \
                  have no spaces"
             ));
         }
@@ -261,8 +298,18 @@ impl KeyChord {
         Self { modifiers, key }
     }
 
+    /// Escape, without modifiers: what ends a key chain or key mode.
+    pub(crate) const fn escape() -> Self {
+        Self::new(Modifiers(0), Keysym::Escape)
+    }
+
+    /// Returns whether the key is a modifier, as Shift or Super are.
+    pub(crate) const fn is_modifier(self) -> bool {
+        self.key.is_modifier_key()
+    }
+
     /// Parses `Super+T`.
-    fn parse(text: &str) -> Result<Self, String> {
+    pub(super) fn parse(text: &str) -> Result<Self, String> {
         let (modifiers, words) = Modifiers::split_from(text)?;
         let [key] = words.as_slice() else {
             return Err(format!(
@@ -632,20 +679,20 @@ mod tests {
                 .expect("valid bindings");
         let super_r = KeyChord::new(held(&["super"]), Keysym::r);
         assert_eq!(
-            parsed.key(super_r),
-            Some(&Command::Run(Action::Exec("fuzzel".to_owned())))
+            parsed.key(None, &[super_r]),
+            KeyLookup::Bound(&Command::Run(Action::Exec("fuzzel".to_owned())))
         );
         assert_eq!(super_r.to_string(), "Super+r");
         let alt_shift_tab = KeyChord::new(held(&["alt", "shift"]), Keysym::Tab);
         assert_eq!(
-            parsed.key(alt_shift_tab),
-            Some(&Command::Run(Action::WindowManager(
+            parsed.key(None, &[alt_shift_tab]),
+            KeyLookup::Bound(&Command::Run(Action::WindowManager(
                 WindowManagerAction::Raise
             )))
         );
         assert_eq!(
-            parsed.key(KeyChord::new(held(&["alt"]), Keysym::Tab)),
-            None,
+            parsed.key(None, &[KeyChord::new(held(&["alt"]), Keysym::Tab)]),
+            KeyLookup::Unbound,
             "Alt+Tab is not Alt+Shift+Tab"
         );
     }
@@ -686,7 +733,7 @@ mod tests {
         "[keys]\n\"Super+T\" = \"close\"\n\"Mod4+t\" = \"kill\"",
         "bound twice"
     )]
-    #[case::key_chain("[keys]\n\"Super+A Super+B\" = \"close\"", "key chains")]
+    #[case::mode_named_default("[key_modes.default]\n\"a\" = \"close\"", "cannot be")]
     #[case::modifier_twice("[keys]\n\"Alt+Alt+T\" = \"close\"", "twice")]
     #[case::unknown_gesture("[mouse.titlebar]\n\"Triple+Left\" = \"close\"", "neither")]
     #[case::dragged_wheel("[mouse.desktop]\n\"Drag+ScrollUp\" = \"close\"", "wheel")]
@@ -694,6 +741,7 @@ mod tests {
         "[mouse.desktop]\n\"Left\" = { repeat = \"close\" }",
         "only key bindings"
     )]
+    #[case::chained_buttons("[mouse.desktop]\n\"Left Right\" = \"close\"", "only keys chain")]
     #[case::unknown_context("[mouse.dock]\n\"Left\" = \"close\"", "unknown variant")]
     #[case::unknown_table("[keyz]", "unknown field")]
     fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {

@@ -20,9 +20,12 @@ use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 
 use crate::Compositor;
-use crate::config::{Bindings, Command, Config, KeyChord, Modifiers, MouseButton, MouseContext};
+use crate::config::{
+    Bindings, Command, Config, KeyChord, KeyModeSwitch, Modifiers, MouseButton, MouseContext,
+};
 use crate::event_source::{RepeatingTimer, Timer};
 use crate::execution::ExecutionContext;
+use crate::key_chain::{ChordOutcome, KeyChain};
 use crate::menu::MenuKey;
 use crate::resources::ResourceLedger;
 use crate::scene::{PointerTarget, WindowTarget};
@@ -151,6 +154,8 @@ pub(crate) struct Input {
     last_click: Option<Click>,
     /// Raises the window the pointer rests on, with auto-raise.
     auto_raise: Option<Timer<Compositor>>,
+    /// The key chain pressed so far, and the key mode.
+    key_chain: KeyChain,
 }
 
 impl Input {
@@ -163,6 +168,16 @@ impl Input {
     pub(crate) const KEY_REPEAT_RATE: NonZeroU32 =
         NonZeroU32::new(25).expect("the key repeat rate is not zero");
 
+    /// Switches to the key mode `switch` of `bindings`.
+    pub(crate) fn switch_key_mode(&mut self, switch: &KeyModeSwitch, bindings: &Bindings) {
+        self.key_chain.switch_mode(switch, bindings);
+    }
+
+    /// Follows `bindings` read again.
+    pub(crate) fn bindings_changed(&mut self, bindings: &Bindings) {
+        self.key_chain.bindings_changed(bindings);
+    }
+
     /// Takes the release of `keycode` from clients, as its press was vaht's
     /// (an open menu's).
     pub(crate) fn claim_release(&mut self, keycode: Keycode) {
@@ -171,13 +186,14 @@ impl Input {
     }
 
     /// Decides whose a key event is: the client's, or vaht's, with the
-    /// command a bound press runs. `chord` is the press
-    /// with its modifiers, if the key has a keysym. A bound press's release
-    /// is vaht's too, and any press or that key's release ends a repeat.
+    /// command a bound press runs ([`KeyChain`]). `chord` is the press,
+    /// at `now`, with its modifiers, if the key has a keysym. A press
+    /// vaht takes has its release taken too, and any press or that key's
+    /// release ends a repeat.
     pub(crate) fn key(
         &mut self,
         keycode: Keycode,
-        state: KeyState,
+        (state, now): (KeyState, Instant),
         chord: Option<KeyChord>,
         bindings: &Bindings,
     ) -> FilterResult<Option<Command>> {
@@ -186,14 +202,19 @@ impl Input {
                 self.key_repeat = None;
                 // A fresh press of a key whose release was never seen.
                 self.suppressed_keys.remove(&keycode);
-                let Some((chord, command)) =
-                    chord.and_then(|chord| Some((chord, bindings.key(chord)?)))
-                else {
+                let Some(chord) = chord else {
                     return FilterResult::Forward;
                 };
-                tracing::debug!(%chord, "key binding");
+                let command = match self.key_chain.press(chord, now, bindings) {
+                    ChordOutcome::Pass => return FilterResult::Forward,
+                    ChordOutcome::Taken => None,
+                    ChordOutcome::Run(command) => {
+                        tracing::debug!(%chord, "key binding");
+                        Some(command)
+                    }
+                };
                 self.suppressed_keys.insert(keycode);
-                FilterResult::Intercept(Some(command.clone()))
+                FilterResult::Intercept(command)
             }
             KeyState::Released => {
                 if self

@@ -521,6 +521,7 @@ impl Compositor {
         if let Some(taskbar) = &mut self.taskbar {
             taskbar.forget_icons();
         }
+        self.input.bindings_changed(&config.bindings);
         self.config = config;
         self.start_taskbar_services();
         if let Some(changes) = output_changes {
@@ -2306,6 +2307,7 @@ impl Compositor {
                     self.schedule_render();
                 }
             }
+            Action::KeyMode(switch) => self.input.switch_key_mode(switch, &self.config.bindings),
         }
     }
 
@@ -2540,7 +2542,8 @@ impl Compositor {
         let chord = keysym
             .raw_latin_sym_or_raw_current_sym()
             .map(|key| KeyChord::new(held, key));
-        match self.input.key(keycode, state, chord, &self.config.bindings) {
+        let press = (state, Instant::now());
+        match self.input.key(keycode, press, chord, &self.config.bindings) {
             FilterResult::Forward => FilterResult::Forward,
             FilterResult::Intercept(command) => {
                 FilterResult::Intercept(command.map(KeyPress::Binding))

@@ -31,10 +31,11 @@ use std::path::{Path, PathBuf};
 use vaht_ui::Theme;
 
 pub(crate) use self::bindings::{
-    Bindings, KeyChord, Modifiers, MouseButton, MouseContext, SwitchFlip, SwitchKind,
+    Bindings, KeyChord, KeyLookup, Modifiers, MouseButton, MouseContext, SwitchFlip, SwitchKind,
 };
 pub(crate) use self::command::{
-    Action, Command, CycleOrder, Delay, MenuRequest, ResizeFrom, WindowCycle, WindowManagerAction,
+    Action, Command, CycleOrder, Delay, KeyModeSwitch, MenuRequest, ResizeFrom, WindowCycle,
+    WindowManagerAction,
 };
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};
@@ -149,6 +150,7 @@ impl Config {
             theme,
         };
         config.check_custom_menus()?;
+        config.check_key_modes()?;
         Ok(config)
     }
 
@@ -169,6 +171,33 @@ impl Config {
             for name in commands.iter().flat_map(|command| command.custom_menus()) {
                 if self.menus.get(name).is_none() {
                     return Err(ConfigError::UnknownMenu {
+                        file,
+                        name: name.to_owned(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Makes sure every `key-mode` names a mode `bindings.toml` has, or
+    /// the default one.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first one that does not, and the file naming it.
+    fn check_key_modes(&self) -> Result<(), ConfigError> {
+        let named = [
+            (
+                "bindings.toml",
+                self.bindings.commands().collect::<Vec<_>>(),
+            ),
+            ("menus.toml", self.menus.commands().collect::<Vec<_>>()),
+        ];
+        for (file, commands) in named {
+            for name in commands.iter().flat_map(|command| command.key_modes()) {
+                if name != KeyModeSwitch::DEFAULT && !self.bindings.has_key_mode(name) {
+                    return Err(ConfigError::UnknownKeyMode {
                         file,
                         name: name.to_owned(),
                     });
@@ -237,6 +266,15 @@ pub enum ConfigError {
         /// The file naming it.
         file: &'static str,
         /// The menu's name.
+        name: String,
+    },
+
+    /// A `key-mode` names a mode `bindings.toml` does not have.
+    #[error("{file}: `key-mode {name}` names no [key_modes.{name}] in bindings.toml")]
+    UnknownKeyMode {
+        /// The file naming it.
+        file: &'static str,
+        /// The mode's name.
         name: String,
     },
 

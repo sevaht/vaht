@@ -9,6 +9,7 @@
 
 use toml_edit::{Array, InlineTable, Value};
 
+use crate::keys::KeysFile;
 use crate::pattern::{self, ClientPattern};
 use crate::report::Reason;
 
@@ -128,6 +129,7 @@ impl FluxboxCommand<'_> {
             "arrangewindowshorizontal" if arguments.is_empty() => plain("arrange rows"),
             "setworkspacename" if !arguments.is_empty() => with("rename-workspace"),
             "toggletoolbarhidden" => plain("toggle-taskbar"),
+            "keymode" => Self::key_mode(arguments),
             "focusleft" => plain("focus-direction left"),
             "focusright" => plain("focus-direction right"),
             "focusup" => plain("focus-direction up"),
@@ -146,6 +148,7 @@ impl FluxboxCommand<'_> {
             "addworkspace" => plain("add-workspace"),
             "removelastworkspace" => plain("remove-last-workspace"),
             "move" => with("move"),
+            "moveleft" | "moveright" | "moveup" | "movedown" => Self::move_by(name, arguments),
             "moveto" => with("move-to"),
             "resize" => with("resize"),
             "resizeto" => with("resize-to"),
@@ -181,6 +184,45 @@ impl FluxboxCommand<'_> {
                     .trim_end()
                     .to_owned(),
             )),
+        }
+    }
+
+    /// Translates `MoveLeft <n>` and its kin into `move <dx> <dy>`.
+    fn move_by(name: &str, arguments: &str) -> Result<String, Untranslated> {
+        let distance: i32 = arguments
+            .parse()
+            .map_err(|_not_a_number| Untranslated::not_yet(format!("{name} {arguments}")))?;
+        let (dx, dy) = match name {
+            "moveleft" => (-distance, 0),
+            "moveright" => (distance, 0),
+            "moveup" => (0, -distance),
+            _ => (0, distance),
+        };
+        Ok(format!("move {dx} {dy}"))
+    }
+
+    /// Translates `KeyMode <name> [<end keys>]`; the end keys are Escape
+    /// unless given, as vaht's are.
+    fn key_mode(arguments: &str) -> Result<String, Untranslated> {
+        let (name, end) = arguments
+            .split_once(char::is_whitespace)
+            .map_or((arguments, ""), |(name, end)| (name, end.trim()));
+        let untranslated = || Untranslated::not_yet(format!("KeyMode {arguments}"));
+        if name.is_empty() {
+            return Err(untranslated());
+        }
+        let name = if name.eq_ignore_ascii_case("default") {
+            "default"
+        } else {
+            name
+        };
+        match end {
+            "" => Ok(format!("key-mode {name}")),
+            end => match KeysFile::chain(end).ok_or_else(untranslated)?.as_str() {
+                "Escape" => Ok(format!("key-mode {name}")),
+                chord if !chord.contains(' ') => Ok(format!("key-mode {name} {chord}")),
+                _ => Err(untranslated()),
+            },
         }
     }
 
@@ -591,6 +633,12 @@ mod tests {
     #[case::fbrun("Exec fbrun", r#""run-dialog""#)]
     #[case::fluxland_run("ExecCommand fluxland-run -f 'Sans 10'", r#""run-dialog""#)]
     #[case::not_a_run_window("Exec fbrunner", r#""exec fbrunner""#)]
+    #[case::move_left("MoveLeft 10", r#""move -10 0""#)]
+    #[case::move_down("MoveDown 5", r#""move 0 5""#)]
+    #[case::key_mode("KeyMode moving", r#""key-mode moving""#)]
+    #[case::key_mode_ended_by_escape("KeyMode moving None Escape", r#""key-mode moving""#)]
+    #[case::key_mode_ended_otherwise("KeyMode moving Mod4 m", r#""key-mode moving Super+m""#)]
+    #[case::key_mode_default("KeyMode Default", r#""key-mode default""#)]
     fn commands_translate(#[case] fluxbox: &str, #[case] vaht: &str) {
         assert_eq!(translate(fluxbox), vaht);
     }
@@ -599,6 +647,7 @@ mod tests {
     #[case::tabs("StartTabbing", Reason::Dropped)]
     #[case::menu_from_a_file("CustomMenu ~/.fluxbox/custom", Reason::NotYetInVaht)]
     #[case::macro_with_a_missing_part("MacroCmd {Raise} {CustomMenu x}", Reason::NotYetInVaht)]
+    #[case::key_mode_ended_by_a_chain("KeyMode moving Mod4 x t", Reason::NotYetInVaht)]
     fn commands_not_translated_say_why(#[case] fluxbox: &str, #[case] reason: Reason) {
         let untranslated = FluxboxCommand(fluxbox).to_vaht().expect_err(fluxbox);
         assert_eq!(untranslated.reason, reason);

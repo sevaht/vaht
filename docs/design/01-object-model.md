@@ -377,8 +377,10 @@ or more.
   `Resize { id, edges, start }` and `Menu`. It implements Smithay's
   `PointerGrab` in one place. Opaque versus wireframe is a field, not a
   separate code path.
-- **`KeyBindings`** maps `(KeyMode, KeyChord)` to a `Command`. Chains are a
-  tree, and `KeyChain` holds the current node.
+- **`KeyTable`** (`[keys]` and each `[key_modes.<name>]`) maps a chain of
+  `KeyChord`s to a `Command`, and knows each chain's beginnings.
+  `KeyChain` holds the chords pressed so far, when the last was pressed,
+  and the key mode; fed a chord and the time, it says what runs.
 - The taskbar never takes keyboard focus (00 decision). An open menu receives
   keys through `Overlays`. Dialogs are ordinary client windows, so they get
   keys like any other window.

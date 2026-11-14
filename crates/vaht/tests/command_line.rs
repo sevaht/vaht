@@ -188,7 +188,8 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     .expect("written");
     std::fs::write(
         setup.path().join("keys"),
-        "Mod4 T :Exec kitty\nMod4 Tab :NextTab\n",
+        "Mod4 T :Exec kitty\nMod4 Tab :NextTab\nMod4 x Mod4 t :Exec xterm\n\
+         Mod4 m :KeyMode moving\nmoving: Left :MoveLeft 10\n",
     )
     .expect("written");
     let target = tempfile::tempdir().expect("a temporary directory");
@@ -228,5 +229,15 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     assert!(
         std::fs::read_dir(setup.path()).expect("readable").count() == 3,
         "the source is untouched"
+    );
+    let bindings = std::fs::read_to_string(target.path().join("bindings.toml")).expect("written");
+    assert!(bindings.contains("[key_modes.moving]"), "{bindings}");
+    let checked = run_executable(
+        &["check", "--config-directory", &path(&target)],
+        logs.path(),
+    );
+    assert!(
+        checked.status.success(),
+        "what import writes is valid: {checked:?}"
     );
 }

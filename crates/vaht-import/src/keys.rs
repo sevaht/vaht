@@ -1,7 +1,9 @@
 //! Converting Fluxbox's `keys` file to `bindings.toml` (02 §6).
 //!
-//! Each line is `[context] [modifiers] [Double] key-or-button :command`.
-//! Key bindings go to `[keys]`, mouse bindings to `[mouse.<context>]`. When
+//! Each line is `[mode:] [context] [modifiers] [Double] key-or-button
+//! :command`, where a key may be a chain (`Mod4 x Mod4 t`). Key bindings
+//! go to `[keys]`, or `[key_modes.<mode>]`, mouse bindings to
+//! `[mouse.<context>]`. When
 //! a chord is bound twice, the later binding wins, as in Fluxbox, and the
 //! earlier one is reported.
 
@@ -25,7 +27,9 @@ pub(crate) struct KeysFile<'text> {
 /// Where a binding goes in `bindings.toml`: the table, and its key there.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Slot {
-    /// `None` for `[keys]`, or the mouse context.
+    /// The key mode, `None` for `[keys]` and the mouse.
+    mode: Option<String>,
+    /// `None` for keys, or the mouse context.
     context: Option<&'static str>,
     /// The chord or trigger, as vaht writes it.
     trigger: String,
@@ -74,6 +78,7 @@ impl<'text> KeysFile<'text> {
         let mut document = DocumentMut::new();
         // Keys first, then mouse contexts, whatever order the file has.
         Self::table(document.as_table_mut(), "keys");
+        Self::table(document.as_table_mut(), "key_modes").set_implicit(true);
         Self::table(document.as_table_mut(), "mouse").set_implicit(true);
         let mut bound_on: HashMap<Slot, usize> = HashMap::new();
         for (index, line) in self.text.lines().enumerate() {
@@ -110,7 +115,7 @@ impl<'text> KeysFile<'text> {
                 Err((reason, detail)) => report.note(self.path, number, reason, detail),
             }
         }
-        for name in ["keys", "mouse"] {
+        for name in ["keys", "key_modes", "mouse"] {
             if document
                 .get(name)
                 .and_then(Item::as_table)
@@ -122,8 +127,18 @@ impl<'text> KeysFile<'text> {
         document
     }
 
-    /// Splits a binding line into where it goes and its command text.
+    /// Splits a binding line into where it goes and its command text. A
+    /// line may begin with a key mode's name and a colon (`moving: h
+    /// :MoveLeft 10`); `default:` is `[keys]`.
     fn binding(line: &'text str) -> Result<(Slot, &'text str), (Reason, String)> {
+        let (mode, line) = match line.split_once(char::is_whitespace) {
+            Some((first, rest)) if first.len() > 1 && first.ends_with(':') => {
+                let name = &first[..first.len() - 1];
+                let mode = (!name.eq_ignore_ascii_case("default")).then(|| name.to_owned());
+                (mode, rest.trim_start())
+            }
+            _ => (None, line),
+        };
         let (left, command) = line.split_once(':').ok_or_else(|| {
             (
                 Reason::Unreadable,
@@ -134,7 +149,7 @@ impl<'text> KeysFile<'text> {
         let mut modifiers = Vec::new();
         let mut gesture = "";
         let mut button = None;
-        let mut keys = Vec::new();
+        let mut chords = Vec::new();
         for token in left.split_whitespace() {
             let lowercase = token.to_ascii_lowercase();
             if let Some((_, vaht)) = Self::CONTEXTS.iter().find(|(name, _)| *name == lowercase) {
@@ -144,10 +159,6 @@ impl<'text> KeysFile<'text> {
                         format!("{token} bindings (tabs and the slit are gone)"),
                     )
                 })?);
-            } else if let Some((_, vaht)) =
-                Self::MODIFIERS.iter().find(|(name, _)| *name == lowercase)
-            {
-                modifiers.push(*vaht);
             } else if lowercase == "double" {
                 gesture = "Double+";
             } else if let Some((drag, number)) = Self::button_token(&lowercase) {
@@ -158,39 +169,87 @@ impl<'text> KeysFile<'text> {
                     Self::button(number)
                         .ok_or_else(|| (Reason::NotYetInVaht, format!("mouse button {number}")))?,
                 );
-            } else if lowercase.starts_with("mod") {
-                return Err((Reason::NotYetInVaht, format!("the modifier {token}")));
-            } else {
-                keys.push(token);
+            } else if lowercase == "arg" {
+                return Err((
+                    Reason::NotYetInVaht,
+                    format!("a chain ending in whatever key comes ({left})"),
+                ));
+            } else if !Self::modifier_token(token, &mut modifiers)? {
+                chords.push(format!("{}{token}", Self::modifier_prefix(&mut modifiers)));
             }
         }
+        let prefix = Self::modifier_prefix(&mut modifiers);
+        let slot = match (button, chords.as_slice()) {
+            (Some(_), _) if mode.is_some() => {
+                return Err((
+                    Reason::NotYetInVaht,
+                    format!("a mouse binding in a key mode ({left})"),
+                ));
+            }
+            (Some(button), []) => Slot {
+                mode: None,
+                context: Some(context.unwrap_or("window")),
+                trigger: format!("{prefix}{gesture}{button}"),
+            },
+            (None, [_, ..]) if context.is_none() && prefix.is_empty() => Slot {
+                mode,
+                context: None,
+                trigger: chords.join(" "),
+            },
+            _ => return Err((Reason::Unreadable, format!("the binding {left}"))),
+        };
+        Ok((slot, command))
+    }
+
+    /// Converts Fluxbox's key chain `text` (`Mod4 x Mod4 t`, or `None
+    /// Escape`) to vaht's (`Super+x Super+t`), if it is one.
+    pub(crate) fn chain(text: &str) -> Option<String> {
+        let mut modifiers = Vec::new();
+        let mut chords = Vec::new();
+        for token in text.split_whitespace() {
+            let is_modifier = Self::modifier_token(token, &mut modifiers).ok()?;
+            if !is_modifier {
+                chords.push(format!("{}{token}", Self::modifier_prefix(&mut modifiers)));
+            }
+        }
+        (modifiers.is_empty() && !chords.is_empty()).then(|| chords.join(" "))
+    }
+
+    /// Adds the modifier `token` names to `modifiers`, if it names one,
+    /// and returns whether it did; `None` names none, and adds nothing.
+    fn modifier_token(
+        token: &str,
+        modifiers: &mut Vec<&'static str>,
+    ) -> Result<bool, (Reason, String)> {
+        let lowercase = token.to_ascii_lowercase();
+        if lowercase == "none" {
+            return Ok(true);
+        }
+        if let Some((_, vaht)) = Self::MODIFIERS.iter().find(|(name, _)| *name == lowercase) {
+            modifiers.push(vaht);
+            return Ok(true);
+        }
+        if lowercase.starts_with("mod") {
+            return Err((Reason::NotYetInVaht, format!("the modifier {token}")));
+        }
+        Ok(false)
+    }
+
+    /// Returns the `modifiers` gathered as vaht writes them before a key
+    /// (`Super+Shift+`), and empties them for the next chord.
+    fn modifier_prefix(modifiers: &mut Vec<&'static str>) -> String {
         modifiers.sort_by_key(|modifier| {
             Self::MODIFIERS
                 .iter()
                 .position(|(_, vaht)| vaht == modifier)
         });
-        let prefix = modifiers
-            .iter()
+        modifiers
+            .drain(..)
             .fold(String::new(), |mut prefix, modifier| {
                 prefix.push_str(modifier);
                 prefix.push('+');
                 prefix
-            });
-        let slot = match (button, keys.as_slice()) {
-            (Some(button), []) => Slot {
-                context: Some(context.unwrap_or("window")),
-                trigger: format!("{prefix}{gesture}{button}"),
-            },
-            (None, [key]) if context.is_none() => Slot {
-                context: None,
-                trigger: format!("{prefix}{key}"),
-            },
-            (None, [_, _, ..]) => {
-                return Err((Reason::NotYetInVaht, format!("the key chain {left}")));
-            }
-            _ => return Err((Reason::Unreadable, format!("the binding {left}"))),
-        };
-        Ok((slot, command))
+            })
     }
 
     /// Reads `mouseN`, `clickN` or `moveN`: whether it is a drag, and N.
@@ -218,9 +277,14 @@ impl<'text> KeysFile<'text> {
 
     /// Puts `command` in `document` where `slot` says.
     fn insert(document: &mut DocumentMut, slot: &Slot, command: Value) {
-        let table = match slot.context {
-            None => Self::table(document.as_table_mut(), "keys"),
-            Some(context) => {
+        let table = match (&slot.mode, slot.context) {
+            (None, None) => Self::table(document.as_table_mut(), "keys"),
+            (Some(mode), _) => {
+                let modes = Self::table(document.as_table_mut(), "key_modes");
+                modes.set_implicit(true);
+                Self::table(modes, mode)
+            }
+            (None, Some(context)) => {
                 let mouse = Self::table(document.as_table_mut(), "mouse");
                 mouse.set_implicit(true);
                 Self::table(mouse, context)
@@ -260,6 +324,43 @@ Mod4 Tab :NextTab
 Mod1 F9 :Minimize
 Mod1 F9 :Maximize
 ";
+
+    #[test]
+    fn chains_and_key_modes_convert() {
+        let mut report = Report::default();
+        let text = "\
+Mod4 x Mod4 t :Exec xterm
+Mod4 m :KeyMode moving
+moving: Left :MoveLeft 10
+moving: Mod4 h :Move -10 0
+default: Mod4 r :Reconfigure
+moving: OnDesktop Mouse1 :RootMenu
+Mod4 g Arg :GotoMarkedWindow
+None Escape :HideMenus
+";
+        let document = KeysFile::new(Path::new("keys"), text).convert(&mut report);
+        let expected = r#"[keys]
+"Super+x Super+t" = "exec xterm"
+"Super+m" = "key-mode moving"
+"Super+r" = "reload"
+Escape = "hide-menus"
+
+[key_modes.moving]
+Left = "move -10 0"
+"Super+h" = "move -10 0"
+"#;
+        assert_eq!(document.to_string(), expected);
+        let lines: Vec<_> = report
+            .notes()
+            .iter()
+            .map(|note| (note.line, note.reason))
+            .collect();
+        assert_eq!(
+            lines,
+            [(6, Reason::NotYetInVaht), (7, Reason::NotYetInVaht)],
+            "a mouse binding in a mode, and Arg: {report}"
+        );
+    }
 
     #[test]
     fn my_keys_convert() {

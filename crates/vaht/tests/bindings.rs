@@ -252,3 +252,38 @@ fn a_delay_run_again_before_its_time_runs_once() {
     let written = wait_for_file(&log, |text| text.contains("marker"));
     assert_eq!(written, "ran\nmarker\n");
 }
+
+#[test]
+fn a_key_chain_runs_on_its_last_chord_and_a_key_mode_until_escape() {
+    let files = WrittenFiles::new();
+    let log = files.path("log");
+    let bindings = format!(
+        "[keys]\n\"Super+F1 Super+T\" = \"exec echo chain >> '{0}'\"\n\
+         \"Super+F2\" = \"key-mode typing\"\n\
+         [key_modes.typing]\n\"t\" = \"exec echo mode >> '{0}'\"\n",
+        log.display()
+    );
+    let vaht =
+        HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("bindings.toml", &bindings)]);
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    client.type_chord(&[keys::LEFT_SUPER, keys::F1]);
+    client.type_chord(&SUPER_T);
+    let _ = wait_for_file(&log, |text| text == "chain\n");
+
+    client.type_chord(&[keys::LEFT_SUPER, keys::F2]);
+    client.type_chord(&[keys::LETTER_T]);
+    let _ = wait_for_file(&log, |text| text == "chain\nmode\n");
+    client.type_chord(&[keys::ESCAPE]);
+    client.type_chord(&[keys::LETTER_T]);
+    let received = client.received_keys();
+    assert_eq!(
+        received
+            .iter()
+            .filter(|&&key| key != keys::LEFT_SUPER)
+            .collect::<Vec<_>>(),
+        [&keys::LETTER_T],
+        "only T after the mode ended reaches the window"
+    );
+    assert_eq!(files.wait_for("log"), "chain\nmode\n");
+}

@@ -360,6 +360,7 @@ A command is written in one of three forms:
 | Grabs | `start-moving`, `start-resizing [nearest-corner\|<corner>]` |
 | Focus | `focus`, `next-window`, `previous-window`, `focus-direction <direction>`, `show-desktop` |
 | Workspaces | `workspace <n\|next\|previous\|last>`, `send-to-workspace <target>`, `take-to-workspace <target>`, `add-workspace`, `remove-last-workspace`, `rename-workspace` |
+| Keys | `key-mode <name> [<end chord>]` |
 | Menus and dialogs | `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`, `custom-menu <name>`, `hide-menus`, `run-dialog`, `command-dialog` |
 | Taskbar | `activate-window-list-entry <n>`, `activate-tray-item <n>`, `tray-item-menu <n>`, `toggle-taskbar`, `taskbar-to-output <target>` |
 | Outputs | `apply-profile <name>`, `cycle-profile`, `cycle-primary-output` |
@@ -451,7 +452,12 @@ My `keys`, converted (repetitive lines shortened):
 "Super+F1"      = "send-to-workspace 1"    # ... through F12
 "Ctrl+Super+F1" = "take-to-workspace 1"    # ... through F12
 
-# Key modes: [keys.mode.<name>] holds bindings active after "key-mode <name>".
+# Key modes: [key_modes.<name>] holds the only keys bound after
+# "key-mode <name>", until Escape (or the end chord "key-mode <name> <chord>"
+# gives), unbound in the mode, goes back to [keys]. For example:
+#   "Super+M" = "key-mode moving"
+#   [key_modes.moving]
+#   "Left" = "move -10 0"
 
 # Mouse: [mouse.<context>]. Contexts: desktop, taskbar, window-list-entry,
 # titlebar, window (anywhere on a window, normally with a modifier), border,
@@ -514,13 +520,23 @@ lid-close = "exec swaylock"
   modifiers), and resizing by dragging a border when the border has no
   binding for that button.
 - Actions of §4 that vaht does not have yet are rejected by name ("not
-  available in vaht yet"), as are key chains and key modes. The structured
+  available in vaht yet"). The structured
   forms are built: a `toggle` runs its commands in turn, one per run (a
   reload starts it over); `if` asks its condition of the window the
   command is about (none never matches); `for_each` runs its command on
   each placed window matching, as the command's window; and `delay_ms`
   runs its command that long later, put off again if run again first. A file that uses them fails
   `vaht check` instead of half-working.
+- A chain (`"Super+X Super+T"`) runs once its chords are pressed in turn,
+  each within 5 seconds of the last, as Fluxbox waits. Escape gives up on
+  a chain, as does a chord it does not go on with, which then reaches the
+  focused window as an unbound key does; modifiers pressed for the next
+  chord do neither. A chain's beginning cannot be bound too, and a chain
+  cannot repeat. A key mode's bindings, in `[key_modes.<name>]`, are the
+  only ones bound while it lasts; keys it leaves unbound reach the
+  window. `key-mode default` goes back to `[keys]`, as does the end
+  chord, and a reload that drops the mode. `vaht check` rejects a
+  `key-mode` naming a mode the file does not have.
 - `focus-direction <left|right|up|down>` focuses and raises the nearest
   shown window whose middle lies that way, within 45 degrees, from the
   focused one's (Fluxbox's `FocusLeft` and its kin). `mark-window <key>`
