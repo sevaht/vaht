@@ -25,6 +25,7 @@ pub mod event_source;
 mod execution;
 mod focus_target;
 mod frame_pacing;
+mod gamma;
 mod gestures;
 mod grab;
 mod idle;

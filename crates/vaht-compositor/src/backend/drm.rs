@@ -55,6 +55,7 @@ use crate::Compositor;
 use crate::capture::{self, CaptureError, CapturedImage};
 use crate::config::{InputSettings, OutputMode, Vrr};
 use crate::event_source::{EventSource, Timer};
+use crate::gamma::GammaRamps;
 use crate::outputs::{OutputControl, Outputs};
 use crate::pointing_devices;
 use crate::resources::ResourceLedger;
@@ -457,6 +458,9 @@ impl DrmBackend {
                 tracing::warn!(%error, gpu = %node, "could not take the GPU back");
             }
             events.extend(self.scan(node));
+            if let Some(device) = self.devices.get_mut(&node) {
+                device.reapply_gamma();
+            }
         }
         self.schedule_render();
         events
@@ -649,6 +653,25 @@ impl DrmBackend {
         }) {
             Ok(timer) => screen.throttle = Some(timer),
             Err(error) => tracing::warn!(%error, "could not wait for the next frame"),
+        }
+    }
+
+    /// Returns how many values each of `output`'s gamma ramps has.
+    pub(crate) fn gamma_size(&self, output: &Output) -> Option<u32> {
+        self.devices
+            .values()
+            .find_map(|device| device.gamma_size(output))
+    }
+
+    /// Changes `output`'s colors by `ramps`, or back to normal without;
+    /// they are applied again whenever vaht's terminal is shown again.
+    pub(crate) fn set_gamma(&mut self, output: &Output, ramps: Option<&GammaRamps>) {
+        if let Some(device) = self
+            .devices
+            .values_mut()
+            .find(|device| device.gamma_size(output).is_some())
+        {
+            device.set_gamma(output, ramps);
         }
     }
 

@@ -30,6 +30,7 @@ use crate::Compositor;
 use crate::backend::{OutputEvent, RenderError};
 use crate::config::{OutputMode, Vrr};
 use crate::event_source::{EventSource, Timer};
+use crate::gamma::GammaRamps;
 use crate::presentation;
 use crate::scene::{self, OutputElement, Scene};
 
@@ -84,6 +85,8 @@ pub(super) struct Screen {
     pub(super) throttle: Option<Timer<Compositor>>,
     /// Whether its monitor is awake (`zwlr_output_power_v1`).
     is_powered: bool,
+    /// The colors a night-light tool set, if one did.
+    gamma: Option<GammaRamps>,
 }
 
 /// What a GPU device needs from the rest of the backend to change its
@@ -267,6 +270,7 @@ impl GpuDevice {
                 frames: FrameState::Due,
                 throttle: None,
                 is_powered: true,
+                gamma: None,
             },
         );
         Some(output)
@@ -292,6 +296,54 @@ impl GpuDevice {
         self.screens
             .values_mut()
             .find(|screen| screen.output == *output)
+    }
+
+    /// Returns how many values each of `output`'s gamma ramps has, if it
+    /// is on this device.
+    pub(super) fn gamma_size(&self, output: &Output) -> Option<u32> {
+        let (crtc, _) = self
+            .screens
+            .iter()
+            .find(|(_, screen)| screen.output == *output)?;
+        let size = self.manager.device().get_crtc(*crtc).ok()?.gamma_length();
+        (size > 0).then_some(size)
+    }
+
+    /// Changes `output`'s colors by `ramps`, or back to normal without.
+    pub(super) fn set_gamma(&mut self, output: &Output, ramps: Option<&GammaRamps>) {
+        let Some(size) = self.gamma_size(output) else {
+            return;
+        };
+        let Some((crtc, screen)) = self
+            .screens
+            .iter_mut()
+            .find(|(_, screen)| screen.output == *output)
+        else {
+            return;
+        };
+        screen.gamma = ramps.cloned();
+        let ramps = ramps.cloned().unwrap_or_else(|| GammaRamps::identity(size));
+        Self::apply_gamma(&self.manager, *crtc, &ramps);
+    }
+
+    /// Applies the colors night-light tools set again, as after another
+    /// program had the GPU.
+    pub(super) fn reapply_gamma(&self) {
+        for (crtc, screen) in &self.screens {
+            if let Some(ramps) = &screen.gamma {
+                Self::apply_gamma(&self.manager, *crtc, ramps);
+            }
+        }
+    }
+
+    /// Sets `crtc`'s gamma ramps to `ramps`.
+    fn apply_gamma(manager: &GpuOutputManager, crtc: crtc::Handle, ramps: &GammaRamps) {
+        if let Err(error) = manager
+            .device()
+            .set_gamma(crtc, &ramps.red, &ramps.green, &ramps.blue)
+        {
+            tracing::warn!(%error, "could not change the monitor's colors");
+        }
     }
 
     /// Draws `scene` on each of this device's outputs that is due and on;

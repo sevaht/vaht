@@ -12,6 +12,7 @@
 
 mod client;
 mod clipboard;
+mod gamma_control;
 mod headless;
 mod input_method;
 mod metrics;
@@ -29,6 +30,7 @@ pub use client::{
     WINDOW_SIZE, keys,
 };
 pub use clipboard::{ClipboardManager, Selection};
+pub use gamma_control::GammaControl;
 pub use headless::{ExitReport, HeadlessVaht};
 pub use input_method::InputMethod;
 pub use metrics::{BUILT_IN_METRICS, ThemeMetrics};

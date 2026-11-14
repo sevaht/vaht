@@ -89,6 +89,10 @@ impl HeadlessBackend {
     /// The time between frames at that rate.
     const FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
+    /// The size of an output's gamma ramps, as night-light tools are told;
+    /// a headless output's colors are only noted.
+    pub(crate) const GAMMA_SIZE: u32 = 256;
+
     /// Creates the in-memory outputs and advertises them.
     ///
     /// # Errors

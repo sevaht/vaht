@@ -9,6 +9,7 @@
 mod activation;
 mod decoration;
 mod dmabuf;
+mod gamma;
 mod idle;
 mod input_method;
 mod layer_shell;

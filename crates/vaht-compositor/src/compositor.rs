@@ -76,6 +76,7 @@ use crate::event_source::{EndingSource, EventSource, Timer};
 use crate::execution::{ExecutionContext, Press};
 use crate::focus_target::FocusTarget;
 use crate::frame_pacing::FramePacing;
+use crate::gamma::GammaControls;
 use crate::gestures;
 use crate::grab::{GrabKind, WindowGrab};
 use crate::idle::IdleInhibitors;
@@ -159,6 +160,9 @@ pub struct Compositor {
     pub(crate) toplevel_management: ToplevelManagement,
     /// Which outputs are off (`zwlr_output_power_manager_v1`).
     pub(crate) output_power: OutputPower,
+    /// Which program controls each output's colors
+    /// (`zwlr_gamma_control_manager_v1`).
+    pub(crate) gamma_controls: GammaControls,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -353,6 +357,7 @@ impl Compositor {
             toplevel_list: ToplevelList::default(),
             toplevel_management: ToplevelManagement::new(&display.handle()),
             output_power: OutputPower::new(&display.handle()),
+            gamma_controls: GammaControls::new(&display.handle()),
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -1187,6 +1192,7 @@ impl Compositor {
                 }
                 OutputEvent::Disconnected(output) => {
                     self.output_power.output_gone(&output);
+                    self.gamma_controls.output_gone(&output);
                     self.remember_windows_on(&output);
                     let changes =
                         self.outputs

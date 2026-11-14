@@ -56,7 +56,7 @@ re-renders its buffer only when its content changes.
 | wlr-foreign-toplevel-management | Taskbars and docks outside the compositor | **built** (§8.6) |
 | ext-workspace | External pagers | niri implements it |
 | ~~wlr-screencopy~~ | | dropped: the installed xdg-desktop-portal-wlr 0.8.4 and grim 1.5 use ext-image-copy-capture |
-| wlr-gamma-control | Night-light tools | niri implements it |
+| wlr-gamma-control | Night-light tools | **built** (§8.8) |
 | wlr-output-power-management | DPMS via `wlopm` | **built** (§8.7) |
 | **tearing-control** | Games | Needs async page flips in the DRM compositor **(verify Smithay support)** |
 | color-representation, color-management | HDR | later |
@@ -297,6 +297,19 @@ with no way back; each control is told the mode whenever it changes. The
 test `an_output_turned_off_comes_on_again_when_asked_or_at_any_input`
 drives two controls and the pointer.
 
+### 8.8 Night light
+
+`zwlr_gamma_control_manager_v1` (`gamma.rs`) lets one program at a time
+set an output's gamma ramps, as wlsunset and gammastep do: it is told the
+CRTC's ramp size and sends a red, green and blue ramp. On the DRM backend
+they are set with the legacy gamma call, which atomic drivers turn into
+the CRTC's gamma LUT, and set again when vaht's terminal is shown again;
+when the control goes, or sends too little, the identity ramp puts the
+colors back. Nested, the host's colors are used, so controls fail. The
+test `one_night_light_at_a_time_changes_an_outputs_colors` drives three
+controls. Not yet seen on hardware: whether NVIDIA's driver takes the
+legacy call.
+
 
 ## 9. The DRM backend (built; not yet run on hardware)
 
@@ -353,7 +366,7 @@ rest only carries the decisions out.
 - **Input settings** (`[input]`, 02 §3) are applied to each pointing
   device as libinput reports it, and to all again on reload
   (`pointing_devices.rs`, tested with a recording device).
-- **Not yet:** DRM leasing for headsets; gamma; dmabuf feedback per surface;
+- **Not yet:** DRM leasing for headsets; dmabuf feedback per surface;
   tearing (not in this Smithay).
 - **First run on hardware**, from a free terminal: `vaht` (log in
   `~/.local/state/vaht/vaht.log`); Ctrl+Alt+F<n> back to the old terminal

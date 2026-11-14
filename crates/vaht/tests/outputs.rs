@@ -7,8 +7,8 @@ use std::process::Command;
 
 use vaht_ipc::{OutputInfo, Reply};
 use vaht_test_support::{
-    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, OutputPowerControl, TestClient, TestLayer,
-    WINDOW_COLOR, keys, solid_png, wait_for_file,
+    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, GammaControl, HeadlessVaht, OutputPowerControl,
+    TestClient, TestLayer, WINDOW_COLOR, keys, solid_png, wait_for_file,
 };
 
 /// The executable cargo built for these tests.
@@ -528,4 +528,26 @@ fn an_output_turned_off_comes_on_again_when_asked_or_at_any_input() {
     assert!(watcher.wait_for(false));
     client.move_pointer_to(10, 10);
     assert!(control.wait_for(true), "input wakes it");
+}
+
+#[test]
+fn one_night_light_at_a_time_changes_an_outputs_colors() {
+    let (vaht, _client) = two_outputs();
+    let mut first = GammaControl::connect(vaht.socket());
+    let size = first.size().expect("told the ramps' size");
+    let second = GammaControl::connect(vaht.socket());
+    assert_eq!(second.size(), None, "another program controls the output");
+
+    let ramps: Vec<u16> = (0..size * 3)
+        .map(|level| u16::try_from(level).unwrap_or(0))
+        .collect();
+    first.send_ramps(&ramps);
+    vaht.wait_for_logged("gamma set output=\"HEADLESS-1\" is_normal=false", 1);
+    first.release();
+    vaht.wait_for_logged("gamma set output=\"HEADLESS-1\" is_normal=true", 1);
+
+    let mut third = GammaControl::connect(vaht.socket());
+    assert!(third.size().is_some(), "free again");
+    third.send_ramps(&ramps[..3]);
+    assert!(third.has_failed(), "too few values");
 }

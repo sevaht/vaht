@@ -28,6 +28,7 @@ pub(crate) use self::winit::WinitBackend;
 use crate::Compositor;
 use crate::capture::{self, CaptureError, CapturedImage};
 use crate::config::OutputMode;
+use crate::gamma::GammaRamps;
 use crate::outputs::{OutputControl, Outputs};
 use crate::resources::ResourceLedger;
 use crate::scene::Scene;
@@ -121,6 +122,31 @@ impl Backend {
         match self {
             Self::Winit(_) | Self::Headless(_) => false,
             Self::Drm(_) => true,
+        }
+    }
+
+    /// Returns how many values each of `output`'s gamma ramps has; none
+    /// where its colors cannot change (nested, the host's are used).
+    pub(crate) fn gamma_size(&self, output: &Output) -> Option<u32> {
+        match self {
+            Self::Winit(_) => None,
+            Self::Headless(_) => Some(HeadlessBackend::GAMMA_SIZE),
+            Self::Drm(backend) => backend.gamma_size(output),
+        }
+    }
+
+    /// Changes `output`'s colors by `ramps`, or back to normal without.
+    pub(crate) fn set_gamma(&mut self, output: &Output, ramps: Option<&GammaRamps>) {
+        match self {
+            Self::Winit(_) => {}
+            Self::Headless(_) => {
+                tracing::info!(
+                    output = output.name(),
+                    is_normal = ramps.is_none(),
+                    "gamma set"
+                );
+            }
+            Self::Drm(backend) => backend.set_gamma(output, ramps),
         }
     }
 
