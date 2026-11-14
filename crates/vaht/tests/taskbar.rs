@@ -86,6 +86,41 @@ fn each_window_has_an_entry_and_the_focused_ones_stands_out() {
 }
 
 #[test]
+fn activate_window_list_entry_does_what_clicking_the_entry_does() {
+    let (vaht, mut client) = start("[\"window-list\"]");
+    client.open_windows(2);
+    let run = |command: &str| {
+        let output = std::process::Command::new(EXECUTABLE)
+            .args(["msg", "run", command])
+            .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+            .output()
+            .expect("vaht msg runs");
+        assert!(output.status.success(), "{output:?}");
+    };
+    let entries = |client: &mut TestClient| {
+        taskbar_runs(&client.screenshot())
+            .iter()
+            .take(2)
+            .map(|(color, _)| *color)
+            .collect::<Vec<_>>()
+    };
+    run("activate-window-list-entry 1");
+    assert_eq!(
+        entries(&mut client),
+        [FOCUSED, UNFOCUSED],
+        "the first focused"
+    );
+    run("activate-window-list-entry 1");
+    assert_eq!(
+        entries(&mut client),
+        [UNFOCUSED, FOCUSED],
+        "the focused one minimized, focus passing on"
+    );
+    run("activate-window-list-entry 3");
+    assert_eq!(entries(&mut client), [UNFOCUSED, FOCUSED], "no third entry");
+}
+
+#[test]
 fn clicking_an_entry_minimizes_its_focused_window_and_again_restores_it() {
     let (_vaht, mut client) = start("[\"window-list\"]");
     client.open_windows(1);

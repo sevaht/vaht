@@ -23,6 +23,7 @@
 //! second if its format shows seconds, as the time of day has them, and
 //! whenever the time of day jumps ([`WallClock`]).
 
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use jiff::{RoundMode, Timestamp, ToSpan, Unit, Zoned, ZonedRound};
@@ -285,6 +286,48 @@ impl Taskbar {
     /// Returns the widget at global `point` that clicking reports, if any.
     pub(crate) fn hit_at(&self, point: Point<f64, Logical>) -> Option<TaskbarHit> {
         self.panel.hit_at(self.local(point.to_i32_floor()))
+    }
+
+    /// Returns the window of the `number`th entry, from 1 at the left, of
+    /// the window list showing `window_manager`'s windows as `settings`
+    /// say.
+    pub(crate) fn entry(
+        window_manager: &WindowManager,
+        settings: &TaskbarSettings,
+        number: NonZeroUsize,
+    ) -> Option<WindowId> {
+        TaskbarContent::listed(window_manager, settings)
+            .get(number.get() - 1)
+            .map(|window| window.id())
+    }
+
+    /// Returns the `number`th tray item, from 1 at the left, in the order
+    /// `settings` pin, and the global point at its middle (the taskbar's
+    /// until it is laid out).
+    pub(crate) fn tray_item(
+        &self,
+        number: NonZeroUsize,
+        settings: &TaskbarSettings,
+    ) -> Option<(TrayItemKey, Point<f64, Logical>)> {
+        let tray = self.tray.as_ref()?;
+        let key = tray
+            .ordered(&settings.tray.pin_left, &settings.tray.pin_right)
+            .get(number.get() - 1)?
+            .key;
+        let local = self.panel.area_of(TaskbarHit::TrayItem(key)).map_or_else(
+            || {
+                Point::from((self.area.size.w, self.area.size.h))
+                    .to_f64()
+                    .downscale(2.0)
+            },
+            |rect| {
+                Point::from((
+                    f64::from(rect.x) + f64::from(rect.width) / 2.0,
+                    f64::from(rect.y) + f64::from(rect.height) / 2.0,
+                ))
+            },
+        );
+        Some((key, local + self.area.loc.to_f64()))
     }
 
     /// Returns the process of the tray item `key`, if known.
@@ -592,18 +635,10 @@ impl TaskbarContent {
             .collect();
         let shows_icons = view.settings.window_list.icons && icon_size > 0;
         let manager = view.window_manager;
-        let current = manager.current_workspace();
-        let mut windows: Vec<&Window> = manager
-            .windows_top_down()
-            .filter(|window| {
-                window.is_placed() && view.settings.window_list.show.matches(window, current)
-            })
-            .collect();
-        windows.sort_by_key(|window| window.id());
         Self {
             widgets: widgets.to_vec(),
             workspace_name: manager.current_workspace_name().to_owned(),
-            entries: windows
+            entries: Self::listed(manager, view.settings)
                 .into_iter()
                 .map(|window| WindowListEntry {
                     window: window.id(),
@@ -620,6 +655,23 @@ impl TaskbarContent {
             tray,
             tray_slot: WidgetIcon::span(height),
         }
+    }
+
+    /// Returns the windows of `manager` the window list shows as `settings`
+    /// say, in the order they opened.
+    fn listed<'state>(
+        manager: &'state WindowManager,
+        settings: &TaskbarSettings,
+    ) -> Vec<&'state Window> {
+        let current = manager.current_workspace();
+        let mut windows: Vec<&Window> = manager
+            .windows_top_down()
+            .filter(|window| {
+                window.is_placed() && settings.window_list.show.matches(window, current)
+            })
+            .collect();
+        windows.sort_by_key(|window| window.id());
+        windows
     }
 
     /// Returns the widget a taskbar widget is.

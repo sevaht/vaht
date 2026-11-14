@@ -208,6 +208,31 @@ fn the_taskbar_shows_on_the_output_the_settings_name() {
 }
 
 #[test]
+fn taskbar_to_output_moves_the_taskbar_by_head_or_connector() {
+    let (vaht, mut client) = two_outputs();
+    let has_taskbar = |client: &mut TestClient, connector: &str| {
+        let screenshot = client.screenshot_of(connector);
+        screenshot.rgb(5, screenshot.height() - 2) != SKY
+    };
+    assert!(
+        has_taskbar(&mut client, "HEADLESS-1"),
+        "on the primary output"
+    );
+    run(&vaht, &["taskbar-to-output", "next"]);
+    assert!(!has_taskbar(&mut client, "HEADLESS-1"));
+    assert!(
+        has_taskbar(&mut client, "HEADLESS-2"),
+        "moved to the next head"
+    );
+    run(&vaht, &["taskbar-to-output", "HEADLESS-1"]);
+    assert!(
+        has_taskbar(&mut client, "HEADLESS-1"),
+        "back by its connector"
+    );
+    assert!(!has_taskbar(&mut client, "HEADLESS-2"));
+}
+
+#[test]
 fn a_layer_surface_opens_on_the_output_the_pointer_is_on() {
     let (_vaht, mut client) = two_outputs();
     client.move_pointer_to(FIRST_WIDTH + 100, 100);

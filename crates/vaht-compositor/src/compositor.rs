@@ -70,7 +70,7 @@ use crate::config::{
     Action, Command, Config, ConfigSource, Delay, FocusModel, KeyChord, MenuGenerator, MenuRequest,
     Menus, Modifiers, ResizeFrom, SettingChange, SettingOverrides, ThemeFile, WindowManagerAction,
 };
-use crate::config::{FocusStealing, SwitchFlip, SwitchKind};
+use crate::config::{FocusStealing, SwitchFlip, SwitchKind, TaskbarAction, TaskbarOutput};
 use crate::cursor::Cursor;
 use crate::event_source::{EventSource, Timer};
 use crate::execution::{ExecutionContext, Press};
@@ -1773,6 +1773,22 @@ impl Compositor {
             .unwrap_or_else(|| self.outputs.primary())
     }
 
+    /// Returns the connector of the output `target` names, from the one
+    /// the taskbar shows on; none if there is no such head.
+    fn taskbar_output_named(&self, target: &TaskbarOutput) -> Option<String> {
+        let head = match target {
+            TaskbarOutput::Connector(connector) => return Some(connector.clone()),
+            TaskbarOutput::Head(head) => *head,
+        };
+        let areas = Self::bare_output_areas(&self.outputs);
+        let from = areas.at(Outputs::geometry(self.taskbar_output()).loc);
+        let to = areas.target(from, head)?;
+        std::iter::once(self.outputs.primary())
+            .chain(self.outputs.others())
+            .find(|output| Outputs::geometry(output) == to.whole)
+            .map(Output::name)
+    }
+
     /// Returns each of `outputs` whole, before panels take any of it.
     fn bare_output_areas(outputs: &Outputs) -> OutputAreas {
         let area_of = |output: &Output| {
@@ -2316,7 +2332,15 @@ impl Compositor {
                 self.menus.close();
                 self.schedule_render();
             }
-            Action::ToggleTaskbar => {
+            Action::Taskbar(action) => self.run_taskbar_action(action),
+            Action::KeyMode(switch) => self.input.switch_key_mode(switch, &self.config.bindings),
+        }
+    }
+
+    /// Runs one action on the taskbar.
+    fn run_taskbar_action(&mut self, action: &TaskbarAction) {
+        match action {
+            TaskbarAction::Toggle => {
                 if let Some(taskbar) = &mut self.taskbar {
                     taskbar.toggle();
                     // Its room is given back or taken, and its clock rests
@@ -2326,7 +2350,32 @@ impl Compositor {
                     self.schedule_render();
                 }
             }
-            Action::KeyMode(switch) => self.input.switch_key_mode(switch, &self.config.bindings),
+            TaskbarAction::ActivateEntry(number) => {
+                let settings = &self.config.settings.taskbar;
+                if self.taskbar.is_some()
+                    && let Some(window) = Taskbar::entry(&self.window_manager, settings, *number)
+                {
+                    self.window_manager.activate_or_minimize(window);
+                    self.schedule_render();
+                }
+            }
+            TaskbarAction::TrayItem { number, request } => {
+                if let Some(taskbar) = &self.taskbar
+                    && let Some((item, location)) =
+                        taskbar.tray_item(*number, &self.config.settings.taskbar)
+                {
+                    taskbar.act_on_tray(item, request.action(), location);
+                    self.tray_grant = taskbar.tray_item_pid(item).map(|pid| (pid, Instant::now()));
+                }
+            }
+            TaskbarAction::ToOutput(target) => {
+                if let Some(connector) = self.taskbar_output_named(target) {
+                    self.change_setting(SettingChange::new(
+                        &["taskbar", "output"],
+                        &toml::Value::String(connector),
+                    ));
+                }
+            }
         }
     }
 

@@ -8,7 +8,7 @@
 //! arguments a string has, so the two cannot disagree.
 
 use std::fmt;
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
 
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use smithay::utils::{Logical, Point, Rectangle, Size};
@@ -19,19 +19,11 @@ pub(crate) use self::forms::{Condition, Delay, Toggle};
 use super::bindings::KeyChord;
 use super::matcher::WindowMatcher;
 use super::overrides::SettingChange;
+use crate::tray::TrayAction;
 use crate::window_manager::{
     AlphaChange, ArrangeStyle, Axes, Direction, HorizontalEdge, OutputTarget, ResizeEdges,
     StackLayer, TileCell, VerticalEdge, WorkspaceTarget,
 };
-
-/// Actions of 02 §4 that vaht does not have yet. Naming one is an error that
-/// says so, rather than "unknown action", and nothing is silently ignored.
-const PLANNED_ACTIONS: &[&str] = &[
-    "activate-tray-item",
-    "activate-window-list-entry",
-    "taskbar-to-output",
-    "tray-item-menu",
-];
 
 /// The windows `next-window` and `previous-window` go through, and in what
 /// order: `{ action = "next-window", windows = <matcher>, order = "opening" }`.
@@ -430,12 +422,133 @@ pub(crate) enum Action {
     OpenMenu(MenuRequest),
     /// Closes every menu.
     HideMenus,
-    /// Turns the taskbar off, or on again.
-    ToggleTaskbar,
+    /// Something done with the taskbar.
+    Taskbar(TaskbarAction),
     /// Makes the keys bound in `[key_modes.<name>]` the only ones bound,
     /// until the mode's end key goes back to `[keys]` (`key-mode <name>
     /// [<end chord>]`, Escape unless given; `key-mode default` goes back).
     KeyMode(KeyModeSwitch),
+}
+
+/// An action on the taskbar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TaskbarAction {
+    /// Turns the taskbar off, or on again (`toggle-taskbar`).
+    Toggle,
+    /// Activates or minimizes the window of the window list entry with
+    /// this number, from 1 at the left, as clicking it does
+    /// (`activate-window-list-entry <n>`).
+    ActivateEntry(NonZeroUsize),
+    /// Asks the tray item with this number, from 1 at the left, for its
+    /// main action (`activate-tray-item <n>`) or its menu
+    /// (`tray-item-menu <n>`).
+    TrayItem {
+        /// The item's number.
+        number: NonZeroUsize,
+        /// What it is asked.
+        request: TrayRequest,
+    },
+    /// Shows the taskbar on another output (`taskbar-to-output
+    /// next|previous|<head>|<connector>`), until `save-settings` writes it
+    /// as `taskbar.output`.
+    ToOutput(TaskbarOutput),
+}
+
+impl TaskbarAction {
+    /// Builds the taskbar action `name` with `arguments`, if `name` is one.
+    fn from_parts(name: &str, arguments: &str) -> Option<Result<Self, String>> {
+        let number = || {
+            arguments.parse().map_err(|_not_a_number| {
+                format!("`{name}` takes a number from 1, not `{arguments}`")
+            })
+        };
+        let tray_item = |request| number().map(|number| Self::TrayItem { number, request });
+        Some(match name {
+            "toggle-taskbar" => no_arguments(name, arguments).map(|()| Self::Toggle),
+            "activate-window-list-entry" => number().map(Self::ActivateEntry),
+            "activate-tray-item" => tray_item(TrayRequest::Activate),
+            "tray-item-menu" => tray_item(TrayRequest::Menu),
+            "taskbar-to-output" => TaskbarOutput::parse(arguments).map(Self::ToOutput),
+            _ => return None,
+        })
+    }
+}
+
+impl fmt::Display for TaskbarAction {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Toggle => formatter.write_str("toggle-taskbar"),
+            Self::ActivateEntry(number) => write!(formatter, "activate-window-list-entry {number}"),
+            Self::TrayItem {
+                number,
+                request: TrayRequest::Activate,
+            } => write!(formatter, "activate-tray-item {number}"),
+            Self::TrayItem {
+                number,
+                request: TrayRequest::Menu,
+            } => write!(formatter, "tray-item-menu {number}"),
+            Self::ToOutput(output) => write!(formatter, "taskbar-to-output {output}"),
+        }
+    }
+}
+
+/// What a tray item is asked by an action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrayRequest {
+    /// Its main action, as a left click asks (`activate-tray-item`).
+    Activate,
+    /// Its menu, as a right click asks (`tray-item-menu`).
+    Menu,
+}
+
+impl TrayRequest {
+    /// Returns what the item is asked.
+    pub(crate) const fn action(self) -> TrayAction {
+        match self {
+            Self::Activate => TrayAction::Activate,
+            Self::Menu => TrayAction::ContextMenu,
+        }
+    }
+}
+
+/// Which output `taskbar-to-output` shows the taskbar on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TaskbarOutput {
+    /// A head, from the taskbar's output as `send-to-output` counts them.
+    Head(OutputTarget),
+    /// The output on this connector.
+    Connector(String),
+}
+
+impl TaskbarOutput {
+    /// Reads `next`, `previous`, a head from 1 or a connector.
+    fn parse(arguments: &str) -> Result<Self, String> {
+        match arguments {
+            "" => Err(
+                "`taskbar-to-output` takes next, previous, a head from 1 or a connector".to_owned(),
+            ),
+            "next" => Ok(Self::Head(OutputTarget::Next)),
+            "previous" => Ok(Self::Head(OutputTarget::Previous)),
+            connector if connector.contains(char::is_whitespace) => {
+                Err(format!("`{connector}` is not an output's connector"))
+            }
+            other => Ok(other.parse::<NonZeroUsize>().map_or_else(
+                |_connector| Self::Connector(other.to_owned()),
+                |head| Self::Head(OutputTarget::Head(head)),
+            )),
+        }
+    }
+}
+
+impl fmt::Display for TaskbarOutput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Head(OutputTarget::Next) => formatter.write_str("next"),
+            Self::Head(OutputTarget::Previous) => formatter.write_str("previous"),
+            Self::Head(OutputTarget::Head(head)) => head.fmt(formatter),
+            Self::Connector(connector) => formatter.write_str(connector),
+        }
+    }
 }
 
 /// A switch to a key mode.
@@ -634,7 +747,6 @@ impl Action {
             }
             "custom-menu" => Ok(Self::OpenMenu(MenuRequest::Custom(arguments.to_owned()))),
             "hide-menus" => without_arguments(Self::HideMenus),
-            "toggle-taskbar" => without_arguments(Self::ToggleTaskbar),
             "key-mode" => KeyModeSwitch::parse(arguments).map(Self::KeyMode),
             "exit" => without_arguments(Self::Exit),
             "set-environment" => {
@@ -653,7 +765,10 @@ impl Action {
                     value: value.to_owned(),
                 })
             }
-            _ => WindowManagerAction::from_parts(name, arguments).map(Self::WindowManager),
+            _ => match TaskbarAction::from_parts(name, arguments) {
+                Some(taskbar) => taskbar.map(Self::Taskbar),
+                None => WindowManagerAction::from_parts(name, arguments).map(Self::WindowManager),
+            },
         }
     }
 
@@ -762,7 +877,7 @@ impl fmt::Display for Action {
             Self::OpenMenu(MenuRequest::WindowList) => formatter.write_str("window-list-menu"),
             Self::OpenMenu(MenuRequest::Custom(name)) => write!(formatter, "custom-menu {name}"),
             Self::HideMenus => formatter.write_str("hide-menus"),
-            Self::ToggleTaskbar => formatter.write_str("toggle-taskbar"),
+            Self::Taskbar(action) => action.fmt(formatter),
             Self::KeyMode(mode) => write!(formatter, "key-mode {mode}"),
         }
     }
@@ -839,7 +954,7 @@ impl WindowManagerAction {
                 "next" => Ok(Self::SendToOutput(OutputTarget::Next)),
                 "previous" => Ok(Self::SendToOutput(OutputTarget::Previous)),
                 head => head
-                    .parse::<std::num::NonZeroUsize>()
+                    .parse::<NonZeroUsize>()
                     .map(|head| Self::SendToOutput(OutputTarget::Head(head)))
                     .map_err(|_not_a_head| {
                         format!(
@@ -853,9 +968,6 @@ impl WindowManagerAction {
                 "`{name}`: `reload` reads every file again, the theme too; a Wayland compositor \
                  cannot restart without closing every window"
             )),
-            _ if PLANNED_ACTIONS.contains(&name) => {
-                Err(format!("`{name}` is not available in vaht yet"))
-            }
             _ => Err(format!("unknown action `{name}`")),
         }
     }
@@ -1132,7 +1244,7 @@ mod tests {
             WindowManagerAction::ResizeTo((800, 600).into()),
             WindowManagerAction::Workspace(WorkspaceTarget::Last),
             WindowManagerAction::SendToWorkspace(WorkspaceTarget::Numbered(
-                std::num::NonZeroUsize::new(3).expect("not zero"),
+                NonZeroUsize::new(3).expect("not zero"),
             )),
             WindowManagerAction::TakeToWorkspace(WorkspaceTarget::Next),
             WindowManagerAction::AddWorkspace,
@@ -1151,6 +1263,30 @@ mod tests {
                 name: "GDK_SCALE".to_owned(),
                 value: "2".to_owned(),
             },
+            Action::Taskbar(TaskbarAction::Toggle),
+            Action::Taskbar(TaskbarAction::ActivateEntry(NonZeroUsize::MIN)),
+            Action::Taskbar(TaskbarAction::TrayItem {
+                number: NonZeroUsize::MIN,
+                request: TrayRequest::Activate,
+            }),
+            Action::Taskbar(TaskbarAction::TrayItem {
+                number: NonZeroUsize::MIN,
+                request: TrayRequest::Menu,
+            }),
+            Action::Taskbar(TaskbarAction::ToOutput(TaskbarOutput::Head(
+                OutputTarget::Next,
+            ))),
+            Action::Taskbar(TaskbarAction::ToOutput(TaskbarOutput::Head(
+                OutputTarget::Head(NonZeroUsize::MIN),
+            ))),
+            Action::Taskbar(TaskbarAction::ToOutput(TaskbarOutput::Connector(
+                "HDMI-A-1".to_owned(),
+            ))),
+            Action::SetSetting(SettingChange::parse("focus.model sloppy").expect("valid")),
+            Action::KeyMode(match Action::parse("key-mode moving Super+m") {
+                Ok(Action::KeyMode(switch)) => switch,
+                other => panic!("a key mode switch: {other:?}"),
+            }),
         ];
         actions.extend(managed.into_iter().map(Action::WindowManager));
         actions.extend(ResizeFrom::EDGES.iter().map(|&(_, horizontal, vertical)| {
@@ -1179,6 +1315,10 @@ mod tests {
     #[case::with_a_table(
         "\"set-environment GDK_SCALE 2\"",
         "{ set-environment = { name = \"GDK_SCALE\", value = \"2\" } }"
+    )]
+    #[case::set_setting(
+        "\"set-setting taskbar.auto_hide true\"",
+        "{ set-setting = { key = \"taskbar.auto_hide\", value = true } }"
     )]
     fn the_string_and_table_forms_agree(#[case] string: &str, #[case] table: &str) {
         assert!(command(string).is_ok(), "{string}");
@@ -1227,7 +1367,6 @@ mod tests {
 
     #[rstest]
     #[case::unknown_action("\"explode\"", "unknown action `explode`")]
-    #[case::planned_action("\"taskbar-to-output 1\"", "not available in vaht yet")]
     #[case::restart("\"restart\"", "`reload` reads every file again")]
     #[case::maximize_both_by_name("\"maximize both\"", "nothing, horizontal or vertical")]
     #[case::one_number("\"move 10\"", "two whole numbers")]

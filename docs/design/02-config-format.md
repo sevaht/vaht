@@ -519,14 +519,21 @@ lid-close = "exec swaylock"
 - Built into the frame, not bindings: titlebar buttons (pressed without
   modifiers), and resizing by dragging a border when the border has no
   binding for that button.
-- Actions of §4 that vaht does not have yet are rejected by name ("not
-  available in vaht yet"). The structured
-  forms are built: a `toggle` runs its commands in turn, one per run (a
-  reload starts it over); `if` asks its condition of the window the
-  command is about (none never matches); `for_each` runs its command on
-  each placed window matching, as the command's window; and `delay_ms`
-  runs its command that long later, put off again if run again first. A file that uses them fails
-  `vaht check` instead of half-working.
+- Every action of §4 is built. The structured forms: a `toggle` runs its
+  commands in turn, one per run (a reload starts it over); `if` asks its
+  condition of the window the command is about (none never matches);
+  `for_each` runs its command on each placed window matching, as the
+  command's window; and `delay_ms` runs its command that long later, put
+  off again if run again first.
+- `activate-window-list-entry <n>` does what clicking the taskbar's `n`th
+  window list entry from the left does: it activates the window, or
+  minimizes it if it has focus. `activate-tray-item <n>` and
+  `tray-item-menu <n>` ask the `n`th tray item for its main action or its
+  menu, as a left or right click does. `taskbar-to-output
+  next|previous|<head>|<connector>` shows the taskbar on another output,
+  heads counted as `send-to-output` counts them; it is a change of
+  `taskbar.output` in place, as `set-setting` makes, which `save-settings`
+  writes.
 - A chain (`"Super+X Super+T"`) runs once its chords are pressed in turn,
   each within 5 seconds of the last, as Fluxbox waits. Escape gives up on
   a chain, as does a chord it does not go on with, which then reaches the

@@ -51,9 +51,14 @@ impl SettingChange {
 
     /// Returns the change of `theme` to `name`.
     pub(crate) fn theme(name: &str) -> Self {
+        Self::new(&["theme"], &toml::Value::String(name.to_owned()))
+    }
+
+    /// Returns the change of `key`, its parts, to `value`.
+    pub(crate) fn new(key: &[&str], value: &toml::Value) -> Self {
         Self {
-            key: vec!["theme".to_owned()],
-            value: toml::Value::String(name.to_owned()).to_string(),
+            key: key.iter().map(|&part| part.to_owned()).collect(),
+            value: value.to_string(),
         }
     }
 
