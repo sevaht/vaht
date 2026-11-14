@@ -82,6 +82,8 @@ pub(super) struct Screen {
     pub(super) frames: FrameState,
     /// The wait after a frame that changed nothing.
     pub(super) throttle: Option<Timer<Compositor>>,
+    /// Whether its monitor is awake (`zwlr_output_power_v1`).
+    is_powered: bool,
 }
 
 /// What a GPU device needs from the rest of the backend to change its
@@ -264,6 +266,7 @@ impl GpuDevice {
                 global: Some(global),
                 frames: FrameState::Due,
                 throttle: None,
+                is_powered: true,
             },
         );
         Some(output)
@@ -301,7 +304,7 @@ impl GpuDevice {
     ) -> Result<Vec<crtc::Handle>, RenderError> {
         let mut unchanged = Vec::new();
         for (crtc, screen) in &mut self.screens {
-            if screen.global.is_none() || !screen.frames.is_due() {
+            if screen.global.is_none() || !screen.is_powered || !screen.frames.is_due() {
                 continue;
             }
             if !screen.render(renderer, scene)? {
@@ -409,6 +412,24 @@ impl Screen {
             }
             (true, Some(global)) => self.global = Some(global),
             (false, None) => {}
+        }
+    }
+
+    /// Wakes the monitor, or puts it to sleep (`is_on` false); the output
+    /// stays on for clients either way.
+    pub(super) fn set_powered(&mut self, is_on: bool) {
+        if self.is_powered == is_on {
+            return;
+        }
+        self.is_powered = is_on;
+        self.frames.reset();
+        if is_on {
+            // The whole frame is drawn anew, so the monitor wakes to it.
+            self.drm_output
+                .with_compositor(DrmCompositor::reset_buffers);
+            let _ = self.frames.request();
+        } else if let Err(error) = self.drm_output.with_compositor(DrmCompositor::clear) {
+            tracing::warn!(%error, "could not put the monitor to sleep");
         }
     }
 

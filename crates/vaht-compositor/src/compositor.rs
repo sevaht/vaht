@@ -88,6 +88,7 @@ use crate::menu::{
     MenuBuilder, MenuChoice, MenuItem, MenuKey, MenuModel, MenuStack, OutputChoices,
 };
 use crate::output_memory::OutputMemory;
+use crate::output_power::OutputPower;
 use crate::outputs::{OutputChanges, Outputs};
 use crate::pointer_lock::{self, PointerHold};
 use crate::protocols::ProtocolStates;
@@ -156,6 +157,8 @@ pub struct Compositor {
     toplevel_list: ToplevelList<WindowId, ForeignToplevelHandle>,
     /// The windows as `zwlr_foreign_toplevel_manager_v1` tells them.
     pub(crate) toplevel_management: ToplevelManagement,
+    /// Which outputs are off (`zwlr_output_power_manager_v1`).
+    pub(crate) output_power: OutputPower,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -349,6 +352,7 @@ impl Compositor {
             input_emulation: None,
             toplevel_list: ToplevelList::default(),
             toplevel_management: ToplevelManagement::new(&display.handle()),
+            output_power: OutputPower::new(&display.handle()),
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -1182,6 +1186,7 @@ impl Compositor {
                     continue;
                 }
                 OutputEvent::Disconnected(output) => {
+                    self.output_power.output_gone(&output);
                     self.remember_windows_on(&output);
                     let changes =
                         self.outputs
@@ -1557,6 +1562,32 @@ impl Compositor {
         self.handle_input_within(event, None);
     }
 
+    /// Notes that the user did something: idle timers start over, and
+    /// outputs turned off come on again.
+    fn note_activity(&mut self) {
+        self.protocols.idle_notifier.notify_activity(&self.seat);
+        for output in self.output_power.wake_all() {
+            tracing::info!(output = output.name(), "output woken by input");
+            self.power_backend(&output, true);
+        }
+    }
+
+    /// Turns `output` on or off (`is_on`), as a program asked.
+    pub(crate) fn set_output_power(&mut self, output: &Output, is_on: bool) {
+        if self.output_power.set(output, is_on) {
+            tracing::info!(output = output.name(), is_on, "output power changed");
+            self.power_backend(output, is_on);
+        }
+    }
+
+    /// Wakes or sleeps `output`'s monitor (`is_on`), where there is one.
+    fn power_backend(&mut self, output: &Output, is_on: bool) {
+        if let Backend::Drm(backend) = &mut self.backend {
+            backend.set_power(output, is_on);
+        }
+        self.schedule_render();
+    }
+
     /// Delivers one input event; absolute motion spans `absolute_area`
     /// (global coordinates), or every output without it.
     pub(crate) fn handle_input_within<B: InputBackend>(
@@ -1565,7 +1596,7 @@ impl Compositor {
         absolute_area: Option<Rectangle<i32, Logical>>,
     ) {
         // Any input is the user being there.
-        self.protocols.idle_notifier.notify_activity(&self.seat);
+        self.note_activity();
         // A key typed right after a binding moved focus goes where it went.
         self.settle();
         #[expect(
@@ -1632,7 +1663,7 @@ impl Compositor {
     /// Sends a key from a virtual keyboard, read with that keyboard's own
     /// keymap (or the seat's, when it sent none).
     pub(crate) fn handle_virtual_key(&mut self, event: &VirtualKeyboardKeyEvent) {
-        self.protocols.idle_notifier.notify_activity(&self.seat);
+        self.note_activity();
         self.settle();
         let device = event.device();
         self.activate_keymap(device.keymap());
@@ -2051,7 +2082,7 @@ impl Compositor {
                     source,
                 } => {
                     if !self.session_lock.is_locked() {
-                        self.protocols.idle_notifier.notify_activity(&self.seat);
+                        self.note_activity();
                         let state = if is_pressed {
                             KeyState::Pressed
                         } else {

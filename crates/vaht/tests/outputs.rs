@@ -7,8 +7,8 @@ use std::process::Command;
 
 use vaht_ipc::{OutputInfo, Reply};
 use vaht_test_support::{
-    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, TestClient, TestLayer, WINDOW_COLOR, keys,
-    solid_png, wait_for_file,
+    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, OutputPowerControl, TestClient, TestLayer,
+    WINDOW_COLOR, keys, solid_png, wait_for_file,
 };
 
 /// The executable cargo built for these tests.
@@ -512,4 +512,20 @@ fn a_panel_on_a_monitor_unplugged_is_closed() {
         1,
         "told, so it can open again elsewhere"
     );
+}
+
+#[test]
+fn an_output_turned_off_comes_on_again_when_asked_or_at_any_input() {
+    let (vaht, mut client) = two_outputs();
+    let mut control = OutputPowerControl::connect(vaht.socket());
+    let mut watcher = OutputPowerControl::connect(vaht.socket());
+    assert!(control.wait_for(true), "on to begin with");
+    control.set(false);
+    assert!(watcher.wait_for(false), "every control is told");
+    control.set(true);
+    assert!(watcher.wait_for(true));
+    control.set(false);
+    assert!(watcher.wait_for(false));
+    client.move_pointer_to(10, 10);
+    assert!(control.wait_for(true), "input wakes it");
 }

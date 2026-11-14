@@ -36,6 +36,7 @@ mod launcher;
 mod layers;
 mod menu;
 mod output_memory;
+mod output_power;
 mod outputs;
 mod pointer_lock;
 mod pointing_devices;

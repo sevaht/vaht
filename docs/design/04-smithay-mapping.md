@@ -57,7 +57,7 @@ re-renders its buffer only when its content changes.
 | ext-workspace | External pagers | niri implements it |
 | ~~wlr-screencopy~~ | | dropped: the installed xdg-desktop-portal-wlr 0.8.4 and grim 1.5 use ext-image-copy-capture |
 | wlr-gamma-control | Night-light tools | niri implements it |
-| wlr-output-power-management | DPMS via `wlopm` | niri implements it |
+| wlr-output-power-management | DPMS via `wlopm` | **built** (§8.7) |
 | **tearing-control** | Games | Needs async page flips in the DRM compositor **(verify Smithay support)** |
 | color-representation, color-management | HDR | later |
 | transient-seat, export-dmabuf | | drop: unused or deprecated |
@@ -285,6 +285,17 @@ tell again, and requests to activate, minimize, maximize, fullscreen or
 close a window go to the window manager. Sandboxed programs are not
 offered it. The test `a_taskbar_outside_vaht_sees_and_works_the_windows`
 works two windows through it.
+
+### 8.7 Monitors off and on
+
+`zwlr_output_power_manager_v1` (`output_power.rs`) turns an output's
+monitor off without changing the layout, as `wlopm` and swayidle's
+`output * power off` ask: on the DRM backend its CRTC is cleared (DPMS
+off) and it is not drawn until turned on, when it is drawn anew. Any input
+turns every output that is off on again, so a screen is never left dark
+with no way back; each control is told the mode whenever it changes. The
+test `an_output_turned_off_comes_on_again_when_asked_or_at_any_input`
+drives two controls and the pointer.
 
 
 ## 9. The DRM backend (built; not yet run on hardware)

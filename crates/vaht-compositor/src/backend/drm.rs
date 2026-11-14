@@ -652,6 +652,18 @@ impl DrmBackend {
         }
     }
 
+    /// Wakes `output`'s monitor, or puts it to sleep (`is_on` false),
+    /// keeping its place in the layout.
+    pub(crate) fn set_power(&mut self, output: &Output, is_on: bool) {
+        if let Some(screen) = self
+            .devices
+            .values_mut()
+            .find_map(|device| device.screen_mut(output))
+        {
+            screen.set_powered(is_on);
+        }
+    }
+
     /// Turns variable refresh on `output` on or off as `vrr` says, with
     /// `top` the window on top there.
     pub(crate) fn set_vrr(&mut self, output: &Output, vrr: Vrr, top: TopWindow) {

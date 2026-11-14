@@ -13,6 +13,7 @@ mod idle;
 mod input_method;
 mod layer_shell;
 mod output;
+mod output_power;
 mod sandbox;
 mod seat;
 mod selection;
