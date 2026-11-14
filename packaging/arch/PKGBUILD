@@ -1,0 +1,58 @@
+# Arch Linux package for vaht, built from the git checkout this file is in:
+#   cd packaging/arch && makepkg -si
+# The files installed, and where, are packaging/install.sh's.
+pkgname=vaht
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='A stacking Wayland compositor that works the way Fluxbox does'
+arch=('x86_64' 'aarch64')
+url='https://github.com/sevaht/vaht'
+license=('MIT')
+depends=(
+  'gcc-libs'
+  'glibc'
+  'libdisplay-info'
+  'libdrm'
+  'libglvnd'
+  'libinput'
+  'libxkbcommon'
+  'mesa'      # GBM and EGL; NVIDIA's driver provides its own through egl-gbm
+  'pixman'
+  'seatd'     # libseat; logind is used when it runs, seatd otherwise
+  'systemd-libs'
+  'wayland'
+)
+makedepends=('cargo' 'git')
+optdepends=(
+  'xdg-desktop-portal-wlr: screen sharing and screenshots in programs'
+  'xdg-desktop-portal-gtk: file chooser and other desktop portals'
+  'grim: screenshots'
+  'wl-clipboard: clipboard on the command line'
+)
+source=()
+sha256sums=()
+
+# The checkout two directories up is the source.
+_source_directory() {
+  realpath "$startdir/../.."
+}
+
+prepare() {
+  cd "$(_source_directory)"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$(_source_directory)"
+  cargo build --release --frozen -p vaht
+}
+
+check() {
+  cd "$(_source_directory)"
+  cargo test --frozen --workspace
+}
+
+package() {
+  cd "$(_source_directory)"
+  packaging/install.sh --destdir "$pkgdir" --prefix /usr --no-build
+}

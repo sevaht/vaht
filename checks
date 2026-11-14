@@ -23,30 +23,36 @@ run_check() {
     echo
 }
 
-# Builds "--<level> lint" argument pairs for every documentation lint.
+# Prints "--<level>" and the lint, one argument a line, for every
+# documentation lint.
 documentation_lint_arguments() {
     local level=${1}
     local lint
     for lint in "${documentation_lints[@]}"; do
-        echo "--${level}" "${lint}"
+        printf '%s\n' "--${level}" "${lint}"
     done
 }
 
 check_code() {
     # --force-warn keeps the documentation lints from failing this run.
+    local lint_arguments
+    mapfile -t lint_arguments < <(documentation_lint_arguments force-warn)
     run_check "formatting code" cargo fmt --all
     run_check "linting" cargo clippy --workspace --all-targets --all-features \
-        -- --deny warnings $(documentation_lint_arguments force-warn)
+        -- --deny warnings "${lint_arguments[@]}"
     run_check "executing tests" cargo nextest run --workspace --all-features \
         --no-tests=warn
     run_check "executing doctests" cargo test --workspace --doc
     run_check "auditing dependencies" cargo deny check
     run_check "finding unused dependencies" cargo machete
+    run_check "linting shell scripts" shellcheck checks packaging/install.sh
 }
 
 check_documentation() {
+    local lint_arguments
+    mapfile -t lint_arguments < <(documentation_lint_arguments deny)
     run_check "linting documentation" cargo clippy --workspace --all-targets \
-        --all-features -- $(documentation_lint_arguments deny)
+        --all-features -- "${lint_arguments[@]}"
     RUSTDOCFLAGS="--deny warnings" run_check "building documentation" \
         cargo doc --workspace --no-deps --document-private-items
 }
