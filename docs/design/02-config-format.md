@@ -213,8 +213,11 @@ rest by name, so a setting never silently does nothing:
   process their `_NET_WM_PID` names); their menus and tooltips
   (override-redirect windows) show over every window. The clipboard and
   primary selection pass both ways. `vaht --no-xwayland` overrides the
-  setting (tests use it). Not yet: `resources` (`~/.Xresources`) and input
-  emulation (fluxland's `session.xwayland.*`). X Shape clipping is exact
+  setting (tests use it). `resources` names an X resources file
+  (`~/.Xresources`; a relative path is from the configuration directory)
+  loaded into Xwayland when it starts, as xrdb does, from fluxland's
+  `session.xwayland.resources`. Not yet: input emulation for X11 programs
+  (`session.xwayland.inputEmulation`, an EIS server for Steam Input). X Shape clipping is exact
   (04 §8.1), the pointer an X11 window sees stays in step while it moves
   (04 §8.2), and a window whose Motif hints ask for no decorations gets no
   frame.

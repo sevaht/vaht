@@ -23,7 +23,7 @@
 //! descriptor to wake up, and clients are dispatched after every wake-up.
 
 use std::fmt;
-use std::io;
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -547,11 +547,38 @@ impl Compositor {
         ) {
             tracing::debug!(%error, "X programs keep Xwayland's own pointer");
         }
+        self.load_x_resources(display_number);
         if let Some(server) = &mut self.xwayland {
             server.manage(wm, display_number, (&self.loop_handle, &self.ledger));
             if let Some(name) = server.display_name() {
                 self.launcher.set_environment("DISPLAY".to_owned(), name);
             }
+        }
+    }
+
+    /// Loads the X resources file the settings name into Xwayland on
+    /// `display_number`, before programs started from now on read it.
+    fn load_x_resources(&self, display_number: u32) {
+        /// The largest resources file loaded, as fluxland had it.
+        const MAX_BYTES: u64 = 1024 * 1024;
+        let Some(path) = self
+            .config
+            .settings
+            .xwayland
+            .resources_path(self.config_source.directory())
+        else {
+            return;
+        };
+        let resources = std::fs::File::open(&path).and_then(|file| {
+            let mut text = Vec::new();
+            file.take(MAX_BYTES).read_to_end(&mut text).map(|_| text)
+        });
+        let loaded = resources
+            .map_err(|error| error.to_string())
+            .and_then(|text| XwaylandServer::load_resources(&format!(":{display_number}"), &text));
+        match loaded {
+            Ok(()) => tracing::info!(path = %path.display(), "X resources loaded"),
+            Err(error) => tracing::warn!(error, path = %path.display(), "X resources not loaded"),
         }
     }
 

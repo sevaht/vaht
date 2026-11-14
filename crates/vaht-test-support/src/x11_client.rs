@@ -257,6 +257,30 @@ impl X11Client {
         (reply.root_x, reply.root_y)
     }
 
+    /// Returns the X resources the server holds (`RESOURCE_MANAGER` on the
+    /// root window), as X programs read their settings.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server does not answer.
+    #[must_use]
+    pub fn resources(&self) -> String {
+        let reply = self
+            .connection
+            .get_property(
+                false,
+                self.root,
+                AtomEnum::RESOURCE_MANAGER,
+                AtomEnum::STRING,
+                0,
+                u32::MAX / 4,
+            )
+            .expect("the request is sent")
+            .reply()
+            .expect("the X server answers");
+        String::from_utf8_lossy(&reply.value).into_owned()
+    }
+
     /// Returns where the X server thinks `window`'s top left corner is on
     /// its screen: what an X program places its menus by.
     ///

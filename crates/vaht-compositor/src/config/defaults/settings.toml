@@ -153,3 +153,5 @@ autostart = []
 [xwayland]
 # Whether vaht starts Xwayland, so X11 programs run; read at start.
 enabled = true
+# An X resources file loaded into Xwayland when it starts, as xrdb does in
+# an X session, such as resources = "~/.Xresources".

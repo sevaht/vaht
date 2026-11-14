@@ -130,6 +130,7 @@ impl InitFile {
     pub(crate) fn convert(mut self, report: &mut Report) -> InitConversion {
         let outputs = OutputResources::convert(&mut self.resources, report);
         self.convert_taskbar_output(&outputs, report);
+        self.convert_x_resources();
         self.convert_focus(report);
         self.convert_placement(report);
         self.convert_windows(report);
@@ -160,6 +161,28 @@ impl InitFile {
             settings: self.document,
             outputs: outputs.document(),
         }
+    }
+
+    /// The X resources file Xwayland loads: `session.xwayland.resources`. A
+    /// relative path is fluxland's, from its configuration directory, so it
+    /// becomes absolute.
+    fn convert_x_resources(&mut self) {
+        let Some(path) = self
+            .resources
+            .value("session.xwayland.resources")
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        let path = if path.starts_with("~/") || path.starts_with('/') {
+            path
+        } else {
+            self.resources.path().parent().map_or_else(
+                || path.clone(),
+                |directory| directory.join(&path).display().to_string(),
+            )
+        };
+        self.set(&["xwayland", "resources"], Value::from(path));
     }
 
     /// The toolbar's output: `onoutput` names it; `onhead` counts heads,
@@ -864,6 +887,26 @@ session.screen0.toolbar.widthPercent:\t80
             .convert(&mut report)
             .settings;
         assert_eq!(document.to_string(), "[menus]\nsearch = \"anywhere\"\n");
+    }
+
+    #[rstest::rstest]
+    #[case::from_home("~/.Xresources", "~/.Xresources")]
+    #[case::absolute("/etc/X11/Xresources", "/etc/X11/Xresources")]
+    #[case::relative_to_fluxland("Xresources", "/home/me/.config/fluxland/Xresources")]
+    fn the_x_resources_file_converts(#[case] given: &str, #[case] expected: &str) {
+        let init = format!("session.xwayland.resources:\t{given}\n");
+        let mut report = Report::default();
+        let document = InitFile::new(Resources::parse(
+            Path::new("/home/me/.config/fluxland/init"),
+            &init,
+        ))
+        .convert(&mut report)
+        .settings;
+        assert_eq!(
+            document.to_string(),
+            format!("[xwayland]\nresources = \"{expected}\"\n")
+        );
+        assert!(report.notes().is_empty(), "{report}");
     }
 
     #[test]

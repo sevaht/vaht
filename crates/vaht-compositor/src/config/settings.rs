@@ -428,11 +428,7 @@ impl WallpaperSettings {
     /// relative path taken from `config_directory`; none without an image,
     /// or with `~/` and no home.
     pub(crate) fn image_path(&self, config_directory: &Path) -> Option<PathBuf> {
-        let image = self.image.as_deref()?;
-        match image.strip_prefix("~/") {
-            Some(rest) => Some(PathBuf::from(std::env::var_os("HOME")?).join(rest)),
-            None => Some(config_directory.join(image)),
-        }
+        file_path(self.image.as_deref()?, config_directory)
     }
 }
 
@@ -454,16 +450,40 @@ impl Default for IpcSettings {
 }
 
 /// X11 programs, through Xwayland.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct XwaylandSettings {
     /// Whether vaht starts Xwayland, so X11 programs run; read at start.
     pub(crate) enabled: bool,
+    /// The X resources file loaded into Xwayland when it starts, as xrdb
+    /// does in an X session (`~/.Xresources`); none without it.
+    pub(crate) resources: Option<String>,
 }
 
 impl Default for XwaylandSettings {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            resources: None,
+        }
+    }
+}
+
+impl XwaylandSettings {
+    /// Returns the X resources file's path (see [`file_path`]), if one is
+    /// set.
+    pub(crate) fn resources_path(&self, config_directory: &Path) -> Option<PathBuf> {
+        file_path(self.resources.as_deref()?, config_directory)
+    }
+}
+
+/// Returns the file `path` a setting names: `~/` read as the home
+/// directory, and a relative path taken from `config_directory`; none for
+/// `~/` with no home.
+fn file_path(path: &str, config_directory: &Path) -> Option<PathBuf> {
+    match path.strip_prefix("~/") {
+        Some(rest) => Some(PathBuf::from(std::env::var_os("HOME")?).join(rest)),
+        None => Some(config_directory.join(path)),
     }
 }
 

@@ -29,6 +29,9 @@ use smithay::wayland::selection::primary_selection::{
 use smithay::wayland::xwayland_shell::{XWaylandShellHandler, XWaylandShellState};
 use smithay::xwayland::xwm::{Reorder, ResizeEdge, WmWindowProperty, XwmId};
 use smithay::xwayland::{X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler};
+use x11rb::connection::Connection as _;
+use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
+use x11rb::wrapper::ConnectionExt as _;
 
 use self::shape::ShapeTracker;
 pub(crate) use self::shape::WindowShape;
@@ -126,6 +129,35 @@ impl XwaylandServer {
         if let Some(shapes) = &mut self.shapes {
             shapes.untrack(window.window_id());
         }
+    }
+
+    /// Loads the X resources `resources` (an `.Xresources` file's text)
+    /// into the server on `display`: the root window's `RESOURCE_MANAGER`,
+    /// which X programs read their settings from, as xrdb sets it.
+    ///
+    /// # Errors
+    ///
+    /// Returns why not: the server cannot be reached or refused.
+    pub(crate) fn load_resources(display: &str, resources: &[u8]) -> Result<(), String> {
+        let (connection, screen) = x11rb::connect(Some(display))
+            .map_err(|error| format!("cannot reach {display}: {error}"))?;
+        let root = connection.setup().roots[screen].root;
+        connection
+            .change_property8(
+                PropMode::REPLACE,
+                root,
+                AtomEnum::RESOURCE_MANAGER,
+                AtomEnum::STRING,
+                resources,
+            )
+            .map_err(|error| error.to_string())?;
+        // A round trip: the property is set before the connection closes.
+        connection
+            .get_input_focus()
+            .map_err(|error| error.to_string())?
+            .reply()
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     /// Starts following the shape of `window`, just mapped.

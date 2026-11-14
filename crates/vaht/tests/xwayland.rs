@@ -313,3 +313,24 @@ fn an_x11_window_moving_itself_sees_the_pointer_where_it_is() {
         "after it"
     );
 }
+
+#[test]
+fn x_resources_named_in_the_settings_are_loaded_for_x_programs() {
+    let vaht = HeadlessVaht::start_with_xwayland(
+        Path::new(EXECUTABLE),
+        &[
+            ("settings.toml", b"[xwayland]\nresources = \"Xresources\"\n"),
+            (
+                "Xresources",
+                b"XTerm*faceName: DejaVu Sans Mono\nXft.dpi: 96\n",
+            ),
+        ],
+    );
+    let x11 = X11Client::connect(&vaht.x_display());
+    let resources = x11.resources();
+    assert!(
+        resources.contains("XTerm*faceName: DejaVu Sans Mono"),
+        "{resources}"
+    );
+    assert!(resources.contains("Xft.dpi: 96"), "{resources}");
+}
