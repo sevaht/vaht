@@ -520,7 +520,11 @@ lid-close = "exec swaylock"
   shown window whose middle lies that way, within 45 degrees, from the
   focused one's (Fluxbox's `FocusLeft` and its kin). `mark-window <key>`
   marks the window with a word, one window per key, and
-  `go-to-marked-window <key>` brings it forward.
+  `go-to-marked-window <key>` brings it forward. `send-to-output
+  next|previous|<head>` moves the window to another output, heads
+  numbered from 1 left to right then top to bottom: a floating window to
+  the same place in proportion, a maximized or tiled one filling its part
+  there (Fluxbox's `SendToNextHead`, `SendToPrevHead`, `SetHead`).
 - `tile` takes a cell in thousandths of the usable area:
   `tile <x> <y> <width> <height>`, the left half being `tile 0 0 500 1000`.
 - `next-window` and `previous-window` walk windows in the order they last

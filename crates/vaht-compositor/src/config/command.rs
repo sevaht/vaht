@@ -15,8 +15,8 @@ use smithay::utils::{Logical, Point, Rectangle, Size};
 
 use super::matcher::WindowMatcher;
 use crate::window_manager::{
-    AlphaChange, Axes, Direction, HorizontalEdge, ResizeEdges, StackLayer, TileCell, VerticalEdge,
-    WorkspaceTarget,
+    AlphaChange, Axes, Direction, HorizontalEdge, OutputTarget, ResizeEdges, StackLayer, TileCell,
+    VerticalEdge, WorkspaceTarget,
 };
 
 /// Actions of 02 §4 that vaht does not have yet. Naming one is an error that
@@ -29,7 +29,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "reload-theme",
     "rename-workspace",
     "restart",
-    "send-to-output",
     "set-setting",
     "taskbar-to-output",
     "toggle-frame",
@@ -380,6 +379,9 @@ pub(crate) enum WindowManagerAction {
     MarkWindow(String),
     /// Brings forward the window a key marks (`go-to-marked-window <key>`).
     GoToMarkedWindow(String),
+    /// Moves the window to another output (`send-to-output
+    /// next|previous|<head>`, heads numbered from 1 left to right).
+    SendToOutput(OutputTarget),
 }
 
 impl Action {
@@ -604,6 +606,19 @@ impl WindowManagerAction {
                 Err(format!("`{name}` needs a key, such as `mark-window a`"))
             }
             "mark-window" => Ok(Self::MarkWindow(arguments.to_owned())),
+            "send-to-output" => match arguments {
+                "next" => Ok(Self::SendToOutput(OutputTarget::Next)),
+                "previous" => Ok(Self::SendToOutput(OutputTarget::Previous)),
+                head => head
+                    .parse::<std::num::NonZeroUsize>()
+                    .map(|head| Self::SendToOutput(OutputTarget::Head(head)))
+                    .map_err(|_not_a_head| {
+                        format!(
+                            "`send-to-output` takes next, previous or a head from 1, \
+                             not `{arguments}`"
+                        )
+                    }),
+            },
             "go-to-marked-window" => Ok(Self::GoToMarkedWindow(arguments.to_owned())),
             _ if PLANNED_ACTIONS.contains(&name) => {
                 Err(format!("`{name}` is not available in vaht yet"))
@@ -681,6 +696,13 @@ impl fmt::Display for WindowManagerAction {
             Self::FocusDirection(direction) => write!(formatter, "focus-direction {direction}"),
             Self::MarkWindow(key) => write!(formatter, "mark-window {key}"),
             Self::GoToMarkedWindow(key) => write!(formatter, "go-to-marked-window {key}"),
+            Self::SendToOutput(OutputTarget::Next) => formatter.write_str("send-to-output next"),
+            Self::SendToOutput(OutputTarget::Previous) => {
+                formatter.write_str("send-to-output previous")
+            }
+            Self::SendToOutput(OutputTarget::Head(head)) => {
+                write!(formatter, "send-to-output {head}")
+            }
         }
     }
 }

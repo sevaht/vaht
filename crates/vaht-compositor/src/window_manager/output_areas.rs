@@ -4,11 +4,26 @@
 //! each output's [`OutputArea`] and says which one a window or a point
 //! belongs to. A window belongs to the output showing the most of it, so
 //! it needs no output of its own to remember: moved across, it belongs to
-//! the next; maximized, it fills the one it is on.
+//! the next; maximized, it fills the one it is on. Outputs are also
+//! numbered as heads, from 1, left to right and then top to bottom, as
+//! Fluxbox and fluxland number them, for `send-to-output`.
+
+use std::num::NonZeroUsize;
 
 use smithay::utils::{Logical, Point};
 
 use super::window::{Area, OutputArea};
+
+/// Which output `send-to-output` sends a window to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputTarget {
+    /// The next head, after the last the first.
+    Next,
+    /// The head before, before the first the last.
+    Previous,
+    /// The head with this number, from 1.
+    Head(NonZeroUsize),
+}
 
 /// Each output's areas, the primary output's first.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +86,57 @@ impl OutputAreas {
         ))
     }
 
+    /// Returns the outputs as heads: left to right, then top to bottom.
+    fn heads(&self) -> Vec<OutputArea> {
+        let mut heads: Vec<OutputArea> = self.iter().copied().collect();
+        heads.sort_by_key(|output| (output.whole.loc.x, output.whole.loc.y));
+        heads
+    }
+
+    /// Returns the output `target` names, from the output `from`; none if
+    /// there is no such head.
+    pub(crate) fn target(&self, from: OutputArea, target: OutputTarget) -> Option<OutputArea> {
+        let heads = self.heads();
+        let count = heads.len();
+        let index = heads.iter().position(|head| *head == from).unwrap_or(0);
+        let chosen = match target {
+            OutputTarget::Next => (index + 1) % count,
+            OutputTarget::Previous => (index + count - 1) % count,
+            OutputTarget::Head(number) => number.get() - 1,
+        };
+        heads.get(chosen).copied()
+    }
+
+    /// Returns where `area`'s corner goes, carried from the output `from`
+    /// to `to`: as far into `to`'s usable area as it was into `from`'s,
+    /// in proportion, and wholly within it where it fits.
+    pub(crate) fn carried(area: Area, from: OutputArea, to: OutputArea) -> Point<i32, Logical> {
+        let along = |offset: i32, from_length: i32, length: i32, to_start: i32, to_length: i32| {
+            let room_from = i64::from((from_length - length).max(1));
+            let room_to = i64::from((to_length - length).max(0));
+            let offset = i64::from(offset.clamp(0, from_length - length.min(from_length)));
+            let moved = i32::try_from(offset * room_to / room_from).unwrap_or_default();
+            to_start + moved.clamp(0, room_to.try_into().unwrap_or_default())
+        };
+        let (from_usable, to_usable) = (from.usable, to.usable);
+        Point::from((
+            along(
+                area.loc.x - from_usable.loc.x,
+                from_usable.size.w,
+                area.size.w,
+                to_usable.loc.x,
+                to_usable.size.w,
+            ),
+            along(
+                area.loc.y - from_usable.loc.y,
+                from_usable.size.h,
+                area.size.h,
+                to_usable.loc.y,
+                to_usable.size.h,
+            ),
+        ))
+    }
+
     /// Returns the areas of the output `point` is on, or the primary
     /// output's if it is on none.
     pub(crate) fn at(&self, point: Point<i32, Logical>) -> OutputArea {
@@ -117,6 +183,41 @@ mod tests {
         assert_eq!(outputs.corner_shown(shown), shown.loc);
         let lost = Rectangle::new((3000, 700).into(), (100, 100).into());
         assert_eq!(outputs.corner_shown(lost), Point::from((700, 500)));
+    }
+
+    #[test]
+    fn heads_go_left_to_right_and_wrap() {
+        let left = output(0, (800, 600));
+        let right = output(800, (640, 480));
+        // The primary output is the right one here.
+        let outputs = OutputAreas::new(right, vec![left]);
+        assert_eq!(outputs.target(left, OutputTarget::Next), Some(right));
+        assert_eq!(
+            outputs.target(right, OutputTarget::Next),
+            Some(left),
+            "wraps"
+        );
+        assert_eq!(outputs.target(left, OutputTarget::Previous), Some(right));
+        let head = |number| OutputTarget::Head(NonZeroUsize::new(number).expect("not 0"));
+        assert_eq!(outputs.target(right, head(1)), Some(left));
+        assert_eq!(outputs.target(right, head(3)), None);
+    }
+
+    #[test]
+    fn a_window_carried_across_keeps_its_place_in_proportion() {
+        let (from, to) = (output(0, (800, 600)), output(800, (640, 480)));
+        let centered = Rectangle::new((300, 250).into(), (200, 100).into());
+        assert_eq!(
+            OutputAreas::carried(centered, from, to),
+            Point::from((800 + 220, 190)),
+            "still centred"
+        );
+        let too_wide = Rectangle::new((0, 0).into(), (700, 100).into());
+        assert_eq!(
+            OutputAreas::carried(too_wide, from, to).x,
+            800,
+            "against the left edge when it does not fit"
+        );
     }
 
     #[test]

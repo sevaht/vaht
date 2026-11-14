@@ -28,7 +28,7 @@ use vaht_ui::{Theme, Typesetter};
 
 pub(crate) use self::focus::CycleDirection;
 use self::focus::Focus;
-pub(crate) use self::output_areas::OutputAreas;
+pub(crate) use self::output_areas::{OutputAreas, OutputTarget};
 pub(crate) use self::placement_strategy::{ColumnDirection, PlacementStrategy, Room, RowDirection};
 use self::snap_zones::{LayoutPicker, SnapTarget};
 pub(crate) use self::window::AlphaChange;
@@ -499,8 +499,31 @@ impl WindowManager {
             WindowManagerAction::SetAlpha(change) => self.change_alpha(window, *change),
             WindowManagerAction::FocusDirection(direction) => self.focus_direction(*direction),
             WindowManagerAction::MarkWindow(key) => self.mark(window, key),
+            WindowManagerAction::SendToOutput(target) => self.send_to_output(window, *target),
             WindowManagerAction::GoToMarkedWindow(key) => self.go_to_marked(key),
         }
+    }
+
+    /// Moves `window` to the output `target` names: a floating window to
+    /// the same place in proportion, a maximized or tiled one filling its
+    /// part of the new output.
+    fn send_to_output(&mut self, window: Option<WindowId>, target: OutputTarget) {
+        let outputs = self.outputs.clone();
+        self.change_window(window, |window, metrics| {
+            let outer = window.outer_area(metrics);
+            let from = outputs.for_area(outer);
+            let Some(to) = outputs.target(from, target) else {
+                return;
+            };
+            let placement = window.placement().clone();
+            if placement == Placement::Floating {
+                let corner = OutputAreas::carried(outer, from, to);
+                window.move_by(corner - outer.loc, metrics);
+            } else {
+                window.place(placement, to, metrics);
+            }
+        });
+        self.is_redraw_needed = true;
     }
 
     /// Marks `window` with `key`, which then marks it alone.
@@ -1378,6 +1401,34 @@ mod tests {
         assert_eq!(desk.manager.focused(), Some(left), "nothing further left");
         desk.manager.run(&action("focus-direction right"), None);
         assert_eq!(desk.manager.focused(), Some(right));
+    }
+
+    #[test]
+    fn a_window_sent_to_another_output_keeps_its_place_there() {
+        let mut desk = Desk::new();
+        let window = desk.open();
+        let right = Rectangle::new((1920, 0).into(), (1280, 1024).into());
+        desk.manager.set_output_areas(OutputAreas::new(
+            output(0),
+            vec![OutputArea {
+                whole: right,
+                usable: right,
+            }],
+        ));
+        desk.run(&action("send-to-output next"));
+        assert!(
+            right.contains_rect(desk.outer(window)),
+            "on the right output"
+        );
+        desk.run(&action("send-to-output 1"));
+        assert_eq!(
+            desk.outer(window).loc,
+            Point::from((0, 0)),
+            "back where it was"
+        );
+        desk.run(&action("maximize"));
+        desk.run(&action("send-to-output next"));
+        assert_eq!(desk.outer(window), right, "maximized there");
     }
 
     #[test]

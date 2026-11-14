@@ -113,6 +113,11 @@ impl FluxboxCommand<'_> {
             "stick" | "stickwindow" => plain("stick"),
             "snapstep" => with("snap-step"),
             "showdesktop" => plain("show-desktop"),
+            "sendtonexthead" => plain("send-to-output next"),
+            "sendtoprevhead" => plain("send-to-output previous"),
+            "sethead" if arguments.parse::<std::num::NonZeroUsize>().is_ok() => {
+                with("send-to-output")
+            }
             "focusleft" => plain("focus-direction left"),
             "focusright" => plain("focus-direction right"),
             "focusup" => plain("focus-direction up"),
@@ -351,6 +356,8 @@ mod tests {
             vaht("GotoMarkedWindow a").as_deref(),
             Ok("go-to-marked-window a")
         );
+        assert_eq!(vaht("SendToNextHead").as_deref(), Ok("send-to-output next"));
+        assert_eq!(vaht("SetHead 2").as_deref(), Ok("send-to-output 2"));
     }
 
     /// Translates `command` and returns the vaht value as TOML text.
