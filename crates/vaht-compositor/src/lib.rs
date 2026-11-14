@@ -40,6 +40,7 @@ mod presentation;
 mod protocols;
 pub mod resources;
 mod scene;
+mod session_environment;
 mod session_lock;
 mod shared_memory;
 mod signals;

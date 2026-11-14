@@ -154,3 +154,65 @@ fn a_client_leaving_after_its_windows_closed_and_were_redrawn_leaves_nothing_beh
     vaht.wait_for_disconnections(1);
     vaht.stop().assert_nothing_left_behind();
 }
+
+#[test]
+fn programs_are_told_to_prefer_wayland() {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let written = directory.path().join("toolkits");
+    let settings = format!(
+        "[session]\nautostart = [\"echo \\\"$QT_QPA_PLATFORM|$SDL_VIDEODRIVER\\\" > {}\"]\n",
+        written.display()
+    );
+    let _vaht =
+        HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("settings.toml", &settings)]);
+    let toolkits = vaht_test_support::wait_for_file(&written, |text| text.ends_with('\n'));
+    assert_eq!(toolkits, "wayland;xcb|wayland,x11\n");
+}
+
+#[test]
+fn the_activation_environment_learns_of_the_session_and_forgets_it_on_exit() {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let calls = directory.path().join("calls");
+    let tool = directory.path().join("dbus-update-activation-environment");
+    std::fs::write(
+        &tool,
+        format!("#!/bin/sh\necho \"$*\" >> {}\n", calls.display()),
+    )
+    .expect("written");
+    std::fs::set_permissions(&tool, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .expect("made runnable");
+    let path = format!(
+        "{}:{}",
+        directory.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let vaht = HeadlessVaht::start_with_environment(
+        Path::new(EXECUTABLE),
+        &[(
+            "settings.toml",
+            b"[session]\nupdate_activation_environment = \"always\"\n",
+        )],
+        &[("PATH", &path)],
+    );
+    let exported =
+        vaht_test_support::wait_for_file(&calls, |text| text.contains("WAYLAND_DISPLAY"));
+    assert!(
+        exported.starts_with("--systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP"),
+        "{exported}"
+    );
+    let _report = vaht.stop();
+    let all = vaht_test_support::wait_for_file(&calls, |text| text.contains("WAYLAND_DISPLAY="));
+    assert!(all.contains("XDG_CURRENT_DESKTOP= "), "{all}");
+}
+
+#[test]
+fn a_headless_vaht_leaves_the_activation_environment_alone() {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let marker = directory.path().join("started");
+    let settings = format!("[session]\nautostart = [\"touch {}\"]\n", marker.display());
+    let vaht =
+        HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("settings.toml", &settings)]);
+    // Autostart runs after the export would have been logged.
+    let _ = vaht_test_support::wait_for_file(&marker, |_| true);
+    assert_eq!(vaht.logged_count("activation environment updated"), 0);
+}

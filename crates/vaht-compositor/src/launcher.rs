@@ -35,6 +35,7 @@ use calloop::{Interest, LoopHandle, Mode, PostAction};
 
 use crate::event_source::EventSource;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
+use crate::session_environment::TOOLKIT_DEFAULTS;
 use crate::{Compositor, WindowId};
 
 /// Starts programs and reaps them.
@@ -101,6 +102,24 @@ impl Launcher {
             executable,
             ledger: ledger.clone(),
         }
+        .with_toolkit_defaults()
+    }
+
+    /// Returns the launcher with toolkits told to prefer Wayland, where
+    /// vaht's own environment does not say otherwise.
+    fn with_toolkit_defaults(mut self) -> Self {
+        for (name, value) in TOOLKIT_DEFAULTS {
+            if std::env::var_os(name).is_none() {
+                self.environment
+                    .insert(OsString::from(name), OsString::from(value));
+            }
+        }
+        self
+    }
+
+    /// Returns whether the programs vaht starts find `name` set.
+    pub(crate) fn is_set(&self, name: &str) -> bool {
+        self.environment.contains_key(OsStr::new(name)) || std::env::var_os(name).is_some()
     }
 
     /// Starts `command_line` with the shell.

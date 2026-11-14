@@ -23,6 +23,7 @@ pub(crate) use self::input::{
 pub(crate) use self::taskbar::{
     TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent,
 };
+use crate::session_environment::ActivationUpdate;
 use crate::window_manager::{
     ColumnDirection, PlacementStrategy, Room, RowDirection, TileCell, TitlebarButton,
     TitlebarLayout, WindowAlpha,
@@ -500,6 +501,9 @@ fn file_path(path: &str, config_directory: &Path) -> Option<PathBuf> {
 pub(crate) struct SessionSettings {
     /// Command lines run once when vaht starts, as `exec` runs them.
     pub(crate) autostart: Vec<String>,
+    /// When the D-Bus and systemd activation environment is told of the
+    /// session, so portals find it; read at start.
+    pub(crate) update_activation_environment: ActivationUpdate,
 }
 
 #[cfg(test)]

@@ -162,12 +162,43 @@ impl InitFile {
                 ),
             }
         }
+        self.convert_activation_environment(report);
         self.accept_what_vaht_does();
         self.report_unused(report);
         InitConversion {
             settings: self.document,
             outputs: outputs.document(),
             switches,
+        }
+    }
+
+    /// When the activation environment is updated:
+    /// `session.updateActivationEnvironment` (`auto`, or a yes or no).
+    fn convert_activation_environment(&mut self, report: &mut Report) {
+        let Some(resource) = self
+            .resources
+            .get("session.updateActivationEnvironment")
+            .cloned()
+        else {
+            return;
+        };
+        let value = resource.value.to_ascii_lowercase();
+        let vaht = match value.as_str() {
+            "auto" => Some("auto"),
+            "true" | "yes" | "1" => Some("always"),
+            "false" | "no" | "0" => Some("never"),
+            _ => None,
+        };
+        match vaht {
+            Some(vaht) => self.set(
+                &["session", "update_activation_environment"],
+                Value::from(vaht),
+            ),
+            None => self.note(
+                report,
+                resource.line,
+                format!("session.updateActivationEnvironment = {}", resource.value),
+            ),
         }
     }
 
@@ -852,6 +883,28 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    #[test]
+    fn the_activation_environment_setting_is_converted() {
+        let convert = |value: &str| {
+            let init = format!("session.updateActivationEnvironment: {value}\n");
+            let mut report = Report::default();
+            let document = InitFile::new(Resources::parse(Path::new("init"), &init))
+                .convert(&mut report)
+                .settings;
+            (document.to_string(), report.notes().len())
+        };
+        assert_eq!(convert("auto"), (String::new(), 0), "the default");
+        assert_eq!(
+            convert("true"),
+            (
+                "[session]\nupdate_activation_environment = \"always\"\n".to_owned(),
+                0
+            )
+        );
+        assert_eq!(convert("no").1, 0);
+        assert_eq!(convert("sometimes").1, 1, "reported");
+    }
 
     #[test]
     fn only_settings_that_differ_from_the_defaults_are_written() {

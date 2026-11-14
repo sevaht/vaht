@@ -91,6 +91,7 @@ use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::{
     Backdrop, Drawn, FrameTextures, Outline, PointerTarget, Scene, SnapOverlay, WindowTarget,
 };
+use crate::session_environment;
 use crate::session_lock::SessionLock;
 use crate::signals::ProcessSignals;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
@@ -136,6 +137,8 @@ pub struct Compositor {
     pub(crate) frame_pacing: FramePacing,
     /// Holds clients' frames until the GPU has drawn them.
     pub(crate) fence_waits: FenceWaits,
+    /// Whether the activation environment is told of the session.
+    exports_activation_environment: bool,
     /// The windows as programs outside vaht see them listed.
     toplevel_list: ToplevelList<WindowId, ForeignToplevelHandle>,
     /// Windows, workspaces and focus, and every rule about them.
@@ -246,6 +249,7 @@ impl Compositor {
                 );
             }
         }
+        compositor.update_activation_environment(true);
         tracing::info!("stopping");
         tracing::debug!(resources = %compositor.ledger, "resources at exit");
         resources::log_process_usage("at exit");
@@ -320,6 +324,7 @@ impl Compositor {
             session_lock: SessionLock::default(),
             frame_pacing: FramePacing::default(),
             fence_waits: FenceWaits::default(),
+            exports_activation_environment: false,
             toplevel_list: ToplevelList::default(),
             window_manager,
             toplevels: Toplevels::default(),
@@ -367,6 +372,14 @@ impl Compositor {
             backend.set_input_settings(&self.config.settings.input);
         }
         self.start_xwayland(allows_xwayland);
+        let owns_seat = matches!(self.backend, Backend::Drm(_));
+        self.exports_activation_environment = self
+            .config
+            .settings
+            .session
+            .update_activation_environment
+            .applies(owns_seat);
+        self.update_activation_environment(false);
         for command_line in &self.config.settings.session.autostart {
             self.launcher.run(command_line);
         }
@@ -836,6 +849,21 @@ impl Compositor {
                 self.launcher.set_environment("DISPLAY".to_owned(), name);
             }
         }
+        // Services started from now on find X too.
+        self.update_activation_environment(false);
+    }
+
+    /// Tells the D-Bus and systemd activation environment of the session,
+    /// or empties it there (`is_clearing`), if vaht exports it.
+    fn update_activation_environment(&mut self, is_clearing: bool) {
+        if !self.exports_activation_environment {
+            return;
+        }
+        let launcher = &self.launcher;
+        let command =
+            session_environment::update_command(is_clearing, |name| launcher.is_set(name));
+        tracing::info!(command, "activation environment updated");
+        self.launcher.run(&command);
     }
 
     /// Loads the X resources file the settings name into Xwayland on

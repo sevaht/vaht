@@ -149,6 +149,22 @@ impl HeadlessVaht {
         Self::launch(executable, (files, &[]), &[], Xwayland::On)
     }
 
+    /// Starts `executable` headless with configuration `files` and
+    /// `environment` (names and values) set for it, and waits until it
+    /// accepts clients.
+    ///
+    /// # Panics
+    ///
+    /// Panics if vaht does not start.
+    #[must_use]
+    pub fn start_with_environment(
+        executable: &Path,
+        files: &[(&str, &[u8])],
+        environment: &[(&str, &str)],
+    ) -> Self {
+        Self::launch(executable, (files, &[]), environment, Xwayland::Off)
+    }
+
     /// Waits until Xwayland is ready, and returns its display, such as
     /// `:1`, for an X11 client's `DISPLAY`.
     ///
@@ -249,6 +265,10 @@ impl HeadlessVaht {
             .env("DBUS_SYSTEM_BUS_ADDRESS", Self::absent_bus(runtime.path()))
             .env("DBUS_SESSION_BUS_ADDRESS", Self::absent_bus(runtime.path()))
             .env_remove("VAHT_LOG")
+            // Toolkit choices: vaht's defaults, not the developer's.
+            .env_remove("QT_QPA_PLATFORM")
+            .env_remove("SDL_VIDEODRIVER")
+            .env_remove("_JAVA_AWT_WM_NONREPARENTING")
             .env_remove("VAHT_HEADLESS_OUTPUTS")
             .env_remove("VAHT_HEADLESS_OUTPUTS_FILE")
             .envs(environment.iter().copied())

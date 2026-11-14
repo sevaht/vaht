@@ -199,7 +199,17 @@ rest by name, so a setting never silently does nothing:
   and `grip-*` mouse contexts bind something). `vaht import` reads it from
   `defaultDeco`'s preset or mask.
 - `[workspaces]`: `names`, at least one.
-- `[session]`: `autostart`.
+- `[session]`: `autostart`, and `update_activation_environment` (from
+  fluxland's `session.updateActivationEnvironment`): `auto` (when vaht
+  runs the session from a terminal, not nested or headless), `always` or
+  `never`. vaht then runs `dbus-update-activation-environment --systemd`
+  with `WAYLAND_DISPLAY`, `DISPLAY` (once Xwayland is ready),
+  `XDG_CURRENT_DESKTOP`, `XDG_SESSION_TYPE` and `VAHT_SOCKET`, so portals
+  and other D-Bus-activated services find the session, and empties them
+  when it exits. Programs vaht starts are also told
+  `QT_QPA_PLATFORM=wayland;xcb`, `SDL_VIDEODRIVER=wayland,x11` and
+  `_JAVA_AWT_WM_NONREPARENTING=1`, unless vaht's own environment sets
+  them.
 - `[wallpaper]`: `image` (PNG, JPEG, GIF, WebP, BMP, TIFF, TGA, PNM, QOI
   or ICO, known by its contents; `~/` is the home directory, a relative
   path is from the configuration directory) and `fit` (`fill`, `fit`,

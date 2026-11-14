@@ -149,6 +149,11 @@ allow_commands = true
 [session]
 # Command lines run once when vaht starts, as exec runs them.
 autostart = []
+# When the D-Bus and systemd activation environment is told of the session
+# (WAYLAND_DISPLAY, DISPLAY, XDG_CURRENT_DESKTOP...), so portals and other
+# services find it: "auto" when vaht runs the session from a terminal, not
+# nested; "always"; or "never". Emptied again when vaht exits.
+update_activation_environment = "auto"
 
 [xwayland]
 # Whether vaht starts Xwayland, so X11 programs run; read at start.
