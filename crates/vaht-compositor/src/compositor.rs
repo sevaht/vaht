@@ -102,6 +102,7 @@ use crate::scene::{
 use crate::session_environment;
 use crate::session_lock::SessionLock;
 use crate::signals::ProcessSignals;
+use crate::tablet;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
 use crate::tooltip::Tooltip;
 use crate::toplevel_list::{ForeignToplevels, ToplevelList};
@@ -1743,8 +1744,8 @@ impl Compositor {
         self.settle();
         #[expect(
             clippy::wildcard_enum_match_arm,
-            reason = "the rest go to touch::handle and gestures::forward, which take \
-                      touches and gestures; tablets are not taken yet"
+            reason = "the rest go to touch::handle, tablet::handle and gestures::forward, \
+                      which take touches, tablets and gestures"
         )]
         match event {
             InputEvent::Keyboard { event } => {
@@ -1793,7 +1794,9 @@ impl Compositor {
                 }
             }
             other => {
-                if touch::handle(self, &other, absolute_area) {
+                if touch::handle(self, &other, absolute_area)
+                    || tablet::handle(self, &other, absolute_area)
+                {
                     return;
                 }
                 let pointer = self

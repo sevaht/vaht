@@ -380,7 +380,11 @@ rest only carries the decisions out.
   pointer. A touch screen covers the laptop's panel (`eDP`), else the
   primary output: a touch on a client is its (`wl_touch`), focusing and
   raising its window; one on vaht's own parts presses and releases the
-  pointer's left button there, one point at a time (`touch.rs`).
+  pointer's left button there, one point at a time (`touch.rs`). A drawing
+  tablet covers every output: its stylus goes to the client under it
+  (`zwp_tablet_v2`: position, pressure, tilt, buttons) and moves the
+  pointer too, and its tip on vaht's own parts presses the left button
+  there (`tablet.rs`).
 - **Sync.** A client's GPU buffer is shown only once drawn
   (`buffer_fences.rs`): at the acquire point the client named with
   explicit sync (`wp_linux_drm_syncobj_v1`, offered when the primary GPU

@@ -42,7 +42,14 @@ fn a_sandboxed_program_is_offered_windows_but_not_the_privileged_globals() {
     }
     let mut sandbox = Sandbox::create(vaht.socket(), "test");
     let sandboxed = Sandbox::globals(&sandbox.socket());
-    for name in ["wl_compositor", "xdg_wm_base", "wl_seat", "wl_shm"] {
+    for name in [
+        "wl_compositor",
+        "xdg_wm_base",
+        "wl_seat",
+        "wl_shm",
+        "zwp_tablet_manager_v2",
+        "zwp_text_input_manager_v3",
+    ] {
         assert!(
             sandboxed.iter().any(|global| global == name),
             "{name}: {sandboxed:?}"

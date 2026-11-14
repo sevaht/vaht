@@ -61,6 +61,7 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
+use smithay::wayland::tablet_manager::TabletManagerState;
 use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
@@ -148,12 +149,14 @@ pub(crate) struct ProtocolStates {
     /// `zwp_relative_pointer_manager_v1`, `zwp_pointer_constraints_v1`,
     /// `wp_pointer_warp_v1` and `zwp_pointer_gestures_v1`: games reading
     /// the mouse's motion, locking or confining the pointer and moving it,
-    /// and touchpad gestures. Held only to keep the globals.
+    /// and touchpad gestures; and `zwp_tablet_manager_v2`, drawing tablets.
+    /// Held only to keep the globals.
     _pointer_extensions: (
         RelativePointerManagerState,
         PointerConstraintsState,
         PointerWarpManager,
         PointerGesturesState,
+        TabletManagerState,
     ),
     /// `zwp_keyboard_shortcuts_inhibit_manager_v1`: a window taking every
     /// key while it has the keyboard.
@@ -302,6 +305,7 @@ impl ProtocolStates {
                 PointerConstraintsState::new::<Compositor>(display),
                 PointerWarpManager::new::<Compositor>(display),
                 PointerGesturesState::new::<Compositor>(display),
+                TabletManagerState::new::<Compositor>(display),
             ),
             output_capture_source: OutputCaptureSourceState::new_with_filter::<Compositor, _>(
                 display,

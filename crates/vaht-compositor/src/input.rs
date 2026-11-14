@@ -159,6 +159,9 @@ pub(crate) struct Input {
     key_chain: KeyChain,
     /// The touch points down, and where each goes.
     pub(crate) touch: TouchRoutes,
+    /// Whether a stylus's tip is down on vaht's own parts, standing in for
+    /// the pointer's left button.
+    pub(crate) is_stylus_the_pointer: bool,
 }
 
 impl Input {

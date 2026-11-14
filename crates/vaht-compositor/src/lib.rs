@@ -50,6 +50,7 @@ mod session_environment;
 mod session_lock;
 mod shared_memory;
 mod signals;
+mod tablet;
 mod taskbar;
 mod tooltip;
 mod toplevel_list;
