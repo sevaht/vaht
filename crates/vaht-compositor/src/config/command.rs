@@ -24,10 +24,7 @@ use crate::window_manager::{
 const PLANNED_ACTIONS: &[&str] = &[
     "activate-tray-item",
     "activate-window-list-entry",
-    "apply-profile",
     "arrange",
-    "cycle-primary-output",
-    "cycle-profile",
     "focus-direction",
     "go-to-marked-window",
     "key-mode",
