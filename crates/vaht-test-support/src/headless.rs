@@ -190,6 +190,10 @@ impl HeadlessVaht {
             .env("XDG_DATA_HOME", data_directory.path())
             .env("XDG_DATA_DIRS", data_directory.path())
             .env("XDG_STATE_HOME", state.path())
+            // Cursor themes only from the data directory's icons.
+            .env("XCURSOR_PATH", data_directory.path().join("icons"))
+            .env_remove("XCURSOR_THEME")
+            .env_remove("XCURSOR_SIZE")
             // No D-Bus bus of the machine's: one that is not there.
             .env("DBUS_SYSTEM_BUS_ADDRESS", Self::absent_bus(runtime.path()))
             .env("DBUS_SESSION_BUS_ADDRESS", Self::absent_bus(runtime.path()))

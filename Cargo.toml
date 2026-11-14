@@ -53,6 +53,8 @@ image = { version = "0.25", default-features = false, features = ["bmp", "gif", 
 # Application icons drawn as SVG; no text or fonts, which icons do not need.
 resvg = { version = "0.49", default-features = false }
 toml = "1"
+# Pointer pictures from the xcursor theme, on outputs vaht draws the pointer on.
+xcursor = "0.3"
 toml_edit = "0.25"
 tracing = "0.1"
 tracing-appender = "0.2"

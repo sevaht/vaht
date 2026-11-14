@@ -19,6 +19,7 @@ mod capture;
 mod client;
 mod compositor;
 mod config;
+mod cursor;
 pub mod event_source;
 mod execution;
 mod grab;

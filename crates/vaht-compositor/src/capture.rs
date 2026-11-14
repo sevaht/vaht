@@ -214,6 +214,12 @@ impl ImageCopyCaptureHandler for Compositor {
             },
             LayerMaps::new(&self.outputs),
         );
+        let pointer = self.pointer_location();
+        let scene = if session.draw_cursor() {
+            scene.with_pointer(&self.cursor, pointer)
+        } else {
+            scene
+        };
         self.capture
             .capture(frame, &scene, &output, self.start_time.elapsed());
     }

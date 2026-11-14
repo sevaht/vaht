@@ -102,6 +102,14 @@ impl Backend {
         }
     }
 
+    /// Returns whether vaht draws the pointer on this backend's outputs;
+    /// nested, the host draws it, and headless, no one sees it.
+    pub(crate) const fn draws_pointer(&self) -> bool {
+        match self {
+            Self::Winit(_) | Self::Headless(_) => false,
+        }
+    }
+
     /// Asks for a frame to be drawn soon.
     pub(crate) fn schedule_render(&mut self) {
         match self {

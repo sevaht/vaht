@@ -20,6 +20,7 @@ mod xdg_shell;
 use smithay::input::SeatState;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::wayland::compositor::CompositorState;
+use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufState};
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::image_capture_source::OutputCaptureSourceState;
@@ -74,6 +75,10 @@ pub(crate) struct ProtocolStates {
         FractionalScaleManagerState,
         SinglePixelBufferState,
     ),
+    /// `wp_cursor_shape_manager_v1`: clients naming the pointer's picture
+    /// (`text`, `pointer`…) rather than drawing it. Held only to keep the
+    /// global.
+    _cursor_shape: CursorShapeManagerState,
     /// `zxdg_decoration_manager_v1`: vaht draws every frame. Held only to
     /// keep the global alive.
     _xdg_decoration: XdgDecorationState,
@@ -118,6 +123,7 @@ impl ProtocolStates {
                 SinglePixelBufferState::new::<Compositor>(display),
             ),
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
+            _cursor_shape: CursorShapeManagerState::new::<Compositor>(display),
             output_capture_source: OutputCaptureSourceState::new::<Compositor>(display),
             image_copy_capture: ImageCopyCaptureState::new::<Compositor>(display),
             // TODO(security): every client may inject input, as on other

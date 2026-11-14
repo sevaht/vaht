@@ -23,6 +23,6 @@ pub use client::{
 };
 pub use headless::{ExitReport, HeadlessVaht};
 pub use metrics::{BUILT_IN_METRICS, ThemeMetrics};
-pub use picture::solid_png;
+pub use picture::{solid_png, solid_xcursor};
 pub use screenshot::{Bounds, Screenshot};
 pub use wait::wait_for_file;

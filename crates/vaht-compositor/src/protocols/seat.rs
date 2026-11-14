@@ -3,6 +3,7 @@
 
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
 use smithay::input::pointer::{CursorImageStatus, Focus};
+use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::Resource as _;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -24,9 +25,10 @@ impl SeatHandler for Compositor {
         &mut self.protocols.seat
     }
 
-    // Nested, the host compositor draws the pointer; clients' cursor images
-    // matter once vaht draws its own pointer on real outputs.
-    fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
+    fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
+        self.cursor.set_status(image);
+        self.schedule_render();
+    }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         // The clipboard follows keyboard focus: only the focused client may
@@ -76,4 +78,10 @@ impl WaylandDndGrabHandler for Compositor {
             None => source.cancel(),
         }
     }
+}
+
+// Tablets come with libinput; until then no tool has focus, but the cursor
+// shape protocol asks for this.
+impl TabletSeatHandler for Compositor {
+    type ToolFocus = WlSurface;
 }

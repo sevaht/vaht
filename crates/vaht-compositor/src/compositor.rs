@@ -60,6 +60,7 @@ use crate::config::{
     Action, Command, Config, ConfigSource, FocusModel, KeyChord, MenuGenerator, MenuRequest, Menus,
     Modifiers, ResizeFrom, SettingOverrides, ThemeFile, WindowManagerAction,
 };
+use crate::cursor::Cursor;
 use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
 use crate::grab::{GrabKind, WindowGrab};
@@ -98,6 +99,8 @@ pub struct Compositor {
     pub(crate) backend: Backend,
     /// The outputs the backend shows on, and where each is.
     pub(crate) outputs: Outputs,
+    /// The pointer's picture, for outputs vaht draws the pointer on.
+    pub(crate) cursor: Cursor,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -278,6 +281,7 @@ impl Compositor {
             seat,
             backend,
             outputs,
+            cursor: Cursor::from_environment(),
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -507,6 +511,12 @@ impl Compositor {
             },
             LayerMaps::new(&self.outputs),
         );
+        let draws_pointer = self.backend.draws_pointer();
+        let scene = if draws_pointer {
+            scene.with_pointer(&self.cursor, self.pointer_location())
+        } else {
+            scene
+        };
         if let Err(error) = self.backend.render(&scene) {
             tracing::warn!(error = &error as &dyn std::error::Error, "frame skipped");
         }
@@ -524,6 +534,10 @@ impl Compositor {
             layer.send_frame(output, time, Some(Duration::ZERO), |_, _| {
                 Some(output.clone())
             });
+        }
+        // An animated pointer moves on by itself.
+        if draws_pointer && self.cursor.is_animated() {
+            self.schedule_render();
         }
         tracing::trace!("frame drawn");
     }
@@ -558,6 +572,7 @@ impl Compositor {
         self.outline
             .update(self.window_manager.outline(), &self.config.theme);
         self.snap_overlay.update(&self.window_manager);
+        self.cursor.prepare(self.start_time.elapsed());
     }
 
     /// Starts managing the window of a new xdg-shell toplevel.

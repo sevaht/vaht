@@ -85,6 +85,7 @@ fn clients_find_the_protocols_everyday_programs_use() {
         "wl_data_device_manager",
         "wl_seat",
         "wl_shm",
+        "wp_cursor_shape_manager_v1",
         "wp_fractional_scale_manager_v1",
         "wp_single_pixel_buffer_manager_v1",
         "wp_viewporter",

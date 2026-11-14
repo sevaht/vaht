@@ -39,6 +39,7 @@ pub(crate) use self::menu_texture::MenuTexture;
 pub(crate) use self::outline::Outline;
 pub(crate) use self::panel_texture::PanelTexture;
 pub(crate) use self::snap_overlay::SnapOverlay;
+use crate::cursor::Cursor;
 use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, LayerMaps};
 use crate::menu::MenuStack;
 use crate::outputs::Outputs;
@@ -162,6 +163,9 @@ pub(crate) struct Scene<'state> {
     drawn: Drawn<'state>,
     /// The outputs' layer surfaces.
     layers: LayerMaps<'state>,
+    /// The pointer and where it is, when vaht draws it (on outputs no
+    /// host draws it on, and in screenshots that ask for it).
+    pointer: Option<(&'state Cursor, Point<f64, Logical>)>,
 }
 
 /// What vaht draws itself: the windows' frames, the taskbar, the menus and
@@ -199,7 +203,20 @@ impl<'state> Scene<'state> {
             toplevels,
             drawn,
             layers,
+            pointer: None,
         }
+    }
+
+    /// Returns the scene with `cursor` drawn at `location` (global
+    /// coordinates), over everything.
+    #[must_use]
+    pub(crate) const fn with_pointer(
+        mut self,
+        cursor: &'state Cursor,
+        location: Point<f64, Logical>,
+    ) -> Self {
+        self.pointer = Some((cursor, location));
+        self
     }
 
     /// Returns the windows shown, from top to bottom, with their toplevels.
@@ -243,8 +260,13 @@ impl<'state> Scene<'state> {
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
-        // Menus are above everything, even the overlay layer.
-        let mut elements = self.drawn.tooltip.render_elements(renderer, scale);
+        // The pointer is above everything; then the menus, above even the
+        // overlay layer.
+        let mut elements = self
+            .pointer
+            .map(|(cursor, location)| cursor.render_elements(renderer, location, scale))
+            .unwrap_or_default();
+        elements.extend(self.drawn.tooltip.render_elements(renderer, scale));
         elements.extend(self.drawn.menus.render_elements(renderer, scale));
         elements.extend(self.drawn.outline.render_elements(renderer, scale));
         elements.extend(self.drawn.snap.picker_element(renderer, scale));

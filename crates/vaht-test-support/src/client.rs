@@ -505,7 +505,18 @@ impl TestClient {
     /// Panics if the capture fails or the connection to vaht does.
     pub fn screenshot(&mut self) -> Screenshot {
         let output = self.output();
-        self.capture(&output)
+        self.capture(&output, Options::empty())
+    }
+
+    /// Captures the (first) output as vaht shows it now, with the pointer
+    /// drawn, as a screen recorder asks.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the capture fails or the connection to vaht does.
+    pub fn screenshot_with_pointer(&mut self) -> Screenshot {
+        let output = self.output();
+        self.capture(&output, Options::PaintCursors)
     }
 
     /// Captures the output named `name` (such as `HEADLESS-2`) as vaht
@@ -530,22 +541,20 @@ impl TestClient {
                     .is_some_and(|info| info.name.as_deref() == Some(name))
             })
             .unwrap_or_else(|| panic!("vaht has an output named {name}"));
-        self.capture(&output)
+        self.capture(&output, Options::empty())
     }
 
-    /// Captures `output` as vaht shows it now.
-    fn capture(&mut self, output: &wl_output::WlOutput) -> Screenshot {
+    /// Captures `output` as vaht shows it now, as `options` ask.
+    fn capture(&mut self, output: &wl_output::WlOutput, options: Options) -> Screenshot {
         let handle = self.queue.handle();
         let source: ExtImageCaptureSourceV1 = self
             .state
             .capture_sources
             .create_source(output, &handle, NoEvents);
-        let session = self.state.capture.create_session(
-            &source,
-            Options::empty(),
-            &handle,
-            CaptureSessionEvents,
-        );
+        let session =
+            self.state
+                .capture
+                .create_session(&source, options, &handle, CaptureSessionEvents);
         source.destroy();
         self.state.capture_size = None;
         self.dispatch_until(|state| state.capture_size.is_some());
