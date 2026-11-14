@@ -68,7 +68,7 @@ use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::{
     Action, Command, Config, ConfigSource, Delay, FocusModel, KeyChord, MenuGenerator, MenuRequest,
-    Menus, Modifiers, ResizeFrom, SettingOverrides, ThemeFile, WindowManagerAction,
+    Menus, Modifiers, ResizeFrom, SettingChange, SettingOverrides, ThemeFile, WindowManagerAction,
 };
 use crate::config::{FocusStealing, SwitchFlip, SwitchKind};
 use crate::cursor::Cursor;
@@ -407,13 +407,15 @@ impl Compositor {
     /// Returns the configuration in `source`, or the built-in one, with an
     /// error logged, if it is not valid.
     fn first_config(source: &ConfigSource) -> Config {
-        source.load().unwrap_or_else(|error| {
-            tracing::error!(
-                error = &error as &dyn std::error::Error,
-                "the configuration is not valid; using the built-in one until it is fixed"
-            );
-            Config::built_in()
-        })
+        source
+            .load(&SettingOverrides::default())
+            .unwrap_or_else(|error| {
+                tracing::error!(
+                    error = &error as &dyn std::error::Error,
+                    "the configuration is not valid; using the built-in one until it is fixed"
+                );
+                Config::built_in()
+            })
     }
 
     /// Opens the IPC socket beside the Wayland one `listener` opened; none,
@@ -471,17 +473,25 @@ impl Compositor {
     /// otherwise the current one stays, and the problem is logged.
     pub(crate) fn reload_configuration(&mut self) {
         self.config_source.watch(&self.loop_handle, &self.ledger);
-        match self.config_source.load() {
-            Ok(mut config) => {
-                if let Err(error) = self
-                    .overrides
-                    .apply(&mut config, self.config_source.directory())
-                {
+        if let Ok(file) = self.config_source.settings_table() {
+            self.overrides.follow_file(&file);
+        }
+        let loaded = match self.config_source.load(&self.overrides) {
+            Err(error) if !self.overrides.is_empty() => {
+                let without = self.config_source.load(&SettingOverrides::default());
+                if without.is_ok() {
                     tracing::warn!(
                         error = &error as &dyn std::error::Error,
-                        "a setting changed in place no longer applies"
+                        "the settings changed in place no longer apply; they are dropped"
                     );
+                    self.overrides = SettingOverrides::default();
                 }
+                without
+            }
+            loaded => loaded,
+        };
+        match loaded {
+            Ok(config) => {
                 self.apply_config(config);
                 tracing::info!(
                     directory = %self.config_source.directory().display(),
@@ -491,6 +501,26 @@ impl Compositor {
             Err(error) => tracing::warn!(
                 error = &error as &dyn std::error::Error,
                 "configuration rejected; the previous one stays in effect"
+            ),
+        }
+    }
+
+    /// Makes `change` to the settings in place, until `save-settings`
+    /// writes it, if the configuration stays valid with it.
+    fn change_setting(&mut self, change: SettingChange) {
+        let changed = self.config_source.settings_table().and_then(|file| {
+            let overrides = self.overrides.with(change, &file);
+            let config = self.config_source.load(&overrides)?;
+            Ok((overrides, config))
+        });
+        match changed {
+            Ok((overrides, config)) => {
+                self.overrides = overrides;
+                self.apply_config(config);
+            }
+            Err(error) => tracing::warn!(
+                error = &error as &dyn std::error::Error,
+                "the setting was not changed"
             ),
         }
     }
@@ -2229,19 +2259,8 @@ impl Compositor {
             Action::CommandDialog => self
                 .launcher
                 .show_dialog("command", self.config_source.directory()),
-            Action::SetTheme(name) => {
-                let mut config = self.config.clone();
-                match self
-                    .overrides
-                    .set_theme(name, &mut config, self.config_source.directory())
-                {
-                    Ok(()) => self.apply_config(config),
-                    Err(error) => tracing::warn!(
-                        error = &error as &dyn std::error::Error,
-                        "could not change the theme"
-                    ),
-                }
-            }
+            Action::SetTheme(name) => self.change_setting(SettingChange::theme(name)),
+            Action::SetSetting(change) => self.change_setting(change.clone()),
             Action::ApplyProfile(name) => {
                 match self
                     .outputs

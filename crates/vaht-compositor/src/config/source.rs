@@ -10,7 +10,7 @@ use std::time::Duration;
 use smithay::reexports::calloop::LoopHandle;
 
 use super::watch::ConfigWatch;
-use super::{Config, ConfigError};
+use super::{Config, ConfigError, SettingOverrides};
 use crate::Compositor;
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
@@ -49,36 +49,37 @@ impl ConfigSource {
         &self.directory
     }
 
-    /// Writes `theme = "<name>"` into `settings.toml`, keeping the rest of
-    /// the file as it is; the watch then reloads the configuration.
+    /// Writes each of `settings`, a key's parts and a TOML value, into
+    /// `settings.toml`, keeping the rest of the file as it is; the watch
+    /// then reloads the configuration.
     ///
     /// # Errors
     ///
     /// Returns an error if `settings.toml` cannot be read, parsed or
     /// written.
-    pub(crate) fn write_theme(&self, name: &str) -> Result<(), ConfigError> {
+    pub(crate) fn write_settings(&self, settings: &[(&[String], &str)]) -> Result<(), ConfigError> {
         let path = self.directory.join("settings.toml");
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(error) => return Err(ConfigError::Read { path, error }),
         };
+        let invalid = |error: &toml_edit::TomlError, text: &str| {
+            let (line, column) = error
+                .span()
+                .map_or((1, 1), |span| Self::line_and_column(text, span.start));
+            ConfigError::Invalid {
+                path: path.clone(),
+                line,
+                column,
+                message: error.message().to_owned(),
+            }
+        };
         let mut document: toml_edit::DocumentMut =
-            text.parse().map_err(|error: toml_edit::TomlError| {
-                let (line, column) = error
-                    .span()
-                    .map_or((1, 1), |span| Self::line_and_column(&text, span.start));
-                ConfigError::Invalid {
-                    path: path.clone(),
-                    line,
-                    column,
-                    message: error.message().to_owned(),
-                }
-            })?;
-        let is_new = !document.contains_key("theme");
-        document.insert("theme", toml_edit::value(name));
-        if is_new {
-            Self::keep_leading_comment_first(&mut document);
+            text.parse().map_err(|error| invalid(&error, &text))?;
+        for (key, value) in settings {
+            let value: toml_edit::Value = value.parse().map_err(|error| invalid(&error, value))?;
+            Self::write_setting(&mut document, key, value);
         }
         // Written beside and renamed over, so a reader never sees half.
         let temporary = path.with_extension("toml.vaht-new");
@@ -87,10 +88,60 @@ impl ConfigSource {
             .map_err(|error| ConfigError::Write { path, error })
     }
 
+    /// Sets `key`, its parts, to `value` in `document`, making the tables
+    /// on the way.
+    fn write_setting(
+        document: &mut toml_edit::DocumentMut,
+        key: &[String],
+        value: toml_edit::Value,
+    ) {
+        let Some((last, path)) = key.split_last() else {
+            return;
+        };
+        if path.is_empty() {
+            let is_new = !document.contains_key(last);
+            Self::insert_keeping_comment(document.as_table_mut(), last, value);
+            if is_new {
+                Self::keep_leading_comment_first(document, last);
+            }
+            return;
+        }
+        let mut table: &mut dyn toml_edit::TableLike = document.as_table_mut();
+        for part in path {
+            let item = table.entry(part).or_insert_with(|| {
+                // Shown only once it holds a value itself.
+                let mut new = toml_edit::Table::new();
+                new.set_implicit(true);
+                toml_edit::Item::Table(new)
+            });
+            if item.as_table_like().is_none() {
+                *item = toml_edit::Item::Table(toml_edit::Table::new());
+            }
+            let Some(next) = item.as_table_like_mut() else {
+                return;
+            };
+            table = next;
+        }
+        Self::insert_keeping_comment(table, last, value);
+    }
+
+    /// Sets `name` in `table` to `value`, keeping the comment beside the
+    /// value it replaces.
+    fn insert_keeping_comment(
+        table: &mut dyn toml_edit::TableLike,
+        name: &str,
+        mut value: toml_edit::Value,
+    ) {
+        if let Some(replaced) = table.get(name).and_then(toml_edit::Item::as_value) {
+            *value.decor_mut() = replaced.decor().clone();
+        }
+        table.insert(name, toml_edit::Item::Value(value));
+    }
+
     /// Moves the file's opening comment, which belongs to its first table,
-    /// onto the `theme` key just added: a key is written above every table,
-    /// and the comment would otherwise follow it.
-    fn keep_leading_comment_first(document: &mut toml_edit::DocumentMut) {
+    /// onto the top-level key `name` just added: a key is written above
+    /// every table, and the comment would otherwise follow it.
+    fn keep_leading_comment_first(document: &mut toml_edit::DocumentMut, name: &str) {
         let first_table = document
             .iter_mut()
             .filter_map(|(_, item)| item.as_table_mut())
@@ -108,7 +159,7 @@ impl ConfigSource {
             return;
         }
         table.decor_mut().set_prefix("\n");
-        if let Some(mut key) = document.key_mut("theme") {
+        if let Some(mut key) = document.key_mut(name) {
             key.leaf_decor_mut().set_prefix(leading);
         }
     }
@@ -128,9 +179,20 @@ impl ConfigSource {
     ///
     /// # Errors
     ///
-    /// Returns the first problem found, as [`Config::load`] does.
-    pub(crate) fn load(&self) -> Result<Config, ConfigError> {
-        Config::load(&self.directory)
+    /// Returns the first problem found, as [`Config::load`] does, with the
+    /// settings `overrides` changes.
+    pub(crate) fn load(&self, overrides: &SettingOverrides) -> Result<Config, ConfigError> {
+        Config::load_with(&self.directory, overrides)
+    }
+
+    /// Reads `settings.toml` as a table, or its built-in version.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if it cannot be read or is not TOML.
+    pub(crate) fn settings_table(&self) -> Result<toml::Table, ConfigError> {
+        let [_, settings, ..] = Config::FILES;
+        settings.read_table(&self.directory)
     }
 
     /// Watches the directory, unless it already is or the directory does
@@ -180,5 +242,44 @@ impl ConfigSource {
                 "could not schedule a configuration reload"
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_are_written_into_their_tables_keeping_the_rest() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let path = directory.path().join("settings.toml");
+        std::fs::write(&path, "# Mine.\n[focus]\nmodel = \"click\" # how\n").expect("written");
+        let source = ConfigSource::new(directory.path().to_path_buf());
+        let key = |text: &str| text.split('.').map(str::to_owned).collect::<Vec<_>>();
+        let (theme, model, delay, speed) = (
+            key("theme"),
+            key("focus.model"),
+            key("taskbar.auto_hide_delay_ms"),
+            vec![
+                "input".to_owned(),
+                "device".to_owned(),
+                "My Mouse".to_owned(),
+                "accel_speed".to_owned(),
+            ],
+        );
+        source
+            .write_settings(&[
+                (&theme, "\"mine\""),
+                (&model, "\"sloppy\""),
+                (&delay, "250"),
+                (&speed, "0.5"),
+            ])
+            .expect("written");
+        let written = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(
+            written,
+            "# Mine.\ntheme = \"mine\"\n\n[focus]\nmodel = \"sloppy\" # how\n\n[taskbar]\n\
+             auto_hide_delay_ms = 250\n\n[input.device.\"My Mouse\"]\naccel_speed = 0.5\n"
+        );
     }
 }

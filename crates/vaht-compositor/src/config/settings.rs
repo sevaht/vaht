@@ -60,6 +60,19 @@ pub(crate) struct Settings {
     pub(crate) input: InputSettings,
 }
 
+impl Settings {
+    /// Reads the settings from `table`, `settings.toml`'s.
+    ///
+    /// # Errors
+    ///
+    /// Returns what is wrong.
+    pub(crate) fn from_table(table: toml::Table) -> Result<Self, String> {
+        toml::Value::Table(table)
+            .try_into()
+            .map_err(|error: toml::de::Error| error.message().trim_end().to_owned())
+    }
+}
+
 /// Which window gets keyboard focus, and when windows rise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]

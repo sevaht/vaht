@@ -152,7 +152,7 @@ impl FluxboxCommand<'_> {
             "moveto" => with("move-to"),
             "resize" => with("resize"),
             "resizeto" => with("resize-to"),
-            "reconfigure" | "reconfig" => plain("reload"),
+            "reconfigure" | "reconfig" | "reloadstyle" => plain("reload"),
             // fluxland's Restart reloads; with a command it would start
             // another window manager instead.
             "restart" if arguments.is_empty() => plain("reload"),

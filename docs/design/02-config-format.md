@@ -354,7 +354,7 @@ A command is written in one of three forms:
 
 | Area | Actions |
 |---|---|
-| Programs and session | `exec <command line>`, `reload`, `exit`, `restart`, `set-environment NAME value`, `set-setting key value`, `save-settings` |
+| Programs and session | `exec <command line>`, `reload`, `exit`, `set-environment NAME value`, `set-setting key value`, `save-settings` |
 | Window state | `close`, `kill`, `minimize`, `maximize [horizontal\|vertical]`, `fullscreen`, `shade`, `stick`, `raise`, `lower`, `set-layer <layer>`, `set-alpha <n>`, `toggle-frame`, `set-title [title]`, `set-title-dialog`, `mark-window <key>`, `go-to-marked-window <key>` |
 | Window placement | `move <dx> <dy>`, `move-to <x> <y>`, `resize <dw> <dh>`, `resize-to <w> <h>`, `snap-step <direction>`, `tile <cell>`, `send-to-output next\|previous\|<n>`, `arrange <style>` |
 | Grabs | `start-moving`, `start-resizing [nearest-corner\|<corner>]` |
@@ -364,7 +364,7 @@ A command is written in one of three forms:
 | Menus and dialogs | `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`, `custom-menu <name>`, `hide-menus`, `run-dialog`, `command-dialog` |
 | Taskbar | `activate-window-list-entry <n>`, `activate-tray-item <n>`, `tray-item-menu <n>`, `toggle-taskbar`, `taskbar-to-output <target>` |
 | Outputs | `apply-profile <name>`, `cycle-profile`, `cycle-primary-output` |
-| Theme | `set-theme <name>`, `reload-theme` |
+| Theme | `set-theme <name>` |
 
 The complete table is generated from the `Action` enum's documentation, so it
 cannot drift (D1).
@@ -557,6 +557,18 @@ lid-close = "exec swaylock"
   row sharing its width, side by side, or one above another (Fluxbox's
   `ArrangeWindows`, `ArrangeWindowsVertical`, `ArrangeWindowsHorizontal`);
   each can be restored as any tiled window can.
+- `set-setting <key> <value>` changes a setting of `settings.toml` in
+  place: the key is dotted (`taskbar.auto_hide`, `input.device."My
+  Mouse".accel_speed`), the value TOML (`true`, `300`, `"sloppy"`) or a
+  bare word taken as a string. `vaht check` refuses a key or value
+  `settings.toml` could not hold, and a change that leaves the whole
+  configuration invalid (a theme that is not there) is not made. As with
+  `set-theme`, which is `set-setting theme <name>`, the change outlasts
+  reloads until the file says otherwise at that key, and `save-settings`
+  writes every change into `settings.toml`, keeping the rest of the file.
+  `restart` and `reload-theme` are refused with a pointer to `reload`,
+  which reads every file, the theme too; a Wayland compositor cannot
+  restart without closing every window.
 - `tile` takes a cell in thousandths of the usable area:
   `tile <x> <y> <width> <height>`, the left half being `tile 0 0 500 1000`.
 - `next-window` and `previous-window` walk windows in the order they last
@@ -655,7 +667,6 @@ items = [
     { label = "Workspaces", generate = "workspaces" },
     { label = "Command",    command = "command-dialog" },
     { label = "Reload",     command = "reload" },
-    { label = "Restart",    command = "restart" },
     { separator = true },
     { label = "Exit",       command = "exit" },
 ]

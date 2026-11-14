@@ -97,7 +97,7 @@ fn without_a_theme_named_the_built_in_one_applies() {
 }
 
 #[test]
-fn set_theme_applies_in_place_and_save_settings_writes_it() {
+fn set_theme_and_set_setting_apply_in_place_and_save_settings_writes_them() {
     let settings = "# My settings.\n[focus]\nmodel = \"click\"\n";
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),
@@ -119,6 +119,8 @@ fn set_theme_applies_in_place_and_save_settings_writes_it() {
     run("set-theme mine");
     let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
     assert_eq!(color, [255, 0, 255], "the theme is in use at once");
+    run("set-setting focus.model sloppy");
+    run("set-setting taskbar.auto_hide_delay_ms 250");
     let file = vaht.config_directory().join("settings.toml");
     let read = || std::fs::read_to_string(&file).expect("the settings are there");
     assert_eq!(read(), settings, "nothing is written yet");
@@ -127,7 +129,11 @@ fn set_theme_applies_in_place_and_save_settings_writes_it() {
     let written = read();
     assert!(written.starts_with("# My settings.\n"), "{written}");
     assert!(written.contains("theme = \"mine\"\n"), "{written}");
-    assert!(written.contains("model = \"click\""), "{written}");
+    assert!(written.contains("model = \"sloppy\""), "{written}");
+    assert!(
+        written.contains("[taskbar]\nauto_hide_delay_ms = 250\n"),
+        "{written}"
+    );
     let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
     assert_eq!(color, [255, 0, 255], "and still after the reload");
 }

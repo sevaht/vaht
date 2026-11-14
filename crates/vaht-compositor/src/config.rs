@@ -43,7 +43,7 @@ pub(crate) use self::outputs::{
     OutputEntry, OutputIdentity, OutputMode, OutputPlan, OutputProfile, OutputScale,
     OutputSettings, OutputTransform, Vrr,
 };
-pub(crate) use self::overrides::SettingOverrides;
+pub(crate) use self::overrides::{SettingChange, SettingOverrides};
 pub(crate) use self::rules::{FocusStealing, Rules};
 pub(crate) use self::settings::{
     AccelProfile, AccelSpeed, ClickMethod, DeviceSettings, FocusModel, FrameSettings,
@@ -72,16 +72,28 @@ impl ConfigFile {
     /// Reads this file from `directory`, or its built-in version if it is
     /// missing, and parses it.
     fn read<T: serde::de::DeserializeOwned>(self, directory: &Path) -> Result<T, ConfigError> {
+        let (text, source) = self.text(directory)?;
+        toml::from_str(&text).map_err(|error| ConfigError::invalid(source, &text, &error))
+    }
+
+    /// Reads this file from `directory`, or its built-in version if it is
+    /// missing, as a TOML table.
+    pub(crate) fn read_table(self, directory: &Path) -> Result<toml::Table, ConfigError> {
+        self.read(directory)
+    }
+
+    /// Returns this file's text in `directory`, or its built-in version if
+    /// it is missing, and where it came from.
+    fn text(self, directory: &Path) -> Result<(String, PathBuf), ConfigError> {
         let path = directory.join(self.name);
-        let (text, source) = match std::fs::read_to_string(&path) {
-            Ok(text) => (text, path),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => (
+        match std::fs::read_to_string(&path) {
+            Ok(text) => Ok((text, path)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok((
                 self.defaults.to_owned(),
                 PathBuf::from(format!("(built-in) {}", self.name)),
-            ),
-            Err(error) => return Err(ConfigError::Read { path, error }),
-        };
-        toml::from_str(&text).map_err(|error| ConfigError::invalid(source, &text, &error))
+            )),
+            Err(error) => Err(ConfigError::Read { path, error }),
+        }
     }
 }
 
@@ -135,8 +147,30 @@ impl Config {
     /// Returns the first problem found: a file that cannot be read, or one
     /// that is not valid, with the line and column of the problem.
     pub fn load(directory: &Path) -> Result<Self, ConfigError> {
+        Self::load_with(directory, &SettingOverrides::default())
+    }
+
+    /// Reads and validates the configuration in `directory`, as
+    /// [`Config::load`] does, with the settings `overrides` changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first problem found, as [`Config::load`] does, or what
+    /// is wrong with the settings changed.
+    pub(crate) fn load_with(
+        directory: &Path,
+        overrides: &SettingOverrides,
+    ) -> Result<Self, ConfigError> {
         let [bindings, settings, rules, menus, outputs] = Self::FILES;
-        let settings: Settings = settings.read(directory)?;
+        let settings: Settings = if overrides.is_empty() {
+            settings.read(directory)?
+        } else {
+            let mut table = settings.read_table(directory)?;
+            overrides
+                .apply_to(&mut table)
+                .and_then(|()| Settings::from_table(table))
+                .map_err(|message| ConfigError::Changed { message })?
+        };
         let theme = match &settings.theme {
             Some(name) => ThemeFile::find(directory, name)?.read()?,
             None => Theme::built_in(),
@@ -256,6 +290,13 @@ pub enum ConfigError {
         line: usize,
         /// The column of the problem, counting from 1.
         column: usize,
+        /// What is wrong.
+        message: String,
+    },
+
+    /// The settings changed in place (`set-setting`) are not valid.
+    #[error("the settings changed in place: {message}")]
+    Changed {
         /// What is wrong.
         message: String,
     },

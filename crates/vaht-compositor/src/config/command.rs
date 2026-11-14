@@ -18,6 +18,7 @@ mod forms;
 pub(crate) use self::forms::{Condition, Delay, Toggle};
 use super::bindings::KeyChord;
 use super::matcher::WindowMatcher;
+use super::overrides::SettingChange;
 use crate::window_manager::{
     AlphaChange, ArrangeStyle, Axes, Direction, HorizontalEdge, OutputTarget, ResizeEdges,
     StackLayer, TileCell, VerticalEdge, WorkspaceTarget,
@@ -28,9 +29,6 @@ use crate::window_manager::{
 const PLANNED_ACTIONS: &[&str] = &[
     "activate-tray-item",
     "activate-window-list-entry",
-    "reload-theme",
-    "restart",
-    "set-setting",
     "taskbar-to-output",
     "tray-item-menu",
 ];
@@ -405,6 +403,10 @@ pub(crate) enum Action {
     /// Uses a theme in place of the settings' (`set-theme <name>`), until
     /// `save-settings` writes it to `settings.toml`.
     SetTheme(String),
+    /// Changes a setting of `settings.toml` in place (`set-setting <key>
+    /// <value>`, the value in TOML or a bare word), until `save-settings`
+    /// writes it.
+    SetSetting(SettingChange),
     /// Writes the settings changed in place into the files.
     SaveSettings,
     /// Applies the display profile with this name (`outputs.toml`).
@@ -612,6 +614,7 @@ impl Action {
             }
             "set-theme" => Ok(Self::SetTheme(arguments.to_owned())),
             "save-settings" => without_arguments(Self::SaveSettings),
+            "set-setting" => SettingChange::parse(arguments).map(Self::SetSetting),
             "apply-profile" if arguments.is_empty() => {
                 Err("`apply-profile` needs a profile's name".to_owned())
             }
@@ -695,6 +698,17 @@ impl Action {
             toml::Value::String(text) => Ok(text.clone()),
             toml::Value::Integer(number) => Ok(number.to_string()),
             toml::Value::Table(table) if table.is_empty() => Ok(String::new()),
+            toml::Value::Table(table) if name == "set-setting" => {
+                let (Some(toml::Value::String(key)), Some(value), 2) =
+                    (table.get("key"), table.get("value"), table.len())
+                else {
+                    return Err(
+                        "set-setting takes { key = \"focus.model\", value = \"sloppy\" }"
+                            .to_owned(),
+                    );
+                };
+                Ok(format!("{key} {value}"))
+            }
             toml::Value::Table(table) if name == "set-environment" => {
                 let field = |key: &str| {
                     table.get(key).and_then(toml::Value::as_str).ok_or_else(|| {
@@ -731,6 +745,7 @@ impl fmt::Display for Action {
             Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
             Self::SetTheme(name) => write!(formatter, "set-theme {name}"),
             Self::SaveSettings => formatter.write_str("save-settings"),
+            Self::SetSetting(change) => write!(formatter, "set-setting {change}"),
             Self::ApplyProfile(name) => write!(formatter, "apply-profile {name}"),
             Self::CycleProfile => formatter.write_str("cycle-profile"),
             Self::CyclePrimaryOutput => formatter.write_str("cycle-primary-output"),
@@ -834,6 +849,10 @@ impl WindowManagerAction {
                     }),
             },
             "go-to-marked-window" => Ok(Self::GoToMarkedWindow(arguments.to_owned())),
+            "restart" | "reload-theme" => Err(format!(
+                "`{name}`: `reload` reads every file again, the theme too; a Wayland compositor \
+                 cannot restart without closing every window"
+            )),
             _ if PLANNED_ACTIONS.contains(&name) => {
                 Err(format!("`{name}` is not available in vaht yet"))
             }
@@ -1208,7 +1227,8 @@ mod tests {
 
     #[rstest]
     #[case::unknown_action("\"explode\"", "unknown action `explode`")]
-    #[case::planned_action("\"reload-theme\"", "not available in vaht yet")]
+    #[case::planned_action("\"taskbar-to-output 1\"", "not available in vaht yet")]
+    #[case::restart("\"restart\"", "`reload` reads every file again")]
     #[case::maximize_both_by_name("\"maximize both\"", "nothing, horizontal or vertical")]
     #[case::one_number("\"move 10\"", "two whole numbers")]
     #[case::cell_outside("\"tile 600 0 500 1000\"", "within 0 to 1000")]
