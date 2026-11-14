@@ -72,6 +72,7 @@ use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
 use crate::focus_target::FocusTarget;
 use crate::grab::{GrabKind, WindowGrab};
+use crate::idle::IdleInhibitors;
 use crate::input::{self, AfterClick, ButtonPress, Input, KeyPress, PressOutcome};
 use crate::ipc::IpcServer;
 use crate::launcher::Launcher;
@@ -118,6 +119,8 @@ pub struct Compositor {
     /// Where a game holding the pointer locked last said it is, on its
     /// surface: where the pointer goes when the lock ends.
     pub(crate) pointer_lock_hint: Option<(WlSurface, Point<f64, Logical>)>,
+    /// The surfaces asking that the session not go idle.
+    pub(crate) idle_inhibitors: IdleInhibitors<WlSurface>,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -241,7 +244,7 @@ impl Compositor {
     ) -> Result<Self, RunError> {
         let display_handle = display.handle();
         let ledger = ResourceLedger::new();
-        let mut protocols = ProtocolStates::new(&display_handle);
+        let mut protocols = ProtocolStates::new(&display_handle, handle);
         let seat = Self::create_seat(&mut protocols.seat, &display_handle)?;
         let physical_keymap = seat
             .get_keyboard()
@@ -296,6 +299,7 @@ impl Compositor {
             cursor: Cursor::from_environment(),
             xwayland: None,
             pointer_lock_hint: None,
+            idle_inhibitors: IdleInhibitors::default(),
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -655,6 +659,32 @@ impl Compositor {
             .and_then(FocusTarget::surface)
             .and_then(|surface| self.seat.keyboard_shortcuts_inhibitor_for_surface(&surface))
             .is_some_and(|inhibitor| inhibitor.is_active())
+    }
+
+    /// Tells idle whether a visible surface asks that the session not go
+    /// idle: a shown window's, or a mapped layer surface's.
+    pub(crate) fn refresh_idle_inhibition(&mut self) {
+        let shown: Vec<WindowId> = self
+            .window_manager
+            .shown_top_down()
+            .map(Window::id)
+            .collect();
+        let toplevels = &self.toplevels;
+        let layers = &self.layers;
+        let is_visible = |surface: &WlSurface| {
+            let mut root = surface.clone();
+            while let Some(parent) = get_parent(&root) {
+                root = parent;
+            }
+            toplevels
+                .window_of(&root)
+                .is_some_and(|window| shown.contains(&window))
+                || layers.find(&root).is_some()
+        };
+        let is_inhibited = self
+            .idle_inhibitors
+            .is_inhibiting(WlSurface::is_alive, is_visible);
+        self.protocols.idle_notifier.set_is_inhibited(is_inhibited);
     }
 
     /// Starts Xwayland, unless the settings, or `allows`, turn it off.
@@ -1033,6 +1063,8 @@ impl Compositor {
                 Some(output.clone())
             });
         }
+        // What shows changed, and with it whether idle is inhibited.
+        self.refresh_idle_inhibition();
         // An animated pointer moves on by itself.
         if draws_pointer && self.cursor.is_animated() {
             self.schedule_render();
@@ -1163,6 +1195,8 @@ impl Compositor {
         event: InputEvent<B>,
         absolute_area: Option<Rectangle<i32, Logical>>,
     ) {
+        // Any input is the user being there.
+        self.protocols.idle_notifier.notify_activity(&self.seat);
         // A key typed right after a binding moved focus goes where it went.
         self.settle();
         #[expect(
@@ -1206,6 +1240,7 @@ impl Compositor {
     /// Sends a key from a virtual keyboard, read with that keyboard's own
     /// keymap (or the seat's, when it sent none).
     pub(crate) fn handle_virtual_key(&mut self, event: &VirtualKeyboardKeyEvent) {
+        self.protocols.idle_notifier.notify_activity(&self.seat);
         self.settle();
         let device = event.device();
         self.activate_keymap(device.keymap());

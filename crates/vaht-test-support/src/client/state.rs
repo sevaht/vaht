@@ -11,6 +11,10 @@ use smithay_client_toolkit::reexports::protocols::wp::pointer_constraints::zv1::
 use smithay_client_toolkit::reexports::protocols::wp::pointer_constraints::zv1::client::zwp_pointer_constraints_v1::ZwpPointerConstraintsV1;
 use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibitor_v1::ZwpKeyboardShortcutsInhibitorV1;
+use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::{self, ExtIdleNotificationV1};
+use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
+use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::{self, ZwpRelativePointerV1};
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
@@ -102,6 +106,8 @@ pub(super) struct ClientState {
     /// The keys pressed while the client had the keyboard, as Linux key
     /// codes, in order.
     pub(super) received_keys: Vec<u32>,
+    /// Whether vaht says the session is idle, once it has said.
+    pub(super) is_idle: Option<bool>,
 }
 
 impl ClientState {
@@ -143,6 +149,7 @@ impl ClientState {
             relative_motion: (0.0, 0.0),
             is_pointer_locked: false,
             received_keys: Vec::new(),
+            is_idle: None,
         }
     }
 
@@ -232,6 +239,9 @@ macro_rules! ignore_events {
 
 ignore_events!(
     wl_seat::WlSeat,
+    ExtIdleNotifierV1,
+    ZwpIdleInhibitManagerV1,
+    ZwpIdleInhibitorV1,
     ZwpKeyboardShortcutsInhibitManagerV1,
     ZwpKeyboardShortcutsInhibitorV1,
     wl_pointer::WlPointer,
@@ -297,6 +307,28 @@ impl Dispatch2<ZwpRelativePointerV1, ClientState> for RelativeMotionEvents {
         if let zwp_relative_pointer_v1::Event::RelativeMotion { dx, dy, .. } = event {
             state.relative_motion.0 += dx;
             state.relative_motion.1 += dy;
+        }
+    }
+}
+
+/// User data of an idle notification: records whether the session is
+/// idle.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct IdleEvents;
+
+impl Dispatch2<ExtIdleNotificationV1, ClientState> for IdleEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &ExtIdleNotificationV1,
+        event: ext_idle_notification_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        match event {
+            ext_idle_notification_v1::Event::Idled => state.is_idle = Some(true),
+            ext_idle_notification_v1::Event::Resumed => state.is_idle = Some(false),
+            _ => {}
         }
     }
 }

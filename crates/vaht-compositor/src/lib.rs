@@ -24,6 +24,7 @@ pub mod event_source;
 mod execution;
 mod focus_target;
 mod grab;
+mod idle;
 mod input;
 mod ipc;
 mod launcher;

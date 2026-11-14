@@ -9,6 +9,7 @@
 mod activation;
 mod decoration;
 mod dmabuf;
+mod idle;
 mod layer_shell;
 mod output;
 mod seat;
@@ -23,6 +24,8 @@ use smithay::wayland::compositor::CompositorState;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufState};
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
+use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
+use smithay::wayland::idle_notify::IdleNotifierState;
 use smithay::wayland::image_capture_source::OutputCaptureSourceState;
 use smithay::wayland::image_copy_capture::ImageCopyCaptureState;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState;
@@ -42,6 +45,8 @@ use smithay::wayland::virtual_pointer::VirtualPointerManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager;
 use smithay::wayland::xwayland_shell::XWaylandShellState;
+
+use smithay::reexports::calloop::LoopHandle;
 
 use crate::Compositor;
 
@@ -86,6 +91,12 @@ pub(crate) struct ProtocolStates {
     /// `zwp_keyboard_shortcuts_inhibit_manager_v1`: a window taking every
     /// key while it has the keyboard.
     pub(crate) keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState,
+    /// `ext_idle_notifier_v1`: tools such as swayidle hearing when the
+    /// session goes idle and comes back.
+    pub(crate) idle_notifier: IdleNotifierState<Compositor>,
+    /// `zwp_idle_inhibit_manager_v1`: a video player keeping the screen
+    /// awake. Held only to keep the global.
+    _idle_inhibit: IdleInhibitManagerState,
     /// `xwayland_shell_v1`: Xwayland pairing X11 windows with surfaces.
     pub(crate) xwayland_shell: XWaylandShellState,
     /// `wp_cursor_shape_manager_v1`: clients naming the pointer's picture
@@ -116,8 +127,9 @@ impl ProtocolStates {
     /// taskbar's (18 by default) and larger, which read well scaled down.
     const TOPLEVEL_ICON_SIZES: [i32; 4] = [16, 24, 32, 48];
 
-    /// Creates every global on `display`.
-    pub(crate) fn new(display: &DisplayHandle) -> Self {
+    /// Creates every global on `display`; idle notifications time out on
+    /// `handle`'s loop.
+    pub(crate) fn new(display: &DisplayHandle, handle: &LoopHandle<'static, Compositor>) -> Self {
         Self {
             compositor: CompositorState::new::<Compositor>(display),
             xdg_shell: XdgShellState::new::<Compositor>(display),
@@ -139,6 +151,8 @@ impl ProtocolStates {
             _cursor_shape: CursorShapeManagerState::new::<Compositor>(display),
             xwayland_shell: XWaylandShellState::new::<Compositor>(display),
             keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<Compositor>(display),
+            idle_notifier: IdleNotifierState::new(display, handle.clone()),
+            _idle_inhibit: IdleInhibitManagerState::new::<Compositor>(display),
             _pointer_extensions: (
                 RelativePointerManagerState::new::<Compositor>(display),
                 PointerConstraintsState::new::<Compositor>(display),
