@@ -77,6 +77,10 @@ impl FluxboxCommand<'_> {
         match lowercase.as_str() {
             "macrocmd" => Self::sequence(arguments),
             "repeat" => Self::repeat(arguments),
+            "togglecmd" => Self::toggle(arguments),
+            "delay" => Self::delay(arguments),
+            "foreach" | "map" => Self::for_each(arguments),
+            "if" | "cond" => Self::branch(arguments),
             "exec" | "execute" | "execcommand" if Self::runs_a_run_window(arguments) => {
                 Ok(Self::run_dialog(arguments))
             }
@@ -291,6 +295,152 @@ impl FluxboxCommand<'_> {
         })
     }
 
+    /// Translates `ToggleCmd {A} {B} ...` into `{ toggle = [A, B, ...] }`.
+    fn toggle(arguments: &str) -> Result<Translated, Untranslated> {
+        let mut commands = Array::new();
+        let mut losses = Vec::new();
+        for inner in Self::braced(arguments) {
+            let translated = FluxboxCommand(inner).to_vaht()?;
+            commands.push(translated.value);
+            losses.extend(translated.losses);
+        }
+        if commands.is_empty() {
+            return Err(Untranslated::not_yet(format!("ToggleCmd {arguments}")));
+        }
+        let mut table = InlineTable::new();
+        table.insert("toggle", Value::Array(commands));
+        Ok(Translated {
+            value: Value::InlineTable(table),
+            losses,
+        })
+    }
+
+    /// Translates `Delay {A} [microseconds]` into `{ delay_ms = n, do = A }`;
+    /// Fluxbox waits 200 milliseconds when it is not told.
+    fn delay(arguments: &str) -> Result<Translated, Untranslated> {
+        let inner = Self::braced(arguments)
+            .into_iter()
+            .next()
+            .ok_or_else(|| Untranslated::not_yet(format!("Delay {arguments}")))?;
+        let after = arguments
+            .rsplit_once('}')
+            .map_or("", |(_, after)| after.trim());
+        let millis = if after.is_empty() {
+            200
+        } else {
+            after
+                .parse::<i64>()
+                .map_err(|_not_a_number| Untranslated::not_yet(format!("Delay {arguments}")))?
+                / 1000
+        };
+        let translated = FluxboxCommand(inner).to_vaht()?;
+        let mut table = InlineTable::new();
+        table.insert("delay_ms", Value::from(millis));
+        table.insert("do", translated.value);
+        Ok(Translated {
+            value: Value::InlineTable(table),
+            losses: translated.losses,
+        })
+    }
+
+    /// Translates `ForEach {A} [{condition}]` (and `Map`) into
+    /// `{ for_each = matcher, do = A }`; only a `Matches` condition has a
+    /// matcher's form.
+    fn for_each(arguments: &str) -> Result<Translated, Untranslated> {
+        let groups = Self::braced(arguments);
+        let inner = groups
+            .first()
+            .ok_or_else(|| Untranslated::not_yet(format!("ForEach {arguments}")))?;
+        let translated = FluxboxCommand(inner).to_vaht()?;
+        let mut losses = translated.losses;
+        let windows = match groups.get(1) {
+            None => InlineTable::new(),
+            Some(condition) => {
+                let pattern = Self::matches_pattern(condition).ok_or_else(|| {
+                    Untranslated::not_yet(format!("ForEach with the condition {{{condition}}}"))
+                })?;
+                let (windows, lost) = ClientPattern::new(pattern).matcher();
+                losses.extend(lost);
+                windows
+            }
+        };
+        let mut table = InlineTable::new();
+        table.insert("for_each", Value::InlineTable(windows));
+        table.insert("do", translated.value);
+        Ok(Translated {
+            value: Value::InlineTable(table),
+            losses,
+        })
+    }
+
+    /// Translates `If {condition} {A} [{B}]` (and `Cond`) into
+    /// `{ if = condition, then = A, else = B }`.
+    fn branch(arguments: &str) -> Result<Translated, Untranslated> {
+        let groups = Self::braced(arguments);
+        let (Some(condition), Some(then)) = (groups.first(), groups.get(1)) else {
+            return Err(Untranslated::not_yet(format!("If {arguments}")));
+        };
+        let mut losses = Vec::new();
+        let condition = Self::condition(condition, &mut losses)?;
+        let then = FluxboxCommand(then).to_vaht()?;
+        losses.extend(then.losses);
+        let mut table = InlineTable::new();
+        table.insert("if", condition);
+        table.insert("then", then.value);
+        if let Some(otherwise) = groups.get(2) {
+            let otherwise = FluxboxCommand(otherwise).to_vaht()?;
+            losses.extend(otherwise.losses);
+            table.insert("else", otherwise.value);
+        }
+        Ok(Translated {
+            value: Value::InlineTable(table),
+            losses,
+        })
+    }
+
+    /// Translates a Fluxbox condition: `Matches (pattern)`, `Not {c}`,
+    /// `And {c} {c}...` or `Or {c} {c}...`.
+    fn condition(text: &str, losses: &mut Vec<(Reason, String)>) -> Result<Value, Untranslated> {
+        let text = text.trim();
+        let (name, rest) = text
+            .split_once(|character: char| {
+                character.is_whitespace() || character == '{' || character == '('
+            })
+            .map_or((text, ""), |(name, _)| (name, &text[name.len()..]));
+        let mut table = InlineTable::new();
+        match name.to_ascii_lowercase().as_str() {
+            "matches" => {
+                let (matcher, lost) = ClientPattern::new(rest).matcher();
+                losses.extend(lost);
+                return Ok(Value::InlineTable(matcher));
+            }
+            "not" => {
+                let inner = Self::braced(rest)
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| Untranslated::not_yet(format!("the condition {text}")))?;
+                table.insert("not", Self::condition(inner, losses)?);
+            }
+            kind @ ("and" | "or") => {
+                let conditions = Self::braced(rest)
+                    .into_iter()
+                    .map(|inner| Self::condition(inner, losses))
+                    .collect::<Result<Array, _>>()?;
+                let key = if kind == "and" { "all" } else { "any" };
+                table.insert(key, Value::Array(conditions));
+            }
+            _ => return Err(Untranslated::not_yet(format!("the condition {text}"))),
+        }
+        Ok(Value::InlineTable(table))
+    }
+
+    /// Returns the pattern of a `Matches (pattern)` condition, if it is one.
+    fn matches_pattern(condition: &str) -> Option<&str> {
+        let condition = condition.trim();
+        let (name, rest) = condition.split_at(condition.find(['(', ' '])?);
+        name.eq_ignore_ascii_case("matches").then_some(rest)
+    }
+
     /// Translates `NextWindow {options} (pattern)` into `action` with a
     /// window matcher.
     fn cycle(action: &str, arguments: &str) -> Translated {
@@ -343,6 +493,38 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    /// Returns the vaht command for `fluxbox`, as TOML text.
+    fn toml_of(fluxbox: &str) -> String {
+        FluxboxCommand(fluxbox).to_vaht().map_or_else(
+            |untranslated| panic!("{fluxbox}: {untranslated:?}"),
+            |translated| translated.value.to_string().trim().to_owned(),
+        )
+    }
+
+    #[test]
+    fn fluxbox_command_forms_translate() {
+        assert_eq!(
+            toml_of("ToggleCmd {Raise} {Lower}"),
+            r#"{ toggle = ["raise", "lower"] }"#
+        );
+        assert_eq!(
+            toml_of("Delay {Exec beep} 500000"),
+            r#"{ delay_ms = 500, do = "exec beep" }"#
+        );
+        assert_eq!(
+            toml_of("Delay {Raise}"),
+            r#"{ delay_ms = 200, do = "raise" }"#
+        );
+        assert_eq!(
+            toml_of("ForEach {Minimize} {Matches (Class=xterm)}"),
+            r#"{ for_each = { app_id = "xterm" }, do = "minimize" }"#
+        );
+        assert_eq!(
+            toml_of("If {Not {Matches (Class=xterm)}} {Exec xterm} {Raise}"),
+            r#"{ if = { not = { app_id = "xterm" } }, then = "exec xterm", else = "raise" }"#
+        );
+    }
 
     #[test]
     fn directional_focus_and_marks_translate() {
