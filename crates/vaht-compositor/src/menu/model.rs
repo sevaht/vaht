@@ -45,6 +45,8 @@ pub(crate) enum MenuItem {
         label: String,
         /// The menu it opens.
         menu: MenuModel,
+        /// Its icon, if it shows one.
+        icon: Option<vaht_ui::Icon>,
     },
     /// Text that does nothing.
     Inert {
@@ -68,7 +70,10 @@ impl MenuItem {
 
     /// Returns whether the item shows an icon.
     pub(crate) const fn has_icon(&self) -> bool {
-        matches!(self, Self::Choice { icon: Some(_), .. })
+        matches!(
+            self,
+            Self::Choice { icon: Some(_), .. } | Self::Submenu { icon: Some(_), .. }
+        )
     }
 
     /// Returns whether the item can be highlighted and chosen.
@@ -234,7 +239,7 @@ impl<'state> MenuBuilder<'state> {
                         .as_ref()
                         .and_then(|name| self.named_icons.get(name).cloned()),
                 }),
-                MenuEntry::Submenu { label, menu } => {
+                MenuEntry::Submenu { label, menu, icon } => {
                     if depth >= Self::MAX_DEPTH {
                         tracing::warn!(menu, "menus nest too deep; not following");
                         continue;
@@ -243,6 +248,9 @@ impl<'state> MenuBuilder<'state> {
                         items.push(MenuItem::Submenu {
                             label: label.clone(),
                             menu: self.build_definition(submenu, depth + 1),
+                            icon: icon
+                                .as_ref()
+                                .and_then(|name| self.named_icons.get(name).cloned()),
                         });
                     }
                 }
@@ -269,6 +277,7 @@ impl<'state> MenuBuilder<'state> {
                                 title: None,
                                 items: generated,
                             },
+                            icon: None,
                         });
                     }
                 }

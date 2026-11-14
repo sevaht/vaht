@@ -141,26 +141,25 @@ impl PanelContent for MenuContent {
                 MenuItem::Choice {
                     label, mark, icon, ..
                 } => {
-                    let widget = Widget::text(ThemeElement::MenuItem, label.clone())
-                        .with_size(row)
-                        .with_hit(index);
-                    let widget = match icon {
-                        Some(icon) => widget.with_icon(WidgetIcon {
-                            icon: icon.clone(),
-                            emphasis: IconEmphasis::Full,
-                        }),
-                        None => widget,
-                    };
+                    let widget = Self::with_icon(
+                        Widget::text(ThemeElement::MenuItem, label.clone())
+                            .with_size(row)
+                            .with_hit(index),
+                        icon.as_ref(),
+                    );
                     if *mark == Some(true) {
                         widget.with_mark_on(Glyph::Check, self.metrics.bullet_side)
                     } else {
                         widget
                     }
                 }
-                MenuItem::Submenu { label, .. } => {
-                    let widget = Widget::text(ThemeElement::MenuItem, label.clone())
-                        .with_size(row)
-                        .with_hit(index);
+                MenuItem::Submenu { label, icon, .. } => {
+                    let widget = Self::with_icon(
+                        Widget::text(ThemeElement::MenuItem, label.clone())
+                            .with_size(row)
+                            .with_hit(index),
+                        icon.as_ref(),
+                    );
                     let side = self.metrics.bullet_side;
                     match self.metrics.bullet.glyph(side) {
                         Some(bullet) => widget.with_mark_on(bullet, side),
@@ -179,6 +178,19 @@ impl PanelContent for MenuContent {
 
     fn state(&self) -> WidgetState {
         WidgetState::Focused
+    }
+}
+
+impl MenuContent {
+    /// Returns `widget` showing `icon` at its left, if there is one.
+    fn with_icon(widget: Widget<usize>, icon: Option<&vaht_ui::Icon>) -> Widget<usize> {
+        match icon {
+            Some(icon) => widget.with_icon(WidgetIcon {
+                icon: icon.clone(),
+                emphasis: IconEmphasis::Full,
+            }),
+            None => widget,
+        }
     }
 }
 

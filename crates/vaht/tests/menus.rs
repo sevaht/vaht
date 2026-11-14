@@ -194,7 +194,9 @@ fn a_menu_item_shows_the_icon_it_names_or_the_image_it_points_to() {
     let menus = "[menu.root]\ntitle = \"test\"\nitems = [\n\
                  { label = \"Named\", command = \"exec true\", icon = \"vaht-test-icon\" },\n\
                  { label = \"File\", command = \"exec true\", icon = \"./red.png\" },\n\
-                 { label = \"None\", command = \"exec true\" },\n]\n\
+                 { label = \"None\", command = \"exec true\" },\n\
+                 { label = \"More\", submenu = \"more\", icon = \"vaht-test-icon\" },\n]\n\
+                 [menu.more]\nitems = []\n\
                  [menu.window]\nitems = []\n[menu.workspace]\nitems = []\n";
     let vaht = HeadlessVaht::start_with_files(
         Path::new(EXECUTABLE),
@@ -221,4 +223,5 @@ fn a_menu_item_shows_the_icon_it_names_or_the_image_it_points_to() {
     assert_eq!(icon_spot(0), green, "the icon theme's");
     assert_eq!(icon_spot(1), red, "the image file");
     assert_eq!(icon_spot(2), MENU_BODY, "no icon");
+    assert_eq!(icon_spot(3), green, "a submenu's");
 }

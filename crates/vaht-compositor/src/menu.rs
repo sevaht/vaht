@@ -509,6 +509,7 @@ mod tests {
                         title: None,
                         items: vec![choice("Exit", Action::Exit)],
                     },
+                    icon: None,
                 },
                 MenuItem::Inert {
                     label: "words".to_owned(),

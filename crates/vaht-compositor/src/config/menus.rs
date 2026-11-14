@@ -53,9 +53,10 @@ impl Menus {
             .values()
             .flat_map(|menu| &menu.items)
             .filter_map(|entry| match entry {
-                MenuEntry::Command { icon, .. } => icon.as_deref(),
-                MenuEntry::Submenu { .. }
-                | MenuEntry::Toggle { .. }
+                MenuEntry::Command { icon, .. } | MenuEntry::Submenu { icon, .. } => {
+                    icon.as_deref()
+                }
+                MenuEntry::Toggle { .. }
                 | MenuEntry::Generate { .. }
                 | MenuEntry::Separator
                 | MenuEntry::Inert { .. } => None,
@@ -154,6 +155,8 @@ pub(crate) enum MenuEntry {
         label: String,
         /// The other menu's name.
         menu: String,
+        /// The icon shown beside it, as a command's.
+        icon: Option<String>,
     },
     /// Toggles a state of the menu's window, with a mark showing it.
     Toggle {
@@ -211,9 +214,9 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
         if file.inline && file.generate.is_none() {
             return Err(de::Error::custom("only a generated list can be inline"));
         }
-        if file.icon.is_some() && file.command.is_none() {
+        if file.icon.is_some() && file.command.is_none() && file.submenu.is_none() {
             return Err(de::Error::custom(
-                "only an item running a command shows an icon",
+                "only an item running a command or opening a submenu shows an icon",
             ));
         }
         let entry = match (
@@ -242,6 +245,7 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
             (None, Some(menu), None, None, false) => Self::Submenu {
                 label: file.label.unwrap_or_else(|| menu.clone()),
                 menu,
+                icon: file.icon,
             },
             (None, None, Some(toggle), None, false) => Self::Toggle {
                 label: file.label,
@@ -436,7 +440,8 @@ mod tests {
                 },
                 MenuEntry::Submenu {
                     label: "More".to_owned(),
-                    menu: "more".to_owned()
+                    menu: "more".to_owned(),
+                    icon: None,
                 },
                 MenuEntry::Toggle {
                     label: None,
@@ -473,7 +478,7 @@ mod tests {
     #[case::empty_item("[menu.root]\nitems = [{}]\n", "needs a label")]
     #[case::icon_without_a_command(
         "[menu.root]\nitems = [{ separator = true, icon = \"x\" }]\n",
-        "only an item running a command"
+        "only an item running a command or opening"
     )]
     fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {
         let error = read(text).expect_err(text);

@@ -224,14 +224,17 @@ impl MenuFiles {
                     };
                     if let Some(icon) = &line.icon {
                         match item.as_inline_table_mut() {
-                            Some(table) if table.contains_key("command") => {
+                            Some(table)
+                                if table.contains_key("command")
+                                    || table.contains_key("submenu") =>
+                            {
                                 table.insert("icon", Value::from(icon.as_str()));
                             }
                             _ => report.note(
                                 file,
                                 line.line,
                                 Reason::NotYetInVaht,
-                                "icons on items other than commands",
+                                "icons on items other than commands and submenus",
                             ),
                         }
                     }
