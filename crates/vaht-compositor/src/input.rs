@@ -30,6 +30,7 @@ use crate::menu::MenuKey;
 use crate::resources::ResourceLedger;
 use crate::scene::{PointerTarget, WindowTarget};
 use crate::taskbar::TaskbarHit;
+use crate::touch::TouchRoutes;
 use crate::tray::{TrayAction, TrayItemKey};
 use crate::window_manager::{FramePart, ResizeEdges, WindowId};
 
@@ -156,6 +157,8 @@ pub(crate) struct Input {
     auto_raise: Option<Timer<Compositor>>,
     /// The key chain pressed so far, and the key mode.
     key_chain: KeyChain,
+    /// The touch points down, and where each goes.
+    pub(crate) touch: TouchRoutes,
 }
 
 impl Input {

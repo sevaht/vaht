@@ -55,6 +55,7 @@ mod tooltip;
 mod toplevel_list;
 mod toplevel_management;
 mod toplevels;
+mod touch;
 mod tray;
 mod wall_clock;
 mod window_manager;

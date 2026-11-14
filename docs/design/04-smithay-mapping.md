@@ -377,7 +377,10 @@ rest only carries the decisions out.
   they are resumed, monitors scanned again and every output drawn anew.
 - **Input** comes from libinput on the seat; keyboards' lights follow Caps,
   Num and Scroll Lock. Touchpad gestures go to the client under the
-  pointer.
+  pointer. A touch screen covers the laptop's panel (`eDP`), else the
+  primary output: a touch on a client is its (`wl_touch`), focusing and
+  raising its window; one on vaht's own parts presses and releases the
+  pointer's left button there, one point at a time (`touch.rs`).
 - **Sync.** A client's GPU buffer is shown only once drawn
   (`buffer_fences.rs`): at the acquire point the client named with
   explicit sync (`wp_linux_drm_syncobj_v1`, offered when the primary GPU

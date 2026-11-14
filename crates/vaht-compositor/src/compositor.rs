@@ -109,6 +109,7 @@ use crate::toplevel_management::{
     Covering, HandleRequest, ToplevelManagement, ToplevelStates, WindowFacts,
 };
 use crate::toplevels::{Toplevel, Toplevels};
+use crate::touch;
 use crate::tray::TrayAction;
 use crate::window_manager::{
     Axes, ClientRequest, FramePart, OutputArea, OutputAreas, Placement, PlacementKind, Window,
@@ -202,7 +203,7 @@ pub struct Compositor {
     /// and the buffers it holds, alive.
     pub(crate) keyboard_focus: Option<FocusTarget>,
     /// Key and button state between events: repeats, double clicks.
-    input: Input,
+    pub(crate) input: Input,
     /// Whether a client released a surface or a capture session since the
     /// last cleanup: renderers and Smithay may still reference its memory.
     pub(crate) client_cleanup_pending: bool,
@@ -1742,8 +1743,8 @@ impl Compositor {
         self.settle();
         #[expect(
             clippy::wildcard_enum_match_arm,
-            reason = "the rest go to gestures::forward, which takes the gestures; \
-                      touch and tablets are not taken yet"
+            reason = "the rest go to touch::handle and gestures::forward, which take \
+                      touches and gestures; tablets are not taken yet"
         )]
         match event {
             InputEvent::Keyboard { event } => {
@@ -1792,6 +1793,9 @@ impl Compositor {
                 }
             }
             other => {
+                if touch::handle(self, &other, absolute_area) {
+                    return;
+                }
                 let pointer = self
                     .seat
                     .get_pointer()
@@ -2984,7 +2988,7 @@ impl Compositor {
     }
 
     /// Moves the pointer to `location`, telling the surface under it.
-    fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
+    pub(crate) fn move_pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
         let whole = Outputs::geometry(self.taskbar_output());
         if let Some(taskbar) = &mut self.taskbar
             && taskbar.follow_pointer(location, whole, (&self.loop_handle, &self.ledger))
@@ -3052,18 +3056,24 @@ impl Compositor {
 
     /// Presses or releases a pointer button.
     fn handle_pointer_button<B: InputBackend>(&mut self, event: &B::PointerButtonEvent) {
+        self.pointer_button(event.button_code(), event.state(), event.time());
+    }
+
+    /// Presses or releases the pointer's `button` (`state`) at `time`: a
+    /// mouse's, or a touch on vaht's own parts standing in for one.
+    pub(crate) fn pointer_button(&mut self, button: u32, state: ButtonState, time: InputTime) {
         let pointer = self
             .seat
             .get_pointer()
             .expect("the seat gets a pointer at startup");
         let serial = SERIAL_COUNTER.next_serial();
         let location = pointer.current_location();
-        match event.state() {
+        match state {
             ButtonState::Pressed if !pointer.is_grabbed() => {
                 if self.tooltip.hide() {
                     self.schedule_render();
                 }
-                self.press_button(event.button_code(), location, serial);
+                self.press_button(button, location, serial);
             }
             ButtonState::Pressed => {}
             ButtonState::Released => {
@@ -3085,10 +3095,10 @@ impl Compositor {
         pointer.button(
             self,
             &ButtonEvent {
-                button: event.button_code(),
-                state: event.state(),
+                button,
+                state,
                 serial,
-                time: event.time(),
+                time,
             },
         );
         pointer.frame(self);
