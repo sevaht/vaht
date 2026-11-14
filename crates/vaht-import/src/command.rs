@@ -129,6 +129,9 @@ impl FluxboxCommand<'_> {
             "arrangewindowshorizontal" if arguments.is_empty() => plain("arrange rows"),
             "setworkspacename" if !arguments.is_empty() => with("rename-workspace"),
             "toggletoolbarhidden" => plain("toggle-taskbar"),
+            "settoolbarhead" if arguments.parse::<std::num::NonZeroUsize>().is_ok() => {
+                with("taskbar-to-output")
+            }
             "keymode" => Self::key_mode(arguments),
             "focusleft" => plain("focus-direction left"),
             "focusright" => plain("focus-direction right"),
@@ -633,6 +636,7 @@ mod tests {
     #[case::fbrun("Exec fbrun", r#""run-dialog""#)]
     #[case::fluxland_run("ExecCommand fluxland-run -f 'Sans 10'", r#""run-dialog""#)]
     #[case::not_a_run_window("Exec fbrunner", r#""exec fbrunner""#)]
+    #[case::toolbar_head("SetToolbarHead 2", r#""taskbar-to-output 2""#)]
     #[case::move_left("MoveLeft 10", r#""move -10 0""#)]
     #[case::move_down("MoveDown 5", r#""move 0 5""#)]
     #[case::key_mode("KeyMode moving", r#""key-mode moving""#)]
