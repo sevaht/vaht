@@ -30,7 +30,8 @@ use std::time::{Duration, Instant};
 use jiff::Zoned;
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, ButtonState, Event, InputBackend, InputEvent, InputTime, KeyState,
-    KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
+    KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent, Switch,
+    SwitchState, SwitchToggleEvent as _,
 };
 use smithay::backend::renderer::utils::with_renderer_surface_state;
 use smithay::desktop::utils::send_frames_surface_tree;
@@ -65,11 +66,11 @@ use crate::backend::{
 use crate::buffer_fences::FenceWaits;
 use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
-use crate::config::FocusStealing;
 use crate::config::{
     Action, Command, Config, ConfigSource, FocusModel, KeyChord, MenuGenerator, MenuRequest, Menus,
     Modifiers, ResizeFrom, SettingOverrides, ThemeFile, WindowManagerAction,
 };
+use crate::config::{FocusStealing, SwitchFlip, SwitchKind};
 use crate::cursor::Cursor;
 use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
@@ -1364,6 +1365,22 @@ impl Compositor {
             }
             InputEvent::PointerButton { event } => self.handle_pointer_button::<B>(&event),
             InputEvent::PointerAxis { event } => self.handle_pointer_axis::<B>(&event),
+            InputEvent::SwitchToggle { event } => {
+                let switch = match event.switch() {
+                    Some(Switch::Lid) => Some(SwitchKind::Lid),
+                    Some(Switch::TabletMode) => Some(SwitchKind::TabletMode),
+                    // A switch libinput knows and vaht does not.
+                    _ => None,
+                };
+                if let Some(switch) = switch {
+                    let flip = SwitchFlip::new(switch, event.state() == SwitchState::On);
+                    tracing::info!(?flip, "switch flipped");
+                    if let Some(command) = self.config.bindings.switch(flip).cloned() {
+                        let focused = self.window_manager.focused();
+                        self.execute(&command, &mut ExecutionContext::for_window(focused));
+                    }
+                }
+            }
             other => {
                 let pointer = self
                     .seat

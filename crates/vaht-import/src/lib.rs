@@ -165,11 +165,32 @@ impl FluxboxSetup {
             },
         );
         if let Some((path, text)) = &self.keys {
-            let bindings = KeysFile::new(path, text).convert(&mut report);
+            let mut bindings = KeysFile::new(path, text).convert(&mut report);
+            if !init.switches.is_empty() {
+                let mut switches = toml_edit::Table::new();
+                for (switch, command, _) in init.switches {
+                    switches.insert(switch, toml_edit::Item::Value(command));
+                }
+                bindings.insert("switches", toml_edit::Item::Table(switches));
+            }
             files.push(OutputFile {
                 name: "bindings.toml".to_owned(),
                 text: header(path) + &bindings.to_string(),
             });
+        } else {
+            // bindings.toml replaces the built-in bindings whole, so it is
+            // not written for the switches alone.
+            for (switch, command, line) in init.switches {
+                report.note(
+                    &init_path,
+                    line,
+                    Reason::NotYetInVaht,
+                    format!(
+                        "{switch} = {command}: there is no keys file, so add it to \
+                         [switches] in bindings.toml by hand"
+                    ),
+                );
+            }
         }
         if let Some((path, text)) = &self.menu {
             let mut menus = MenuFiles::new();
@@ -390,6 +411,63 @@ mod tests {
         assert!(menus.contains("submenu = \"more\""), "{menus}");
         assert!(
             conversion.report().notes().is_empty(),
+            "{}",
+            conversion.report()
+        );
+    }
+
+    #[test]
+    fn switch_commands_become_switch_bindings() {
+        let source = tempfile::tempdir().expect("a temporary directory");
+        std::fs::write(
+            source.path().join("init"),
+            "session.switch.lidClose: Exec swaylock\nsession.switch.tabletModeOn: Exec onboard\n",
+        )
+        .expect("written");
+        std::fs::write(source.path().join("keys"), "Mod4 T :Exec kitty\n").expect("written");
+        let conversion = FluxboxSetup::read(source.path())
+            .expect("readable")
+            .convert();
+        let target = tempfile::tempdir().expect("a temporary directory");
+        conversion
+            .write(target.path(), false)
+            .expect("written and valid");
+        let bindings =
+            std::fs::read_to_string(target.path().join("bindings.toml")).expect("written");
+        assert!(
+            bindings.contains(
+                "[switches]\nlid-close = \"exec swaylock\"\ntablet-mode-on = \"exec onboard\"\n"
+            ),
+            "{bindings}"
+        );
+        assert!(
+            conversion.report().notes().is_empty(),
+            "{}",
+            conversion.report()
+        );
+    }
+
+    #[test]
+    fn switch_commands_without_a_keys_file_are_reported() {
+        let source = tempfile::tempdir().expect("a temporary directory");
+        std::fs::write(
+            source.path().join("init"),
+            "session.switch.lidClose: Exec swaylock\n",
+        )
+        .expect("written");
+        let conversion = FluxboxSetup::read(source.path())
+            .expect("readable")
+            .convert();
+        assert!(
+            conversion
+                .files()
+                .iter()
+                .all(|file| file.name != "bindings.toml"),
+            "the built-in bindings are kept"
+        );
+        assert_eq!(
+            conversion.report().notes().len(),
+            1,
             "{}",
             conversion.report()
         );

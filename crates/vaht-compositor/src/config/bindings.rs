@@ -6,6 +6,9 @@
 //!
 //! [mouse.titlebar]
 //! "Drag+Left" = "start-moving"
+//!
+//! [switches]
+//! lid-close = "exec swaylock"
 //! ```
 //!
 //! A key chord is modifiers joined by `+`, then an xkb key name. A mouse
@@ -37,6 +40,45 @@ pub(crate) struct Bindings {
     /// Mouse triggers and what they do, by where the pointer is.
     #[serde(default)]
     mouse: HashMap<MouseContext, MouseBindings>,
+    /// What a laptop's lid or a convertible's tablet mode flipping does.
+    #[serde(default)]
+    switches: HashMap<SwitchFlip, Command>,
+}
+
+/// A switch flipping: a laptop's lid, or a convertible's tablet mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SwitchFlip {
+    /// The lid closed.
+    LidClose,
+    /// The lid opened.
+    LidOpen,
+    /// The convertible folded into a tablet.
+    TabletModeOn,
+    /// The convertible unfolded into a laptop.
+    TabletModeOff,
+}
+
+/// Which switch flipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SwitchKind {
+    /// A laptop's lid.
+    Lid,
+    /// A convertible's tablet mode.
+    TabletMode,
+}
+
+impl SwitchFlip {
+    /// Returns the flip of the `switch` to on (`is_on`: the lid closed, or
+    /// a tablet) or off.
+    pub(crate) const fn new(switch: SwitchKind, is_on: bool) -> Self {
+        match (switch, is_on) {
+            (SwitchKind::Lid, true) => Self::LidClose,
+            (SwitchKind::Lid, false) => Self::LidOpen,
+            (SwitchKind::TabletMode, true) => Self::TabletModeOn,
+            (SwitchKind::TabletMode, false) => Self::TabletModeOff,
+        }
+    }
 }
 
 /// What a mouse button press is bound to in one context.
@@ -49,11 +91,17 @@ pub(crate) struct ButtonBindings<'bindings> {
 }
 
 impl Bindings {
-    /// Returns every command bound, keys' and the mouse's.
+    /// Returns every command bound: keys', the mouse's and switches'.
     pub(crate) fn commands(&self) -> impl Iterator<Item = &Command> {
         self.keys
             .values()
             .chain(self.mouse.values().flat_map(|bindings| bindings.0.values()))
+            .chain(self.switches.values())
+    }
+
+    /// Returns what `flip` is bound to.
+    pub(crate) fn switch(&self, flip: SwitchFlip) -> Option<&Command> {
+        self.switches.get(&flip)
     }
 
     /// Returns what `chord` is bound to.
@@ -505,6 +553,32 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    #[test]
+    fn a_switch_flipping_runs_its_binding() {
+        let bindings: Bindings =
+            toml::from_str("[switches]\nlid-close = \"exec swaylock\"\n").expect("valid");
+        let closed = SwitchFlip::new(SwitchKind::Lid, true);
+        assert!(bindings.switch(closed).is_some(), "the lid closed");
+        assert!(
+            bindings
+                .switch(SwitchFlip::new(SwitchKind::Lid, false))
+                .is_none()
+        );
+        assert_eq!(
+            SwitchFlip::new(SwitchKind::TabletMode, true),
+            SwitchFlip::TabletModeOn
+        );
+        assert_eq!(
+            SwitchFlip::new(SwitchKind::TabletMode, false),
+            SwitchFlip::TabletModeOff
+        );
+    }
+
+    #[test]
+    fn an_unknown_switch_is_refused() {
+        assert!(toml::from_str::<Bindings>("[switches]\nlid-shut = \"exit\"\n").is_err());
+    }
     use crate::config::command::{Action, WindowManagerAction};
 
     /// Parses a bindings file.

@@ -218,6 +218,7 @@ These are structural problems in fluxland that vaht's design should avoid.
 | Fluxbox style format: textures, gradients, bevels, interlacing, pixmaps, fonts with halo and shadow, button pixmaps, style overlay | `style.c`, `render.c` | rework | New theme format built on cascading *element × state*. My style plus overlay gets converted. A Fluxbox style importer lives in the import tool |
 | Live reload (Mod4+r, SIGHUP) | | keep | |
 | `--check-config` validation | `validate.c` | keep | `vaht check` |
+| libinput settings (`session.input.*`) and switch commands (`session.switch.*`: lid, tablet mode) | `input_config.c`, `input.c` | keep | `[input]` in `settings.toml` and `[switches]` in `bindings.toml`, both converted by `vaht import` |
 | `--import-fluxbox` | `import.c`, `fbcompat.c` | rework | `vaht import`, which converts both fluxbox and fluxland configs |
 | Settings with no effect on Wayland (colorsPerChannel, cacheLife…) | | drop | |
 | DPI setting | | keep ★ | `dpi: 96` |

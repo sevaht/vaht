@@ -467,6 +467,11 @@ My `keys`, converted (repetitive lines shortened):
 "Drag+Left"   = "start-moving"
 "Middle"      = "lower"
 "Right"       = "window-menu"
+
+# Switches (fluxland's session.switch.*, which vaht import moves here):
+# lid-close, lid-open, tablet-mode-on, tablet-mode-off.
+[switches]
+lid-close = "exec swaylock"
 ```
 
 **How bindings behave (as built).**
@@ -482,6 +487,9 @@ My `keys`, converted (repetitive lines shortened):
 - `repeat` runs its command on the press, then again after the keyboard's
   repeat delay at its own rate, until any key is pressed or that key is
   released. Mouse bindings cannot repeat.
+- A `[switches]` binding runs, for the focused window, when a laptop's lid
+  or a convertible's tablet mode flips (on the DRM backend, which hears
+  switches from libinput).
 - Built into the frame, not bindings: titlebar buttons (pressed without
   modifiers), and resizing by dragging a border when the border has no
   binding for that button.

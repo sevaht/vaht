@@ -9,6 +9,7 @@
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 use vaht_compositor::Config;
 
+use crate::command::{FluxboxCommand, Untranslated};
 use crate::outputs::OutputResources;
 use crate::pattern::ClientPattern;
 use crate::report::{Reason, Report};
@@ -88,14 +89,18 @@ impl Decoration {
     }
 }
 
-/// What an `init` file becomes: `settings.toml`, and `outputs.toml` if it
-/// sets any output up.
+/// What an `init` file becomes: `settings.toml`, `outputs.toml` if it
+/// sets any output up, and `bindings.toml`'s `[switches]` if it binds
+/// switches.
 #[derive(Debug)]
 pub(crate) struct InitConversion {
     /// `settings.toml`.
     pub(crate) settings: DocumentMut,
     /// `outputs.toml`.
     pub(crate) outputs: Option<DocumentMut>,
+    /// `bindings.toml`'s `[switches]`, with the line of `init` each came
+    /// from.
+    pub(crate) switches: Vec<(&'static str, Value, usize)>,
 }
 
 /// An `init` file being converted.
@@ -130,6 +135,7 @@ impl InitFile {
     pub(crate) fn convert(mut self, report: &mut Report) -> InitConversion {
         let outputs = OutputResources::convert(&mut self.resources, report);
         crate::input::convert(&mut self.resources, &mut self.document, report);
+        let switches = self.convert_switches(report);
         self.convert_taskbar_output(&outputs, report);
         self.convert_x_resources();
         self.convert_focus(report);
@@ -161,7 +167,44 @@ impl InitFile {
         InitConversion {
             settings: self.document,
             outputs: outputs.document(),
+            switches,
         }
+    }
+
+    /// The commands fluxland runs when a switch flips
+    /// (`session.switch.lidClose` and its kin), as vaht's switch bindings.
+    fn convert_switches(&mut self, report: &mut Report) -> Vec<(&'static str, Value, usize)> {
+        const SWITCHES: [(&str, &str); 4] = [
+            ("lidClose", "lid-close"),
+            ("lidOpen", "lid-open"),
+            ("tabletModeOn", "tablet-mode-on"),
+            ("tabletModeOff", "tablet-mode-off"),
+        ];
+        let mut switches = Vec::new();
+        for (fluxland, vaht) in SWITCHES {
+            let Some(resource) = self
+                .resources
+                .get(&format!("session.switch.{fluxland}"))
+                .cloned()
+            else {
+                continue;
+            };
+            if resource.value.trim().is_empty() {
+                continue;
+            }
+            match FluxboxCommand(&resource.value).to_vaht() {
+                Ok(translated) => {
+                    for (reason, detail) in translated.losses {
+                        report.note(self.resources.path(), resource.line, reason, detail);
+                    }
+                    switches.push((vaht, translated.value, resource.line));
+                }
+                Err(Untranslated { reason, detail }) => {
+                    report.note(self.resources.path(), resource.line, reason, detail);
+                }
+            }
+        }
+        switches
     }
 
     /// The X resources file Xwayland loads: `session.xwayland.resources`. A

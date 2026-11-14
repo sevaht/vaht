@@ -30,7 +30,9 @@ use std::path::{Path, PathBuf};
 
 use vaht_ui::Theme;
 
-pub(crate) use self::bindings::{Bindings, KeyChord, Modifiers, MouseButton, MouseContext};
+pub(crate) use self::bindings::{
+    Bindings, KeyChord, Modifiers, MouseButton, MouseContext, SwitchFlip, SwitchKind,
+};
 pub(crate) use self::command::{
     Action, Command, CycleOrder, MenuRequest, ResizeFrom, WindowCycle, WindowManagerAction,
 };
