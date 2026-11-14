@@ -11,9 +11,11 @@ mod winit;
 
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Format, Fourcc};
+use smithay::backend::renderer::gles::GlesTexture;
 use smithay::backend::renderer::{ExportMem, ImportMemWl, Texture as _};
 use smithay::output::Output;
 use smithay::reexports::calloop::LoopHandle;
+use smithay::reexports::pixman::Image;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::utils::{Rectangle, Transform};
@@ -21,6 +23,7 @@ use smithay::utils::{Rectangle, Transform};
 pub(crate) use self::headless::HeadlessBackend;
 pub(crate) use self::winit::WinitBackend;
 use crate::Compositor;
+use crate::capture::{self, CaptureError, CapturedImage};
 use crate::config::OutputMode;
 use crate::outputs::{OutputControl, Outputs};
 use crate::resources::ResourceLedger;
@@ -166,6 +169,29 @@ impl Backend {
         match self {
             Self::Winit(backend) => backend.render(scene),
             Self::Headless(backend) => backend.render(scene),
+        }
+    }
+
+    /// Draws what `scene` shows on `output` with this backend's renderer,
+    /// for a screenshot or a screen recording.
+    ///
+    /// # Errors
+    ///
+    /// Returns why the image could not be made.
+    pub(crate) fn capture(
+        &mut self,
+        scene: &Scene<'_>,
+        output: &Output,
+    ) -> Result<CapturedImage, CaptureError> {
+        match self {
+            Self::Winit(backend) => {
+                capture::draw_capture::<_, GlesTexture>(backend.renderer(), scene, output)
+            }
+            Self::Headless(backend) => capture::draw_capture::<_, Image<'static, 'static>>(
+                backend.renderer(),
+                scene,
+                output,
+            ),
         }
     }
 

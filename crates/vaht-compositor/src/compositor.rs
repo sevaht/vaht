@@ -296,7 +296,7 @@ impl Compositor {
             tray_grant: None,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             icons: vaht_ui::IconStore::from_environment(),
-            capture: ScreenCapture::new().map_err(RunError::CaptureRenderer)?,
+            capture: ScreenCapture::default(),
             physical_keymap,
             keyboard_focus: None,
             input: Input::default(),
@@ -1056,7 +1056,6 @@ impl Compositor {
         if std::mem::take(&mut self.client_cleanup_pending) || has_client_left {
             self.protocols.image_copy_capture.cleanup();
             self.backend.release_unused_textures();
-            self.capture.release_unused_textures();
             // The last references to a gone client's buffers go with the next
             // frame, so make sure there is one.
             self.schedule_render();
@@ -1722,10 +1721,6 @@ pub enum RunError {
     /// The keyboard's keymap could not be compiled.
     #[error("could not set up the keyboard")]
     Keyboard(#[source] smithay::input::keyboard::Error),
-
-    /// The software renderer that draws screenshots could not be created.
-    #[error("could not create the screenshot renderer")]
-    CaptureRenderer(#[source] smithay::backend::renderer::pixman::PixmanError),
 
     /// No backend could start.
     #[error("could not start a backend")]

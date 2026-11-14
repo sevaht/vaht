@@ -1,24 +1,22 @@
 //! Screenshots and screen recording: `ext-image-copy-capture-v1`.
 //!
 //! A client (grim, the screen-sharing portal, OBS, vaht's own tests) asks
-//! for an output's image and hands vaht a shared-memory buffer. vaht
-//! composes the current scene with a software renderer of its own into an
-//! image it owns, reads the pixels back, and copies them into the client's
-//! buffer ([`crate::shared_memory`]). The same path works for every backend,
-//! and a capture never disturbs what the backend shows. A capture is rare
-//! next to frames, so drawing it again in software costs nothing in normal
-//! use.
+//! for an output's image and hands vaht a shared-memory buffer. The
+//! backend draws the scene again with its own renderer into an image of
+//! its own ([`draw_capture`]), reads the pixels back, and vaht copies them
+//! into the client's buffer ([`crate::shared_memory`]). Drawing with the
+//! backend's renderer is what lets windows drawn on the GPU show; every
+//! backend runs the same function, so the software one tests it. A capture
+//! never disturbs what the outputs show.
 
 use std::time::Duration;
 
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
-use smithay::backend::renderer::pixman::{PixmanError, PixmanRenderer};
-use smithay::backend::renderer::{Bind as _, ExportMem as _, Renderer as _};
+use smithay::backend::renderer::{Bind, ExportMem, ImportAll, ImportMem, Offscreen, Renderer};
 use smithay::output::{Output, WeakOutput};
-use smithay::reexports::pixman::{FormatCode, Image};
 use smithay::reexports::wayland_server::protocol::wl_shm::Format;
-use smithay::utils::{Physical, Rectangle, Scale, Size, Transform};
+use smithay::utils::{Rectangle, Size, Transform};
 use smithay::wayland::image_capture_source::{
     ImageCaptureSource, ImageCaptureSourceHandler, OutputCaptureSourceHandler,
     OutputCaptureSourceState,
@@ -34,97 +32,86 @@ use crate::resources::{ResourceKind, Tracked};
 use crate::scene::{self, Drawn, Scene};
 use crate::shared_memory::{self, SharedMemoryError};
 
-/// Draws captures; separate from the backend's renderer, so captures look
-/// the same on every backend.
+/// The open capture sessions.
+#[derive(Default)]
 pub(crate) struct ScreenCapture {
-    /// The software renderer captures are drawn with.
-    renderer: PixmanRenderer,
     /// Open capture sessions. Smithay stops a session when its `Session`
     /// is dropped, so each is kept until its client destroys it.
     sessions: Vec<(Session, Tracked)>,
 }
 
+/// What a capture drew: packed 32-bit rows, ARGB8888 in memory (blue,
+/// green, red, alpha), of an image `width` by `height` pixels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CapturedImage {
+    /// The pixels.
+    pub(crate) pixels: Vec<u8>,
+    /// Its width, in pixels.
+    pub(crate) width: usize,
+    /// Its height, in pixels.
+    pub(crate) height: usize,
+}
+
+/// Draws what `scene` shows on `output` with `renderer` into an image of
+/// the renderer's own, and reads it back.
+///
+/// # Errors
+///
+/// Returns an error if the output has no mode, or the scene could not be
+/// drawn or read back.
+pub(crate) fn draw_capture<R, Target>(
+    renderer: &mut R,
+    scene: &Scene<'_>,
+    output: &Output,
+) -> Result<CapturedImage, CaptureError>
+where
+    R: Renderer + ImportAll + ImportMem + Offscreen<Target> + Bind<Target> + ExportMem,
+    R::TextureId: Send + Clone + 'static,
+    R::Error: Send + Sync + 'static,
+{
+    let size = output
+        .current_mode()
+        .map(|mode| mode.size)
+        .ok_or(CaptureError::EmptyOutput)?;
+    let width = usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?;
+    let height = usize::try_from(size.h).map_err(|_negative| CaptureError::EmptyOutput)?;
+    let scale: smithay::utils::Scale<f64> = output.current_scale().fractional_scale().into();
+    let buffer_size: Size<i32, smithay::utils::Buffer> = (size.w, size.h).into();
+    let mut target = renderer
+        .create_buffer(Fourcc::Argb8888, buffer_size)
+        .map_err(CaptureError::renderer)?;
+    let elements = scene.output_elements(renderer, output);
+    let mut framebuffer = renderer.bind(&mut target).map_err(CaptureError::renderer)?;
+    OutputDamageTracker::new(size, scale, Transform::Normal)
+        .render_output(
+            renderer,
+            &mut framebuffer,
+            0,
+            &elements,
+            scene::BACKGROUND_COLOR,
+        )
+        .map_err(|error| CaptureError::Draw(error.to_string()))?;
+    let region = Rectangle::from_size((size.w, size.h).into());
+    let mapping = renderer
+        .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
+        .map_err(CaptureError::renderer)?;
+    let pixels = renderer
+        .map_texture(&mapping)
+        .map_err(CaptureError::renderer)?
+        .to_vec();
+    Ok(CapturedImage {
+        pixels,
+        width,
+        height,
+    })
+}
+
 impl ScreenCapture {
-    /// Creates the capture renderer.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the software renderer cannot be created.
-    pub(crate) fn new() -> Result<Self, PixmanError> {
-        Ok(Self {
-            renderer: PixmanRenderer::new()?,
-            sessions: Vec::new(),
-        })
-    }
-
-    /// Frees textures cached for client buffers that no longer exist.
-    pub(crate) fn release_unused_textures(&mut self) {
-        if let Err(error) = self.renderer.cleanup_texture_cache() {
-            tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                "could not free unused textures"
-            );
-        }
-    }
-
-    /// Returns what `scene` shows on `output`, whose mode is `size` pixels,
-    /// as packed 32-bit BGRA rows (ARGB8888 in memory).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the scene could not be drawn or read back.
-    fn render(
-        &mut self,
-        scene: &Scene<'_>,
-        output: &Output,
-        size: Size<i32, Physical>,
-    ) -> Result<Vec<u8>, CaptureError> {
-        let scale: Scale<f64> = output.current_scale().fractional_scale().into();
-        let width = usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?;
-        let height = usize::try_from(size.h).map_err(|_negative| CaptureError::EmptyOutput)?;
-        let mut image =
-            Image::new(FormatCode::A8R8G8B8, width, height, false).map_err(CaptureError::Image)?;
-        let framebuffer = self
-            .renderer
-            .bind(&mut image)
-            .map_err(CaptureError::Renderer)?;
-        let mut framebuffer = framebuffer;
-        let elements = scene.output_elements(&mut self.renderer, output);
-        OutputDamageTracker::new(size, scale, Transform::Normal)
-            .render_output(
-                &mut self.renderer,
-                &mut framebuffer,
-                0,
-                &elements,
-                scene::BACKGROUND_COLOR,
-            )
-            .map_err(CaptureError::Draw)?;
-        let region = Rectangle::from_size((size.w, size.h).into());
-        let mapping = self
-            .renderer
-            .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
-            .map_err(CaptureError::Renderer)?;
-        let pixels = self
-            .renderer
-            .map_texture(&mapping)
-            .map_err(CaptureError::Renderer)?;
-        Ok(pixels.to_vec())
-    }
-
-    /// Fills `frame` with the image `scene` makes of `output`, or fails it;
-    /// `time` is when the image was made, from vaht's start.
-    fn capture(&mut self, frame: Frame, scene: &Scene<'_>, output: &Output, time: Duration) {
-        let Some(mode) = output.current_mode() else {
-            frame.fail(CaptureFailureReason::Stopped);
-            return;
-        };
-        let size = mode.size;
-        let result = self.render(scene, output, size).and_then(|pixels| {
-            let (width, height) = (
-                usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?,
-                usize::try_from(size.h).map_err(|_negative| CaptureError::EmptyOutput)?,
-            );
-            shared_memory::write_frame(&frame.buffer(), &pixels, width, height)
+    /// Fills `frame` with `image`, made `time` after vaht started, or
+    /// fails it for why the image could not be made.
+    fn fill(frame: Frame, image: Result<CapturedImage, CaptureError>, time: Duration) {
+        let result = image.and_then(|image| {
+            shared_memory::write_frame(&frame.buffer(), &image.pixels, image.width, image.height)
                 .map_err(CaptureError::Write)
         });
         match result {
@@ -134,7 +121,6 @@ impl ScreenCapture {
                 let reason = match error {
                     CaptureError::Write(_) => CaptureFailureReason::BufferConstraints,
                     CaptureError::EmptyOutput
-                    | CaptureError::Image(_)
                     | CaptureError::Renderer(_)
                     | CaptureError::Draw(_) => CaptureFailureReason::Unknown,
                 };
@@ -220,31 +206,34 @@ impl ImageCopyCaptureHandler for Compositor {
         } else {
             scene
         };
-        self.capture
-            .capture(frame, &scene, &output, self.start_time.elapsed());
+        let image = self.backend.capture(&scene, &output);
+        ScreenCapture::fill(frame, image, self.start_time.elapsed());
     }
 }
 
 /// Why a capture failed.
 #[derive(Debug, thiserror::Error)]
-enum CaptureError {
+pub(crate) enum CaptureError {
     /// The output has no size.
     #[error("the output has no size")]
     EmptyOutput,
 
-    /// The image to draw into could not be created.
-    #[error("could not create the capture image")]
-    Image(#[source] smithay::reexports::pixman::CreateFailed),
-
-    /// The software renderer failed to bind or read back.
-    #[error("the capture renderer failed")]
-    Renderer(#[source] PixmanError),
+    /// The renderer could not make, bind or read back the capture image.
+    #[error("the renderer failed")]
+    Renderer(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// Drawing the scene failed.
-    #[error("could not draw the capture")]
-    Draw(#[source] smithay::backend::renderer::damage::Error<PixmanError>),
+    #[error("could not draw the capture: {0}")]
+    Draw(String),
 
     /// The client's buffer could not be written.
     #[error("could not write the client's buffer")]
     Write(#[source] SharedMemoryError),
+}
+
+impl CaptureError {
+    /// A renderer's `error`.
+    fn renderer(error: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::Renderer(Box::new(error))
+    }
 }
