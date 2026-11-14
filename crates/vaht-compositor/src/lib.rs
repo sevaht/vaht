@@ -30,6 +30,7 @@ mod launcher;
 mod layers;
 mod menu;
 mod outputs;
+mod pointer_lock;
 mod protocols;
 pub mod resources;
 mod scene;

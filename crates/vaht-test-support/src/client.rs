@@ -14,6 +14,9 @@ use std::path::Path;
 
 use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
 use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm};
+use smithay_client_toolkit::reexports::protocols::wp::pointer_constraints::zv1::client::zwp_pointer_constraints_v1::{self, ZwpPointerConstraintsV1};
+use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::ZwpRelativePointerV1;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue};
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
@@ -26,7 +29,8 @@ use smithay_client_toolkit::shell::xdg::window::WindowDecorations;
 pub use self::input::keys;
 use self::input::{KeyMotion, VirtualInput};
 use self::state::{
-    CaptureFrameEvents, CaptureSessionEvents, ClientState, KeyboardEvents, NoEvents, bind,
+    CaptureFrameEvents, CaptureSessionEvents, ClientState, KeyboardEvents, LockEvents, NoEvents,
+    RelativeMotionEvents, bind,
 };
 use crate::screenshot::Screenshot;
 
@@ -94,6 +98,12 @@ pub struct TestClient {
     input: VirtualInput,
     /// The seat's keyboard, which hears where keyboard focus is.
     _seat_keyboard: wl_keyboard::WlKeyboard,
+    /// The seat's pointer, which constraints are made for.
+    seat_pointer: wl_pointer::WlPointer,
+    /// Hears how the mouse moves.
+    _relative_pointer: ZwpRelativePointerV1,
+    /// Locks the pointer.
+    constraints: ZwpPointerConstraintsV1,
 }
 
 impl TestClient {
@@ -113,6 +123,13 @@ impl TestClient {
         let seat: wl_seat::WlSeat = bind(&globals, &handle, "wl_seat");
         let input = VirtualInput::bind(&globals, &handle, &seat);
         let seat_keyboard = seat.get_keyboard(&handle, KeyboardEvents);
+        let seat_pointer = seat.get_pointer(&handle, NoEvents);
+        let relative_pointers: ZwpRelativePointerManagerV1 =
+            bind(&globals, &handle, "zwp_relative_pointer_manager_v1");
+        let relative_pointer =
+            relative_pointers.get_relative_pointer(&seat_pointer, &handle, RelativeMotionEvents);
+        let constraints: ZwpPointerConstraintsV1 =
+            bind(&globals, &handle, "zwp_pointer_constraints_v1");
         let mut state = ClientState::bind(&globals, &handle);
         // Learn the outputs before anything needs them.
         queue
@@ -123,6 +140,9 @@ impl TestClient {
             state,
             input,
             _seat_keyboard: seat_keyboard,
+            seat_pointer,
+            _relative_pointer: relative_pointer,
+            constraints,
         }
     }
 
@@ -234,6 +254,59 @@ impl TestClient {
     pub fn closed_layers(&mut self) -> usize {
         self.roundtrip();
         self.state.closed_layers
+    }
+
+    /// Moves the pointer by `dx`, `dy`, as a mouse does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn move_pointer_by(&mut self, dx: f64, dy: f64) {
+        self.input.move_pointer_by((dx, dy));
+        self.roundtrip();
+    }
+
+    /// Asks vaht to lock the pointer while it is over the first window,
+    /// as a game does, and returns whether vaht locked it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the client has no window or the connection fails.
+    pub fn lock_pointer(&mut self) -> bool {
+        let handle = self.queue.handle();
+        let surface = self.state.windows[0].wl_surface().clone();
+        let _lock = self.constraints.lock_pointer(
+            &surface,
+            &self.seat_pointer,
+            None,
+            zwp_pointer_constraints_v1::Lifetime::Persistent,
+            &handle,
+            LockEvents,
+        );
+        self.roundtrip();
+        self.roundtrip();
+        self.state.is_pointer_locked
+    }
+
+    /// Returns whether vaht holds the pointer locked for the client now.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn is_pointer_locked(&mut self) -> bool {
+        self.roundtrip();
+        self.state.is_pointer_locked
+    }
+
+    /// Returns how far the mouse moved in all, as relative motion told the
+    /// client.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn relative_motion(&mut self) -> (f64, f64) {
+        self.roundtrip();
+        self.state.relative_motion
     }
 
     /// Moves the pointer to `x`, `y` in global coordinates, which start at

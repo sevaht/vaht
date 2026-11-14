@@ -38,7 +38,9 @@ use smithay::desktop::{
 use smithay::input::keyboard::{
     FilterResult, KeyboardSource, Keycode, KeymapFile, KeysymHandle, ModifiersState, XkbConfig,
 };
-use smithay::input::pointer::{ButtonEvent, Focus, GrabStartData, MotionEvent};
+use smithay::input::pointer::{
+    ButtonEvent, Focus, GrabStartData, MotionEvent, RelativeMotionEvent,
+};
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::{EventLoop, LoopHandle};
@@ -47,6 +49,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
 use smithay::utils::{IsAlive as _, Logical, Point, Rectangle, SERIAL_COUNTER, Serial};
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
+use smithay::wayland::pointer_constraints::{PointerConstraint, with_pointer_constraint};
 use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::shell::xdg::{PopupSurface, ToplevelSurface};
@@ -74,6 +77,7 @@ use crate::launcher::Launcher;
 use crate::layers::{LayerMaps, Layers, OutputLayers};
 use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack, OutputChoices};
 use crate::outputs::{OutputChanges, Outputs};
+use crate::pointer_lock::{self, PointerHold};
 use crate::protocols::ProtocolStates;
 use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::{
@@ -110,6 +114,9 @@ pub struct Compositor {
     /// Xwayland, for X11 programs, unless the settings turn it off or it
     /// could not start.
     pub(crate) xwayland: Option<XwaylandServer>,
+    /// Where a game holding the pointer locked last said it is, on its
+    /// surface: where the pointer goes when the lock ends.
+    pub(crate) pointer_lock_hint: Option<(WlSurface, Point<f64, Logical>)>,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -254,13 +261,7 @@ impl Compositor {
             .watch(handle, &ledger)
             .map_err(RunError::WatchSignals)?;
         let config_source = ConfigSource::new(options.config_directory);
-        let config = config_source.load().unwrap_or_else(|error| {
-            tracing::error!(
-                error = &error as &dyn std::error::Error,
-                "the configuration is not valid; using the built-in one until it is fixed"
-            );
-            Config::built_in()
-        });
+        let config = Self::first_config(&config_source);
 
         let mut outputs = backend.outputs();
         let mut output_changes = outputs.configure(&config.outputs, &mut backend);
@@ -293,6 +294,7 @@ impl Compositor {
             outputs,
             cursor: Cursor::from_environment(),
             xwayland: None,
+            pointer_lock_hint: None,
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -334,6 +336,18 @@ impl Compositor {
         }
         compositor.follow_output_changes(&output_changes);
         Ok(compositor)
+    }
+
+    /// Returns the configuration in `source`, or the built-in one, with an
+    /// error logged, if it is not valid.
+    fn first_config(source: &ConfigSource) -> Config {
+        source.load().unwrap_or_else(|error| {
+            tracing::error!(
+                error = &error as &dyn std::error::Error,
+                "the configuration is not valid; using the built-in one until it is fixed"
+            );
+            Config::built_in()
+        })
     }
 
     /// Opens the IPC socket beside the Wayland one `listener` opened; none,
@@ -499,6 +513,137 @@ impl Compositor {
             Backend::Winit(_) | Backend::Drm(_) => Vec::new(),
         };
         self.handle_output_events(events);
+    }
+
+    /// Tells the surface under the pointer how the mouse moved, before any
+    /// constraint or edge holds the pointer: what a game aiming reads.
+    fn send_relative_motion(&mut self, event: &RelativeMotionEvent) {
+        let from = self.pointer_location();
+        let under = self
+            .scene()
+            .target_at(from)
+            .and_then(|target| target.client_surface());
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        pointer.relative_motion(self, under, event);
+    }
+
+    /// Returns where the pointer at `from` goes when the mouse moves it by
+    /// `delta`: there, unless a constraint holds it (`pointer_lock`).
+    fn constrained_motion(
+        &self,
+        from: Point<f64, Logical>,
+        delta: Point<f64, Logical>,
+    ) -> Point<f64, Logical> {
+        let Some((surface, origin)) = self
+            .scene()
+            .target_at(from)
+            .and_then(|target| target.client_surface())
+        else {
+            return from + delta;
+        };
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        let active = with_pointer_constraint(&surface, &pointer, |constraint| {
+            let constraint = constraint.filter(|constraint| constraint.is_active())?;
+            let hold = match &*constraint {
+                PointerConstraint::Locked(_) => PointerHold::Locked,
+                PointerConstraint::Confined(_) => PointerHold::Confined,
+            };
+            Some((hold, constraint.region().cloned()))
+        });
+        let Some((hold, region)) = active else {
+            return from + delta;
+        };
+        let scene = self.scene();
+        pointer_lock::constrain(hold, from, delta, |point| {
+            let on_surface = (point - origin).to_i32_round();
+            region
+                .as_ref()
+                .is_none_or(|region| region.contains(on_surface))
+                && scene
+                    .target_at(point)
+                    .and_then(|target| target.client_surface())
+                    .is_some_and(|(under, _)| under == surface)
+        })
+    }
+
+    /// Lets the constraint of the surface under the pointer at `location`
+    /// hold the pointer, if its surface has the keyboard.
+    fn activate_pointer_constraint_under(&mut self, location: Point<f64, Logical>) {
+        if let Some((surface, _)) = self
+            .scene()
+            .target_at(location)
+            .and_then(|target| target.client_surface())
+        {
+            self.activate_pointer_constraint(&surface);
+        }
+    }
+
+    /// Lets `surface`'s pointer constraint hold the pointer, if `surface`
+    /// is under the pointer and has the keyboard: a game in the
+    /// background never takes the pointer.
+    pub(crate) fn activate_pointer_constraint(&mut self, surface: &WlSurface) {
+        let has_keyboard = self
+            .keyboard_focus
+            .as_ref()
+            .and_then(FocusTarget::surface)
+            .is_some_and(|focused| focused == *surface);
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        let is_under = pointer
+            .current_focus()
+            .is_some_and(|under| under == *surface);
+        if has_keyboard && is_under {
+            with_pointer_constraint(surface, &pointer, |constraint| {
+                if let Some(constraint) = constraint.filter(|constraint| !constraint.is_active()) {
+                    constraint.activate();
+                    tracing::debug!("pointer constraint active");
+                }
+            });
+        }
+    }
+
+    /// Lets go of `surface`'s pointer constraint: it lost the keyboard.
+    fn deactivate_pointer_constraint(&mut self, surface: &WlSurface) {
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        with_pointer_constraint(surface, &pointer, |constraint| {
+            if let Some(constraint) = constraint.filter(|constraint| constraint.is_active()) {
+                constraint.deactivate();
+                tracing::debug!("pointer constraint released");
+            }
+        });
+        self.end_pointer_lock(surface);
+    }
+
+    /// Puts the pointer where the game whose lock on `surface` ended last
+    /// said it is, if it said.
+    pub(crate) fn end_pointer_lock(&mut self, surface: &WlSurface) {
+        let Some((hinted, location)) = self.pointer_lock_hint.take() else {
+            return;
+        };
+        if hinted != *surface {
+            self.pointer_lock_hint = Some((hinted, location));
+            return;
+        }
+        let origin = self
+            .scene()
+            .target_at(self.pointer_location())
+            .and_then(|target| target.client_surface())
+            .filter(|(under, _)| under == surface)
+            .map(|(_, origin)| origin);
+        if let Some(origin) = origin {
+            self.move_pointer_to(origin + location, InputTime::now());
+        }
     }
 
     /// Starts Xwayland, unless the settings, or `allows`, turn it off.
@@ -1024,9 +1169,17 @@ impl Compositor {
                 );
             }
             InputEvent::PointerMotion { event } => {
+                let delta = event.delta();
+                self.send_relative_motion(&RelativeMotionEvent {
+                    delta,
+                    delta_unaccel: event.delta_unaccel(),
+                    time: event.time(),
+                });
                 let from = self.pointer_location();
-                let location = self.outputs.clamp(from, from + event.delta());
+                let to = self.constrained_motion(from, delta);
+                let location = self.outputs.clamp(from, to);
                 self.move_pointer_to(location, event.time());
+                self.activate_pointer_constraint_under(location);
             }
             InputEvent::PointerMotionAbsolute { event } => {
                 let area = absolute_area.unwrap_or_else(|| self.outputs.bounds());
@@ -1384,6 +1537,11 @@ impl Compositor {
             .map(|given| given.alive().then(|| given.clone()));
         if given == target.clone().map(Some) {
             return;
+        }
+        if let Some(previous) = self.keyboard_focus.as_ref().and_then(FocusTarget::surface)
+            && target.as_ref().and_then(FocusTarget::surface).as_ref() != Some(&previous)
+        {
+            self.deactivate_pointer_constraint(&previous);
         }
         self.keyboard_focus.clone_from(&target);
         // Smithay clears the focus of a destroyed surface without telling

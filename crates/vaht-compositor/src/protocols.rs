@@ -26,6 +26,8 @@ use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::image_capture_source::OutputCaptureSourceState;
 use smithay::wayland::image_copy_capture::ImageCopyCaptureState;
 use smithay::wayland::output::OutputManagerState;
+use smithay::wayland::pointer_constraints::PointerConstraintsState;
+use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
@@ -76,6 +78,10 @@ pub(crate) struct ProtocolStates {
         FractionalScaleManagerState,
         SinglePixelBufferState,
     ),
+    /// `zwp_relative_pointer_manager_v1` and `zwp_pointer_constraints_v1`:
+    /// games reading the mouse's motion and locking or confining the
+    /// pointer. Held only to keep the globals.
+    _pointer_extensions: (RelativePointerManagerState, PointerConstraintsState),
     /// `xwayland_shell_v1`: Xwayland pairing X11 windows with surfaces.
     pub(crate) xwayland_shell: XWaylandShellState,
     /// `wp_cursor_shape_manager_v1`: clients naming the pointer's picture
@@ -128,6 +134,10 @@ impl ProtocolStates {
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
             _cursor_shape: CursorShapeManagerState::new::<Compositor>(display),
             xwayland_shell: XWaylandShellState::new::<Compositor>(display),
+            _pointer_extensions: (
+                RelativePointerManagerState::new::<Compositor>(display),
+                PointerConstraintsState::new::<Compositor>(display),
+            ),
             output_capture_source: OutputCaptureSourceState::new::<Compositor>(display),
             image_copy_capture: ImageCopyCaptureState::new::<Compositor>(display),
             // TODO(security): every client may inject input, as on other

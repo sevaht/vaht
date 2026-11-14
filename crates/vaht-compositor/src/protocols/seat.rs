@@ -8,11 +8,15 @@ use smithay::input::tablet::TabletSeatHandler;
 
 use crate::backend::Backend;
 use crate::focus_target::FocusTarget;
+use smithay::input::pointer::PointerHandle;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::Resource as _;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Serial;
-use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
+use smithay::utils::{Logical, Point};
+use smithay::wayland::pointer_constraints::{
+    ConstraintRemove, PointerConstraint, PointerConstraintsHandler,
+};
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
@@ -50,9 +54,35 @@ impl SeatHandler for Compositor {
     }
 }
 
-// Pointer constraints (games locking the pointer) are not offered yet; the
-// trait is required by the pointer focus type, and its defaults do nothing.
-impl PointerConstraintsHandler for Compositor {}
+/// Games lock the pointer (it stays put; they read relative motion) or
+/// confine it to their window. A constraint holds while its surface is
+/// under the pointer and has the keyboard.
+impl PointerConstraintsHandler for Compositor {
+    fn new_constraint(&mut self, surface: &WlSurface, _pointer: &PointerHandle<Self>) {
+        self.activate_pointer_constraint(surface);
+    }
+
+    fn remove_constraint(
+        &mut self,
+        surface: &WlSurface,
+        _pointer: &PointerHandle<Self>,
+        removed: ConstraintRemove,
+    ) {
+        // A lock ending puts the pointer where the game last said it is.
+        if let ConstraintRemove::Destroyed(PointerConstraint::Locked(_)) = removed {
+            self.end_pointer_lock(surface);
+        }
+    }
+
+    fn cursor_position_hint(
+        &mut self,
+        surface: &WlSurface,
+        _pointer: &PointerHandle<Self>,
+        location: Point<f64, Logical>,
+    ) {
+        self.pointer_lock_hint = Some((surface.clone(), location));
+    }
+}
 
 impl SelectionHandler for Compositor {
     type SelectionUserData = ();

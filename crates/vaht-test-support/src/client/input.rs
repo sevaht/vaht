@@ -153,6 +153,13 @@ impl VirtualInput {
         self.pointer.frame();
     }
 
+    /// Moves the pointer by `delta`, as a mouse does.
+    pub(super) fn move_pointer_by(&mut self, delta: (f64, f64)) {
+        let time = self.tick();
+        self.pointer.motion(time, delta.0, delta.1);
+        self.pointer.frame();
+    }
+
     /// Presses or releases `button`.
     pub(super) fn button(&mut self, button: u32, state: wl_pointer::ButtonState) {
         let time = self.tick();

@@ -6,7 +6,11 @@ use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Fra
 use smithay_client_toolkit::dispatch2::Dispatch2;
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::client::globals::GlobalList;
-use smithay_client_toolkit::reexports::client::protocol::{wl_buffer, wl_keyboard, wl_output, wl_seat, wl_shm, wl_surface};
+use smithay_client_toolkit::reexports::client::protocol::{wl_buffer, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
+use smithay_client_toolkit::reexports::protocols::wp::pointer_constraints::zv1::client::zwp_locked_pointer_v1::{self, ZwpLockedPointerV1};
+use smithay_client_toolkit::reexports::protocols::wp::pointer_constraints::zv1::client::zwp_pointer_constraints_v1::ZwpPointerConstraintsV1;
+use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::{self, ZwpRelativePointerV1};
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
 use smithay_client_toolkit::reexports::client::{Connection, QueueHandle};
@@ -89,6 +93,10 @@ pub(super) struct ClientState {
     pub(super) capture_result: Option<Result<(), String>>,
     /// The surface with keyboard focus, as vaht last told.
     pub(super) keyboard_focus: Option<wl_surface::WlSurface>,
+    /// How far the mouse moved, as relative motion told, in all.
+    pub(super) relative_motion: (f64, f64),
+    /// Whether vaht holds the pointer locked for the client.
+    pub(super) is_pointer_locked: bool,
 }
 
 impl ClientState {
@@ -127,6 +135,8 @@ impl ClientState {
             capture_size: None,
             capture_result: None,
             keyboard_focus: None,
+            relative_motion: (0.0, 0.0),
+            is_pointer_locked: false,
         }
     }
 
@@ -216,6 +226,9 @@ macro_rules! ignore_events {
 
 ignore_events!(
     wl_seat::WlSeat,
+    wl_pointer::WlPointer,
+    ZwpRelativePointerManagerV1,
+    ZwpPointerConstraintsV1,
     ZwpVirtualKeyboardManagerV1,
     ZwpVirtualKeyboardV1,
     ZwlrVirtualPointerManagerV1,
@@ -247,6 +260,47 @@ impl Dispatch2<wl_keyboard::WlKeyboard, ClientState> for KeyboardEvents {
         match event {
             wl_keyboard::Event::Enter { surface, .. } => state.keyboard_focus = Some(surface),
             wl_keyboard::Event::Leave { .. } => state.keyboard_focus = None,
+            _ => {}
+        }
+    }
+}
+
+/// User data of the relative pointer: adds up how far the mouse moved.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RelativeMotionEvents;
+
+impl Dispatch2<ZwpRelativePointerV1, ClientState> for RelativeMotionEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &ZwpRelativePointerV1,
+        event: zwp_relative_pointer_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        if let zwp_relative_pointer_v1::Event::RelativeMotion { dx, dy, .. } = event {
+            state.relative_motion.0 += dx;
+            state.relative_motion.1 += dy;
+        }
+    }
+}
+
+/// User data of a pointer lock: records whether it holds.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct LockEvents;
+
+impl Dispatch2<ZwpLockedPointerV1, ClientState> for LockEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &ZwpLockedPointerV1,
+        event: zwp_locked_pointer_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        match event {
+            zwp_locked_pointer_v1::Event::Locked => state.is_pointer_locked = true,
+            zwp_locked_pointer_v1::Event::Unlocked => state.is_pointer_locked = false,
             _ => {}
         }
     }
