@@ -49,6 +49,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
 use smithay::utils::{IsAlive as _, Logical, Point, Rectangle, SERIAL_COUNTER, Serial};
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
+use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat as _;
 use smithay::wayland::pointer_constraints::{PointerConstraint, with_pointer_constraint};
 use smithay::wayland::selection::data_device::set_data_device_focus;
 use smithay::wayland::selection::primary_selection::set_primary_focus;
@@ -644,6 +645,16 @@ impl Compositor {
         if let Some(origin) = origin {
             self.move_pointer_to(origin + location, InputTime::now());
         }
+    }
+
+    /// Returns whether the surface with the keyboard takes every key
+    /// (`keyboard-shortcuts-inhibit`), so vaht's bindings rest.
+    fn are_shortcuts_inhibited(&self) -> bool {
+        self.keyboard_focus
+            .as_ref()
+            .and_then(FocusTarget::surface)
+            .and_then(|surface| self.seat.keyboard_shortcuts_inhibitor_for_surface(&surface))
+            .is_some_and(|inhibitor| inhibitor.is_active())
     }
 
     /// Starts Xwayland, unless the settings, or `allows`, turn it off.
@@ -1909,6 +1920,10 @@ impl Compositor {
         {
             self.input.claim_release(keycode);
             return FilterResult::Intercept(Some(KeyPress::SwitchTerminal(terminal)));
+        }
+        // A window taking every key gets them, bound or not.
+        if self.are_shortcuts_inhibited() {
+            return FilterResult::Forward;
         }
         if self.menus.is_open() && state == KeyState::Pressed {
             // Keys are the menus' while one is open, their releases too.

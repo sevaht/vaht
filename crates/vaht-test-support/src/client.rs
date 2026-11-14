@@ -15,6 +15,7 @@ use std::path::Path;
 use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
 use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm};
 use smithay_client_toolkit::reexports::protocols::wp::pointer_constraints::zv1::client::zwp_pointer_constraints_v1::{self, ZwpPointerConstraintsV1};
+use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::ZwpRelativePointerV1;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue};
@@ -104,6 +105,10 @@ pub struct TestClient {
     _relative_pointer: ZwpRelativePointerV1,
     /// Locks the pointer.
     constraints: ZwpPointerConstraintsV1,
+    /// The seat.
+    seat: wl_seat::WlSeat,
+    /// Asks for every key.
+    shortcut_inhibitors: ZwpKeyboardShortcutsInhibitManagerV1,
 }
 
 impl TestClient {
@@ -130,6 +135,11 @@ impl TestClient {
             relative_pointers.get_relative_pointer(&seat_pointer, &handle, RelativeMotionEvents);
         let constraints: ZwpPointerConstraintsV1 =
             bind(&globals, &handle, "zwp_pointer_constraints_v1");
+        let shortcut_inhibitors: ZwpKeyboardShortcutsInhibitManagerV1 = bind(
+            &globals,
+            &handle,
+            "zwp_keyboard_shortcuts_inhibit_manager_v1",
+        );
         let mut state = ClientState::bind(&globals, &handle);
         // Learn the outputs before anything needs them.
         queue
@@ -143,6 +153,8 @@ impl TestClient {
             seat_pointer,
             _relative_pointer: relative_pointer,
             constraints,
+            seat,
+            shortcut_inhibitors,
         }
     }
 
@@ -286,6 +298,32 @@ impl TestClient {
         self.roundtrip();
         self.roundtrip();
         self.state.is_pointer_locked
+    }
+
+    /// Asks vaht for every key while the first window has the keyboard,
+    /// bound or not, as a game or virtual machine does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the client has no window or the connection fails.
+    pub fn inhibit_shortcuts(&mut self) {
+        let handle = self.queue.handle();
+        let surface = self.state.windows[0].wl_surface().clone();
+        let _inhibitor = self
+            .shortcut_inhibitors
+            .inhibit_shortcuts(&surface, &self.seat, &handle, NoEvents);
+        self.roundtrip();
+    }
+
+    /// Returns the keys pressed while the client had the keyboard, as Linux
+    /// key codes, in order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn received_keys(&mut self) -> Vec<u32> {
+        self.roundtrip();
+        self.state.received_keys.clone()
     }
 
     /// Returns whether vaht holds the pointer locked for the client now.

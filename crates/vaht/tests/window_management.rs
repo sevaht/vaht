@@ -213,3 +213,17 @@ fn alt_tab_walks_windows_by_recent_focus_and_restarts_after_alt_is_let_go() {
         "not on to the first, as a cycle still in progress would"
     );
 }
+
+#[test]
+fn a_window_taking_every_key_gets_super_up_instead_of_vaht() {
+    let mut desktop = Desktop::with_windows(1);
+    let floating = desktop.content().expect("the window is shown");
+    desktop.client.inhibit_shortcuts();
+    desktop.type_chord(&[keys::LEFT_SUPER, keys::UP]);
+    assert_eq!(desktop.content(), Some(floating), "not maximized");
+    assert_eq!(
+        desktop.client.received_keys(),
+        [keys::LEFT_SUPER, keys::UP],
+        "the window got the keys"
+    );
+}

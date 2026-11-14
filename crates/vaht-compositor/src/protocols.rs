@@ -25,6 +25,7 @@ use smithay::wayland::dmabuf::{DmabufGlobal, DmabufState};
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::image_capture_source::OutputCaptureSourceState;
 use smithay::wayland::image_copy_capture::ImageCopyCaptureState;
+use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
@@ -82,6 +83,9 @@ pub(crate) struct ProtocolStates {
     /// games reading the mouse's motion and locking or confining the
     /// pointer. Held only to keep the globals.
     _pointer_extensions: (RelativePointerManagerState, PointerConstraintsState),
+    /// `zwp_keyboard_shortcuts_inhibit_manager_v1`: a window taking every
+    /// key while it has the keyboard.
+    pub(crate) keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState,
     /// `xwayland_shell_v1`: Xwayland pairing X11 windows with surfaces.
     pub(crate) xwayland_shell: XWaylandShellState,
     /// `wp_cursor_shape_manager_v1`: clients naming the pointer's picture
@@ -134,6 +138,7 @@ impl ProtocolStates {
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
             _cursor_shape: CursorShapeManagerState::new::<Compositor>(display),
             xwayland_shell: XWaylandShellState::new::<Compositor>(display),
+            keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<Compositor>(display),
             _pointer_extensions: (
                 RelativePointerManagerState::new::<Compositor>(display),
                 PointerConstraintsState::new::<Compositor>(display),

@@ -9,6 +9,8 @@ use smithay_client_toolkit::reexports::client::globals::GlobalList;
 use smithay_client_toolkit::reexports::client::protocol::{wl_buffer, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface};
 use smithay_client_toolkit::reexports::protocols::wp::pointer_constraints::zv1::client::zwp_locked_pointer_v1::{self, ZwpLockedPointerV1};
 use smithay_client_toolkit::reexports::protocols::wp::pointer_constraints::zv1::client::zwp_pointer_constraints_v1::ZwpPointerConstraintsV1;
+use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibitor_v1::ZwpKeyboardShortcutsInhibitorV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::{self, ZwpRelativePointerV1};
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
@@ -97,6 +99,9 @@ pub(super) struct ClientState {
     pub(super) relative_motion: (f64, f64),
     /// Whether vaht holds the pointer locked for the client.
     pub(super) is_pointer_locked: bool,
+    /// The keys pressed while the client had the keyboard, as Linux key
+    /// codes, in order.
+    pub(super) received_keys: Vec<u32>,
 }
 
 impl ClientState {
@@ -137,6 +142,7 @@ impl ClientState {
             keyboard_focus: None,
             relative_motion: (0.0, 0.0),
             is_pointer_locked: false,
+            received_keys: Vec::new(),
         }
     }
 
@@ -226,6 +232,8 @@ macro_rules! ignore_events {
 
 ignore_events!(
     wl_seat::WlSeat,
+    ZwpKeyboardShortcutsInhibitManagerV1,
+    ZwpKeyboardShortcutsInhibitorV1,
     wl_pointer::WlPointer,
     ZwpRelativePointerManagerV1,
     ZwpPointerConstraintsV1,
@@ -260,6 +268,14 @@ impl Dispatch2<wl_keyboard::WlKeyboard, ClientState> for KeyboardEvents {
         match event {
             wl_keyboard::Event::Enter { surface, .. } => state.keyboard_focus = Some(surface),
             wl_keyboard::Event::Leave { .. } => state.keyboard_focus = None,
+            wl_keyboard::Event::Key {
+                key,
+                state:
+                    smithay_client_toolkit::reexports::client::WEnum::Value(
+                        wl_keyboard::KeyState::Pressed,
+                    ),
+                ..
+            } => state.received_keys.push(key),
             _ => {}
         }
     }

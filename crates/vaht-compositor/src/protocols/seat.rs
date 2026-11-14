@@ -14,6 +14,9 @@ use smithay::reexports::wayland_server::Resource as _;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Serial;
 use smithay::utils::{Logical, Point};
+use smithay::wayland::keyboard_shortcuts_inhibit::{
+    KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitor,
+};
 use smithay::wayland::pointer_constraints::{
     ConstraintRemove, PointerConstraint, PointerConstraintsHandler,
 };
@@ -126,4 +129,18 @@ impl WaylandDndGrabHandler for Compositor {
 // shape protocol asks for this.
 impl TabletSeatHandler for Compositor {
     type ToolFocus = WlSurface;
+}
+
+/// Games, virtual machines and remote desktops ask for every key, Super's
+/// chords included, while they have the keyboard. vaht grants it at once;
+/// the terminal switch keys stay vaht's, so the user is never shut in.
+impl KeyboardShortcutsInhibitHandler for Compositor {
+    fn keyboard_shortcuts_inhibit_state(&mut self) -> &mut KeyboardShortcutsInhibitState {
+        &mut self.protocols.keyboard_shortcuts_inhibit
+    }
+
+    fn new_inhibitor(&mut self, inhibitor: KeyboardShortcutsInhibitor) {
+        tracing::debug!("a window takes every key while it has the keyboard");
+        inhibitor.activate();
+    }
 }
