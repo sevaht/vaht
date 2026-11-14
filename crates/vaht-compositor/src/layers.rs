@@ -263,6 +263,11 @@ impl<'outputs> LayerMaps<'outputs> {
         Self { outputs }
     }
 
+    /// Returns the outputs.
+    pub(crate) const fn outputs(self) -> &'outputs Outputs {
+        self.outputs
+    }
+
     /// Returns each output's layer surfaces.
     fn each_output(self) -> impl Iterator<Item = OutputLayers<'outputs>> {
         self.outputs

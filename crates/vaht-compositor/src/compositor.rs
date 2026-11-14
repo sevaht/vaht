@@ -32,6 +32,7 @@ use smithay::backend::input::{
     AbsolutePositionEvent, Axis, ButtonState, Event, InputBackend, InputEvent, InputTime, KeyState,
     KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
 };
+use smithay::desktop::utils::send_frames_surface_tree;
 use smithay::desktop::{
     PopupKind, PopupManager, find_popup_root_surface, get_popup_toplevel_coords,
 };
@@ -85,6 +86,7 @@ use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::{
     Backdrop, Drawn, FrameTextures, Outline, PointerTarget, Scene, SnapOverlay, WindowTarget,
 };
+use crate::session_lock::SessionLock;
 use crate::signals::ProcessSignals;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
 use crate::tooltip::Tooltip;
@@ -121,6 +123,8 @@ pub struct Compositor {
     pub(crate) pointer_lock_hint: Option<(WlSurface, Point<f64, Logical>)>,
     /// The surfaces asking that the session not go idle.
     pub(crate) idle_inhibitors: IdleInhibitors<WlSurface>,
+    /// The session lock.
+    pub(crate) session_lock: SessionLock,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -300,6 +304,7 @@ impl Compositor {
             xwayland: None,
             pointer_lock_hint: None,
             idle_inhibitors: IdleInhibitors::default(),
+            session_lock: SessionLock::default(),
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -390,6 +395,7 @@ impl Compositor {
                 tooltip: &self.tooltip,
                 snap: &self.snap_overlay,
                 xwayland: self.xwayland.as_ref(),
+                lock: &self.session_lock,
             },
             self.layer_maps(),
         )
@@ -1036,6 +1042,7 @@ impl Compositor {
                 tooltip: &self.tooltip,
                 snap: &self.snap_overlay,
                 xwayland: self.xwayland.as_ref(),
+                lock: &self.session_lock,
             },
             LayerMaps::new(&self.outputs),
         );
@@ -1065,6 +1072,16 @@ impl Compositor {
         }
         // What shows changed, and with it whether idle is inhibited.
         self.refresh_idle_inhibition();
+        // A frame showing nothing of the session went out: the locker
+        // hears the session is locked.
+        if self.session_lock.is_locked() {
+            self.session_lock.confirm();
+            for (output, surface) in self.session_lock.surfaces() {
+                send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
+                    Some(output.clone())
+                });
+            }
+        }
         // An animated pointer moves on by itself.
         if draws_pointer && self.cursor.is_animated() {
             self.schedule_render();
@@ -1520,7 +1537,7 @@ impl Compositor {
     /// Carries out what the window manager decided since the last call:
     /// places windows can be put, what clients are asked, where keyboard
     /// focus goes, and whether a frame is needed.
-    fn settle(&mut self) {
+    pub(crate) fn settle(&mut self) {
         self.refresh_output_area();
         let updates = self.window_manager.take_client_updates();
         for (window, requested) in &updates.states {
@@ -1569,12 +1586,25 @@ impl Compositor {
             .focused()
             .and_then(|window| self.toplevels.get(window))
             .map(Toplevel::focus_target);
-        let target = self
-            .layers
-            .keyboard()
-            .cloned()
-            .map(FocusTarget::Surface)
-            .or(window_target);
+        let target = if self.session_lock.is_locked() {
+            // Only the locker gets keys: its primary output's surface.
+            self.session_lock
+                .surface_on(self.outputs.primary())
+                .or_else(|| {
+                    self.session_lock
+                        .surfaces()
+                        .next()
+                        .map(|(_, surface)| surface)
+                })
+                .cloned()
+                .map(FocusTarget::Surface)
+        } else {
+            self.layers
+                .keyboard()
+                .cloned()
+                .map(FocusTarget::Surface)
+                .or(window_target)
+        };
         // A focused target that is gone reads as `Some(None)`, unlike any
         // target or none, so its client's focus is always cleared.
         let given = self
@@ -1956,8 +1986,9 @@ impl Compositor {
             self.input.claim_release(keycode);
             return FilterResult::Intercept(Some(KeyPress::SwitchTerminal(terminal)));
         }
-        // A window taking every key gets them, bound or not.
-        if self.are_shortcuts_inhibited() {
+        // A window taking every key gets them, bound or not; a locked
+        // session's keys are its locker's.
+        if self.are_shortcuts_inhibited() || self.session_lock.is_locked() {
             return FilterResult::Forward;
         }
         if self.menus.is_open() && state == KeyState::Pressed {

@@ -14,6 +14,7 @@ mod layer_shell;
 mod output;
 mod seat;
 mod selection;
+mod session_lock;
 mod surfaces;
 mod virtual_input;
 mod xdg_shell;
@@ -34,6 +35,7 @@ use smithay::wayland::pointer_constraints::PointerConstraintsState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
+use smithay::wayland::session_lock::SessionLockManagerState;
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
@@ -97,6 +99,8 @@ pub(crate) struct ProtocolStates {
     /// `zwp_idle_inhibit_manager_v1`: a video player keeping the screen
     /// awake. Held only to keep the global.
     _idle_inhibit: IdleInhibitManagerState,
+    /// `ext_session_lock_manager_v1`: lockers such as swaylock.
+    pub(crate) session_lock: SessionLockManagerState,
     /// `xwayland_shell_v1`: Xwayland pairing X11 windows with surfaces.
     pub(crate) xwayland_shell: XWaylandShellState,
     /// `wp_cursor_shape_manager_v1`: clients naming the pointer's picture
@@ -152,6 +156,7 @@ impl ProtocolStates {
             xwayland_shell: XWaylandShellState::new::<Compositor>(display),
             keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<Compositor>(display),
             idle_notifier: IdleNotifierState::new(display, handle.clone()),
+            session_lock: SessionLockManagerState::new::<Compositor, _>(display, |_client| true),
             _idle_inhibit: IdleInhibitManagerState::new::<Compositor>(display),
             _pointer_extensions: (
                 RelativePointerManagerState::new::<Compositor>(display),

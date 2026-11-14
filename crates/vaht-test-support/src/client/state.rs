@@ -13,6 +13,9 @@ use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit
 use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibitor_v1::ZwpKeyboardShortcutsInhibitorV1;
 use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::{self, ExtIdleNotificationV1};
 use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
+use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_manager_v1::ExtSessionLockManagerV1;
+use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_surface_v1::{self, ExtSessionLockSurfaceV1};
+use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_v1::{self, ExtSessionLockV1};
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
@@ -108,6 +111,9 @@ pub(super) struct ClientState {
     pub(super) received_keys: Vec<u32>,
     /// Whether vaht says the session is idle, once it has said.
     pub(super) is_idle: Option<bool>,
+    /// Whether vaht says the session is locked for the client, once it has
+    /// said.
+    pub(super) is_session_locked: Option<bool>,
 }
 
 impl ClientState {
@@ -150,6 +156,7 @@ impl ClientState {
             is_pointer_locked: false,
             received_keys: Vec::new(),
             is_idle: None,
+            is_session_locked: None,
         }
     }
 
@@ -239,6 +246,7 @@ macro_rules! ignore_events {
 
 ignore_events!(
     wl_seat::WlSeat,
+    ExtSessionLockManagerV1,
     ExtIdleNotifierV1,
     ZwpIdleInhibitManagerV1,
     ZwpIdleInhibitorV1,
@@ -329,6 +337,58 @@ impl Dispatch2<ExtIdleNotificationV1, ClientState> for IdleEvents {
             ext_idle_notification_v1::Event::Idled => state.is_idle = Some(true),
             ext_idle_notification_v1::Event::Resumed => state.is_idle = Some(false),
             _ => {}
+        }
+    }
+}
+
+/// User data of a session lock: records whether it holds.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SessionLockEvents;
+
+impl Dispatch2<ExtSessionLockV1, ClientState> for SessionLockEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &ExtSessionLockV1,
+        event: ext_session_lock_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        match event {
+            ext_session_lock_v1::Event::Locked => state.is_session_locked = Some(true),
+            ext_session_lock_v1::Event::Finished => state.is_session_locked = Some(false),
+            _ => {}
+        }
+    }
+}
+
+/// User data of a lock surface: its surface and color, which it is filled
+/// with at the size vaht configures.
+#[derive(Debug, Clone)]
+pub(super) struct LockSurfaceEvents {
+    /// The surface.
+    pub(super) surface: wl_surface::WlSurface,
+    /// Its color.
+    pub(super) color: [u8; 3],
+}
+
+impl Dispatch2<ExtSessionLockSurfaceV1, ClientState> for LockSurfaceEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        lock_surface: &ExtSessionLockSurfaceV1,
+        event: ext_session_lock_surface_v1::Event,
+        _: &Connection,
+        handle: &QueueHandle<ClientState>,
+    ) {
+        if let ext_session_lock_surface_v1::Event::Configure {
+            serial,
+            width,
+            height,
+        } = event
+        {
+            lock_surface.ack_configure(serial);
+            state.fill(&self.surface, handle, (width, height), self.color);
         }
     }
 }

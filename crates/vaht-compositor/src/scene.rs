@@ -22,13 +22,16 @@ mod panel_texture;
 mod shaped_element;
 mod snap_overlay;
 
+use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
+use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{AsRenderElements as _, Element as _};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::WindowSurfaceType;
+use smithay::desktop::utils::under_from_surface_tree;
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Physical, Point, Scale};
@@ -46,6 +49,7 @@ use crate::cursor::Cursor;
 use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, LayerMaps};
 use crate::menu::MenuStack;
 use crate::outputs::Outputs;
+use crate::session_lock::SessionLock;
 use crate::taskbar::{Taskbar, TaskbarHit};
 use crate::tooltip::Tooltip;
 use crate::toplevels::{Toplevel, Toplevels};
@@ -111,6 +115,13 @@ pub(crate) enum PointerTarget {
     Window(WindowTarget),
     /// The taskbar: one of its widgets, or its background.
     Taskbar(Option<TaskbarHit>),
+    /// A locker's surface, while the session is locked.
+    Lock {
+        /// The surface under the pointer.
+        surface: WlSurface,
+        /// That surface's origin, in global coordinates.
+        origin: Point<f64, Logical>,
+    },
     /// An X11 program's override-redirect window: its menu, tooltip or
     /// drop-down.
     Unmanaged {
@@ -138,7 +149,9 @@ impl PointerTarget {
     pub(crate) const fn window(&self) -> Option<WindowId> {
         match self {
             Self::Window(target) => Some(target.window()),
-            Self::Taskbar(_) | Self::Layer { .. } | Self::Unmanaged { .. } => None,
+            Self::Taskbar(_) | Self::Layer { .. } | Self::Unmanaged { .. } | Self::Lock { .. } => {
+                None
+            }
         }
     }
 
@@ -147,9 +160,11 @@ impl PointerTarget {
     pub(crate) const fn binding_window(&self) -> Option<WindowId> {
         match self {
             Self::Taskbar(Some(hit)) => hit.window(),
-            Self::Window(_) | Self::Taskbar(None) | Self::Layer { .. } | Self::Unmanaged { .. } => {
-                self.window()
-            }
+            Self::Window(_)
+            | Self::Taskbar(None)
+            | Self::Layer { .. }
+            | Self::Unmanaged { .. }
+            | Self::Lock { .. } => self.window(),
         }
     }
 
@@ -163,7 +178,8 @@ impl PointerTarget {
             | Self::Layer {
                 surface, origin, ..
             }
-            | Self::Unmanaged { surface, origin } => Some((surface.clone(), *origin)),
+            | Self::Unmanaged { surface, origin }
+            | Self::Lock { surface, origin } => Some((surface.clone(), *origin)),
             Self::Window(WindowTarget::Frame { .. }) | Self::Taskbar(_) => None,
         }
     }
@@ -204,6 +220,8 @@ pub(crate) struct Drawn<'state> {
     pub(crate) tooltip: &'state Tooltip,
     /// X11 programs' override-redirect windows, when Xwayland runs.
     pub(crate) xwayland: Option<&'state XwaylandServer>,
+    /// The session lock: while locked, the outputs show only it.
+    pub(crate) lock: &'state SessionLock,
     /// Where a moved window would snap, and the layout picker.
     pub(crate) snap: &'state SnapOverlay,
 }
@@ -253,6 +271,9 @@ impl<'state> Scene<'state> {
     /// above the windows, the topmost shown window's client surface or
     /// frame, or a layer surface below the windows.
     pub(crate) fn target_at(&self, point: Point<f64, Logical>) -> Option<PointerTarget> {
+        if self.drawn.lock.is_locked() {
+            return self.lock_target_at(point);
+        }
         let layer = |layers, is_below_windows| {
             self.layers
                 .surface_under(layers, point)
@@ -337,12 +358,50 @@ impl<'state> Scene<'state> {
             .loc
             .to_physical_precise_round(scale);
         let toward_origin = Point::from((-corner.x, -corner.y));
-        self.elements(renderer, scale)
+        let elements = if self.drawn.lock.is_locked() {
+            self.lock_elements(renderer, output, corner, scale)
+        } else {
+            self.elements(renderer, scale)
+        };
+        elements
             .into_iter()
             .map(|element| {
                 RelocateRenderElement::from_element(element, toward_origin, Relocate::Relative)
             })
             .collect()
+    }
+
+    /// Returns what `output` (whose corner is at `corner`) shows while the
+    /// session is locked: the pointer and the locker's surface; black
+    /// until the locker gives one.
+    fn lock_elements<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        corner: Point<i32, Physical>,
+        scale: Scale<f64>,
+    ) -> Vec<SceneElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let mut elements = self
+            .pointer
+            .map(|(cursor, location)| cursor.render_elements(renderer, location, scale))
+            .unwrap_or_default();
+        if let Some(surface) = self.drawn.lock.surface_on(output) {
+            let surface_elements: Vec<WaylandSurfaceRenderElement<R>> =
+                render_elements_from_surface_tree(
+                    renderer,
+                    surface,
+                    corner,
+                    scale,
+                    1.0,
+                    Kind::Unspecified,
+                );
+            elements.extend(surface_elements.into_iter().map(SceneElement::Surface));
+        }
+        elements
     }
 
     /// Appends the elements of the windows shown, topmost first: those in
@@ -489,6 +548,24 @@ impl<'state> Scene<'state> {
             }
             let part = window.frame_geometry(metrics).part_at(point)?;
             Some(WindowTarget::Frame { window: id, part })
+        })
+    }
+
+    /// Returns the locker's surface under `point`, while locked: its
+    /// output's.
+    fn lock_target_at(&self, point: Point<f64, Logical>) -> Option<PointerTarget> {
+        let output = self.layers.outputs().at(point)?;
+        let surface = self.drawn.lock.surface_on(output)?;
+        let corner = Outputs::geometry(output).loc;
+        let (surface, origin) = under_from_surface_tree(
+            surface,
+            point - corner.to_f64(),
+            corner,
+            WindowSurfaceType::ALL,
+        )?;
+        Some(PointerTarget::Lock {
+            surface,
+            origin: origin.to_f64(),
         })
     }
 

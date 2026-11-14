@@ -35,6 +35,7 @@ mod pointer_lock;
 mod protocols;
 pub mod resources;
 mod scene;
+mod session_lock;
 mod shared_memory;
 mod signals;
 mod taskbar;

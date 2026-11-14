@@ -17,6 +17,8 @@ use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
 use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm};
 use smithay_client_toolkit::reexports::protocols::wp::pointer_constraints::zv1::client::zwp_pointer_constraints_v1::{self, ZwpPointerConstraintsV1};
 use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
+use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_manager_v1::ExtSessionLockManagerV1;
+use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_v1::ExtSessionLockV1;
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
@@ -34,7 +36,7 @@ pub use self::input::keys;
 use self::input::{KeyMotion, VirtualInput};
 use self::state::{
     CaptureFrameEvents, CaptureSessionEvents, ClientState, IdleEvents, KeyboardEvents, LockEvents,
-    NoEvents, RelativeMotionEvents, bind,
+    LockSurfaceEvents, NoEvents, RelativeMotionEvents, SessionLockEvents, bind,
 };
 use crate::screenshot::Screenshot;
 
@@ -116,6 +118,10 @@ pub struct TestClient {
     idle_notifier: ExtIdleNotifierV1,
     /// Keeps the session awake.
     idle_inhibitors: ZwpIdleInhibitManagerV1,
+    /// Locks the session.
+    session_locks: ExtSessionLockManagerV1,
+    /// The session lock the client holds, if it does.
+    session_lock: Option<ExtSessionLockV1>,
 }
 
 impl TestClient {
@@ -150,6 +156,8 @@ impl TestClient {
         let idle_notifier: ExtIdleNotifierV1 = bind(&globals, &handle, "ext_idle_notifier_v1");
         let idle_inhibitors: ZwpIdleInhibitManagerV1 =
             bind(&globals, &handle, "zwp_idle_inhibit_manager_v1");
+        let session_locks: ExtSessionLockManagerV1 =
+            bind(&globals, &handle, "ext_session_lock_manager_v1");
         let mut state = ClientState::bind(&globals, &handle);
         // Learn the outputs before anything needs them.
         queue
@@ -167,6 +175,8 @@ impl TestClient {
             shortcut_inhibitors,
             idle_notifier,
             idle_inhibitors,
+            session_locks,
+            session_lock: None,
         }
     }
 
@@ -353,6 +363,45 @@ impl TestClient {
         let _inhibitor = self
             .idle_inhibitors
             .create_inhibitor(&surface, &handle, NoEvents);
+        self.roundtrip();
+    }
+
+    /// Locks the session, as a screen locker does: a surface filled with
+    /// `color` on every output. Returns whether vaht said it is locked.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn lock_session(&mut self, color: [u8; 3]) -> bool {
+        let handle = self.queue.handle();
+        let lock = self.session_locks.lock(&handle, SessionLockEvents);
+        let outputs: Vec<wl_output::WlOutput> = self.state.outputs.outputs().collect();
+        for output in &outputs {
+            let surface = self.state.compositor.create_surface(&handle);
+            let _lock_surface = lock.get_lock_surface(
+                &surface,
+                output,
+                &handle,
+                LockSurfaceEvents {
+                    surface: surface.clone(),
+                    color,
+                },
+            );
+        }
+        self.session_lock = Some(lock);
+        self.dispatch_until(|state| state.is_session_locked.is_some());
+        self.state.is_session_locked == Some(true)
+    }
+
+    /// Unlocks the session the client locked.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the client holds no lock or the connection fails.
+    pub fn unlock_session(&mut self) {
+        let lock = self.session_lock.take().expect("the client holds the lock");
+        lock.unlock_and_destroy();
+        self.state.is_session_locked = None;
         self.roundtrip();
     }
 

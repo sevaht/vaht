@@ -324,7 +324,8 @@ impl MouseContext {
                     is_below_windows: false,
                     ..
                 }
-                | PointerTarget::Unmanaged { .. },
+                | PointerTarget::Unmanaged { .. }
+                | PointerTarget::Lock { .. },
             ) => &[],
         }
     }
