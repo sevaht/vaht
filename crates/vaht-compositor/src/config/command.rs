@@ -18,8 +18,8 @@ mod forms;
 pub(crate) use self::forms::{Condition, Delay, Toggle};
 use super::matcher::WindowMatcher;
 use crate::window_manager::{
-    AlphaChange, Axes, Direction, HorizontalEdge, OutputTarget, ResizeEdges, StackLayer, TileCell,
-    VerticalEdge, WorkspaceTarget,
+    AlphaChange, ArrangeStyle, Axes, Direction, HorizontalEdge, OutputTarget, ResizeEdges,
+    StackLayer, TileCell, VerticalEdge, WorkspaceTarget,
 };
 
 /// Actions of 02 §4 that vaht does not have yet. Naming one is an error that
@@ -27,7 +27,6 @@ use crate::window_manager::{
 const PLANNED_ACTIONS: &[&str] = &[
     "activate-tray-item",
     "activate-window-list-entry",
-    "arrange",
     "key-mode",
     "reload-theme",
     "restart",
@@ -503,6 +502,9 @@ pub(crate) enum WindowManagerAction {
     GoToMarkedWindow(String),
     /// Shows the window without its frame, or with it again.
     ToggleFrame,
+    /// Tiles the windows shown on the window's output (`arrange
+    /// grid|columns|rows`).
+    Arrange(ArrangeStyle),
     /// Names the workspace shown (`rename-workspace <name>`), until the
     /// settings are read again.
     RenameWorkspace(String),
@@ -736,6 +738,10 @@ impl WindowManagerAction {
             }
             "mark-window" => Ok(Self::MarkWindow(arguments.to_owned())),
             "toggle-frame" => without_arguments(Self::ToggleFrame),
+            "arrange" if arguments.is_empty() => Ok(Self::Arrange(ArrangeStyle::Grid)),
+            "arrange" => arguments.parse().map(Self::Arrange).map_err(|_unknown| {
+                format!("`arrange` takes grid, columns or rows, not `{arguments}`")
+            }),
             "rename-workspace" if arguments.is_empty() => {
                 Err("`rename-workspace` needs the workspace's new name".to_owned())
             }
@@ -831,6 +837,7 @@ impl fmt::Display for WindowManagerAction {
             Self::MarkWindow(key) => write!(formatter, "mark-window {key}"),
             Self::GoToMarkedWindow(key) => write!(formatter, "go-to-marked-window {key}"),
             Self::ToggleFrame => formatter.write_str("toggle-frame"),
+            Self::Arrange(style) => write!(formatter, "arrange {style}"),
             Self::RenameWorkspace(name) => write!(formatter, "rename-workspace {name}"),
             Self::SendToOutput(OutputTarget::Next) => formatter.write_str("send-to-output next"),
             Self::SendToOutput(OutputTarget::Previous) => {

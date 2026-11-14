@@ -13,6 +13,7 @@
 //! It holds no protocol object and never calls Smithay's seat, so every
 //! rule here is tested on its own, by unit and property tests below.
 
+mod arrange;
 mod direction;
 mod focus;
 mod output_areas;
@@ -26,6 +27,7 @@ use smithay::utils::{Logical, Point, Rectangle};
 use vaht_ui::theme::Metrics;
 use vaht_ui::{Theme, Typesetter};
 
+pub(crate) use self::arrange::ArrangeStyle;
 pub(crate) use self::focus::CycleDirection;
 use self::focus::Focus;
 pub(crate) use self::output_areas::{OutputAreas, OutputTarget};
@@ -500,6 +502,7 @@ impl WindowManager {
             WindowManagerAction::FocusDirection(direction) => self.focus_direction(*direction),
             WindowManagerAction::MarkWindow(key) => self.mark(window, key),
             WindowManagerAction::SendToOutput(target) => self.send_to_output(window, *target),
+            WindowManagerAction::Arrange(style) => self.arrange(window, *style),
             WindowManagerAction::RenameWorkspace(name) => {
                 self.workspaces.rename_current(name);
                 self.is_redraw_needed = true;
@@ -553,6 +556,33 @@ impl WindowManager {
             }
         });
         self.is_redraw_needed = true;
+    }
+
+    /// Tiles the windows shown on the output of `window` (or the primary
+    /// one) as `style` arranges them, in the order they opened.
+    fn arrange(&mut self, window: Option<WindowId>, style: ArrangeStyle) {
+        let metrics = self.metrics;
+        let output = window.and_then(|window| self.window(window)).map_or_else(
+            || self.outputs.iter().next().copied(),
+            |window| Some(self.outputs.for_area(window.outer_area(metrics))),
+        );
+        let Some(output) = output else {
+            return;
+        };
+        let mut windows: Vec<WindowId> = self
+            .shown_top_down()
+            .filter(|shown| shown.is_placed() && !shown.placement().is_fullscreen())
+            .filter(|shown| self.outputs.for_area(shown.outer_area(metrics)) == output)
+            .map(Window::id)
+            .collect();
+        windows.sort_unstable();
+        let cells = arrange::cells(windows.len(), style);
+        for (window, cell) in windows.into_iter().zip(cells) {
+            self.change_placement(Some(window), |placement, current| Placement::Tiled {
+                cell,
+                restore: placement.restore_area(current),
+            });
+        }
     }
 
     /// Marks `window` with `key`, which then marks it alone.
@@ -1479,6 +1509,29 @@ mod tests {
         desk.run(&action("toggle-frame"));
         assert!(desk.window(window).has_frame());
         assert_eq!(desk.window(window).content_area(), content);
+    }
+
+    #[test]
+    fn arranging_tiles_the_windows_in_a_grid() {
+        let mut desk = Desk::new();
+        let first = desk.open();
+        let second = desk.open();
+        let third = desk.open();
+        desk.run(&action("arrange"));
+        let usable = output(0).usable;
+        assert_eq!(desk.outer(first).loc, usable.loc, "the first top left");
+        assert_eq!(
+            desk.outer(second).loc.y,
+            usable.loc.y,
+            "the second beside it"
+        );
+        assert!(desk.outer(second).loc.x > desk.outer(first).loc.x);
+        assert_eq!(
+            desk.outer(third).loc.x,
+            usable.loc.x,
+            "the third below the first"
+        );
+        assert!(desk.outer(third).loc.y > usable.loc.y);
     }
 
     #[test]

@@ -122,6 +122,10 @@ impl FluxboxCommand<'_> {
                 with("send-to-output")
             }
             "toggledecor" => plain("toggle-frame"),
+            // A pattern choosing which windows to arrange has no form yet.
+            "arrangewindows" if arguments.is_empty() => plain("arrange grid"),
+            "arrangewindowsvertical" if arguments.is_empty() => plain("arrange columns"),
+            "arrangewindowshorizontal" if arguments.is_empty() => plain("arrange rows"),
             "setworkspacename" if !arguments.is_empty() => with("rename-workspace"),
             "toggletoolbarhidden" => plain("toggle-taskbar"),
             "focusleft" => plain("focus-direction left"),
@@ -543,6 +547,10 @@ mod tests {
         assert_eq!(vaht("SendToNextHead").as_deref(), Ok("send-to-output next"));
         assert_eq!(vaht("SetHead 2").as_deref(), Ok("send-to-output 2"));
         assert_eq!(vaht("ToggleDecor").as_deref(), Ok("toggle-frame"));
+        assert_eq!(
+            vaht("ArrangeWindowsVertical").as_deref(),
+            Ok("arrange columns")
+        );
         assert_eq!(
             vaht("SetWorkspaceName Mail").as_deref(),
             Ok("rename-workspace Mail")

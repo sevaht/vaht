@@ -535,7 +535,11 @@ lid-close = "exec swaylock"
   reserved and resting its clock, or on again (Fluxbox's
   `ToggleToolbarHidden`). `rename-workspace <name>` names the workspace
   shown, until the settings are read again (Fluxbox's
-  `SetWorkspaceName`).
+  `SetWorkspaceName`). `arrange grid|columns|rows` tiles the windows shown
+  on the window's output, in the order they opened: a grid with the last
+  row sharing its width, side by side, or one above another (Fluxbox's
+  `ArrangeWindows`, `ArrangeWindowsVertical`, `ArrangeWindowsHorizontal`);
+  each can be restored as any tiled window can.
 - `tile` takes a cell in thousandths of the usable area:
   `tile <x> <y> <width> <height>`, the left half being `tile 0 0 500 1000`.
 - `next-window` and `previous-window` walk windows in the order they last
