@@ -198,3 +198,68 @@ fn programs_vaht_starts_learn_the_desktop_and_session() {
     assert!(output.status.success(), "{output:?}");
     wait_for_file(&result, |text| text == "vaht vaht wayland");
 }
+
+#[test]
+fn a_subscriber_hears_each_list_at_once_and_whenever_it_changes() {
+    use std::io::BufRead as _;
+
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut follower = Command::new(EXECUTABLE)
+        .args(["msg", "--json", "subscribe", "workspaces", "windows"])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("vaht msg runs");
+    let (lines, received) = std::sync::mpsc::channel();
+    let stdout = follower.stdout.take().expect("piped");
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+        {
+            if lines.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    let next = || -> vaht_ipc::Event {
+        let line = received
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("an event in time");
+        serde_json::from_str(&line).expect("an event")
+    };
+    let current = |event: &vaht_ipc::Event| match event {
+        vaht_ipc::Event::Workspaces { workspaces } => workspaces
+            .iter()
+            .find(|workspace| workspace.is_current)
+            .map(|workspace| workspace.number),
+        vaht_ipc::Event::Windows { .. } | vaht_ipc::Event::Outputs { .. } => None,
+    };
+    let first = [next(), next()];
+    assert!(
+        first.iter().any(|event| current(event) == Some(1)),
+        "{first:?}"
+    );
+    assert!(
+        first.iter().any(
+            |event| matches!(event, vaht_ipc::Event::Windows { windows } if windows.is_empty())
+        ),
+        "{first:?}"
+    );
+
+    assert!(message(&vaht, &["run", "workspace", "2"]).status.success());
+    assert_eq!(current(&next()), Some(2), "only the list that changed");
+
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let opened = loop {
+        if let vaht_ipc::Event::Windows { windows } = next()
+            && !windows.is_empty()
+        {
+            break windows;
+        }
+    };
+    assert_eq!(opened[0].app_id, "vaht.test");
+    follower.kill().expect("stopped");
+    let _ = follower.wait();
+}

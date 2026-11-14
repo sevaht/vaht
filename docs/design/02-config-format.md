@@ -1100,6 +1100,7 @@ dialogs use too.
 | `{"request":"run","command":"workspace 2"}` | `command`: as a binding writes it (§4, one action); `window`: an id, the focused window by default | `{"reply":"done"}` |
 | `{"request":"windows"}` | | `{"reply":"windows","windows":[{"id":1,"title":"…","app_id":"kitty","workspace":1,"is_focused":true,"is_minimized":false,"is_shaded":false}]}`, topmost first; `workspace` is `null` for a window on every workspace |
 | `{"request":"workspaces"}` | | `{"reply":"workspaces","workspaces":[{"number":1,"name":"…","is_current":true}]}` |
+| `{"request":"subscribe","events":["windows","workspaces"]}` | `events`: any of `windows`, `workspaces`, `outputs` | `{"reply":"done"}`, then each list at once and whenever it changes, as `{"event":"windows","windows":[…]}` (and `workspaces`, `outputs` with `profile`), the same fields as the reply to asking for it; a client is sent a list only when it differs from the one it was last sent |
 | `{"request":"outputs"}` | | `{"reply":"outputs","outputs":[{"connector":"HDMI-A-1","make":"…","model":"…","serial":"…","is_enabled":true,"is_primary":true,"mode":{"width":1920,"height":1080,"refresh_millihertz":60000},"position":[0,0],"scale":1.0}]}`, on and off, in the order found; `mode` is `null` for an output off |
 
 - **Errors are replies:** `{"reply":"error","message":"…"}` for a request
@@ -1109,7 +1110,9 @@ dialogs use too.
 - **`vaht msg`** asks from the command line: `vaht msg run workspace 2`,
   `vaht msg windows`, `vaht msg workspaces`, `vaht msg outputs` (each
   output with the `match` lines to paste into `outputs.toml`),
-  `vaht msg version`; `--json` prints the reply as sent.
+  `vaht msg version`, `vaht msg subscribe windows workspaces outputs`
+  (each list as it changes, until vaht stops); `--json` prints the reply,
+  or each event, as sent.
 - **`[ipc] allow_commands`** (on by default; from Fluxbox's
   `allowRemoteActions`): off, only vaht's own dialogs may run commands,
   known by the process at the other end of the socket. Asking for windows
@@ -1117,7 +1120,7 @@ dialogs use too.
   (in `XDG_RUNTIME_DIR`, mode 0700), so this guards against the user's
   other programs, which can already type through the virtual keyboard
   protocol.
-- **Not built yet:** event subscriptions and the JSON Schema export.
+- **Not built yet:** the JSON Schema export.
 
 ---
 

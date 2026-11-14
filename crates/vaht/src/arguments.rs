@@ -141,6 +141,36 @@ pub enum MessageRequest {
     /// Lists the outputs, the primary one marked `*` and those off `-`,
     /// each with matches to paste into `outputs.toml`.
     Outputs,
+    /// Prints the lists named now, and again whenever they change, until
+    /// vaht stops: `vaht msg subscribe windows workspaces`.
+    Subscribe {
+        /// The lists.
+        #[arg(required = true, value_enum)]
+        events: Vec<EventList>,
+    },
+}
+
+/// A list `vaht msg subscribe` follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum EventList {
+    /// The windows, as `vaht msg windows` lists them.
+    Windows,
+    /// The workspaces, as `vaht msg workspaces` lists them.
+    Workspaces,
+    /// The outputs, as `vaht msg outputs` lists them.
+    Outputs,
+}
+
+impl EventList {
+    /// Returns the list as the protocol names it.
+    #[must_use]
+    pub const fn kind(self) -> vaht_ipc::EventKind {
+        match self {
+            Self::Windows => vaht_ipc::EventKind::Windows,
+            Self::Workspaces => vaht_ipc::EventKind::Workspaces,
+            Self::Outputs => vaht_ipc::EventKind::Outputs,
+        }
+    }
 }
 
 impl MessageRequest {
@@ -156,6 +186,9 @@ impl MessageRequest {
             Self::Windows => vaht_ipc::Request::Windows {},
             Self::Workspaces => vaht_ipc::Request::Workspaces {},
             Self::Outputs => vaht_ipc::Request::Outputs {},
+            Self::Subscribe { events } => vaht_ipc::Request::Subscribe {
+                events: events.iter().map(|list| list.kind()).collect(),
+            },
         }
     }
 }

@@ -29,7 +29,11 @@ fn main() -> ExitCode {
             return vaht::dialog::show(*dialog, &arguments.config_directory());
         }
         Some(Subcommand::Msg { json, request }) => {
-            return vaht::message::send(&request.to_request(), *json);
+            return if let vaht::arguments::MessageRequest::Subscribe { events } = request {
+                vaht::message::follow(events.iter().map(|list| list.kind()).collect(), *json)
+            } else {
+                vaht::message::send(&request.to_request(), *json)
+            };
         }
         None => {}
     }

@@ -1,8 +1,8 @@
 //! What the compositor answers each IPC request with.
 
-use vaht_ipc::{ModeInfo, OutputInfo, Reply, Request, WindowInfo, WorkspaceInfo};
+use vaht_ipc::{Event, EventKind, ModeInfo, OutputInfo, Reply, Request, WindowInfo, WorkspaceInfo};
 
-use super::IpcHandler;
+use super::{IpcHandler, IpcServer};
 use crate::Compositor;
 use crate::WindowId;
 use crate::config::{Action, Command};
@@ -44,45 +44,86 @@ impl IpcHandler for Compositor {
                 );
                 Reply::Done {}
             }
-            Request::Windows {} => {
-                let focused = self.window_manager.focused();
-                let windows = self
-                    .window_manager
-                    .windows_top_down()
-                    .map(|window| {
-                        let state = window.state();
-                        WindowInfo {
-                            id: window.id().get(),
-                            title: window.title().to_owned(),
-                            app_id: window.app_id().to_owned(),
-                            workspace: (!state.is_sticky)
-                                .then(|| window.workspace().number().get()),
-                            is_focused: focused == Some(window.id()),
-                            is_minimized: state.is_minimized,
-                            is_shaded: state.is_shaded,
-                        }
-                    })
-                    .collect();
-                Reply::Windows { windows }
-            }
-            Request::Workspaces {} => {
-                let current = self.window_manager.current_workspace();
-                let workspaces = self
-                    .window_manager
-                    .workspaces()
-                    .map(|(workspace, name)| WorkspaceInfo {
-                        number: workspace.number().get(),
-                        name: name.to_owned(),
-                        is_current: workspace == current,
-                    })
-                    .collect();
-                Reply::Workspaces { workspaces }
-            }
+            Request::Windows {} => Reply::Windows {
+                windows: self.window_infos(),
+            },
+            Request::Workspaces {} => Reply::Workspaces {
+                workspaces: self.workspace_infos(),
+            },
             Request::Outputs {} => Reply::Outputs {
                 outputs: output_infos(&self.outputs),
                 profile: self.outputs.profile().map(str::to_owned),
             },
+            // A connection answers this itself.
+            Request::Subscribe { .. } => Reply::Error {
+                message: "subscriptions are kept by the connection".to_owned(),
+            },
         }
+    }
+}
+
+impl Compositor {
+    /// Returns the list `kind` as it is now, for clients subscribed to it.
+    pub(crate) fn ipc_event(&self, kind: EventKind) -> Event {
+        match kind {
+            EventKind::Windows => Event::Windows {
+                windows: self.window_infos(),
+            },
+            EventKind::Workspaces => Event::Workspaces {
+                workspaces: self.workspace_infos(),
+            },
+            EventKind::Outputs => Event::Outputs {
+                outputs: output_infos(&self.outputs),
+                profile: self.outputs.profile().map(str::to_owned),
+            },
+        }
+    }
+
+    /// Sends each list some client subscribed to, to those whose copy is
+    /// out of date.
+    pub(crate) fn publish_ipc_events(&mut self) {
+        let Some(kinds) = self.ipc.as_ref().map(IpcServer::subscribed) else {
+            return;
+        };
+        for kind in kinds {
+            let event = self.ipc_event(kind);
+            if let Some(server) = &mut self.ipc {
+                server.publish(&event);
+            }
+        }
+    }
+
+    /// Describes each window for IPC, topmost first.
+    fn window_infos(&self) -> Vec<WindowInfo> {
+        let focused = self.window_manager.focused();
+        self.window_manager
+            .windows_top_down()
+            .map(|window| {
+                let state = window.state();
+                WindowInfo {
+                    id: window.id().get(),
+                    title: window.title().to_owned(),
+                    app_id: window.app_id().to_owned(),
+                    workspace: (!state.is_sticky).then(|| window.workspace().number().get()),
+                    is_focused: focused == Some(window.id()),
+                    is_minimized: state.is_minimized,
+                    is_shaded: state.is_shaded,
+                }
+            })
+            .collect()
+    }
+
+    /// Describes each workspace for IPC, in order.
+    fn workspace_infos(&self) -> Vec<WorkspaceInfo> {
+        let current = self.window_manager.current_workspace();
+        self.window_manager
+            .workspaces()
+            .map(|(workspace, name)| WorkspaceInfo {
+                number: workspace.number().get(),
+                name: name.to_owned(),
+                is_current: workspace == current,
+            })
+            .collect()
     }
 }
 

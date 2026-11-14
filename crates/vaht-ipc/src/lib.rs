@@ -2,7 +2,8 @@
 //! and a small blocking client.
 //!
 //! One JSON message per line, in both directions: a client writes a
-//! [`Request`] and reads one [`Reply`] for it, in order. The types here are
+//! [`Request`] and reads one [`Reply`] for it, in order; a client that
+//! subscribed also reads [`Event`]s. The types here are
 //! the single source of the protocol: vaht answers with them, `vaht msg` and
 //! the dialogs ask with them (02 §12).
 //!
@@ -16,7 +17,9 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 pub use client::{Client, ClientError};
-pub use message::{ModeInfo, OutputInfo, Reply, Request, WindowInfo, WorkspaceInfo};
+pub use message::{
+    Event, EventKind, ModeInfo, OutputInfo, Reply, Request, WindowInfo, WorkspaceInfo,
+};
 
 /// The environment variable that names vaht's IPC socket, set for every
 /// program vaht starts.

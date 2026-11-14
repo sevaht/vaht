@@ -1,9 +1,11 @@
-//! One IPC client's connection: requests in, replies out, a line each.
+//! One IPC client's connection: requests in, replies out, a line each;
+//! and the lists it subscribed to, sent whenever they change.
 
+use std::collections::BTreeMap;
 use std::io::{self, Read as _, Write as _};
 use std::os::unix::net::UnixStream;
 
-use vaht_ipc::{MAX_MESSAGE_BYTES, Reply, Request};
+use vaht_ipc::{EventKind, MAX_MESSAGE_BYTES, Reply, Request};
 
 use super::IpcHandler;
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
@@ -26,6 +28,8 @@ pub(super) struct Connection {
     output: Vec<u8>,
     /// The process at the other end, if known.
     peer: Option<i32>,
+    /// Each list subscribed to, and the line last sent of it, if any.
+    subscriptions: BTreeMap<EventKind, Option<Vec<u8>>>,
     /// Counts the connection while it lives.
     _tracked: Tracked,
 }
@@ -43,8 +47,32 @@ impl Connection {
             input: Vec::new(),
             output: Vec::new(),
             peer,
+            subscriptions: BTreeMap::new(),
             _tracked: ledger.track(ResourceKind::IpcConnection),
         }
+    }
+
+    /// Returns the lists the client subscribed to.
+    pub(super) fn subscriptions(&self) -> impl Iterator<Item = EventKind> + '_ {
+        self.subscriptions.keys().copied()
+    }
+
+    /// Sends `line`, the list `kind` as it is now, unless the client did
+    /// not subscribe to it or was last sent the same; writes what `stream`
+    /// takes.
+    pub(super) fn push(&mut self, kind: EventKind, line: &[u8], stream: &UnixStream) -> Progress {
+        let Some(last) = self.subscriptions.get_mut(&kind) else {
+            return Progress::Open;
+        };
+        if last.as_deref() == Some(line) {
+            return Progress::Open;
+        }
+        *last = Some(line.to_vec());
+        self.output.extend_from_slice(line);
+        if self.output.len() > Self::MAX_UNSENT_BYTES {
+            return Progress::Ended("left too many events unread");
+        }
+        self.send(stream)
     }
 
     /// Reads what `stream` has, answers each complete request with
@@ -75,6 +103,10 @@ impl Connection {
         while let Some(end) = self.input.iter().position(|byte| *byte == b'\n') {
             let line: Vec<u8> = self.input.drain(..=end).collect();
             let reply = match serde_json::from_slice::<Request>(&line) {
+                Ok(Request::Subscribe { events }) => {
+                    self.subscriptions = events.into_iter().map(|kind| (kind, None)).collect();
+                    Reply::Done {}
+                }
                 Ok(request) => handler.answer(request, self.peer),
                 Err(error) => Reply::Error {
                     message: format!("not a request: {error}"),
@@ -149,6 +181,33 @@ mod tests {
         let mut connection = Connection::new(None, &ResourceLedger::new());
         connection.receive(b"hello\n", &mut Echo);
         assert!(unsent(&connection).contains("not a request"));
+    }
+
+    #[test]
+    fn a_subscriber_is_sent_a_list_only_when_it_changed() {
+        let (stream, mut peer) = UnixStream::pair().expect("a socket pair");
+        stream.set_nonblocking(true).expect("non-blocking");
+        let mut connection = Connection::new(None, &ResourceLedger::new());
+        connection.receive(
+            b"{\"request\":\"subscribe\",\"events\":[\"windows\"]}\n",
+            &mut Echo,
+        );
+        assert!(unsent(&connection).contains("done"));
+        assert_eq!(
+            connection.subscriptions().collect::<Vec<_>>(),
+            [EventKind::Windows]
+        );
+        let windows = b"{\"event\":\"windows\",\"windows\":[]}\n";
+        connection.push(EventKind::Windows, windows, &stream);
+        connection.push(EventKind::Windows, windows, &stream);
+        connection.push(EventKind::Workspaces, b"not subscribed\n", &stream);
+        drop(stream);
+        let mut received = String::new();
+        peer.read_to_string(&mut received).expect("read");
+        assert_eq!(
+            received, "{\"reply\":\"done\"}\n{\"event\":\"windows\",\"windows\":[]}\n",
+            "the reply, then the list once"
+        );
     }
 
     #[test]

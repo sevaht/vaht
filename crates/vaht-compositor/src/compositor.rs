@@ -268,6 +268,8 @@ impl Compositor {
             // referenced while its resources are released.
             compositor.settle();
             compositor.release_dead_client_resources();
+            // Last, so what clients changed just now is in it.
+            compositor.publish_ipc_events();
             if let Err(error) = display.flush_clients() {
                 tracing::warn!(
                     error = &error as &dyn std::error::Error,

@@ -5,21 +5,23 @@
 //! ([`vaht_ipc::socket_path`]) and keeps an event source per connected
 //! client. Each connection reads requests a line at a time and writes a
 //! reply line for each, in order ([`Connection`]); what a request does is
-//! the compositor's to decide ([`IpcHandler`]). Nothing is held on a
-//! client's behalf: a connection that closes, fails, or sends or leaves
-//! unread more than the protocol allows is dropped.
+//! the compositor's to decide ([`IpcHandler`]). A client that subscribed
+//! is sent the lists it subscribed to whenever they change
+//! ([`IpcServer::publish`]). Nothing is held on a client's behalf: a
+//! connection that closes, fails, or sends or leaves unread more than the
+//! protocol allows is dropped.
 
 mod answers;
 mod connection;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
 use calloop::generic::Generic;
 use calloop::{Interest, LoopHandle, Mode, PostAction};
-use vaht_ipc::{Reply, Request};
+use vaht_ipc::{Event, EventKind, Reply, Request};
 
 use self::connection::{Connection, Progress};
 use crate::Compositor;
@@ -33,6 +35,17 @@ pub(crate) trait IpcHandler {
     fn answer(&mut self, request: Request, peer: Option<i32>) -> Reply;
 }
 
+/// A client connected.
+#[derive(Debug)]
+struct Served {
+    /// Its socket's source.
+    _source: EventSource<Compositor>,
+    /// Its socket, to send it what it subscribed to.
+    stream: UnixStream,
+    /// What it has read and is to write; out only while it is served.
+    connection: Option<Connection>,
+}
+
 /// The IPC socket and the clients connected to it.
 #[derive(Debug)]
 pub(crate) struct IpcServer {
@@ -40,8 +53,8 @@ pub(crate) struct IpcServer {
     path: PathBuf,
     /// Accepts clients.
     _listener: EventSource<Compositor>,
-    /// Each connected client's source, by connection number.
-    connections: BTreeMap<u64, EventSource<Compositor>>,
+    /// Each connected client, by connection number.
+    connections: BTreeMap<u64, Served>,
     /// The number the next connection gets.
     next_number: u64,
     /// Connections that ended during the last dispatch, to be dropped after
@@ -95,6 +108,47 @@ impl IpcServer {
         }
     }
 
+    /// Returns the lists some client subscribed to.
+    pub(crate) fn subscribed(&self) -> BTreeSet<EventKind> {
+        self.connections
+            .values()
+            .filter_map(|served| served.connection.as_ref())
+            .flat_map(Connection::subscriptions)
+            .collect()
+    }
+
+    /// Sends `event` to each client subscribed to it whose last copy
+    /// differs; a client that can take no more is dropped.
+    pub(crate) fn publish(&mut self, event: &Event) {
+        let mut line = serde_json::to_vec(event).expect("events are plain data, always encodable");
+        line.push(b'\n');
+        let kind = event.kind();
+        self.connections.retain(|number, served| {
+            let Some(connection) = &mut served.connection else {
+                return true;
+            };
+            match connection.push(kind, &line, &served.stream) {
+                Progress::Open => true,
+                Progress::Ended(reason) => {
+                    tracing::debug!(number, reason, "IPC client dropped");
+                    false
+                }
+            }
+        });
+    }
+
+    /// Takes connection `number` out to serve it.
+    fn take(&mut self, number: u64) -> Option<Connection> {
+        self.connections.get_mut(&number)?.connection.take()
+    }
+
+    /// Puts connection `number` back after serving it.
+    fn put_back(&mut self, number: u64, connection: Connection) {
+        if let Some(served) = self.connections.get_mut(&number) {
+            served.connection = Some(connection);
+        }
+    }
+
     /// Accepts every client waiting on `listener`.
     fn accept_all(listener: &UnixListener, compositor: &mut Compositor) {
         loop {
@@ -131,20 +185,38 @@ impl IpcServer {
             nix::sys::socket::getsockopt(&stream, nix::sys::socket::sockopt::PeerCredentials)
                 .ok()
                 .map(|credentials| credentials.pid());
-        let mut connection = Connection::new(peer, ledger);
+        let connection = Connection::new(peer, ledger);
+        let pushing = match stream.try_clone() {
+            Ok(pushing) => pushing,
+            Err(error) => {
+                tracing::warn!(%error, "could not serve an IPC client");
+                return;
+            }
+        };
         // Edge-triggered: each wake-up reads and writes until the socket
         // would block, and writing waits for the socket to drain without
         // waking the loop while there is nothing to write.
         let source = Generic::new(stream, Interest::BOTH, Mode::Edge);
         let inserted = EventSource::insert(handle, ledger, source, move |_, stream, compositor| {
+            let Some(mut connection) = compositor
+                .ipc
+                .as_mut()
+                .and_then(|server| server.take(number))
+            else {
+                return Ok(PostAction::Remove);
+            };
             let progress = connection.serve(stream, compositor);
+            let Some(server) = &mut compositor.ipc else {
+                return Ok(PostAction::Remove);
+            };
             Ok(match progress {
-                Progress::Open => PostAction::Continue,
+                Progress::Open => {
+                    server.put_back(number, connection);
+                    PostAction::Continue
+                }
                 Progress::Ended(reason) => {
                     tracing::debug!(number, reason, "IPC client gone");
-                    if let Some(server) = &mut compositor.ipc {
-                        server.ended.push(number);
-                    }
+                    server.ended.push(number);
                     PostAction::Remove
                 }
             })
@@ -152,7 +224,14 @@ impl IpcServer {
         match inserted {
             Ok(source) => {
                 tracing::debug!(number, "IPC client connected");
-                self.connections.insert(number, source);
+                self.connections.insert(
+                    number,
+                    Served {
+                        _source: source,
+                        stream: pushing,
+                        connection: Some(connection),
+                    },
+                );
             }
             Err(error) => tracing::warn!(
                 error = &error.error as &dyn std::error::Error,

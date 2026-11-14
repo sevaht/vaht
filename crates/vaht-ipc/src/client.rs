@@ -4,7 +4,7 @@ use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
-use crate::message::{Reply, Request};
+use crate::message::{Event, EventKind, Reply, Request};
 use crate::{MAX_MESSAGE_BYTES, SOCKET_VARIABLE};
 
 /// A connection to vaht's IPC socket.
@@ -69,16 +69,54 @@ impl Client {
         let mut line = serde_json::to_vec(request).map_err(ClientError::Encode)?;
         line.push(b'\n');
         self.writer.write_all(&line).map_err(ClientError::Io)?;
-        let mut reply = Vec::new();
+        let reply = self.read_line()?;
+        serde_json::from_slice(&reply).map_err(ClientError::Decode)
+    }
+
+    /// Subscribes to the lists `events` names; [`Client::next_event`] then
+    /// reads them, and nothing but them should be asked here after.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails, or vaht refuses.
+    pub fn subscribe(&mut self, events: Vec<EventKind>) -> Result<(), ClientError> {
+        match self.request(&Request::Subscribe { events })? {
+            Reply::Done {} => Ok(()),
+            Reply::Error { message } => Err(ClientError::Refused(message)),
+            other @ (Reply::Version { .. }
+            | Reply::Windows { .. }
+            | Reply::Workspaces { .. }
+            | Reply::Outputs { .. }) => Err(ClientError::Unexpected(format!("{other:?}"))),
+        }
+    }
+
+    /// Waits for the next list subscribed to.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection fails, or vaht closes it or sends
+    /// something that is not an event.
+    pub fn next_event(&mut self) -> Result<Event, ClientError> {
+        let line = self.read_line()?;
+        serde_json::from_slice(&line).map_err(ClientError::Decode)
+    }
+
+    /// Reads one line vaht sent, its newline included.
+    ///
+    /// # Panics
+    ///
+    /// Never: [`MAX_MESSAGE_BYTES`] fits in a `u64`.
+    fn read_line(&mut self) -> Result<Vec<u8>, ClientError> {
+        let mut line = Vec::new();
         let limit = u64::try_from(MAX_MESSAGE_BYTES).expect("the limit fits in u64");
         (&mut self.reader)
             .take(limit)
-            .read_until(b'\n', &mut reply)
+            .read_until(b'\n', &mut line)
             .map_err(ClientError::Io)?;
-        if reply.last() != Some(&b'\n') {
+        if line.last() != Some(&b'\n') {
             return Err(ClientError::Closed);
         }
-        serde_json::from_slice(&reply).map_err(ClientError::Decode)
+        Ok(line)
     }
 }
 
@@ -110,6 +148,12 @@ pub enum ClientError {
     /// vaht's reply was not one this client understands.
     #[error("vaht's reply could not be read")]
     Decode(#[source] serde_json::Error),
+    /// vaht refused the request.
+    #[error("vaht refused: {0}")]
+    Refused(String),
+    /// vaht replied with something other than what the request asks for.
+    #[error("vaht replied unexpectedly: {0}")]
+    Unexpected(String),
 }
 
 #[cfg(test)]

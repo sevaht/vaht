@@ -7,6 +7,9 @@
 //! {"request":"run","command":"workspace 2"}
 //! {"reply":"done"}
 //! ```
+//!
+//! A client that subscribes is then sent an [`Event`] (`"event"`) with the
+//! whole of each list it subscribed to, at once and whenever it changes.
 
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +38,69 @@ pub enum Request {
     Workspaces {},
     /// The outputs, on and off, in the order vaht found them.
     Outputs {},
+    /// Sends the lists `events` names now, and again whenever they change,
+    /// as [`Event`]s on this connection.
+    Subscribe {
+        /// The lists.
+        events: Vec<EventKind>,
+    },
+}
+
+/// A list a client may subscribe to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EventKind {
+    /// The windows, as [`Request::Windows`] answers.
+    Windows,
+    /// The workspaces, as [`Request::Workspaces`] answers.
+    Workspaces,
+    /// The outputs, as [`Request::Outputs`] answers.
+    Outputs,
+}
+
+/// A list a client subscribed to, sent at once and whenever it changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Event {
+    /// The windows, topmost first.
+    Windows {
+        /// Each window.
+        windows: Vec<WindowInfo>,
+    },
+    /// The workspaces, in order.
+    Workspaces {
+        /// Each workspace.
+        workspaces: Vec<WorkspaceInfo>,
+    },
+    /// The outputs, in the order vaht found them.
+    Outputs {
+        /// Each output.
+        outputs: Vec<OutputInfo>,
+        /// The display profile applied, if one is.
+        profile: Option<String>,
+    },
+}
+
+impl Event {
+    /// Returns the reply asking for this list now would get.
+    #[must_use]
+    pub fn into_reply(self) -> Reply {
+        match self {
+            Self::Windows { windows } => Reply::Windows { windows },
+            Self::Workspaces { workspaces } => Reply::Workspaces { workspaces },
+            Self::Outputs { outputs, profile } => Reply::Outputs { outputs, profile },
+        }
+    }
+
+    /// Returns the list this is.
+    #[must_use]
+    pub const fn kind(&self) -> EventKind {
+        match self {
+            Self::Windows { .. } => EventKind::Windows,
+            Self::Workspaces { .. } => EventKind::Workspaces,
+            Self::Outputs { .. } => EventKind::Outputs,
+        }
+    }
 }
 
 /// What vaht answers a request with.

@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 use std::process::ExitCode;
 
-use vaht_ipc::{Client, OutputInfo, Reply, Request};
+use vaht_ipc::{Client, ClientError, EventKind, OutputInfo, Reply, Request};
 
 use crate::terminal;
 
@@ -40,6 +40,43 @@ pub fn send(request: &Request, json: bool) -> ExitCode {
         Err(error) => {
             terminal::report_error(&anyhow::Error::new(error));
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// Subscribes to the lists `events` and prints each as vaht sends it, as
+/// JSON when `json`, else for a person to read (a blank line after each),
+/// until vaht stops.
+///
+/// # Panics
+///
+/// Never: events are plain data that always encode.
+#[must_use]
+pub fn follow(events: Vec<EventKind>, json: bool) -> ExitCode {
+    let mut client = match Client::connect_from_environment()
+        .and_then(|mut client| client.subscribe(events).map(|()| client))
+    {
+        Ok(client) => client,
+        Err(error) => {
+            terminal::report_error(&anyhow::Error::new(error));
+            return ExitCode::FAILURE;
+        }
+    };
+    loop {
+        match client.next_event() {
+            Ok(event) => terminal::print(&if json {
+                let mut line =
+                    serde_json::to_string(&event).expect("events are plain data, always encodable");
+                line.push('\n');
+                line
+            } else {
+                format!("{}\n", readable(&event.into_reply()))
+            }),
+            Err(ClientError::Closed) => return ExitCode::SUCCESS,
+            Err(error) => {
+                terminal::report_error(&anyhow::Error::new(error));
+                return ExitCode::FAILURE;
+            }
         }
     }
 }
