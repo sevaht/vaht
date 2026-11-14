@@ -12,6 +12,7 @@ mod profile;
 use std::fmt;
 
 use serde::de::{self, Deserializer};
+use smithay::utils::Transform;
 
 pub(crate) use self::profile::{OutputHooks, OutputProfile};
 
@@ -187,6 +188,17 @@ pub(crate) enum Vrr {
 }
 
 impl OutputSettings {
+    /// Returns settings of `entries` alone, with these settings' hooks: an
+    /// arrangement asked for outright, as a program configuring outputs
+    /// asks.
+    pub(crate) fn exactly(&self, entries: Vec<OutputEntry>) -> Self {
+        Self {
+            entries,
+            profiles: Vec::new(),
+            hooks: self.hooks.clone(),
+        }
+    }
+
     /// Returns the entry `output` follows: the first that matches it.
     pub(crate) fn entry_for(&self, output: OutputIdentity<'_>) -> Option<&OutputEntry> {
         self.entries
@@ -294,6 +306,56 @@ impl OutputEntry {
     const fn enabled_by_default() -> bool {
         true
     }
+
+    /// Returns an entry for the output on `connector` that leaves it on,
+    /// as it prefers, for the caller to fill in.
+    pub(crate) fn for_connector(connector: &str) -> Self {
+        Self {
+            matcher: OutputMatcher {
+                connector: Some(connector.to_owned()),
+                make: None,
+                model: None,
+                serial: None,
+            },
+            mode: None,
+            position: None,
+            scale: None,
+            transform: OutputTransform::Normal,
+            enabled: true,
+            primary: false,
+            vrr: Vrr::default(),
+        }
+    }
+}
+
+impl OutputTransform {
+    /// Returns Smithay's transform for this one.
+    pub(crate) const fn to_smithay(self) -> Transform {
+        match self {
+            Self::Normal => Transform::Normal,
+            Self::Turned90 => Transform::_90,
+            Self::Turned180 => Transform::_180,
+            Self::Turned270 => Transform::_270,
+            Self::Flipped => Transform::Flipped,
+            Self::Flipped90 => Transform::Flipped90,
+            Self::Flipped180 => Transform::Flipped180,
+            Self::Flipped270 => Transform::Flipped270,
+        }
+    }
+
+    /// Returns the transform Smithay's `transform` is.
+    pub(crate) const fn from_smithay(transform: Transform) -> Self {
+        match transform {
+            Transform::Normal => Self::Normal,
+            Transform::_90 => Self::Turned90,
+            Transform::_180 => Self::Turned180,
+            Transform::_270 => Self::Turned270,
+            Transform::Flipped => Self::Flipped,
+            Transform::Flipped90 => Self::Flipped90,
+            Transform::Flipped180 => Self::Flipped180,
+            Transform::Flipped270 => Self::Flipped270,
+        }
+    }
 }
 
 impl OutputMatcher {
@@ -396,6 +458,13 @@ impl OutputScale {
     const MIN: f64 = 0.25;
     /// The largest scale.
     const MAX: f64 = 8.0;
+
+    /// Returns the scale `scale`, if it is from 0.25 to 8.
+    pub(crate) fn new(scale: f64) -> Option<Self> {
+        (Self::MIN..=Self::MAX)
+            .contains(&scale)
+            .then_some(Self(scale))
+    }
 
     /// Returns the scale.
     pub(crate) const fn get(self) -> f64 {

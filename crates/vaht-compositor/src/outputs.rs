@@ -181,6 +181,16 @@ impl Outputs {
         self.configure(settings, backend)
     }
 
+    /// Sets the outputs up exactly as `settings` say, no profile applying:
+    /// as a program configuring outputs asked.
+    pub(crate) fn arrange_exactly(
+        &mut self,
+        settings: &OutputSettings,
+        backend: &mut impl OutputControl,
+    ) -> OutputChanges {
+        self.arrange(settings, None, backend, false)
+    }
+
     /// Applies the profile called `name`.
     ///
     /// # Errors

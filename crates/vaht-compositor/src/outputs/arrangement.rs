@@ -2,7 +2,6 @@
 //! is set up, where each goes, and which one is primary.
 
 use smithay::output::{Output, Scale};
-use smithay::utils::Transform;
 
 use super::{OutputControl, Outputs};
 use crate::config::{
@@ -59,7 +58,7 @@ impl<'settings> Arrangement<'settings> {
             backend.set_enabled(output, true);
             backend.set_mode(output, entry.and_then(|entry| entry.mode));
             let transform = entry.map_or(OutputTransform::Normal, |entry| entry.transform);
-            backend.set_transform(output, Self::turned(transform));
+            backend.set_transform(output, OutputTransform::to_smithay(transform));
             let scale = entry
                 .and_then(|entry| entry.scale)
                 .map_or(1.0, OutputScale::get);
@@ -122,19 +121,5 @@ impl<'settings> Arrangement<'settings> {
         let mut on: Vec<Output> = self.on.into_iter().map(|(output, _)| output).collect();
         let primary = on.remove(index);
         (primary, on)
-    }
-
-    /// Returns Smithay's transform for `transform`.
-    const fn turned(transform: OutputTransform) -> Transform {
-        match transform {
-            OutputTransform::Normal => Transform::Normal,
-            OutputTransform::Turned90 => Transform::_90,
-            OutputTransform::Turned180 => Transform::_180,
-            OutputTransform::Turned270 => Transform::_270,
-            OutputTransform::Flipped => Transform::Flipped,
-            OutputTransform::Flipped90 => Transform::Flipped90,
-            OutputTransform::Flipped180 => Transform::Flipped180,
-            OutputTransform::Flipped270 => Transform::Flipped270,
-        }
     }
 }

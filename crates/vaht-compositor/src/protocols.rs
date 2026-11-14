@@ -14,6 +14,7 @@ mod idle;
 mod input_method;
 mod layer_shell;
 mod output;
+mod output_management;
 mod output_power;
 mod sandbox;
 mod seat;
@@ -76,6 +77,9 @@ use smithay::utils::{ClockSource, Monotonic};
 
 use crate::Compositor;
 use crate::client::ClientState;
+use crate::gamma::GammaControls;
+use crate::output_management::OutputManagement;
+use crate::output_power::OutputPower;
 
 /// Smithay's state for every protocol global vaht advertises.
 pub(crate) struct ProtocolStates {
@@ -313,6 +317,30 @@ impl ProtocolStates {
                 icons.replace_icon_sizes(Self::TOPLEVEL_ICON_SIZES);
                 icons
             },
+        }
+    }
+}
+
+/// What programs outside vaht do to the outputs: arrange them
+/// (`zwlr_output_manager_v1`), turn them off (`zwlr_output_power_v1`) and
+/// change their colors (`zwlr_gamma_control_v1`).
+#[derive(Debug)]
+pub(crate) struct OutputControls {
+    /// The outputs as programs arranging them see them.
+    pub(crate) management: OutputManagement,
+    /// Which outputs are off.
+    pub(crate) power: OutputPower,
+    /// Which program controls each output's colors.
+    pub(crate) gamma: GammaControls,
+}
+
+impl OutputControls {
+    /// Offers the globals on `display`.
+    pub(crate) fn new(display: &DisplayHandle) -> Self {
+        Self {
+            management: OutputManagement::new(display),
+            power: OutputPower::new(display),
+            gamma: GammaControls::new(display),
         }
     }
 }

@@ -16,6 +16,7 @@ mod gamma_control;
 mod headless;
 mod input_method;
 mod metrics;
+mod output_configurator;
 mod output_power;
 mod picture;
 mod sandbox;
@@ -34,6 +35,9 @@ pub use gamma_control::GammaControl;
 pub use headless::{ExitReport, HeadlessVaht};
 pub use input_method::InputMethod;
 pub use metrics::{BUILT_IN_METRICS, ThemeMetrics};
+pub use output_configurator::{
+    ConfigurationResult, ConfiguredHead, HeadChange, OutputConfigurator,
+};
 pub use output_power::OutputPowerControl;
 pub use picture::{solid_png, solid_xcursor};
 pub use sandbox::Sandbox;

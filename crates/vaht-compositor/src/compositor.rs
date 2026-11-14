@@ -70,13 +70,15 @@ use crate::config::{
     Action, Command, Config, ConfigSource, Delay, FocusModel, KeyChord, MenuGenerator, MenuRequest,
     Menus, Modifiers, ResizeFrom, SettingChange, SettingOverrides, ThemeFile, WindowManagerAction,
 };
-use crate::config::{FocusStealing, SwitchFlip, SwitchKind, TaskbarAction, TaskbarOutput};
+use crate::config::{
+    FocusStealing, OutputEntry, OutputMode, OutputScale, OutputTransform, SwitchFlip, SwitchKind,
+    TaskbarAction, TaskbarOutput,
+};
 use crate::cursor::Cursor;
 use crate::event_source::{EndingSource, EventSource, Timer};
 use crate::execution::{ExecutionContext, Press};
 use crate::focus_target::FocusTarget;
 use crate::frame_pacing::FramePacing;
-use crate::gamma::GammaControls;
 use crate::gestures;
 use crate::grab::{GrabKind, WindowGrab};
 use crate::idle::IdleInhibitors;
@@ -88,11 +90,11 @@ use crate::layers::{LayerMaps, Layers, OutputLayers};
 use crate::menu::{
     MenuBuilder, MenuChoice, MenuItem, MenuKey, MenuModel, MenuStack, OutputChoices,
 };
+use crate::output_management::{HeadRequest, HeadState};
 use crate::output_memory::OutputMemory;
-use crate::output_power::OutputPower;
 use crate::outputs::{OutputChanges, Outputs};
 use crate::pointer_lock::{self, PointerHold};
-use crate::protocols::ProtocolStates;
+use crate::protocols::{OutputControls, ProtocolStates};
 use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::{
     Backdrop, Drawn, FrameTextures, Outline, PointerTarget, Scene, SnapOverlay, WindowTarget,
@@ -158,11 +160,9 @@ pub struct Compositor {
     toplevel_list: ToplevelList<WindowId, ForeignToplevelHandle>,
     /// The windows as `zwlr_foreign_toplevel_manager_v1` tells them.
     pub(crate) toplevel_management: ToplevelManagement,
-    /// Which outputs are off (`zwlr_output_power_manager_v1`).
-    pub(crate) output_power: OutputPower,
-    /// Which program controls each output's colors
-    /// (`zwlr_gamma_control_manager_v1`).
-    pub(crate) gamma_controls: GammaControls,
+    /// What programs outside vaht do to the outputs: arrange them, turn
+    /// them off and change their colors.
+    pub(crate) output_controls: OutputControls,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -270,6 +270,7 @@ impl Compositor {
             compositor.release_dead_client_resources();
             // Last, so what clients changed just now is in it.
             compositor.publish_ipc_events();
+            compositor.announce_outputs();
             if let Err(error) = display.flush_clients() {
                 tracing::warn!(
                     error = &error as &dyn std::error::Error,
@@ -358,8 +359,7 @@ impl Compositor {
             input_emulation: None,
             toplevel_list: ToplevelList::default(),
             toplevel_management: ToplevelManagement::new(&display.handle()),
-            output_power: OutputPower::new(&display.handle()),
-            gamma_controls: GammaControls::new(&display.handle()),
+            output_controls: OutputControls::new(&display.handle()),
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -1193,8 +1193,8 @@ impl Compositor {
                     continue;
                 }
                 OutputEvent::Disconnected(output) => {
-                    self.output_power.output_gone(&output);
-                    self.gamma_controls.output_gone(&output);
+                    self.output_controls.power.output_gone(&output);
+                    self.output_controls.gamma.output_gone(&output);
                     self.remember_windows_on(&output);
                     let changes =
                         self.outputs
@@ -1570,11 +1570,98 @@ impl Compositor {
         self.handle_input_within(event, None);
     }
 
+    /// Tells programs arranging outputs of the outputs, if anything about
+    /// them changed.
+    fn announce_outputs(&mut self) {
+        let connected = self
+            .outputs
+            .connected()
+            .map(|output| {
+                let is_enabled = self.outputs.iter().any(|on| on == output);
+                (output.clone(), HeadState::of(output, is_enabled))
+            })
+            .collect();
+        self.output_controls
+            .management
+            .follow(connected, &self.display_handle);
+    }
+
+    /// Arranges the outputs as a program asked: each of `wanted` on, as
+    /// asked, or off; or only checks that it could (`is_test`). Returns
+    /// whether it could: at least one output stays on, each mode asked
+    /// for is one the output has, and each scale is from 0.25 to 8.
+    pub(crate) fn apply_output_configuration(
+        &mut self,
+        wanted: &[(Output, Option<HeadRequest>)],
+        is_test: bool,
+    ) -> bool {
+        if wanted.iter().all(|(_, asked)| asked.is_none()) {
+            return false;
+        }
+        let mut entries = Vec::new();
+        for (output, asked) in wanted {
+            let mut entry = OutputEntry::for_connector(&output.name());
+            entry.primary = output == self.outputs.primary();
+            let identity = Outputs::identity(output);
+            if let Some(written) = self.config.outputs.entry_for(identity.as_identity()) {
+                entry.vrr = written.vrr;
+            }
+            let Some(asked) = asked else {
+                entry.enabled = false;
+                entries.push(entry);
+                continue;
+            };
+            let scale = asked
+                .scale
+                .unwrap_or_else(|| output.current_scale().fractional_scale());
+            let Some(scale) = OutputScale::new(scale) else {
+                return false;
+            };
+            entry.scale = Some(scale);
+            let mode = asked.mode.or_else(|| {
+                output
+                    .current_mode()
+                    .map(|mode| (mode.size.w, mode.size.h, Some(mode.refresh)))
+            });
+            if let Some((width, height, refresh)) = mode {
+                let is_offered = output.modes().iter().any(|offered| {
+                    offered.size.w == width
+                        && offered.size.h == height
+                        && refresh.is_none_or(|refresh| offered.refresh == refresh)
+                });
+                if !is_offered {
+                    return false;
+                }
+                entry.mode = Some(OutputMode {
+                    width,
+                    height,
+                    refresh_millihertz: refresh,
+                });
+            }
+            let position = asked.position.unwrap_or_else(|| output.current_location());
+            entry.position = Some([position.x, position.y]);
+            entry.transform = OutputTransform::from_smithay(
+                asked
+                    .transform
+                    .unwrap_or_else(|| output.current_transform()),
+            );
+            entries.push(entry);
+        }
+        if is_test {
+            return true;
+        }
+        let settings = self.config.outputs.exactly(entries);
+        let changes = self.outputs.arrange_exactly(&settings, &mut self.backend);
+        self.follow_output_changes(&changes);
+        tracing::info!("outputs arranged as a program asked");
+        true
+    }
+
     /// Notes that the user did something: idle timers start over, and
     /// outputs turned off come on again.
     fn note_activity(&mut self) {
         self.protocols.idle_notifier.notify_activity(&self.seat);
-        for output in self.output_power.wake_all() {
+        for output in self.output_controls.power.wake_all() {
             tracing::info!(output = output.name(), "output woken by input");
             self.power_backend(&output, true);
         }
@@ -1582,7 +1669,7 @@ impl Compositor {
 
     /// Turns `output` on or off (`is_on`), as a program asked.
     pub(crate) fn set_output_power(&mut self, output: &Output, is_on: bool) {
-        if self.output_power.set(output, is_on) {
+        if self.output_controls.power.set(output, is_on) {
             tracing::info!(output = output.name(), is_on, "output power changed");
             self.power_backend(output, is_on);
         }

@@ -36,6 +36,7 @@ mod key_chain;
 mod launcher;
 mod layers;
 mod menu;
+mod output_management;
 mod output_memory;
 mod output_power;
 mod outputs;

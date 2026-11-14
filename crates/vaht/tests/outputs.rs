@@ -7,8 +7,9 @@ use std::process::Command;
 
 use vaht_ipc::{OutputInfo, Reply};
 use vaht_test_support::{
-    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, GammaControl, HeadlessVaht, OutputPowerControl,
-    TestClient, TestLayer, WINDOW_COLOR, keys, solid_png, wait_for_file,
+    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, ConfigurationResult, GammaControl, HeadChange,
+    HeadlessVaht, OutputConfigurator, OutputPowerControl, TestClient, TestLayer, WINDOW_COLOR,
+    keys, solid_png, wait_for_file,
 };
 
 /// The executable cargo built for these tests.
@@ -550,4 +551,76 @@ fn one_night_light_at_a_time_changes_an_outputs_colors() {
     assert!(third.size().is_some(), "free again");
     third.send_ramps(&ramps[..3]);
     assert!(third.has_failed(), "too few values");
+}
+
+#[test]
+fn a_program_arranging_outputs_sees_them_and_moves_them() {
+    let (vaht, _client) = two_outputs();
+    let mut randr = OutputConfigurator::connect(vaht.socket());
+    let heads = randr.wait_for(|heads| heads.len() == 2);
+    let summary: Vec<_> = heads
+        .iter()
+        .map(|head| {
+            (
+                head.name.as_str(),
+                head.is_enabled,
+                head.position,
+                head.size,
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("HEADLESS-1", true, (0, 0), Some((800, 600))),
+            ("HEADLESS-2", true, (800, 0), Some((640, 480))),
+        ]
+    );
+    let stale = randr.serial().map(|serial| serial.wrapping_sub(1));
+
+    assert_eq!(
+        randr.apply(
+            &[
+                ("HEADLESS-2", HeadChange::At(0, 0)),
+                ("HEADLESS-1", HeadChange::At(640, 0))
+            ],
+            None
+        ),
+        Some(ConfigurationResult::Succeeded)
+    );
+    let heads = randr.wait_for(|heads| heads.iter().any(|head| head.position == (640, 0)));
+    assert_eq!(heads[0].position, (640, 0), "told of the change");
+    let listed: Vec<_> = listed_outputs(&vaht)
+        .iter()
+        .map(|output| (output.connector.clone(), output.position))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("HEADLESS-1".to_owned(), [640, 0]),
+            ("HEADLESS-2".to_owned(), [0, 0])
+        ]
+    );
+
+    assert_eq!(
+        randr.apply(&[("HEADLESS-1", HeadChange::At(0, 0))], stale),
+        Some(ConfigurationResult::Cancelled),
+        "made for outputs since changed"
+    );
+    assert_eq!(
+        randr.apply(
+            &[
+                ("HEADLESS-1", HeadChange::Off),
+                ("HEADLESS-2", HeadChange::Off)
+            ],
+            None
+        ),
+        Some(ConfigurationResult::Failed),
+        "every output off"
+    );
+    assert_eq!(
+        randr.apply(&[("HEADLESS-2", HeadChange::Off)], None),
+        Some(ConfigurationResult::Succeeded)
+    );
+    assert_eq!(outputs_on(&vaht), ["*HEADLESS-1"]);
 }

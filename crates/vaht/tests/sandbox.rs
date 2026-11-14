@@ -11,7 +11,7 @@ use vaht_test_support::{HeadlessVaht, Sandbox};
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 
 /// What only unrestricted programs are offered.
-const PRIVILEGED: [&str; 14] = [
+const PRIVILEGED: [&str; 15] = [
     "ext_data_control_manager_v1",
     "zwlr_data_control_manager_v1",
     "ext_foreign_toplevel_list_v1",
@@ -26,6 +26,7 @@ const PRIVILEGED: [&str; 14] = [
     "zwp_input_method_manager_v2",
     "zwlr_output_power_manager_v1",
     "zwlr_gamma_control_manager_v1",
+    "zwlr_output_manager_v1",
 ];
 
 #[test]

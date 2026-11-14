@@ -52,7 +52,7 @@ re-renders its buffer only when its content changes.
 
 | Protocol | Why vaht needs it | Note |
 |---|---|---|
-| wlr-output-management | wlr-randr, kanshi, outside tools | niri implements it. vaht's built-in display profiles go through the same internal output configuration code |
+| wlr-output-management | wlr-randr, kanshi, outside tools | **built** (§8.9), through the same output arrangement as `outputs.toml` and its profiles |
 | wlr-foreign-toplevel-management | Taskbars and docks outside the compositor | **built** (§8.6) |
 | ext-workspace | External pagers | niri implements it |
 | ~~wlr-screencopy~~ | | dropped: the installed xdg-desktop-portal-wlr 0.8.4 and grim 1.5 use ext-image-copy-capture |
@@ -259,7 +259,7 @@ listener end), and marks each client accepted there as sandboxed
 (`ClientState::is_unrestricted`). Sandboxed programs are not offered the
 globals that reach beyond their own windows: data control (every
 selection), the toplevel list and toplevel management, input methods,
-session lock, screen capture, virtual
+output management, power and gamma, session lock, screen capture, virtual
 pointer and keyboard, layer shell, and security contexts themselves. The
 test `a_sandboxed_program_is_offered_windows_but_not_the_privileged_globals`
 drives a sandbox engine's socket and lists what each side is offered.
@@ -309,6 +309,20 @@ colors back. Nested, the host's colors are used, so controls fail. The
 test `one_night_light_at_a_time_changes_an_outputs_colors` drives three
 controls. Not yet seen on hardware: whether NVIDIA's driver takes the
 legacy call.
+
+### 8.9 Outputs arranged by other programs
+
+`zwlr_output_manager_v1` (`output_management.rs`) gives each program a
+head per connected output with its modes and state, told again with a
+new serial whenever anything changes (`HeadState`, compared after each
+loop). A configuration applied is checked (some output stays on, each mode
+is one the output has, scales from 0.25 to 8) and carried out as
+`[[output]]` entries arranged exactly, no profile applying; it lasts until
+`outputs.toml` is read again or monitors come or go, when `outputs.toml`
+applies again (kanshi applies its own again then too). A configuration
+made for outputs since changed is cancelled. The test
+`a_program_arranging_outputs_sees_them_and_moves_them` swaps two outputs,
+is cancelled, fails to turn both off, and turns one off.
 
 
 ## 9. The DRM backend (built; not yet run on hardware)

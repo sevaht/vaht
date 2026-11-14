@@ -43,7 +43,7 @@ impl Dispatch<ZwlrOutputPowerManagerV1, ()> for Compositor {
             let output = Output::from_resource(&output);
             let control = data_init.init(id, output.clone());
             match output {
-                Some(output) => state.output_power.add_control(control, output),
+                Some(output) => state.output_controls.power.add_control(control, output),
                 None => control.failed(),
             }
         }
@@ -75,6 +75,6 @@ impl Dispatch<ZwlrOutputPowerV1, Option<Output>> for Compositor {
         resource: &ZwlrOutputPowerV1,
         _data: &Option<Output>,
     ) {
-        state.output_power.forget_control(resource);
+        state.output_controls.power.forget_control(resource);
     }
 }

@@ -47,7 +47,7 @@ impl Dispatch<ZwlrGammaControlManagerV1, ()> for Compositor {
             match Output::from_resource(&output) {
                 Some(output) => {
                     let size = state.backend.gamma_size(&output);
-                    state.gamma_controls.add(control, output, size);
+                    state.output_controls.gamma.add(control, output, size);
                 }
                 None => control.failed(),
             }
@@ -68,14 +68,14 @@ impl Dispatch<ZwlrGammaControlV1, ()> for Compositor {
         let zwlr_gamma_control_v1::Request::SetGamma { fd } = request else {
             return;
         };
-        let Some((output, size)) = state.gamma_controls.output_of(resource) else {
+        let Some((output, size)) = state.output_controls.gamma.output_of(resource) else {
             return;
         };
         match GammaRamps::read(File::from(fd), size) {
             Ok(ramps) => state.backend.set_gamma(&output, Some(&ramps)),
             Err(error) => {
                 tracing::warn!(%error, output = output.name(), "a program sent unusable gamma ramps");
-                if let Some(output) = state.gamma_controls.fail(resource) {
+                if let Some(output) = state.output_controls.gamma.fail(resource) {
                     state.backend.set_gamma(&output, None);
                 }
             }
@@ -83,7 +83,7 @@ impl Dispatch<ZwlrGammaControlV1, ()> for Compositor {
     }
 
     fn destroyed(state: &mut Self, _client: ClientId, resource: &ZwlrGammaControlV1, (): &()) {
-        if let Some(output) = state.gamma_controls.forget(resource) {
+        if let Some(output) = state.output_controls.gamma.forget(resource) {
             state.backend.set_gamma(&output, None);
         }
     }
