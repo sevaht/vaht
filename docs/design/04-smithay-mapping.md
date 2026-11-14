@@ -250,6 +250,19 @@ the window manager next wrote to X; vaht sends it at once
 directions, and both selections, through a clipboard manager (data
 control) and an X program of the tests' own.
 
+### 8.4 Sandboxed programs
+
+A sandbox engine (Flatpak) asks over `wp_security_context_v1` for a socket
+of its own; vaht listens there until the engine closes its end
+(`protocols/sandbox.rs`, with `event_source::EndingSource` noticing the
+listener end), and marks each client accepted there as sandboxed
+(`ClientState::is_unrestricted`). Sandboxed programs are not offered the
+globals that reach beyond their own windows: data control (every
+selection), the toplevel list, session lock, screen capture, virtual
+pointer and keyboard, layer shell, and security contexts themselves. The
+test `a_sandboxed_program_is_offered_windows_but_not_the_privileged_globals`
+drives a sandbox engine's socket and lists what each side is offered.
+
 
 ## 9. The DRM backend (built; not yet run on hardware)
 

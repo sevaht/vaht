@@ -173,6 +173,117 @@ impl<State: 'static> RepeatingTimer<State> {
     }
 }
 
+/// A source that may end on its own, as a listener whose peer hung up
+/// does: its owner sees that it ended, and drops it (outside its
+/// callback).
+#[derive(Debug)]
+pub struct EndingSource<State: 'static> {
+    /// The registered source.
+    _source: EventSource<State>,
+    /// Set once the source has asked to be removed; calloop has removed
+    /// it by then.
+    ended: Rc<Cell<bool>>,
+}
+
+impl<State: 'static> EndingSource<State> {
+    /// Registers `source`, calling `callback` for each of its events.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the source could not be registered.
+    pub fn insert<Source, Callback>(
+        handle: &LoopHandle<'static, State>,
+        ledger: &ResourceLedger,
+        source: Source,
+        callback: Callback,
+    ) -> Result<Self, calloop::Error>
+    where
+        Source: calloop::EventSource + 'static,
+        Callback: FnMut(Source::Event, &mut Source::Metadata, &mut State) -> Source::Ret + 'static,
+    {
+        let ended = Rc::new(Cell::new(false));
+        let noticing = NoticingEnd {
+            inner: source,
+            ended: Rc::clone(&ended),
+        };
+        let source =
+            EventSource::insert(handle, ledger, noticing, callback).map_err(|error| error.error)?;
+        Ok(Self {
+            _source: source,
+            ended,
+        })
+    }
+
+    /// Returns whether the source has ended; it can then be dropped
+    /// (outside its own callback).
+    #[must_use]
+    pub fn has_ended(&self) -> bool {
+        self.ended.get()
+    }
+}
+
+/// A source passing everything to `inner`, noting when it asks to be
+/// removed.
+struct NoticingEnd<Source> {
+    /// The source.
+    inner: Source,
+    /// Set once it asks to be removed.
+    ended: Rc<Cell<bool>>,
+}
+
+impl<Source: calloop::EventSource> calloop::EventSource for NoticingEnd<Source> {
+    type Event = Source::Event;
+    type Metadata = Source::Metadata;
+    type Ret = Source::Ret;
+    type Error = Source::Error;
+
+    const NEEDS_EXTRA_LIFECYCLE_EVENTS: bool = Source::NEEDS_EXTRA_LIFECYCLE_EVENTS;
+
+    fn process_events<Callback>(
+        &mut self,
+        readiness: calloop::Readiness,
+        token: calloop::Token,
+        callback: Callback,
+    ) -> Result<calloop::PostAction, Self::Error>
+    where
+        Callback: FnMut(Self::Event, &mut Self::Metadata) -> Self::Ret,
+    {
+        let action = self.inner.process_events(readiness, token, callback)?;
+        if matches!(action, calloop::PostAction::Remove) {
+            self.ended.set(true);
+        }
+        Ok(action)
+    }
+
+    fn register(
+        &mut self,
+        poll: &mut calloop::Poll,
+        token_factory: &mut calloop::TokenFactory,
+    ) -> calloop::Result<()> {
+        self.inner.register(poll, token_factory)
+    }
+
+    fn reregister(
+        &mut self,
+        poll: &mut calloop::Poll,
+        token_factory: &mut calloop::TokenFactory,
+    ) -> calloop::Result<()> {
+        self.inner.reregister(poll, token_factory)
+    }
+
+    fn unregister(&mut self, poll: &mut calloop::Poll) -> calloop::Result<()> {
+        self.inner.unregister(poll)
+    }
+
+    fn before_sleep(&mut self) -> calloop::Result<Option<(calloop::Readiness, calloop::Token)>> {
+        self.inner.before_sleep()
+    }
+
+    fn before_handle_events(&mut self, events: calloop::EventIterator<'_>) {
+        self.inner.before_handle_events(events);
+    }
+}
+
 /// A stream polled on the event loop, each item handed to a callback, until
 /// the stream ends or this is dropped.
 #[derive(Debug)]
@@ -274,6 +385,42 @@ mod tests {
             .dispatch(Duration::ZERO, &mut events)
             .expect("dispatch");
         assert_eq!(events, ["pinged"], "a dropped source no longer fires");
+        assert_eq!(ledger.count(ResourceKind::EventSource).live, 0);
+    }
+
+    #[test]
+    fn an_ending_source_says_when_it_ended() {
+        use std::io::Write as _;
+
+        let mut event_loop: EventLoop<'static, Events> =
+            EventLoop::try_new().expect("an event loop");
+        let ledger = ResourceLedger::new();
+        let (mut writer, reader) = std::os::unix::net::UnixStream::pair().expect("a socket pair");
+        let generic =
+            calloop::generic::Generic::new(reader, calloop::Interest::READ, calloop::Mode::Level);
+        let source = EndingSource::insert(
+            &event_loop.handle(),
+            &ledger,
+            generic,
+            |_readiness, _reader, events: &mut Events| {
+                events.push("hung up");
+                Ok(calloop::PostAction::Remove)
+            },
+        )
+        .expect("the source registers");
+        let mut events = Events::new();
+        event_loop
+            .dispatch(Duration::ZERO, &mut events)
+            .expect("dispatch");
+        assert!(!source.has_ended());
+
+        writer.write_all(b"x").expect("written");
+        event_loop
+            .dispatch(Duration::ZERO, &mut events)
+            .expect("dispatch");
+        assert_eq!(events, ["hung up"]);
+        assert!(source.has_ended());
+        drop(source);
         assert_eq!(ledger.count(ResourceKind::EventSource).live, 0);
     }
 

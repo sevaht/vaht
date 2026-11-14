@@ -12,6 +12,7 @@ mod dmabuf;
 mod idle;
 mod layer_shell;
 mod output;
+mod sandbox;
 mod seat;
 mod selection;
 mod session_lock;
@@ -43,6 +44,7 @@ use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::pointer_warp::PointerWarpManager;
 use smithay::wayland::presentation::PresentationState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
+use smithay::wayland::security_context::SecurityContextState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
 use smithay::wayland::selection::{ext_data_control, wlr_data_control};
@@ -67,6 +69,7 @@ use smithay::reexports::calloop::LoopHandle;
 use smithay::utils::{ClockSource, Monotonic};
 
 use crate::Compositor;
+use crate::client::ClientState;
 
 /// Smithay's state for every protocol global vaht advertises.
 pub(crate) struct ProtocolStates {
@@ -174,6 +177,9 @@ pub(crate) struct ProtocolStates {
     /// `zwp_virtual_keyboard_manager_v1`: key input from programs. Held only
     /// to keep the global alive.
     _virtual_keyboard: VirtualKeyboardManagerState,
+    /// `wp_security_context_manager_v1`: sandbox engines giving their
+    /// programs a socket of their own. Held only to keep the global alive.
+    _security_context: SecurityContextState,
     /// `xdg_toplevel_icon_manager_v1`: windows naming or drawing their
     /// icon, which their commits carry. Held only to keep the global alive.
     _toplevel_icon: XdgToplevelIconManager,
@@ -191,30 +197,35 @@ impl ProtocolStates {
         Self {
             compositor: CompositorState::new::<Compositor>(display),
             xdg_shell: XdgShellState::new::<Compositor>(display),
-            layer_shell: WlrLayerShellState::new::<Compositor>(display),
+            layer_shell: WlrLayerShellState::new_with_filter::<Compositor, _>(
+                display,
+                ClientState::is_unrestricted,
+            ),
             shm: ShmState::new::<Compositor>(display, Vec::new()),
             _output_manager: OutputManagerState::new_with_xdg_output::<Compositor>(display),
             seat: SeatState::new(),
             data_device: DataDeviceState::new::<Compositor>(display),
-            // TODO(security): every client may read the selections, as on
-            // other wlroots-style compositors; restrict with security-context
-            // once sandboxed clients exist.
+            // Sandboxed programs may not read every selection, nor the rest
+            // filtered so below.
             data_control: (
                 ext_data_control::DataControlState::new::<Compositor, _>(
                     display,
                     Some(&primary_selection),
-                    |_client| true,
+                    ClientState::is_unrestricted,
                 ),
                 wlr_data_control::DataControlState::new::<Compositor, _>(
                     display,
                     Some(&primary_selection),
-                    |_client| true,
+                    ClientState::is_unrestricted,
                 ),
             ),
             primary_selection,
             activation: XdgActivationState::new::<Compositor>(display),
             xdg_foreign: XdgForeignState::new::<Compositor>(display),
-            foreign_toplevel_list: ForeignToplevelListState::new::<Compositor>(display),
+            foreign_toplevel_list: ForeignToplevelListState::new_with_filter::<Compositor>(
+                display,
+                ClientState::is_unrestricted,
+            ),
             dmabuf: DmabufState::new(),
             dmabuf_global: None,
             _surface_extensions: (
@@ -243,7 +254,10 @@ impl ProtocolStates {
             _xwayland_keyboard_grab: XWaylandKeyboardGrabState::new::<Compositor>(display),
             keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<Compositor>(display),
             idle_notifier: IdleNotifierState::new(display, handle.clone()),
-            session_lock: SessionLockManagerState::new::<Compositor, _>(display, |_client| true),
+            session_lock: SessionLockManagerState::new::<Compositor, _>(
+                display,
+                ClientState::is_unrestricted,
+            ),
             _idle_inhibit: IdleInhibitManagerState::new::<Compositor>(display),
             _pointer_extensions: (
                 RelativePointerManagerState::new::<Compositor>(display),
@@ -251,18 +265,26 @@ impl ProtocolStates {
                 PointerWarpManager::new::<Compositor>(display),
                 PointerGesturesState::new::<Compositor>(display),
             ),
-            output_capture_source: OutputCaptureSourceState::new::<Compositor>(display),
-            image_copy_capture: ImageCopyCaptureState::new::<Compositor>(display),
-            // TODO(security): every client may inject input, as on other
-            // wlroots-style compositors; restrict with security-context once
-            // sandboxed clients exist.
+            output_capture_source: OutputCaptureSourceState::new_with_filter::<Compositor, _>(
+                display,
+                ClientState::is_unrestricted,
+            ),
+            image_copy_capture: ImageCopyCaptureState::new_with_filter::<Compositor, _>(
+                display,
+                ClientState::is_unrestricted,
+            ),
             _virtual_pointer: VirtualPointerManagerState::new::<Compositor, _>(
                 display,
-                |_client| true,
+                ClientState::is_unrestricted,
             ),
             _virtual_keyboard: VirtualKeyboardManagerState::new::<Compositor, _>(
                 display,
-                |_client| true,
+                ClientState::is_unrestricted,
+            ),
+            // A sandboxed program may not make a sandbox of its own.
+            _security_context: SecurityContextState::new::<Compositor, _>(
+                display,
+                ClientState::is_unrestricted,
             ),
             _toplevel_icon: {
                 let mut icons = XdgToplevelIconManager::new::<Compositor>(display);

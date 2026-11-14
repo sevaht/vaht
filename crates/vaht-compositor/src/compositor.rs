@@ -72,7 +72,7 @@ use crate::config::{
 };
 use crate::config::{FocusStealing, SwitchFlip, SwitchKind, TaskbarAction, TaskbarOutput};
 use crate::cursor::Cursor;
-use crate::event_source::{EventSource, Timer};
+use crate::event_source::{EndingSource, EventSource, Timer};
 use crate::execution::{ExecutionContext, Press};
 use crate::focus_target::FocusTarget;
 use crate::frame_pacing::FramePacing;
@@ -212,6 +212,9 @@ pub struct Compositor {
     is_running: bool,
     /// The socket clients connect to.
     listener: ClientListener,
+    /// The sockets sandboxed programs connect to, one per sandbox; dropped
+    /// once ended.
+    pub(crate) sandbox_listeners: Vec<EndingSource<Self>>,
     /// The IPC socket, unless it could not be opened.
     pub(crate) ipc: Option<IpcServer>,
     /// The signals vaht handles, registered with the event loop.
@@ -368,6 +371,7 @@ impl Compositor {
             start_time: Instant::now(),
             is_running: true,
             listener,
+            sandbox_listeners: Vec::new(),
             ipc,
             _signals: signals,
         };

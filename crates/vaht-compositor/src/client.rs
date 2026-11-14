@@ -4,7 +4,11 @@
 //! [`ClientListener`] opens the socket (`WAYLAND_DISPLAY`) and accepts
 //! clients on it; it also wakes the event loop when connected clients send
 //! something, which the compositor then dispatches. [`ClientState`] is what
-//! each client carries while it is connected.
+//! each client carries while it is connected: a client that connected from
+//! a sandbox's socket ([`crate::protocols`]' security contexts) is
+//! restricted, and the globals that would let it read the selections,
+//! inject input, capture the screen, list windows, lock the session or
+//! draw panels are hidden from it.
 
 use std::ffi::{OsStr, OsString};
 use std::io;
@@ -13,9 +17,10 @@ use std::sync::Arc;
 
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
-use smithay::reexports::wayland_server::Display;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
+use smithay::reexports::wayland_server::{Client, Display};
 use smithay::wayland::compositor::CompositorClientState;
+use smithay::wayland::security_context::SecurityContext;
 use smithay::wayland::socket::ListeningSocketSource;
 
 use crate::Compositor;
@@ -109,6 +114,9 @@ pub enum ListenError {
 pub(crate) struct ClientState {
     /// Smithay's per-client compositor bookkeeping.
     pub(crate) compositor_state: CompositorClientState,
+    /// The sandbox the client connected from, if any
+    /// (`wp_security_context_v1`).
+    security_context: Option<SecurityContext>,
     /// Counts the client while it is connected.
     _tracked: Tracked,
 }
@@ -118,8 +126,26 @@ impl ClientState {
     pub(crate) fn new(ledger: &ResourceLedger) -> Self {
         Self {
             compositor_state: CompositorClientState::default(),
+            security_context: None,
             _tracked: ledger.track(ResourceKind::Client),
         }
+    }
+
+    /// Creates the state of a client newly connected from the sandbox
+    /// `context`.
+    pub(crate) fn sandboxed(ledger: &ResourceLedger, context: SecurityContext) -> Self {
+        Self {
+            security_context: Some(context),
+            ..Self::new(ledger)
+        }
+    }
+
+    /// Returns whether `client` may use what sandboxed programs may not:
+    /// it did not connect from a sandbox. Xwayland, which vaht starts, may.
+    pub(crate) fn is_unrestricted(client: &Client) -> bool {
+        client
+            .get_data::<Self>()
+            .is_none_or(|state| state.security_context.is_none())
     }
 }
 
