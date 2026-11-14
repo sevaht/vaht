@@ -23,7 +23,9 @@ use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
-use smithay::backend::drm::{DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType};
+use smithay::backend::drm::{
+    DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmNode, NodeType,
+};
 use smithay::backend::egl::context::ContextPriority;
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
@@ -305,8 +307,8 @@ impl DrmBackend {
             &self.loop_handle,
             &self.ledger,
             notifier,
-            move |event, _metadata, compositor| match event {
-                DrmEvent::VBlank(crtc) => compositor.drm_frame_shown(node, crtc),
+            move |event, metadata, compositor| match event {
+                DrmEvent::VBlank(crtc) => compositor.drm_frame_shown(node, crtc, metadata.as_ref()),
                 DrmEvent::Error(error) => tracing::warn!(%error, gpu = %node, "GPU error"),
             },
         )
@@ -473,13 +475,18 @@ impl DrmBackend {
         }
     }
 
-    /// Notes that GPU `node`'s output on `crtc` showed its frame (or its
-    /// wait after an unchanged one is over); draws again if one is due.
-    pub(crate) fn frame_shown(&mut self, node: DrmNode, crtc: crtc::Handle) {
+    /// Notes that GPU `node`'s output on `crtc` showed its frame, as its
+    /// page flip's `metadata` says; draws again if one is due.
+    pub(crate) fn frame_shown(
+        &mut self,
+        node: DrmNode,
+        crtc: crtc::Handle,
+        metadata: Option<&DrmEventMetadata>,
+    ) {
         let is_due = self
             .devices
             .get_mut(&node)
-            .is_some_and(|device| device.frame_shown(crtc));
+            .is_some_and(|device| device.frame_shown(crtc, metadata));
         if is_due {
             self.render_soon();
         }

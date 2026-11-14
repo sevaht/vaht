@@ -66,3 +66,16 @@ pub fn wait_for_file(path: &Path, accept: impl Fn(&str) -> bool) -> String {
     })
     .unwrap_or_else(|| panic!("{} never held what was waited for", path.display()))
 }
+
+/// Returns the monotonic clock's time now (`CLOCK_MONOTONIC`), which vaht
+/// tells presentation times by.
+///
+/// # Panics
+///
+/// Panics if the clock cannot be read.
+#[must_use]
+pub fn monotonic_now() -> Duration {
+    let now = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC)
+        .expect("the monotonic clock can be read");
+    Duration::from(now)
+}

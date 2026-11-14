@@ -2,6 +2,8 @@
 //! up to date: the toolkit's handlers, and the protocol objects whose events
 //! the client records or ignores.
 
+use std::time::Duration;
+
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, FrameCallbackData};
 use smithay_client_toolkit::dispatch2::Dispatch2;
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
@@ -23,6 +25,8 @@ use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::cli
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
 use smithay_client_toolkit::reexports::client::{Connection, QueueHandle};
+use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation::{self, WpPresentation};
+use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation_feedback::{self, WpPresentationFeedback};
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1};
@@ -44,7 +48,7 @@ use smithay_client_toolkit::shm::slot::SlotPool;
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
-use super::{BYTES_PER_PIXEL, WINDOW_COLOR, WINDOW_SIZE};
+use super::{BYTES_PER_PIXEL, Presentation, WINDOW_COLOR, WINDOW_SIZE};
 
 /// Binds the global `name`, which vaht must offer.
 pub(super) fn bind<I>(globals: &GlobalList, handle: &QueueHandle<ClientState>, name: &str) -> I
@@ -114,6 +118,10 @@ pub(super) struct ClientState {
     /// Whether vaht says the session is locked for the client, once it has
     /// said.
     pub(super) is_session_locked: Option<bool>,
+    /// The clock presentation times are told by, once vaht has said.
+    pub(super) presentation_clock: Option<u32>,
+    /// How vaht reported the last frame asked about, once it has.
+    pub(super) presentation: Option<Presentation>,
 }
 
 impl ClientState {
@@ -156,6 +164,8 @@ impl ClientState {
             is_pointer_locked: false,
             received_keys: Vec::new(),
             is_idle: None,
+            presentation_clock: None,
+            presentation: None,
             is_session_locked: None,
         }
     }
@@ -315,6 +325,69 @@ impl Dispatch2<ZwpRelativePointerV1, ClientState> for RelativeMotionEvents {
         if let zwp_relative_pointer_v1::Event::RelativeMotion { dx, dy, .. } = event {
             state.relative_motion.0 += dx;
             state.relative_motion.1 += dy;
+        }
+    }
+}
+
+/// User data of the presentation global: records its clock.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PresentationEvents;
+
+impl Dispatch2<WpPresentation, ClientState> for PresentationEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &WpPresentation,
+        event: wp_presentation::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        if let wp_presentation::Event::ClockId { clk_id } = event {
+            state.presentation_clock = Some(clk_id);
+        }
+    }
+}
+
+/// User data of a frame's presentation feedback: records how vaht
+/// reported the frame.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FeedbackEvents;
+
+impl Dispatch2<WpPresentationFeedback, ClientState> for FeedbackEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &WpPresentationFeedback,
+        event: wp_presentation_feedback::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "which output showed the frame does not matter to a test"
+        )]
+        match event {
+            wp_presentation_feedback::Event::Presented {
+                tv_sec_hi,
+                tv_sec_lo,
+                tv_nsec,
+                refresh,
+                seq_hi,
+                seq_lo,
+                ..
+            } => {
+                let seconds = (u64::from(tv_sec_hi) << 32) | u64::from(tv_sec_lo);
+                state.presentation = Some(Presentation::Shown {
+                    clock: state.presentation_clock.unwrap_or_default(),
+                    time: Duration::new(seconds, tv_nsec),
+                    refresh: Duration::from_nanos(u64::from(refresh)),
+                    sequence: (u64::from(seq_hi) << 32) | u64::from(seq_lo),
+                });
+            }
+            wp_presentation_feedback::Event::Discarded => {
+                state.presentation = Some(Presentation::Discarded);
+            }
+            _ => {}
         }
     }
 }

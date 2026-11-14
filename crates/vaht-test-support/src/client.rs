@@ -24,6 +24,7 @@ use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::ZwpRelativePointerV1;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue};
+use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation::WpPresentation;
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
 use smithay_client_toolkit::shell::WaylandSurface as _;
@@ -35,8 +36,9 @@ use smithay_client_toolkit::shell::xdg::window::WindowDecorations;
 pub use self::input::keys;
 use self::input::{KeyMotion, VirtualInput};
 use self::state::{
-    CaptureFrameEvents, CaptureSessionEvents, ClientState, IdleEvents, KeyboardEvents, LockEvents,
-    LockSurfaceEvents, NoEvents, RelativeMotionEvents, SessionLockEvents, bind,
+    CaptureFrameEvents, CaptureSessionEvents, ClientState, FeedbackEvents, IdleEvents,
+    KeyboardEvents, LockEvents, LockSurfaceEvents, NoEvents, PresentationEvents,
+    RelativeMotionEvents, SessionLockEvents, bind,
 };
 use crate::screenshot::Screenshot;
 
@@ -122,6 +124,26 @@ pub struct TestClient {
     session_locks: ExtSessionLockManagerV1,
     /// The session lock the client holds, if it does.
     session_lock: Option<ExtSessionLockV1>,
+    /// Says when frames showed.
+    presentation: WpPresentation,
+}
+
+/// How vaht reported a frame (`wp_presentation`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presentation {
+    /// It showed.
+    Shown {
+        /// The clock `time` is by, as `clock_gettime` numbers clocks.
+        clock: u32,
+        /// When it showed.
+        time: Duration,
+        /// The time between the output's refreshes.
+        refresh: Duration,
+        /// Which of the output's refreshes showed it.
+        sequence: u64,
+    },
+    /// It never showed: a later frame replaced it.
+    Discarded,
 }
 
 impl TestClient {
@@ -158,6 +180,9 @@ impl TestClient {
             bind(&globals, &handle, "zwp_idle_inhibit_manager_v1");
         let session_locks: ExtSessionLockManagerV1 =
             bind(&globals, &handle, "ext_session_lock_manager_v1");
+        let presentation: WpPresentation = globals
+            .bind(&handle, 1..=1, PresentationEvents)
+            .expect("vaht offers wp_presentation");
         let mut state = ClientState::bind(&globals, &handle);
         // Learn the outputs before anything needs them.
         queue
@@ -177,7 +202,26 @@ impl TestClient {
             idle_inhibitors,
             session_locks,
             session_lock: None,
+            presentation,
         }
+    }
+
+    /// Redraws window `index` (in opening order) all `color`, and returns
+    /// how vaht reported the frame that showed it (`wp_presentation`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, or the connection to vaht fails.
+    pub fn redraw_reported(&mut self, index: usize, color: [u8; 3]) -> Presentation {
+        let handle = self.queue.handle();
+        let surface = self.state.windows[index].wl_surface().clone();
+        self.state.presentation = None;
+        let _feedback = self
+            .presentation
+            .feedback(&surface, &handle, FeedbackEvents);
+        self.state.fill(&surface, &handle, WINDOW_SIZE, color);
+        self.dispatch_until(|state| state.presentation.is_some());
+        self.state.presentation.expect("vaht reported the frame")
     }
 
     /// Opens `count` windows and waits until each has been shown once.

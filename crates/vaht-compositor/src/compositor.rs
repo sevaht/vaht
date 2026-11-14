@@ -493,14 +493,16 @@ impl Compositor {
         self.handle_output_events(events);
     }
 
-    /// Follows a monitor showing its frame on GPU `node`'s CRTC `crtc`.
+    /// Follows a monitor showing its frame on GPU `node`'s CRTC `crtc`, as
+    /// its page flip's `metadata` says.
     pub(crate) fn drm_frame_shown(
         &mut self,
         node: smithay::backend::drm::DrmNode,
         crtc: smithay::reexports::drm::control::crtc::Handle,
+        metadata: Option<&smithay::backend::drm::DrmEventMetadata>,
     ) {
         if let Backend::Drm(backend) = &mut self.backend {
-            backend.frame_shown(node, crtc);
+            backend.frame_shown(node, crtc, metadata);
         }
     }
 

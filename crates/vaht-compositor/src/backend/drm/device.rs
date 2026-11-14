@@ -15,7 +15,8 @@ use smithay::backend::allocator::gbm::GbmAllocator;
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
 use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
-use smithay::backend::drm::{DrmDeviceFd, DrmNode, VrrSupport};
+use smithay::backend::drm::{DrmDeviceFd, DrmEventMetadata, DrmNode, VrrSupport};
+use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::output::{Mode as OutputModeInfo, Output, PhysicalProperties};
 use smithay::reexports::drm::control::{Device as _, Mode, ModeTypeFlags, connector, crtc};
 use smithay::reexports::wayland_server::DisplayHandle;
@@ -29,19 +30,24 @@ use crate::Compositor;
 use crate::backend::{OutputEvent, RenderError};
 use crate::config::{OutputMode, Vrr};
 use crate::event_source::{EventSource, Timer};
+use crate::presentation;
 use crate::scene::{self, OutputElement, Scene};
 
 /// How a GPU's outputs are driven.
 pub(super) type GpuOutputManager = DrmOutputManager<
     GbmAllocator<DrmDeviceFd>,
     GbmFramebufferExporter<DrmDeviceFd>,
-    (),
+    OutputPresentationFeedback,
     DrmDeviceFd,
 >;
 
 /// One output's driver.
-type GpuOutput =
-    DrmOutput<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, (), DrmDeviceFd>;
+type GpuOutput = DrmOutput<
+    GbmAllocator<DrmDeviceFd>,
+    GbmFramebufferExporter<DrmDeviceFd>,
+    OutputPresentationFeedback,
+    DrmDeviceFd,
+>;
 
 /// One GPU's display side.
 pub(super) struct GpuDevice {
@@ -314,13 +320,30 @@ impl GpuDevice {
             .is_some_and(|screen| screen.frames.finished())
     }
 
-    /// Notes that `crtc`'s frame was shown; returns whether another is due.
-    pub(super) fn frame_shown(&mut self, crtc: crtc::Handle) -> bool {
+    /// Notes that `crtc`'s frame was shown, as its page flip's `metadata`
+    /// says, and tells the clients in it; returns whether another is due.
+    pub(super) fn frame_shown(
+        &mut self,
+        crtc: crtc::Handle,
+        metadata: Option<&DrmEventMetadata>,
+    ) -> bool {
         let Some(screen) = self.screens.get_mut(&crtc) else {
             return false;
         };
-        if let Err(error) = screen.drm_output.frame_submitted() {
-            tracing::debug!(?error, "a frame was not shown");
+        match screen.drm_output.frame_submitted() {
+            Ok(Some(feedback)) => {
+                let is_variable = screen
+                    .drm_output
+                    .with_compositor(|compositor| compositor.vrr_enabled());
+                presentation::report_shown(
+                    feedback,
+                    presentation::shown_at(metadata, presentation::now()),
+                    metadata.map_or(0, |metadata| u64::from(metadata.sequence)),
+                    (screen.frame_interval(), is_variable),
+                );
+            }
+            Ok(None) => {}
+            Err(error) => tracing::debug!(?error, "a frame was not shown"),
         }
         screen.frames.finished()
     }
@@ -365,11 +388,7 @@ impl Screen {
 
     /// Returns the frame interval at the output's refresh rate.
     pub(super) fn frame_interval(&self) -> Duration {
-        let millihertz = self
-            .output
-            .current_mode()
-            .map_or(60_000, |mode| mode.refresh.max(1));
-        Duration::from_micros(1_000_000_000 / u64::try_from(millihertz).unwrap_or(60_000))
+        presentation::frame_interval(&self.output)
     }
 
     /// Turns the output on or off: off, its monitor sleeps and clients no
@@ -485,8 +504,9 @@ impl Screen {
             .map_err(|error| RenderError::Hardware(error.to_string()))?;
         let is_changed = !result.is_empty;
         if is_changed {
+            let feedback = scene.presentation_feedback(&self.output, &result.states);
             self.drm_output
-                .queue_frame(())
+                .queue_frame(feedback)
                 .map_err(|error| RenderError::Hardware(error.to_string()))?;
         }
         self.frames.drawn(is_changed);

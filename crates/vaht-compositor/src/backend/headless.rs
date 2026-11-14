@@ -29,6 +29,7 @@ use crate::Compositor;
 use crate::config::OutputMode;
 use crate::event_source::Timer;
 use crate::outputs::{OutputControl, Outputs};
+use crate::presentation::FrameCounter;
 use crate::resources::ResourceLedger;
 use crate::scene::{self, Scene};
 
@@ -62,6 +63,8 @@ struct Screen {
     damage_tracker: OutputDamageTracker,
     /// Its global while it is on: clients see it, and it is drawn.
     global: Option<GlobalId>,
+    /// The frames it has shown, which number their presentations.
+    shown: FrameCounter,
 }
 
 impl HeadlessBackend {
@@ -377,6 +380,7 @@ impl Screen {
             target,
             damage_tracker,
             global: Some(global),
+            shown: FrameCounter::default(),
         })
     }
 
@@ -428,7 +432,8 @@ impl Screen {
             .bind(&mut self.target)
             .map_err(RenderError::BindSoftware)?;
         let elements = scene.output_elements(renderer, &self.output);
-        self.damage_tracker
+        let drawn = self
+            .damage_tracker
             .render_output(
                 renderer,
                 &mut framebuffer,
@@ -437,6 +442,9 @@ impl Screen {
                 scene::BACKGROUND_COLOR,
             )
             .map_err(RenderError::DrawSoftware)?;
+        // The image is the screen: the frame shows as soon as it is drawn.
+        let feedback = scene.presentation_feedback(&self.output, &drawn.states);
+        self.shown.report_shown_now(&self.output, feedback);
         Ok(())
     }
 }

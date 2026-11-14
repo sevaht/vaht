@@ -29,13 +29,21 @@ use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{AsRenderElements as _, Element as _};
+use smithay::backend::renderer::element::{
+    RenderElementStates, default_primary_scanout_output_compare,
+};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
-use smithay::desktop::WindowSurfaceType;
-use smithay::desktop::utils::under_from_surface_tree;
+use smithay::desktop::utils::{
+    OutputPresentationFeedback, surface_presentation_feedback_flags_from_states,
+    surface_primary_scanout_output, take_presentation_feedback_surface_tree,
+    under_from_surface_tree, update_surface_primary_scanout_output, with_surfaces_surface_tree,
+};
+use smithay::desktop::{PopupManager, WindowSurfaceType, layer_map_for_output};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Physical, Point, Scale};
 use smithay::wayland::shell::wlr_layer::Layer;
+use smithay::xwayland::X11Surface;
 
 pub(crate) use self::backdrop::Backdrop;
 pub(crate) use self::corner_texture::CornerTexture;
@@ -293,6 +301,79 @@ impl<'state> Scene<'state> {
             })
             .or_else(|| self.window_at(point, false).map(PointerTarget::Window))
             .or_else(|| layer(&BELOW_WINDOWS, true))
+    }
+
+    /// Takes the presentation feedback of the client surfaces `output`
+    /// shows best, after a frame was drawn on it with the elements
+    /// `states`; the backend sends it when the frame shows. A surface on
+    /// two outputs is told of the one showing most of it.
+    pub(crate) fn presentation_feedback(
+        &self,
+        output: &Output,
+        states: &RenderElementStates,
+    ) -> OutputPresentationFeedback {
+        let roots = self.client_surfaces(output);
+        for root in &roots {
+            with_surfaces_surface_tree(root, |surface, data| {
+                update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    data,
+                    None,
+                    states,
+                    default_primary_scanout_output_compare,
+                );
+            });
+        }
+        let mut feedback = OutputPresentationFeedback::new(output);
+        for root in &roots {
+            take_presentation_feedback_surface_tree(
+                root,
+                &mut feedback,
+                surface_primary_scanout_output,
+                |surface, _| surface_presentation_feedback_flags_from_states(surface, None, states),
+            );
+        }
+        feedback
+    }
+
+    /// Returns the root surfaces of the clients `output` may show, each
+    /// with its subsurfaces beneath it: the windows and X programs' menus,
+    /// the output's layer surfaces, their popups, and while locked only
+    /// the output's lock surface.
+    fn client_surfaces(&self, output: &Output) -> Vec<WlSurface> {
+        if self.drawn.lock.is_locked() {
+            return self
+                .drawn
+                .lock
+                .surface_on(output)
+                .cloned()
+                .into_iter()
+                .collect();
+        }
+        let mut roots: Vec<WlSurface> = self
+            .windows()
+            .filter_map(|(_, toplevel)| toplevel.wl_surface())
+            .collect();
+        roots.extend(
+            self.drawn
+                .xwayland
+                .into_iter()
+                .flat_map(XwaylandServer::unmanaged)
+                .filter_map(X11Surface::wl_surface),
+        );
+        roots.extend(
+            layer_map_for_output(output)
+                .layers()
+                .map(|layer| layer.wl_surface().clone()),
+        );
+        let popups: Vec<WlSurface> = roots
+            .iter()
+            .flat_map(PopupManager::popups_for_surface)
+            .map(|(popup, _)| popup.wl_surface().clone())
+            .collect();
+        roots.extend(popups);
+        roots
     }
 
     /// Returns the elements to draw at `scale`, topmost first, as damage

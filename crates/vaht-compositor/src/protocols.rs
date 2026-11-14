@@ -36,6 +36,7 @@ use smithay::wayland::image_copy_capture::ImageCopyCaptureState;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
+use smithay::wayland::presentation::PresentationState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
@@ -57,6 +58,7 @@ use smithay::wayland::xdg_toplevel_tag::XdgToplevelTagManager;
 use smithay::wayland::xwayland_shell::XWaylandShellState;
 
 use smithay::reexports::calloop::LoopHandle;
+use smithay::utils::{ClockSource, Monotonic};
 
 use crate::Compositor;
 
@@ -109,6 +111,9 @@ pub(crate) struct ProtocolStates {
         ContentTypeState,
         FixesState,
     ),
+    /// `wp_presentation`: clients told when their frames showed, by the
+    /// monotonic clock. Held only to keep the global alive.
+    _presentation: PresentationState,
     /// `xdg_system_bell_v1` and `xdg_toplevel_tag_manager_v1`: a bell
     /// rung, and a window's tag. Held only to keep the globals alive.
     _window_hints: (XdgSystemBellState, XdgToplevelTagManager),
@@ -196,6 +201,10 @@ impl ProtocolStates {
                 AlphaModifierState::new::<Compositor>(display),
                 ContentTypeState::new::<Compositor>(display),
                 FixesState::new::<Compositor>(display),
+            ),
+            _presentation: PresentationState::new::<Compositor>(
+                display,
+                <Monotonic as ClockSource>::ID as u32,
             ),
             _window_hints: (
                 XdgSystemBellState::new::<Compositor>(display),

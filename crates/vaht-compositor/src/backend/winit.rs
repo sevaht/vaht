@@ -19,6 +19,7 @@ use crate::Compositor;
 use crate::config::OutputMode;
 use crate::event_source::EventSource;
 use crate::outputs::{OutputControl, Outputs};
+use crate::presentation::FrameCounter;
 use crate::resources::ResourceLedger;
 use crate::scene::{self, Scene};
 
@@ -30,6 +31,8 @@ pub(crate) struct WinitBackend {
     output: Output,
     /// Knows what changed since earlier frames, to redraw only that.
     damage_tracker: OutputDamageTracker,
+    /// The frames shown, which number their presentations.
+    shown: FrameCounter,
     /// The host window's events, registered for as long as the backend lives.
     _events: EventSource<Compositor>,
 }
@@ -98,6 +101,7 @@ impl WinitBackend {
             graphics,
             output,
             damage_tracker,
+            shown: FrameCounter::default(),
             _events: events,
         })
     }
@@ -119,10 +123,11 @@ impl WinitBackend {
     /// Returns an error if the frame could not be drawn or shown.
     pub(crate) fn render(&mut self, scene: &Scene<'_>) -> Result<(), RenderError> {
         let age = self.graphics.buffer_age().unwrap_or(0);
-        let damage = {
+        let (damage, feedback) = {
             let (renderer, mut framebuffer) = self.graphics.bind().map_err(RenderError::Bind)?;
             let elements = scene.output_elements(renderer, &self.output);
-            self.damage_tracker
+            let drawn = self
+                .damage_tracker
                 .render_output(
                     renderer,
                     &mut framebuffer,
@@ -130,9 +135,11 @@ impl WinitBackend {
                     &elements,
                     scene::BACKGROUND_COLOR,
                 )
-                .map_err(RenderError::Draw)?
-                .damage
-                .cloned()
+                .map_err(RenderError::Draw)?;
+            (
+                drawn.damage.cloned(),
+                scene.presentation_feedback(&self.output, &drawn.states),
+            )
         };
         // No damage means nothing changed: keep showing the last frame.
         if let Some(damage) = damage {
@@ -140,6 +147,8 @@ impl WinitBackend {
                 .submit(Some(&damage))
                 .map_err(RenderError::Submit)?;
         }
+        // The host shows the frame when it will; it does not say when.
+        self.shown.report_shown_now(&self.output, feedback);
         Ok(())
     }
 
