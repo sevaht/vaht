@@ -11,6 +11,7 @@ use crate::focus_target::FocusTarget;
 use smithay::input::pointer::PointerHandle;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::Resource as _;
+use smithay::reexports::wayland_server::protocol::wl_pointer::WlPointer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Serial;
 use smithay::utils::{Logical, Point};
@@ -20,11 +21,26 @@ use smithay::wayland::keyboard_shortcuts_inhibit::{
 use smithay::wayland::pointer_constraints::{
     ConstraintRemove, PointerConstraint, PointerConstraintsHandler,
 };
+use smithay::wayland::pointer_warp::PointerWarpHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
 };
 
 use crate::Compositor;
+
+/// A client moving the pointer within its own surface, as Xwayland does
+/// for an X program's warp.
+impl PointerWarpHandler for Compositor {
+    fn warp_pointer(
+        &mut self,
+        surface: WlSurface,
+        _pointer: WlPointer,
+        pos: Point<f64, Logical>,
+        serial: Serial,
+    ) {
+        Self::warp_pointer(self, &surface, pos, serial);
+    }
+}
 
 impl SeatHandler for Compositor {
     type KeyboardFocus = FocusTarget;

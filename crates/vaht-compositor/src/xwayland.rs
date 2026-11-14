@@ -16,6 +16,7 @@ use std::process::Stdio;
 
 use smithay::reexports::calloop::LoopHandle;
 use smithay::reexports::wayland_server::DisplayHandle;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Rectangle};
 use smithay::wayland::selection::SelectionTarget;
 use smithay::wayland::selection::data_device::{
@@ -26,6 +27,7 @@ use smithay::wayland::selection::primary_selection::{
     clear_primary_selection, current_primary_selection_userdata, request_primary_client_selection,
     set_primary_selection,
 };
+use smithay::wayland::xwayland_keyboard_grab::XWaylandKeyboardGrabHandler;
 use smithay::wayland::xwayland_shell::{XWaylandShellHandler, XWaylandShellState};
 use smithay::xwayland::xwm::{Reorder, ResizeEdge, WmWindowProperty, XwmId};
 use smithay::xwayland::{X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler};
@@ -260,6 +262,16 @@ impl XwaylandServer {
 impl XWaylandShellHandler for Compositor {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
         &mut self.protocols.xwayland_shell
+    }
+}
+
+/// An X program grabbing the keyboard (`XGrabKeyboard`, as games and
+/// virtual machines do), which Xwayland passes on: honored for the window
+/// with the keyboard, until vaht moves focus. vaht's bindings still see
+/// each key first.
+impl XWaylandKeyboardGrabHandler for Compositor {
+    fn keyboard_focus_for_xsurface(&self, surface: &WlSurface) -> Option<FocusTarget> {
+        self.x11_keyboard_grab_target(surface)
     }
 }
 

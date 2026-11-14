@@ -25,6 +25,7 @@ use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::cli
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::ZwpRelativePointerV1;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue};
 use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation::WpPresentation;
+use smithay_client_toolkit::reexports::protocols::wp::pointer_warp::v1::client::wp_pointer_warp_v1::WpPointerWarpV1;
 use smithay_client_toolkit::reexports::protocols::wp::fifo::v1::client::wp_fifo_manager_v1::WpFifoManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::fifo::v1::client::wp_fifo_v1::WpFifoV1;
 use smithay_client_toolkit::reexports::protocols::wp::commit_timing::v1::client::wp_commit_timing_manager_v1::WpCommitTimingManagerV1;
@@ -41,7 +42,7 @@ pub use self::input::keys;
 use self::input::{KeyMotion, VirtualInput};
 use self::state::{
     CaptureFrameEvents, CaptureSessionEvents, ClientState, FeedbackEvents, IdleEvents,
-    KeyboardEvents, LockEvents, LockSurfaceEvents, NoEvents, PresentationEvents,
+    KeyboardEvents, LockEvents, LockSurfaceEvents, NoEvents, PointerEvents, PresentationEvents,
     RelativeMotionEvents, SessionLockEvents, bind,
 };
 use crate::screenshot::Screenshot;
@@ -130,6 +131,8 @@ pub struct TestClient {
     session_lock: Option<ExtSessionLockV1>,
     /// Says when frames showed.
     presentation: WpPresentation,
+    /// Moves the pointer within the client's surfaces.
+    pointer_warp: WpPointerWarpV1,
     /// Paces frames (fifo).
     fifo_manager: WpFifoManagerV1,
     /// Times frames (commit timing).
@@ -173,7 +176,7 @@ impl TestClient {
         let seat: wl_seat::WlSeat = bind(&globals, &handle, "wl_seat");
         let input = VirtualInput::bind(&globals, &handle, &seat);
         let seat_keyboard = seat.get_keyboard(&handle, KeyboardEvents);
-        let seat_pointer = seat.get_pointer(&handle, NoEvents);
+        let seat_pointer = seat.get_pointer(&handle, PointerEvents);
         let relative_pointers: ZwpRelativePointerManagerV1 =
             bind(&globals, &handle, "zwp_relative_pointer_manager_v1");
         let relative_pointer =
@@ -194,6 +197,7 @@ impl TestClient {
             .bind(&handle, 1..=1, PresentationEvents)
             .expect("vaht offers wp_presentation");
         let fifo_manager: WpFifoManagerV1 = bind(&globals, &handle, "wp_fifo_manager_v1");
+        let pointer_warp: WpPointerWarpV1 = bind(&globals, &handle, "wp_pointer_warp_v1");
         let commit_timing: WpCommitTimingManagerV1 =
             bind(&globals, &handle, "wp_commit_timing_manager_v1");
         let mut state = ClientState::bind(&globals, &handle);
@@ -219,7 +223,29 @@ impl TestClient {
             fifo_manager,
             commit_timing,
             pacing: Vec::new(),
+            pointer_warp,
         }
+    }
+
+    /// Asks vaht to move the pointer to `(x, y)` on window `index` (in
+    /// opening order), as an X game's warp through Xwayland does; returns
+    /// where vaht then says the pointer is on the client's surface, if on
+    /// one. Only a window the pointer is over may move it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, or the connection to vaht fails.
+    pub fn warp_pointer(&mut self, index: usize, x: f64, y: f64) -> Option<(f64, f64)> {
+        self.roundtrip();
+        let surface = self.state.windows[index].wl_surface().clone();
+        let serial = self.state.pointer_entered.unwrap_or_default();
+        self.pointer_warp
+            .warp_pointer(&surface, &self.seat_pointer, x, y, serial);
+        // A warp refused says nothing; one done says where.
+        let _ = self.dispatch_for(Duration::from_millis(500), |state| {
+            state.pointer_position == Some((x, y))
+        });
+        self.state.pointer_position
     }
 
     /// Redraws window `index` once for each of `colors`, as fast as it

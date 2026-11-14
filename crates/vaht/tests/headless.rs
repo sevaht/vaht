@@ -82,6 +82,7 @@ fn clients_find_the_protocols_everyday_programs_use() {
     let interfaces = client.global_interfaces();
     for expected in [
         "ext_data_control_manager_v1",
+        "ext_foreign_toplevel_list_v1",
         "wl_compositor",
         "wl_data_device_manager",
         "wl_fixes",
@@ -93,6 +94,7 @@ fn clients_find_the_protocols_everyday_programs_use() {
         "wp_cursor_shape_manager_v1",
         "wp_fifo_manager_v1",
         "wp_fractional_scale_manager_v1",
+        "wp_pointer_warp_v1",
         "wp_presentation",
         "wp_single_pixel_buffer_manager_v1",
         "wp_viewporter",
@@ -101,6 +103,7 @@ fn clients_find_the_protocols_everyday_programs_use() {
         "xdg_toplevel_tag_manager_v1",
         "xdg_wm_base",
         "zwlr_data_control_manager_v1",
+        "zwp_pointer_gestures_v1",
         "zwp_primary_selection_device_manager_v1",
         "zxdg_decoration_manager_v1",
         "zxdg_exporter_v2",

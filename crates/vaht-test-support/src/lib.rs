@@ -17,6 +17,7 @@ mod metrics;
 mod picture;
 mod screenshot;
 mod wait;
+mod window_list;
 mod x11_client;
 
 pub use client::{
@@ -29,4 +30,5 @@ pub use metrics::{BUILT_IN_METRICS, ThemeMetrics};
 pub use picture::{solid_png, solid_xcursor};
 pub use screenshot::{Bounds, Screenshot};
 pub use wait::{monotonic_now, wait_for_file};
+pub use window_list::{ListedWindow, WindowList};
 pub use x11_client::X11Client;

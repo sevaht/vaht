@@ -1,5 +1,5 @@
 //! Pointer tests for games: relative motion (how the mouse moved, before
-//! anything holds the pointer) and pointer locks.
+//! anything holds the pointer), pointer locks, and warps.
 
 use std::path::Path;
 
@@ -78,5 +78,26 @@ fn a_lock_ends_when_its_window_loses_the_keyboard() {
     assert!(
         !client.is_pointer_locked(),
         "the pointer is the user's again"
+    );
+}
+
+#[test]
+fn a_window_under_the_pointer_may_move_it_within_itself() {
+    let (_vaht, mut client, _) = game();
+    assert_eq!(
+        client.warp_pointer(0, 7.0, 9.0),
+        Some((7.0, 9.0)),
+        "moved where the window asked"
+    );
+}
+
+#[test]
+fn a_window_may_not_move_the_pointer_off_itself() {
+    let (_vaht, mut client, _) = game();
+    let before = client.warp_pointer(0, 7.0, 9.0);
+    assert_eq!(
+        client.warp_pointer(0, -50.0, 9.0),
+        before,
+        "the pointer stayed on the window"
     );
 }

@@ -1,12 +1,15 @@
-//! Where a locked or confined pointer may go (`pointer-constraints`),
-//! decided from plain values.
+//! Where a locked or confined pointer may go (`pointer-constraints`), and
+//! whether a client may move it (`pointer-warp`), decided from plain
+//! values.
 //!
 //! A game locks the pointer (it stays put; the game reads relative motion)
 //! or confines it to its window or a region of it. The compositor reads
 //! which constraint holds, if any, and asks [`constrain`] where a motion
-//! takes the pointer.
+//! takes the pointer. A client may also move the pointer within its own
+//! surface while it has the pointer, as an X game's warp through Xwayland
+//! does; [`may_warp`] says whether a request may.
 
-use smithay::utils::{Logical, Point};
+use smithay::utils::{Logical, Point, Serial, Size};
 
 /// What holds the pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,9 +42,54 @@ pub(crate) fn constrain(
     }
 }
 
+/// Returns whether a client may move the pointer to `position` on its
+/// surface of `size`: the surface has the pointer, the client names the
+/// serial of the pointer's last entering one of its surfaces
+/// (`entered`), and the position is on the surface.
+pub(crate) fn may_warp(
+    is_focused: bool,
+    (serial, entered): (Serial, Option<Serial>),
+    position: Point<f64, Logical>,
+    size: Size<i32, Logical>,
+) -> bool {
+    let size = size.to_f64();
+    is_focused
+        && entered == Some(serial)
+        && (0.0..size.w).contains(&position.x)
+        && (0.0..size.h).contains(&position.y)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_client_moves_the_pointer_only_on_its_surface_while_it_has_it() {
+        let size = Size::from((100, 50));
+        let serial = Serial::from(7);
+        let inside = Point::from((10.0, 20.0));
+        assert!(may_warp(true, (serial, Some(serial)), inside, size));
+        assert!(
+            !may_warp(false, (serial, Some(serial)), inside, size),
+            "not focused"
+        );
+        assert!(
+            !may_warp(true, (serial, Some(Serial::from(8))), inside, size),
+            "a stale serial"
+        );
+        assert!(
+            !may_warp(true, (serial, None), inside, size),
+            "never entered"
+        );
+        assert!(
+            !may_warp(true, (serial, Some(serial)), (100.0, 20.0).into(), size),
+            "off the surface's right edge"
+        );
+        assert!(
+            !may_warp(true, (serial, Some(serial)), (-1.0, 20.0).into(), size),
+            "off its left edge"
+        );
+    }
 
     /// Whether `point` is within the square from 0 to 100.
     fn in_square(point: Point<f64, Logical>) -> bool {

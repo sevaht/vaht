@@ -30,6 +30,7 @@ use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufState};
 use smithay::wayland::fifo::FifoManagerState;
 use smithay::wayland::fixes::FixesState;
+use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
 use smithay::wayland::idle_notify::IdleNotifierState;
@@ -38,6 +39,8 @@ use smithay::wayland::image_copy_capture::ImageCopyCaptureState;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
+use smithay::wayland::pointer_gestures::PointerGesturesState;
+use smithay::wayland::pointer_warp::PointerWarpManager;
 use smithay::wayland::presentation::PresentationState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
@@ -57,6 +60,7 @@ use smithay::wayland::xdg_foreign::XdgForeignState;
 use smithay::wayland::xdg_system_bell::XdgSystemBellState;
 use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager;
 use smithay::wayland::xdg_toplevel_tag::XdgToplevelTagManager;
+use smithay::wayland::xwayland_keyboard_grab::XWaylandKeyboardGrabState;
 use smithay::wayland::xwayland_shell::XWaylandShellState;
 
 use smithay::reexports::calloop::LoopHandle;
@@ -91,6 +95,9 @@ pub(crate) struct ProtocolStates {
     ),
     /// `xdg_activation_v1`: programs bringing their windows forward.
     pub(crate) activation: XdgActivationState,
+    /// `ext_foreign_toplevel_list_v1`: the windows, listed for docks and
+    /// window switchers ([`crate::toplevel_list`]).
+    pub(crate) foreign_toplevel_list: ForeignToplevelListState,
     /// `zxdg_exporter_v2` and `zxdg_importer_v2`: a window made the parent
     /// of another program's (a portal's dialog).
     pub(crate) xdg_foreign: XdgForeignState,
@@ -123,10 +130,16 @@ pub(crate) struct ProtocolStates {
     /// `xdg_system_bell_v1` and `xdg_toplevel_tag_manager_v1`: a bell
     /// rung, and a window's tag. Held only to keep the globals alive.
     _window_hints: (XdgSystemBellState, XdgToplevelTagManager),
-    /// `zwp_relative_pointer_manager_v1` and `zwp_pointer_constraints_v1`:
-    /// games reading the mouse's motion and locking or confining the
-    /// pointer. Held only to keep the globals.
-    _pointer_extensions: (RelativePointerManagerState, PointerConstraintsState),
+    /// `zwp_relative_pointer_manager_v1`, `zwp_pointer_constraints_v1`,
+    /// `wp_pointer_warp_v1` and `zwp_pointer_gestures_v1`: games reading
+    /// the mouse's motion, locking or confining the pointer and moving it,
+    /// and touchpad gestures. Held only to keep the globals.
+    _pointer_extensions: (
+        RelativePointerManagerState,
+        PointerConstraintsState,
+        PointerWarpManager,
+        PointerGesturesState,
+    ),
     /// `zwp_keyboard_shortcuts_inhibit_manager_v1`: a window taking every
     /// key while it has the keyboard.
     pub(crate) keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState,
@@ -140,6 +153,9 @@ pub(crate) struct ProtocolStates {
     pub(crate) session_lock: SessionLockManagerState,
     /// `xwayland_shell_v1`: Xwayland pairing X11 windows with surfaces.
     pub(crate) xwayland_shell: XWaylandShellState,
+    /// `zwp_xwayland_keyboard_grab_manager_v1`: X programs grabbing the
+    /// keyboard. Held only to keep the global alive.
+    _xwayland_keyboard_grab: XWaylandKeyboardGrabState,
     /// `wp_cursor_shape_manager_v1`: clients naming the pointer's picture
     /// (`text`, `pointer`…) rather than drawing it. Held only to keep the
     /// global.
@@ -198,6 +214,7 @@ impl ProtocolStates {
             primary_selection,
             activation: XdgActivationState::new::<Compositor>(display),
             xdg_foreign: XdgForeignState::new::<Compositor>(display),
+            foreign_toplevel_list: ForeignToplevelListState::new::<Compositor>(display),
             dmabuf: DmabufState::new(),
             dmabuf_global: None,
             _surface_extensions: (
@@ -223,6 +240,7 @@ impl ProtocolStates {
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
             _cursor_shape: CursorShapeManagerState::new::<Compositor>(display),
             xwayland_shell: XWaylandShellState::new::<Compositor>(display),
+            _xwayland_keyboard_grab: XWaylandKeyboardGrabState::new::<Compositor>(display),
             keyboard_shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<Compositor>(display),
             idle_notifier: IdleNotifierState::new(display, handle.clone()),
             session_lock: SessionLockManagerState::new::<Compositor, _>(display, |_client| true),
@@ -230,6 +248,8 @@ impl ProtocolStates {
             _pointer_extensions: (
                 RelativePointerManagerState::new::<Compositor>(display),
                 PointerConstraintsState::new::<Compositor>(display),
+                PointerWarpManager::new::<Compositor>(display),
+                PointerGesturesState::new::<Compositor>(display),
             ),
             output_capture_source: OutputCaptureSourceState::new::<Compositor>(display),
             image_copy_capture: ImageCopyCaptureState::new::<Compositor>(display),

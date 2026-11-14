@@ -32,6 +32,7 @@ use smithay::backend::input::{
     AbsolutePositionEvent, Axis, ButtonState, Event, InputBackend, InputEvent, InputTime, KeyState,
     KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
 };
+use smithay::backend::renderer::utils::with_renderer_surface_state;
 use smithay::desktop::utils::send_frames_surface_tree;
 use smithay::desktop::{
     PopupKind, PopupManager, find_popup_root_surface, get_popup_toplevel_coords,
@@ -73,6 +74,7 @@ use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
 use crate::focus_target::FocusTarget;
 use crate::frame_pacing::FramePacing;
+use crate::gestures;
 use crate::grab::{GrabKind, WindowGrab};
 use crate::idle::IdleInhibitors;
 use crate::input::{self, AfterClick, ButtonPress, Input, KeyPress, PressOutcome};
@@ -91,6 +93,7 @@ use crate::session_lock::SessionLock;
 use crate::signals::ProcessSignals;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
 use crate::tooltip::Tooltip;
+use crate::toplevel_list::{ForeignToplevels, ToplevelList};
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::tray::TrayAction;
 use crate::window_manager::{
@@ -98,6 +101,7 @@ use crate::window_manager::{
     WindowManager, WorkspaceTarget,
 };
 use crate::xwayland::XwaylandServer;
+use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::xwayland::{X11Surface, X11Wm};
 
 /// The running compositor.
@@ -128,6 +132,8 @@ pub struct Compositor {
     pub(crate) session_lock: SessionLock,
     /// Holds back and lets through clients' paced and timed frames.
     pub(crate) frame_pacing: FramePacing,
+    /// The windows as programs outside vaht see them listed.
+    toplevel_list: ToplevelList<WindowId, ForeignToplevelHandle>,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -309,6 +315,7 @@ impl Compositor {
             idle_inhibitors: IdleInhibitors::default(),
             session_lock: SessionLock::default(),
             frame_pacing: FramePacing::default(),
+            toplevel_list: ToplevelList::default(),
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -1165,6 +1172,17 @@ impl Compositor {
             }
         }
         self.follow_timed_frames();
+        // Windows opened, renamed or closed are announced as they show.
+        let windows = self
+            .window_manager
+            .windows_top_down()
+            .map(|window| (window.id(), window.title(), window.app_id()));
+        self.toplevel_list.follow(
+            windows,
+            &mut ForeignToplevels {
+                state: &mut self.protocols.foreign_toplevel_list,
+            },
+        );
         tracing::trace!("frame drawn");
     }
 
@@ -1297,7 +1315,8 @@ impl Compositor {
         self.settle();
         #[expect(
             clippy::wildcard_enum_match_arm,
-            reason = "Smithay's input enum has many kinds vaht does not handle yet"
+            reason = "the rest go to gestures::forward, which takes the gestures; \
+                      touch and tablets are not taken yet"
         )]
         match event {
             InputEvent::Keyboard { event } => {
@@ -1329,7 +1348,13 @@ impl Compositor {
             }
             InputEvent::PointerButton { event } => self.handle_pointer_button::<B>(&event),
             InputEvent::PointerAxis { event } => self.handle_pointer_axis::<B>(&event),
-            _ => {}
+            other => {
+                let pointer = self
+                    .seat
+                    .get_pointer()
+                    .expect("the seat gets a pointer at startup");
+                let _ = gestures::forward(self, &pointer, &other);
+            }
         }
     }
 
@@ -1596,6 +1621,39 @@ impl Compositor {
         self.schedule_render();
     }
 
+    /// Moves the pointer to `position` on `surface`, as its client asks
+    /// with the serial of the pointer's last entering one of its surfaces
+    /// (`pointer-warp`); refused unless `surface` has the pointer and the
+    /// position is on it.
+    pub(crate) fn warp_pointer(
+        &mut self,
+        surface: &WlSurface,
+        position: Point<f64, Logical>,
+        serial: Serial,
+    ) {
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        let under = self
+            .scene()
+            .target_at(self.pointer_location())
+            .and_then(|target| target.client_surface());
+        let origin = under
+            .filter(|(focused, _)| focused == surface)
+            .map(|(_, origin)| origin);
+        let size = with_renderer_surface_state(surface, |state| state.surface_size())
+            .flatten()
+            .unwrap_or_default();
+        let entered = pointer.last_enter();
+        match origin {
+            Some(origin) if pointer_lock::may_warp(true, (serial, entered), position, size) => {
+                self.move_pointer_to(origin + position, InputTime::now());
+            }
+            _ => tracing::debug!(?position, "a client's pointer warp was refused"),
+        }
+    }
+
     /// Returns where the pointer is.
     pub(crate) fn pointer_location(&self) -> Point<f64, Logical> {
         self.seat
@@ -1713,7 +1771,22 @@ impl Compositor {
             .seat
             .get_keyboard()
             .expect("the seat gets a keyboard at startup");
+        // vaht decides where the keyboard goes: an X program's keyboard
+        // grab, the only one there is, ends when focus moves on.
+        if keyboard.is_grabbed() {
+            keyboard.unset_grab(self);
+        }
         keyboard.set_focus(self, target, SERIAL_COUNTER.next_serial());
+    }
+
+    /// Returns the focus an X program's keyboard grab of its window's
+    /// `surface` holds the keyboard on: the window, if it has the keyboard
+    /// now; a window in the background cannot take it.
+    pub(crate) fn x11_keyboard_grab_target(&self, surface: &WlSurface) -> Option<FocusTarget> {
+        self.keyboard_focus
+            .clone()
+            .filter(|focus| matches!(focus, FocusTarget::X11(_)))
+            .filter(|focus| focus.surface().as_ref() == Some(surface))
     }
 
     /// Updates the window whose root surface is `root` after a commit of

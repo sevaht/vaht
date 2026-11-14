@@ -26,6 +26,7 @@ use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
 use smithay_client_toolkit::reexports::client::{Connection, QueueHandle};
 use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation::{self, WpPresentation};
+use smithay_client_toolkit::reexports::protocols::wp::pointer_warp::v1::client::wp_pointer_warp_v1::WpPointerWarpV1;
 use smithay_client_toolkit::reexports::protocols::wp::fifo::v1::client::wp_fifo_manager_v1::WpFifoManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::fifo::v1::client::wp_fifo_v1::WpFifoV1;
 use smithay_client_toolkit::reexports::protocols::wp::commit_timing::v1::client::wp_commit_timing_manager_v1::WpCommitTimingManagerV1;
@@ -122,6 +123,11 @@ pub(super) struct ClientState {
     /// Whether vaht says the session is locked for the client, once it has
     /// said.
     pub(super) is_session_locked: Option<bool>,
+    /// The serial of the pointer's last entering a surface of the client,
+    /// while it is on one.
+    pub(super) pointer_entered: Option<u32>,
+    /// Where the pointer is on the surface it is on, as vaht last said.
+    pub(super) pointer_position: Option<(f64, f64)>,
     /// The clock presentation times are told by, once vaht has said.
     pub(super) presentation_clock: Option<u32>,
     /// How vaht reported the last frame asked about, once it has.
@@ -168,6 +174,8 @@ impl ClientState {
             is_pointer_locked: false,
             received_keys: Vec::new(),
             is_idle: None,
+            pointer_entered: None,
+            pointer_position: None,
             presentation_clock: None,
             presentation: None,
             is_session_locked: None,
@@ -260,6 +268,7 @@ macro_rules! ignore_events {
 
 ignore_events!(
     wl_seat::WlSeat,
+    WpPointerWarpV1,
     WpFifoManagerV1,
     WpFifoV1,
     WpCommitTimingManagerV1,
@@ -270,7 +279,6 @@ ignore_events!(
     ZwpIdleInhibitorV1,
     ZwpKeyboardShortcutsInhibitManagerV1,
     ZwpKeyboardShortcutsInhibitorV1,
-    wl_pointer::WlPointer,
     ZwpRelativePointerManagerV1,
     ZwpPointerConstraintsV1,
     ZwpVirtualKeyboardManagerV1,
@@ -333,6 +341,48 @@ impl Dispatch2<ZwpRelativePointerV1, ClientState> for RelativeMotionEvents {
         if let zwp_relative_pointer_v1::Event::RelativeMotion { dx, dy, .. } = event {
             state.relative_motion.0 += dx;
             state.relative_motion.1 += dy;
+        }
+    }
+}
+
+/// User data of the seat's pointer: records where the pointer is on the
+/// client's surfaces.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PointerEvents;
+
+impl Dispatch2<wl_pointer::WlPointer, ClientState> for PointerEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "only where the pointer is matters to a test, not its buttons"
+        )]
+        match event {
+            wl_pointer::Event::Enter {
+                serial,
+                surface_x,
+                surface_y,
+                ..
+            } => {
+                state.pointer_entered = Some(serial);
+                state.pointer_position = Some((surface_x, surface_y));
+            }
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => state.pointer_position = Some((surface_x, surface_y)),
+            wl_pointer::Event::Leave { .. } => {
+                state.pointer_entered = None;
+                state.pointer_position = None;
+            }
+            _ => {}
         }
     }
 }
