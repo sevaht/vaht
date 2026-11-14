@@ -12,6 +12,7 @@
 //! without hardware; this module carries them out.
 
 mod device;
+mod input_device;
 pub(crate) mod plan;
 
 use std::collections::HashMap;
@@ -52,9 +53,10 @@ use self::plan::{GpuQuirks, TopWindow};
 use super::{BackendError, OutputEvent, RenderError};
 use crate::Compositor;
 use crate::capture::{self, CaptureError, CapturedImage};
-use crate::config::{OutputMode, Vrr};
+use crate::config::{InputSettings, OutputMode, Vrr};
 use crate::event_source::{EventSource, Timer};
 use crate::outputs::{OutputControl, Outputs};
+use crate::pointing_devices;
 use crate::resources::ResourceLedger;
 use crate::scene::Scene;
 
@@ -102,6 +104,10 @@ pub(crate) struct DrmBackend {
     is_active: bool,
     /// The keyboards, whose lights follow the lock keys.
     keyboards: Vec<smithay::reexports::input::Device>,
+    /// The pointing devices, set up as `[input]` says.
+    pointers: Vec<smithay::reexports::input::Device>,
+    /// How pointing devices are set up.
+    input_settings: InputSettings,
     /// The lights the keyboards show.
     leds: smithay::reexports::input::Led,
     /// Explicit sync (`wp_linux_drm_syncobj_manager_v1`), when the
@@ -159,6 +165,8 @@ impl DrmBackend {
             render_soon: None,
             is_active: true,
             keyboards: Vec::new(),
+            pointers: Vec::new(),
+            input_settings: InputSettings::default(),
             leds: smithay::reexports::input::Led::empty(),
             syncobj: None,
             _sources: sources,
@@ -535,8 +543,18 @@ impl DrmBackend {
         }
     }
 
+    /// Sets every pointing device up as `settings` say, and each one
+    /// plugged in later.
+    pub(crate) fn set_input_settings(&mut self, settings: &InputSettings) {
+        self.input_settings.clone_from(settings);
+        for device in &mut self.pointers {
+            pointing_devices::configure(device, &self.input_settings);
+        }
+    }
+
     /// Follows libinput's news of an input device: keyboards are kept, so
-    /// their lights can show Caps Lock and Num Lock.
+    /// their lights can show Caps Lock and Num Lock, and pointing devices
+    /// are set up as `[input]` says.
     pub(crate) fn input_device_event(&mut self, event: &InputEvent<LibinputInputBackend>) {
         #[expect(
             clippy::wildcard_enum_match_arm,
@@ -550,8 +568,16 @@ impl DrmBackend {
                 device.led_update(self.leds);
                 self.keyboards.push(device);
             }
+            InputEvent::DeviceAdded { device }
+                if device.has_capability(DeviceCapability::Pointer) =>
+            {
+                let mut device = device.clone();
+                pointing_devices::configure(&mut device, &self.input_settings);
+                self.pointers.push(device);
+            }
             InputEvent::DeviceRemoved { device } => {
                 self.keyboards.retain(|keyboard| keyboard != device);
+                self.pointers.retain(|pointer| pointer != device);
             }
             _ => {}
         }

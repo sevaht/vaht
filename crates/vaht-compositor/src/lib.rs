@@ -35,6 +35,7 @@ mod layers;
 mod menu;
 mod outputs;
 mod pointer_lock;
+mod pointing_devices;
 mod presentation;
 mod protocols;
 pub mod resources;

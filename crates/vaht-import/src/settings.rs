@@ -129,6 +129,7 @@ impl InitFile {
     /// Converts the resources, noting in `report` what it leaves out.
     pub(crate) fn convert(mut self, report: &mut Report) -> InitConversion {
         let outputs = OutputResources::convert(&mut self.resources, report);
+        crate::input::convert(&mut self.resources, &mut self.document, report);
         self.convert_taskbar_output(&outputs, report);
         self.convert_x_resources();
         self.convert_focus(report);

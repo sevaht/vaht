@@ -6,6 +6,7 @@
 //! Sections for features vaht does not have yet are not accepted, so a
 //! setting never silently does nothing.
 
+mod input;
 mod taskbar;
 
 use std::path::{Path, PathBuf};
@@ -15,6 +16,10 @@ use smithay::utils::{Logical, Point, Size};
 use vaht_ui::WallpaperFit;
 use vaht_ui::theme::Metrics;
 
+pub(crate) use self::input::{
+    AccelProfile, AccelSpeed, ClickMethod, DeviceSettings, InputSettings, ScrollMethod, SendEvents,
+    TapButtonMap,
+};
 pub(crate) use self::taskbar::{
     TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent,
 };
@@ -49,6 +54,8 @@ pub(crate) struct Settings {
     pub(crate) session: SessionSettings,
     /// X11 programs.
     pub(crate) xwayland: XwaylandSettings,
+    /// How pointing devices behave.
+    pub(crate) input: InputSettings,
 }
 
 /// Which window gets keyboard focus, and when windows rise.

@@ -351,16 +351,25 @@ impl Compositor {
             ipc,
             _signals: signals,
         };
-        compositor
-            .config_source
-            .watch(&compositor.loop_handle, &compositor.ledger);
-        compositor.start_taskbar_services();
-        compositor.start_xwayland(allows_xwayland);
-        for command_line in &compositor.config.settings.session.autostart {
-            compositor.launcher.run(command_line);
-        }
-        compositor.follow_output_changes(&output_changes);
+        compositor.start(allows_xwayland, &output_changes);
         Ok(compositor)
+    }
+
+    /// Starts what runs alongside the compositor once it is made: the
+    /// configuration's watch, the taskbar's services, input devices'
+    /// settings, Xwayland (if `allows_xwayland`), the autostart programs,
+    /// and the outputs' `output_changes`.
+    fn start(&mut self, allows_xwayland: bool, output_changes: &OutputChanges) {
+        self.config_source.watch(&self.loop_handle, &self.ledger);
+        self.start_taskbar_services();
+        if let Backend::Drm(backend) = &mut self.backend {
+            backend.set_input_settings(&self.config.settings.input);
+        }
+        self.start_xwayland(allows_xwayland);
+        for command_line in &self.config.settings.session.autostart {
+            self.launcher.run(command_line);
+        }
+        self.follow_output_changes(output_changes);
     }
 
     /// Returns the configuration in `source`, or the built-in one, with an
@@ -472,6 +481,9 @@ impl Compositor {
         let output_changes = (config.outputs != self.config.outputs)
             .then(|| self.outputs.configure(&config.outputs, &mut self.backend));
         self.backdrop.apply(&config.settings.wallpaper);
+        if let Backend::Drm(backend) = &mut self.backend {
+            backend.set_input_settings(&config.settings.input);
+        }
         // A reload is when icons installed or changed since show.
         self.icons.forget();
         if let Some(taskbar) = &mut self.taskbar {

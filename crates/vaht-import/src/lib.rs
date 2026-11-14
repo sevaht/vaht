@@ -15,6 +15,7 @@
 
 mod apps;
 mod command;
+mod input;
 mod keys;
 mod menu;
 mod outputs;

@@ -155,3 +155,20 @@ autostart = []
 enabled = true
 # An X resources file loaded into Xwayland when it starts, as xrdb does in
 # an X session, such as resources = "~/.Xresources".
+
+[input]
+# How pointing devices behave, as libinput sets them; a setting set
+# nowhere keeps libinput's default. Settings go in scopes, the more
+# specific winning: [input.all] for every device, [input.touchpad] or
+# [input.pointer] (mice, trackballs), and [input.device."<name>"] for one
+# device by the name libinput gives it. The settings: tap, tap_drag,
+# tap_drag_lock, tap_button_map ("lrm" or "lmr"), natural_scroll,
+# left_handed, disable_while_typing, middle_emulation, accel_profile
+# ("flat" or "adaptive"), accel_speed (-1 to 1), scroll_method ("none",
+# "two-finger", "edge" or "button"), scroll_button (a button code, such as
+# 274 for the middle one), click_method ("button-areas" or "click-finger")
+# and send_events ("enabled", "disabled" or "disabled-on-external-mouse").
+# For example:
+#   [input.touchpad]
+#   tap = true
+#   natural_scroll = true

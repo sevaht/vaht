@@ -303,9 +303,10 @@ rest only carries the decisions out.
   to the page flip, reported with the flip's time and sequence; fifo
   barriers lift at the flip, or after the refresh wait of an unchanged
   frame (`frame_pacing.rs`).
-- **Not yet:** per-device input settings (tap to click, natural scrolling,
-  acceleration: fluxland's `session.input.*`, which my config does not
-  use); DRM leasing for headsets; gamma; dmabuf feedback per surface;
+- **Input settings** (`[input]`, 02 §3) are applied to each pointing
+  device as libinput reports it, and to all again on reload
+  (`pointing_devices.rs`, tested with a recording device).
+- **Not yet:** DRM leasing for headsets; gamma; dmabuf feedback per surface;
   tearing (not in this Smithay).
 - **First run on hardware**, from a free terminal: `vaht` (log in
   `~/.local/state/vaht/vaht.log`); Ctrl+Alt+F<n> back to the old terminal

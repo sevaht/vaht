@@ -221,6 +221,20 @@ rest by name, so a setting never silently does nothing:
   (04 §8.1), the pointer an X11 window sees stays in step while it moves
   (04 §8.2), and a window whose Motif hints ask for no decorations gets no
   frame.
+- `[input]` (fluxland's `session.input.*`, which `vaht import` converts):
+  libinput settings for pointing devices, in four scopes, the more specific
+  winning: `[input.all]`, `[input.touchpad]` or `[input.pointer]` (mice,
+  trackballs), and `[input.device."<name>"]` (by libinput's name for the
+  device, or fluxland's form of it with each character but letters and
+  digits made `_`). Settings: `tap`, `tap_drag`, `tap_drag_lock`,
+  `tap_button_map` (`lrm`, `lmr`), `natural_scroll`, `left_handed`,
+  `disable_while_typing`, `middle_emulation`, `accel_profile` (`flat`,
+  `adaptive`), `accel_speed` (-1 to 1), `scroll_method` (`none`,
+  `two-finger`, `edge`, `button`), `scroll_button`, `click_method`
+  (`button-areas`, `click-finger`) and `send_events` (`enabled`,
+  `disabled`, `disabled-on-external-mouse`). A setting set nowhere keeps
+  libinput's default, and one taken out is undone on reload. They apply
+  on the DRM backend; a nested vaht's input is the host's.
 - `theme`: the name of a theme in `themes/` (§10); without it, the built-in
   theme.
 - `[taskbar]`: `enabled`, `output` (the name of the output it shows on,
