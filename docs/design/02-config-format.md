@@ -525,6 +525,8 @@ lid-close = "exec swaylock"
   numbered from 1 left to right then top to bottom: a floating window to
   the same place in proportion, a maximized or tiled one filling its part
   there (Fluxbox's `SendToNextHead`, `SendToPrevHead`, `SetHead`).
+  `toggle-frame` shows the window without its frame, its content staying
+  where it is, or with it again (Fluxbox's `ToggleDecor`).
 - `tile` takes a cell in thousandths of the usable area:
   `tile <x> <y> <width> <height>`, the left half being `tile 0 0 500 1000`.
 - `next-window` and `previous-window` walk windows in the order they last

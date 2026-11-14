@@ -31,7 +31,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "restart",
     "set-setting",
     "taskbar-to-output",
-    "toggle-frame",
     "toggle-taskbar",
     "tray-item-menu",
 ];
@@ -379,6 +378,8 @@ pub(crate) enum WindowManagerAction {
     MarkWindow(String),
     /// Brings forward the window a key marks (`go-to-marked-window <key>`).
     GoToMarkedWindow(String),
+    /// Shows the window without its frame, or with it again.
+    ToggleFrame,
     /// Moves the window to another output (`send-to-output
     /// next|previous|<head>`, heads numbered from 1 left to right).
     SendToOutput(OutputTarget),
@@ -606,6 +607,7 @@ impl WindowManagerAction {
                 Err(format!("`{name}` needs a key, such as `mark-window a`"))
             }
             "mark-window" => Ok(Self::MarkWindow(arguments.to_owned())),
+            "toggle-frame" => without_arguments(Self::ToggleFrame),
             "send-to-output" => match arguments {
                 "next" => Ok(Self::SendToOutput(OutputTarget::Next)),
                 "previous" => Ok(Self::SendToOutput(OutputTarget::Previous)),
@@ -696,6 +698,7 @@ impl fmt::Display for WindowManagerAction {
             Self::FocusDirection(direction) => write!(formatter, "focus-direction {direction}"),
             Self::MarkWindow(key) => write!(formatter, "mark-window {key}"),
             Self::GoToMarkedWindow(key) => write!(formatter, "go-to-marked-window {key}"),
+            Self::ToggleFrame => formatter.write_str("toggle-frame"),
             Self::SendToOutput(OutputTarget::Next) => formatter.write_str("send-to-output next"),
             Self::SendToOutput(OutputTarget::Previous) => {
                 formatter.write_str("send-to-output previous")

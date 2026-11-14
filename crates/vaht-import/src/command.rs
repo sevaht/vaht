@@ -54,7 +54,7 @@ pub(crate) struct FluxboxCommand<'text>(pub(crate) &'text str);
 
 impl FluxboxCommand<'_> {
     /// Fluxbox commands vaht deliberately has no counterpart for.
-    const DROPPED: [&str; 11] = [
+    const DROPPED: [&str; 10] = [
         "activatetab",
         "starttabbing",
         "nexttab",
@@ -63,7 +63,6 @@ impl FluxboxCommand<'_> {
         "movetableft",
         "movetabright",
         "detachclient",
-        "toggledecor",
         "setdecor",
         "setstyle",
     ];
@@ -118,6 +117,7 @@ impl FluxboxCommand<'_> {
             "sethead" if arguments.parse::<std::num::NonZeroUsize>().is_ok() => {
                 with("send-to-output")
             }
+            "toggledecor" => plain("toggle-frame"),
             "focusleft" => plain("focus-direction left"),
             "focusright" => plain("focus-direction right"),
             "focusup" => plain("focus-direction up"),
@@ -358,6 +358,7 @@ mod tests {
         );
         assert_eq!(vaht("SendToNextHead").as_deref(), Ok("send-to-output next"));
         assert_eq!(vaht("SetHead 2").as_deref(), Ok("send-to-output 2"));
+        assert_eq!(vaht("ToggleDecor").as_deref(), Ok("toggle-frame"));
     }
 
     /// Translates `command` and returns the vaht value as TOML text.

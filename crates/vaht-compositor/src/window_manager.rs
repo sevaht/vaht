@@ -500,6 +500,11 @@ impl WindowManager {
             WindowManagerAction::FocusDirection(direction) => self.focus_direction(*direction),
             WindowManagerAction::MarkWindow(key) => self.mark(window, key),
             WindowManagerAction::SendToOutput(target) => self.send_to_output(window, *target),
+            WindowManagerAction::ToggleFrame => {
+                self.change_window(window, |target, _| target.toggle_frame());
+                // Its content stays where it is, or fills its place again.
+                self.refit_placed_windows();
+            }
             WindowManagerAction::GoToMarkedWindow(key) => self.go_to_marked(key),
         }
     }
@@ -1429,6 +1434,27 @@ mod tests {
         desk.run(&action("maximize"));
         desk.run(&action("send-to-output next"));
         assert_eq!(desk.outer(window), right, "maximized there");
+    }
+
+    #[test]
+    fn a_window_shown_without_its_frame_keeps_its_content_still() {
+        let mut desk = Desk::new();
+        let window = desk.open();
+        let content = desk.window(window).content_area();
+        desk.run(&action("toggle-frame"));
+        assert!(!desk.window(window).has_frame());
+        assert_eq!(desk.window(window).content_area(), content);
+        assert_eq!(desk.outer(window), content, "nothing around it");
+        desk.run(&action("maximize"));
+        assert_eq!(
+            desk.window(window).content_area(),
+            output(0).usable,
+            "fills it all"
+        );
+        desk.run(&action("maximize"));
+        desk.run(&action("toggle-frame"));
+        assert!(desk.window(window).has_frame());
+        assert_eq!(desk.window(window).content_area(), content);
     }
 
     #[test]

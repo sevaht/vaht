@@ -86,6 +86,16 @@ pub(crate) struct WindowState {
     pub(crate) is_shaded: bool,
 }
 
+/// Whether vaht frames a window, as `toggle-frame` leaves it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FrameChoice {
+    /// Framed, unless fullscreen or drawing its own.
+    #[default]
+    Framed,
+    /// Never framed.
+    Frameless,
+}
+
 /// A drag of the window in progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DragProgress {
@@ -121,6 +131,8 @@ pub(crate) enum ResizeStyle {
 pub(crate) struct Window {
     /// Its identity.
     id: WindowId,
+    /// Whether vaht frames it.
+    frame_choice: FrameChoice,
     /// What its client last committed.
     committed: CommittedState,
     /// What vaht asks of its client.
@@ -173,6 +185,7 @@ impl Window {
             drag: None,
             placement: Placement::Floating,
             state: WindowState::default(),
+            frame_choice: FrameChoice::Framed,
             workspace,
             awaits_placement: true,
             is_pseudo_transparent: false,
@@ -304,7 +317,9 @@ impl Window {
 
     /// Returns whether it has a frame when placed as `placement`.
     const fn is_framed_when(&self, placement: &Placement) -> bool {
-        !placement.is_fullscreen() && !self.committed.is_self_decorated
+        !placement.is_fullscreen()
+            && !self.committed.is_self_decorated
+            && matches!(self.frame_choice, FrameChoice::Framed)
     }
 
     /// Returns where its content goes when its frame (if it has one when
@@ -482,6 +497,16 @@ impl Window {
     /// Rolls the window up into its titlebar, or down again.
     pub(crate) const fn set_shaded(&mut self, is_shaded: bool) {
         self.state.is_shaded = is_shaded;
+    }
+
+    /// Frames the window if it was not framed by choice, or not if it
+    /// was (`toggle-frame`).
+    pub(crate) fn toggle_frame(&mut self) {
+        self.frame_choice = match self.frame_choice {
+            FrameChoice::Framed => FrameChoice::Frameless,
+            FrameChoice::Frameless => FrameChoice::Framed,
+        };
+        self.invalidate_frame();
     }
 
     /// Puts the window on `workspace`.
