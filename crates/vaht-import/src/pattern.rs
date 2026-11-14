@@ -41,10 +41,14 @@ impl<'text> ClientPattern<'text> {
         (matcher, losses)
     }
 
-    /// Adds `criterion` (`workspace=[current]`, `class!=steam`, or a bare
-    /// `workspace`, which means the current one) to `matcher`; returns
+    /// Adds `criterion` (`workspace=[current]`, `class!=steam`, a bare
+    /// `workspace`, which means the current one, or a bare regex, which
+    /// Fluxbox matches against the name property) to `matcher`; returns
     /// whether vaht can match it.
     fn add_criterion(matcher: &mut InlineTable, criterion: &str) -> bool {
+        if !criterion.contains('=') && !criterion.trim().eq_ignore_ascii_case("workspace") {
+            return Self::add_criterion(matcher, &format!("name={criterion}"));
+        }
         let (key, value) = criterion
             .split_once('=')
             .map_or((criterion, "[current]"), |(key, value)| (key, value.trim()));
@@ -63,6 +67,9 @@ impl<'text> ClientPattern<'text> {
             ("class", "fbrun" | "fluxland-run") => Some(("app_id", Value::from(RUN_DIALOG_APP_ID))),
             ("class", text) => Some(("app_id", Self::text_pattern(text))),
             ("title", text) => Some(("title", Self::text_pattern(text))),
+            // WM_CLASS's instance, which vaht does not keep; it is most
+            // often the class (the app id) in other letters.
+            ("name", text) => Some(("app_id", Self::any_case(text))),
             ("minimized", "yes") => Some(("minimized", Value::from(true))),
             ("minimized", "no") => Some(("minimized", Value::from(false))),
             _ => None,
@@ -78,6 +85,14 @@ impl<'text> ClientPattern<'text> {
             matcher.insert(key, value);
         }
         true
+    }
+
+    /// Returns the regular expression `text` as a vaht text pattern that
+    /// matches whole names in any letter case.
+    fn any_case(text: &str) -> Value {
+        let mut regex = InlineTable::new();
+        regex.insert("regex", Value::from(format!("(?i)^(?:{text})$")));
+        Value::InlineTable(regex)
     }
 
     /// Returns a pattern's value as a vaht text pattern: exact if it has
@@ -132,6 +147,8 @@ mod tests {
         "{ workspace = \"current\", not = { app_id = { regex = \"steam.*\" } } }"
     )]
     #[case::exact_class("(class=kitty)", "{ app_id = \"kitty\" }")]
+    #[case::bare_name("(xterm)", "{ app_id = { regex = \"(?i)^(?:xterm)$\" } }")]
+    #[case::name("(name=fire.*)", "{ app_id = { regex = \"(?i)^(?:fire.*)$\" } }")]
     fn patterns_become_matchers(#[case] text: &str, #[case] expected: &str) {
         let (matcher, losses) = ClientPattern::new(text).matcher();
         assert_eq!(losses, []);

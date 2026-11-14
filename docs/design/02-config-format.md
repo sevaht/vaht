@@ -393,6 +393,10 @@ list:
 - All keys must match, so a matcher with several keys means "and".
 - The `{N}` count from Fluxbox patterns is dropped; nothing in my setup uses
   it.
+- `vaht import` turns a bare Fluxbox pattern (`(xterm)`), which Fluxbox
+  matches against the `name` property, and `(name=...)` into an `app_id`
+  regex matched in any letter case (`(?i)^(?:xterm)$`): WM_CLASS's instance
+  is most often its class in other letters, and vaht keeps only the class.
 - Built so far: `app_id`, `title`, `workspace`, `minimized`, `sticky` and
   `not`. The X11 keys, `layer`, `output` and `hidden_from_window_list` come
   with the features they describe.
