@@ -52,6 +52,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
 use smithay::utils::{IsAlive as _, Logical, Point, Rectangle, SERIAL_COUNTER, Serial};
 use smithay::wayland::compositor::{get_parent, is_sync_subsurface};
+use smithay::wayland::dmabuf::DmabufGlobal;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat as _;
 use smithay::wayland::pointer_constraints::{PointerConstraint, with_pointer_constraint};
 use smithay::wayland::selection::data_device::set_data_device_focus;
@@ -307,13 +308,8 @@ impl Compositor {
             .keymap_file();
         let allows_xwayland = options.allows_xwayland;
         let mut backend = Backend::start(options.backend, handle, &display_handle, &ledger)?;
-        if let Some(formats) = backend.dmabuf_formats() {
-            protocols.dmabuf_global = Some(
-                protocols
-                    .dmabuf
-                    .create_global::<Self>(&display_handle, formats),
-            );
-        }
+        protocols.dmabuf_global =
+            Self::dmabuf_global(&mut protocols, &mut backend, &display_handle);
 
         let listener = ClientListener::open(handle, display, &ledger)?;
         let signals = signals
@@ -428,6 +424,25 @@ impl Compositor {
             }
         }
         self.follow_output_changes(output_changes);
+    }
+
+    /// Offers `linux-dmabuf` with what `backend` reads: with feedback on
+    /// the hardware, where surfaces are told which buffers suit them; none
+    /// where the backend takes no GPU buffers.
+    fn dmabuf_global(
+        protocols: &mut ProtocolStates,
+        backend: &mut Backend,
+        display: &DisplayHandle,
+    ) -> Option<DmabufGlobal> {
+        if let Some(feedback) = backend.dmabuf_default_feedback() {
+            return Some(
+                protocols
+                    .dmabuf
+                    .create_global_with_default_feedback::<Self>(display, &feedback),
+            );
+        }
+        let formats = backend.dmabuf_formats()?;
+        Some(protocols.dmabuf.create_global::<Self>(display, formats))
     }
 
     /// Returns the configuration in `source`, or the built-in one, with an

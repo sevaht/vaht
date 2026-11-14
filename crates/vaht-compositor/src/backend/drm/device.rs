@@ -11,11 +11,15 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::gbm::GbmAllocator;
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
 use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
-use smithay::backend::drm::{DrmDeviceFd, DrmEventMetadata, DrmNode, VrrSupport};
+use smithay::backend::drm::{DrmDeviceFd, DrmEventMetadata, DrmNode, DrmSurface, VrrSupport};
+use smithay::backend::renderer::ImportDma as _;
+use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1::TrancheFlags;
+use smithay::wayland::dmabuf::DmabufFeedbackBuilder;
 use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::output::{Mode as OutputModeInfo, Output, PhysicalProperties};
 use smithay::reexports::drm::control::{Device as _, Mode, ModeTypeFlags, connector, crtc};
@@ -32,6 +36,7 @@ use crate::config::{OutputMode, Vrr};
 use crate::event_source::{EventSource, Timer};
 use crate::gamma::GammaRamps;
 use crate::presentation;
+use crate::scene::SurfaceDmabufFeedback;
 use crate::scene::{self, OutputElement, Scene};
 
 /// How a GPU's outputs are driven.
@@ -87,6 +92,9 @@ pub(super) struct Screen {
     is_powered: bool,
     /// The colors a night-light tool set, if one did.
     gamma: Option<GammaRamps>,
+    /// What clients on it are told of buffers, as their surfaces are
+    /// scanned out or composited.
+    dmabuf_feedback: Option<SurfaceDmabufFeedback>,
 }
 
 /// What a GPU device needs from the rest of the backend to change its
@@ -96,6 +104,10 @@ pub(super) struct DeviceContext<'context, 'renderer> {
     pub(super) display: &'context DisplayHandle,
     /// A renderer for this device.
     pub(super) renderer: &'context mut DrmRenderer<'renderer>,
+    /// The primary GPU, and the one rendering for this device.
+    pub(super) nodes: (DrmNode, DrmNode),
+    /// The formats the primary GPU's renderer reads.
+    pub(super) primary_formats: &'context FormatSet,
 }
 
 impl GpuDevice {
@@ -258,6 +270,8 @@ impl GpuDevice {
                 return None;
             }
         };
+        let dmabuf_feedback = drm_output
+            .with_compositor(|compositor| Self::dmabuf_feedback(context, compositor.surface()));
         let global = output.create_global::<Compositor>(context.display);
         tracing::info!(connector = name, mode = ?output_mode, "monitor set up");
         self.screens.insert(
@@ -271,9 +285,87 @@ impl GpuDevice {
                 throttle: None,
                 is_powered: true,
                 gamma: None,
+                dmabuf_feedback,
             },
         );
         Some(output)
+    }
+
+    /// The `linux-dmabuf` versions a tranche for another GPU's sampling
+    /// is sent to, as Smithay's own compositor has them.
+    const SAMPLING_VERSIONS: std::ops::RangeInclusive<u32> = 3..=6;
+
+    /// The `linux-dmabuf` versions the scan-out tranches are sent to.
+    const SCANOUT_VERSIONS: std::ops::RangeInclusive<u32> = 4..=6;
+
+    /// Returns the `linux-dmabuf` feedback for client surfaces on the
+    /// display `surface` drives, as `context`'s GPUs read and its planes
+    /// scan out: the scan-out tranche lists only formats the renderer
+    /// reads too, so a buffer that cannot go on a plane can always be
+    /// drawn instead.
+    fn dmabuf_feedback(
+        context: &DeviceContext<'_, '_>,
+        surface: &DrmSurface,
+    ) -> Option<SurfaceDmabufFeedback> {
+        let (primary, render_node) = context.nodes;
+        let render_formats = context.renderer.dmabuf_formats();
+        let readable: FormatSet = context
+            .primary_formats
+            .iter()
+            .chain(render_formats.iter())
+            .copied()
+            .collect();
+        let planes = surface.planes();
+        let plane_formats: FormatSet = surface
+            .plane_info()
+            .formats
+            .iter()
+            .copied()
+            .chain(
+                planes
+                    .overlay
+                    .iter()
+                    .flat_map(|plane| plane.formats.iter().copied()),
+            )
+            .collect::<FormatSet>()
+            .intersection(&readable)
+            .copied()
+            .collect();
+        let builder = DmabufFeedbackBuilder::new(primary.dev_id(), context.primary_formats.clone());
+        let render = if render_node == primary {
+            builder.clone().build()
+        } else {
+            builder
+                .clone()
+                .add_preference_tranche(
+                    render_node.dev_id(),
+                    TrancheFlags::Sampling,
+                    render_formats.clone(),
+                    Self::SAMPLING_VERSIONS,
+                )
+                .build()
+        };
+        let scanout = builder
+            .add_preference_tranche(
+                surface.device_fd().dev_id().ok()?,
+                TrancheFlags::Scanout,
+                plane_formats,
+                Self::SCANOUT_VERSIONS,
+            )
+            .add_preference_tranche(
+                render_node.dev_id(),
+                TrancheFlags::Sampling,
+                render_formats,
+                Self::SCANOUT_VERSIONS,
+            )
+            .build();
+        match (render, scanout) {
+            (Ok(render), Ok(scanout)) => Some(SurfaceDmabufFeedback { render, scanout }),
+            (Err(error), _) | (_, Err(error)) => {
+                tracing::warn!(%error, "no dmabuf feedback for the monitor");
+                None
+            }
+        }
     }
 
     /// Returns whether the connector `handle` says its monitor is not for
@@ -576,6 +668,9 @@ impl Screen {
             )
             .map_err(|error| RenderError::Hardware(error.to_string()))?;
         let is_changed = !result.is_empty;
+        if let Some(dmabuf_feedback) = &self.dmabuf_feedback {
+            scene.send_dmabuf_feedback(&self.output, dmabuf_feedback, &result.states);
+        }
         if is_changed {
             let feedback = scene.presentation_feedback(&self.output, &result.states);
             self.drm_output

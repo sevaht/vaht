@@ -397,7 +397,14 @@ rest only carries the decisions out.
 - **Input settings** (`[input]`, 02 §3) are applied to each pointing
   device as libinput reports it, and to all again on reload
   (`pointing_devices.rs`, tested with a recording device).
-- **Not yet:** DRM leasing for headsets; dmabuf feedback per surface;
+- **Direct scan-out.** Each monitor builds `linux-dmabuf` feedback from
+  its planes when it connects (`device.rs`): after each frame, a surface
+  the frame put straight on a plane (a fullscreen game) is told the
+  formats those planes take first, so it keeps drawing buffers that need
+  no copy; the rest are told what the renderer reads. The scan-out
+  tranche lists only formats the renderer reads too, so a buffer that
+  cannot go on a plane is drawn instead.
+- **Not yet:** DRM leasing for headsets;
   tearing (not in this Smithay).
 - **First run on hardware**, from a free terminal: `vaht` (log in
   `~/.local/state/vaht/vaht.log`); Ctrl+Alt+F<n> back to the old terminal

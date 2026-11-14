@@ -27,6 +27,7 @@ use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
+use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{AsRenderElements as _, Element as _};
 use smithay::backend::renderer::element::{
@@ -34,14 +35,16 @@ use smithay::backend::renderer::element::{
 };
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::utils::{
-    OutputPresentationFeedback, surface_presentation_feedback_flags_from_states,
-    surface_primary_scanout_output, take_presentation_feedback_surface_tree,
-    under_from_surface_tree, update_surface_primary_scanout_output, with_surfaces_surface_tree,
+    OutputPresentationFeedback, send_dmabuf_feedback_surface_tree,
+    surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
+    take_presentation_feedback_surface_tree, under_from_surface_tree,
+    update_surface_primary_scanout_output, with_surfaces_surface_tree,
 };
 use smithay::desktop::{PopupManager, WindowSurfaceType, layer_map_for_output};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Physical, Point, Scale};
+use smithay::wayland::dmabuf::DmabufFeedback;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::xwayland::X11Surface;
 
@@ -211,6 +214,16 @@ pub(crate) struct Scene<'state> {
     pointer: Option<(&'state Cursor, Point<f64, Logical>)>,
 }
 
+/// The `linux-dmabuf` feedback for a client surface on one output.
+#[derive(Debug, Clone)]
+pub(crate) struct SurfaceDmabufFeedback {
+    /// For a surface vaht composites: formats the renderer reads.
+    pub(crate) render: DmabufFeedback,
+    /// For a surface put straight on a display plane: formats the plane
+    /// takes, first.
+    pub(crate) scanout: DmabufFeedback,
+}
+
 /// What vaht draws itself: the windows' frames, the taskbar, the menus and
 /// a resize's outline over the windows, and the wallpaper beneath them.
 #[derive(Debug, Clone, Copy)]
@@ -336,6 +349,29 @@ impl<'state> Scene<'state> {
             );
         }
         feedback
+    }
+
+    /// Tells each client surface shown mostly on `output` which buffers
+    /// suit it now (`linux-dmabuf` feedback): one the frame just put
+    /// straight on a display plane (`states`) is told the formats that
+    /// plane takes, so a fullscreen game keeps drawing buffers that can be
+    /// scanned out without a copy; the rest, those vaht composites.
+    pub(crate) fn send_dmabuf_feedback(
+        &self,
+        output: &Output,
+        feedback: &SurfaceDmabufFeedback,
+        states: &RenderElementStates,
+    ) {
+        for root in self.client_surfaces(output) {
+            send_dmabuf_feedback_surface_tree(
+                &root,
+                output,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    select_dmabuf_feedback(surface, states, &feedback.render, &feedback.scanout)
+                },
+            );
+        }
     }
 
     /// Returns the root surfaces of the clients `output` may show, each

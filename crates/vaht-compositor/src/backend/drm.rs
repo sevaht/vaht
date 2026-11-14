@@ -46,6 +46,7 @@ use smithay::reexports::input::Libinput;
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{DeviceFd, Transform};
+use smithay::wayland::dmabuf::{DmabufFeedback, DmabufFeedbackBuilder};
 use smithay::wayland::drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd};
 use smithay::wayland::image_copy_capture::DmabufConstraints;
 
@@ -376,12 +377,19 @@ impl DrmBackend {
             return Vec::new();
         };
         let render_node = device.render_node.unwrap_or(primary);
+        let primary_formats = self
+            .gpus
+            .single_renderer(&primary)
+            .map(|renderer| renderer.dmabuf_formats())
+            .unwrap_or_default();
         let Ok(mut renderer) = self.gpus.single_renderer(&render_node) else {
             return Vec::new();
         };
         let mut context = DeviceContext {
             display: &self.display,
             renderer: &mut renderer,
+            nodes: (primary, render_node),
+            primary_formats: &primary_formats,
         };
         let events = device.scan(&mut context);
         self.schedule_render();
@@ -705,6 +713,17 @@ impl DrmBackend {
         self.gpus
             .single_renderer(&self.primary_gpu)
             .map_err(|error| RenderError::Hardware(error.to_string()))
+    }
+
+    /// Returns the `linux-dmabuf` feedback every client starts from: the
+    /// primary GPU, and the formats its renderer reads.
+    pub(crate) fn dmabuf_default_feedback(&mut self) -> Option<DmabufFeedback> {
+        let primary = self.primary_gpu;
+        let formats = self.renderer().ok()?.dmabuf_formats();
+        DmabufFeedbackBuilder::new(primary.dev_id(), formats)
+            .build()
+            .inspect_err(|error| tracing::warn!(%error, "no dmabuf feedback"))
+            .ok()
     }
 
     /// Returns the GPU buffer formats the primary GPU can import.

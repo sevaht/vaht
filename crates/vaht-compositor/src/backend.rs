@@ -20,6 +20,7 @@ use smithay::reexports::pixman::Image;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::utils::{Rectangle, Transform};
+use smithay::wayland::dmabuf::DmabufFeedback;
 use smithay::wayland::image_copy_capture::DmabufConstraints;
 
 pub(crate) use self::drm::DrmBackend;
@@ -240,6 +241,16 @@ impl Backend {
                 output,
             ),
             Self::Drm(backend) => backend.capture(scene, output),
+        }
+    }
+
+    /// Returns the `linux-dmabuf` feedback clients start from, on the DRM
+    /// backend, where surfaces are then told which buffers suit them as
+    /// they are scanned out or composited; none elsewhere.
+    pub(crate) fn dmabuf_default_feedback(&mut self) -> Option<DmabufFeedback> {
+        match self {
+            Self::Drm(backend) => backend.dmabuf_default_feedback(),
+            Self::Winit(_) | Self::Headless(_) => None,
         }
     }
 
