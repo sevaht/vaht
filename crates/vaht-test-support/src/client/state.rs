@@ -26,6 +26,10 @@ use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
 use smithay_client_toolkit::reexports::client::{Connection, QueueHandle};
 use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation::{self, WpPresentation};
+use smithay_client_toolkit::reexports::protocols::wp::fifo::v1::client::wp_fifo_manager_v1::WpFifoManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::fifo::v1::client::wp_fifo_v1::WpFifoV1;
+use smithay_client_toolkit::reexports::protocols::wp::commit_timing::v1::client::wp_commit_timing_manager_v1::WpCommitTimingManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::commit_timing::v1::client::wp_commit_timer_v1::WpCommitTimerV1;
 use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation_feedback::{self, WpPresentationFeedback};
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1;
@@ -256,6 +260,10 @@ macro_rules! ignore_events {
 
 ignore_events!(
     wl_seat::WlSeat,
+    WpFifoManagerV1,
+    WpFifoV1,
+    WpCommitTimingManagerV1,
+    WpCommitTimerV1,
     ExtSessionLockManagerV1,
     ExtIdleNotifierV1,
     ZwpIdleInhibitManagerV1,

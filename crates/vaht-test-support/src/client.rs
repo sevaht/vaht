@@ -25,6 +25,10 @@ use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::cli
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::ZwpRelativePointerV1;
 use smithay_client_toolkit::reexports::client::{Connection, EventQueue};
 use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation::WpPresentation;
+use smithay_client_toolkit::reexports::protocols::wp::fifo::v1::client::wp_fifo_manager_v1::WpFifoManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::fifo::v1::client::wp_fifo_v1::WpFifoV1;
+use smithay_client_toolkit::reexports::protocols::wp::commit_timing::v1::client::wp_commit_timing_manager_v1::WpCommitTimingManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::commit_timing::v1::client::wp_commit_timer_v1::WpCommitTimerV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
 use smithay_client_toolkit::shell::WaylandSurface as _;
@@ -126,6 +130,12 @@ pub struct TestClient {
     session_lock: Option<ExtSessionLockV1>,
     /// Says when frames showed.
     presentation: WpPresentation,
+    /// Paces frames (fifo).
+    fifo_manager: WpFifoManagerV1,
+    /// Times frames (commit timing).
+    commit_timing: WpCommitTimingManagerV1,
+    /// Each window's fifo and commit timer, by window, once asked for.
+    pacing: Vec<(usize, WpFifoV1, WpCommitTimerV1)>,
 }
 
 /// How vaht reported a frame (`wp_presentation`).
@@ -183,6 +193,9 @@ impl TestClient {
         let presentation: WpPresentation = globals
             .bind(&handle, 1..=1, PresentationEvents)
             .expect("vaht offers wp_presentation");
+        let fifo_manager: WpFifoManagerV1 = bind(&globals, &handle, "wp_fifo_manager_v1");
+        let commit_timing: WpCommitTimingManagerV1 =
+            bind(&globals, &handle, "wp_commit_timing_manager_v1");
         let mut state = ClientState::bind(&globals, &handle);
         // Learn the outputs before anything needs them.
         queue
@@ -203,7 +216,82 @@ impl TestClient {
             session_locks,
             session_lock: None,
             presentation,
+            fifo_manager,
+            commit_timing,
+            pacing: Vec::new(),
         }
+    }
+
+    /// Redraws window `index` once for each of `colors`, as fast as it
+    /// can, each frame waiting for the last to show (fifo, as Vulkan's
+    /// FIFO present mode does); returns how vaht reported the last frame.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, or the connection to vaht fails.
+    pub fn redraw_paced(&mut self, index: usize, colors: &[[u8; 3]]) -> Presentation {
+        let handle = self.queue.handle();
+        let surface = self.state.windows[index].wl_surface().clone();
+        let (fifo, _) = self.pacing_of(index);
+        self.state.presentation = None;
+        for (number, color) in colors.iter().enumerate() {
+            fifo.wait_barrier();
+            fifo.set_barrier();
+            if number + 1 == colors.len() {
+                let _feedback = self
+                    .presentation
+                    .feedback(&surface, &handle, FeedbackEvents);
+            }
+            self.state.fill(&surface, &handle, WINDOW_SIZE, *color);
+        }
+        self.wait_for_presentation()
+    }
+
+    /// Redraws window `index` all `color`, to show no sooner than `at` (by
+    /// the monotonic clock: commit timing); returns how vaht reported the
+    /// frame.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, or the connection to vaht fails.
+    pub fn redraw_at(&mut self, index: usize, color: [u8; 3], at: Duration) -> Presentation {
+        let handle = self.queue.handle();
+        let surface = self.state.windows[index].wl_surface().clone();
+        let (_, timer) = self.pacing_of(index);
+        let seconds = at.as_secs();
+        timer.set_timestamp(
+            u32::try_from(seconds >> 32).expect("a 64-bit time's high half"),
+            u32::try_from(seconds & u64::from(u32::MAX)).expect("a 64-bit time's low half"),
+            at.subsec_nanos(),
+        );
+        self.state.presentation = None;
+        let _feedback = self
+            .presentation
+            .feedback(&surface, &handle, FeedbackEvents);
+        self.state.fill(&surface, &handle, WINDOW_SIZE, color);
+        self.wait_for_presentation()
+    }
+
+    /// Waits for vaht to report the frame asked about, and returns how.
+    fn wait_for_presentation(&mut self) -> Presentation {
+        let is_reported =
+            self.dispatch_for(crate::wait::PATIENCE, |state| state.presentation.is_some());
+        assert!(is_reported, "vaht never reported the frame");
+        self.state.presentation.expect("vaht reported the frame")
+    }
+
+    /// Returns window `index`'s fifo and commit timer, made the first time
+    /// (a surface may have one of each).
+    fn pacing_of(&mut self, index: usize) -> (WpFifoV1, WpCommitTimerV1) {
+        if let Some((_, fifo, timer)) = self.pacing.iter().find(|(known, ..)| *known == index) {
+            return (fifo.clone(), timer.clone());
+        }
+        let handle = self.queue.handle();
+        let surface = self.state.windows[index].wl_surface().clone();
+        let fifo = self.fifo_manager.get_fifo(&surface, &handle, NoEvents);
+        let timer = self.commit_timing.get_timer(&surface, &handle, NoEvents);
+        self.pacing.push((index, fifo.clone(), timer.clone()));
+        (fifo, timer)
     }
 
     /// Redraws window `index` (in opening order) all `color`, and returns
@@ -220,8 +308,7 @@ impl TestClient {
             .presentation
             .feedback(&surface, &handle, FeedbackEvents);
         self.state.fill(&surface, &handle, WINDOW_SIZE, color);
-        self.dispatch_until(|state| state.presentation.is_some());
-        self.state.presentation.expect("vaht reported the frame")
+        self.wait_for_presentation()
     }
 
     /// Opens `count` windows and waits until each has been shown once.

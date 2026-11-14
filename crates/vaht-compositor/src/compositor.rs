@@ -72,6 +72,7 @@ use crate::cursor::Cursor;
 use crate::event_source::EventSource;
 use crate::execution::{ExecutionContext, Press};
 use crate::focus_target::FocusTarget;
+use crate::frame_pacing::FramePacing;
 use crate::grab::{GrabKind, WindowGrab};
 use crate::idle::IdleInhibitors;
 use crate::input::{self, AfterClick, ButtonPress, Input, KeyPress, PressOutcome};
@@ -125,6 +126,8 @@ pub struct Compositor {
     pub(crate) idle_inhibitors: IdleInhibitors<WlSurface>,
     /// The session lock.
     pub(crate) session_lock: SessionLock,
+    /// Holds back and lets through clients' paced and timed frames.
+    pub(crate) frame_pacing: FramePacing,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -305,6 +308,7 @@ impl Compositor {
             pointer_lock_hint: None,
             idle_inhibitors: IdleInhibitors::default(),
             session_lock: SessionLock::default(),
+            frame_pacing: FramePacing::default(),
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -503,6 +507,9 @@ impl Compositor {
     ) {
         if let Backend::Drm(backend) = &mut self.backend {
             backend.frame_shown(node, crtc, metadata);
+            if let Some(output) = backend.output_on(node, crtc) {
+                self.output_refreshed(&output);
+            }
         }
     }
 
@@ -515,7 +522,64 @@ impl Compositor {
     ) {
         if let Backend::Drm(backend) = &mut self.backend {
             backend.wait_over(node, crtc);
+            if let Some(output) = backend.output_on(node, crtc) {
+                self.output_refreshed(&output);
+            }
         }
+    }
+
+    /// Follows `output` refreshing: the frames of clients using fifo that
+    /// waited for it go on.
+    fn output_refreshed(&mut self, output: &Output) {
+        let roots = self.client_roots();
+        let released = FramePacing::output_refreshed(&roots, output);
+        self.let_frames_go_on(released);
+    }
+
+    /// Follows commits that may have asked for frames at a moment: wakes
+    /// for the earliest.
+    pub(crate) fn follow_timed_frames(&mut self) {
+        let deadline = FramePacing::next_deadline(&self.client_roots());
+        let interval = crate::presentation::frame_interval(self.outputs.primary());
+        self.frame_pacing
+            .wake_for(deadline, interval, (&self.loop_handle, &self.ledger));
+    }
+
+    /// Lets the frames `clients` held back go on: their commits waiting on
+    /// a barrier lifted are applied.
+    fn let_frames_go_on(&mut self, clients: Vec<smithay::reexports::wayland_server::Client>) {
+        let display = self.display_handle.clone();
+        for client in clients {
+            smithay::wayland::compositor::CompositorHandler::client_compositor_state(self, &client)
+                .blocker_cleared(self, &display);
+        }
+    }
+
+    /// Returns the root surface of everything clients may show, shown or
+    /// hidden, each with its subsurfaces beneath it: windows, X programs'
+    /// menus, layer surfaces, lock surfaces, and their popups.
+    fn client_roots(&self) -> Vec<WlSurface> {
+        let mut roots: Vec<WlSurface> = self.toplevels.surfaces().collect();
+        if let Some(xwayland) = &self.xwayland {
+            roots.extend(xwayland.unmanaged().filter_map(X11Surface::wl_surface));
+        }
+        roots.extend(
+            self.layers
+                .iter()
+                .map(|(layer, _)| layer.wl_surface().clone()),
+        );
+        roots.extend(
+            self.session_lock
+                .surfaces()
+                .map(|(_, surface)| surface.clone()),
+        );
+        let popups: Vec<WlSurface> = roots
+            .iter()
+            .flat_map(PopupManager::popups_for_surface)
+            .map(|(popup, _)| popup.wl_surface().clone())
+            .collect();
+        roots.extend(popups);
+        roots
     }
 
     /// Follows the headless backend's outputs file (at `path`) changing:
@@ -1030,6 +1094,11 @@ impl Compositor {
     /// they were shown; hidden windows get no frame callbacks, so they stop
     /// drawing.
     pub(crate) fn render(&mut self) {
+        // Timed frames due by the time this frame shows are let in first.
+        let interval = crate::presentation::frame_interval(self.outputs.primary());
+        let released =
+            FramePacing::release_due(&self.client_roots(), crate::presentation::now() + interval);
+        self.let_frames_go_on(released);
         self.prepare_frames();
         self.update_vrr();
         let scene = Scene::new(
@@ -1088,6 +1157,14 @@ impl Compositor {
         if draws_pointer && self.cursor.is_animated() {
             self.schedule_render();
         }
+        // A monitor refreshes when its page flips; other outputs refresh as
+        // soon as they are drawn.
+        if !matches!(self.backend, Backend::Drm(_)) {
+            for output in self.outputs.iter().cloned().collect::<Vec<_>>() {
+                self.output_refreshed(&output);
+            }
+        }
+        self.follow_timed_frames();
         tracing::trace!("frame drawn");
     }
 

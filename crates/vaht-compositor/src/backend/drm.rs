@@ -492,6 +492,15 @@ impl DrmBackend {
         }
     }
 
+    /// Returns the output GPU `node` shows on `crtc`, if it has one.
+    pub(crate) fn output_on(&self, node: DrmNode, crtc: crtc::Handle) -> Option<Output> {
+        self.devices
+            .get(&node)?
+            .screens
+            .get(&crtc)
+            .map(|screen| screen.output.clone())
+    }
+
     /// Notes that GPU `node`'s output on `crtc` waited out a refresh after
     /// an unchanged frame; draws again if one is due.
     pub(crate) fn wait_over(&mut self, node: DrmNode, crtc: crtc::Handle) {

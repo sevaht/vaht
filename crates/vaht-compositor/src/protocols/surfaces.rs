@@ -6,8 +6,9 @@ use smithay::reexports::wayland_server::Client;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::buffer::BufferHandler;
+use smithay::wayland::commit_timing::CommitTimerStateUserData;
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorHandler, CompositorState, with_states,
+    CompositorClientState, CompositorHandler, CompositorState, add_pre_commit_hook, with_states,
 };
 use smithay::wayland::fractional_scale::{FractionalScaleHandler, with_fractional_scale};
 use smithay::wayland::shm::{ShmHandler, ShmState};
@@ -32,6 +33,23 @@ impl CompositorHandler for Compositor {
             .get_data::<ClientState>()
             .expect("every other client is inserted with a ClientState")
             .compositor_state
+    }
+
+    fn new_surface(&mut self, surface: &WlSurface) {
+        // A commit held until a moment (commit timing) wakes nothing by
+        // itself; vaht looks for the moment once the commit is in. This hook
+        // runs before Smithay's registers the moment, so it asks only
+        // whether the surface was ever timed.
+        add_pre_commit_hook::<Self, _>(surface, |compositor, _, surface| {
+            let is_timed = with_states(surface, |states| {
+                states.data_map.get::<CommitTimerStateUserData>().is_some()
+            });
+            if is_timed {
+                compositor
+                    .frame_pacing
+                    .check_soon(&compositor.loop_handle, &compositor.ledger);
+            }
+        });
     }
 
     fn destroyed(&mut self, _surface: &WlSurface) {

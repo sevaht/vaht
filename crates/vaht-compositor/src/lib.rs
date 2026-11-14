@@ -23,6 +23,7 @@ mod cursor;
 pub mod event_source;
 mod execution;
 mod focus_target;
+mod frame_pacing;
 mod grab;
 mod idle;
 mod input;

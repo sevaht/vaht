@@ -61,6 +61,13 @@ impl Toplevels {
         Some(window)
     }
 
+    /// Returns every toplevel's root surface, shown or not.
+    pub(crate) fn surfaces(&self) -> impl Iterator<Item = WlSurface> {
+        self.by_window
+            .values()
+            .filter_map(|(toplevel, _)| toplevel.wl_surface())
+    }
+
     /// Records that `toplevel` stands for `window`.
     pub(crate) fn insert(&mut self, window: WindowId, toplevel: Toplevel, ledger: &ResourceLedger) {
         self.by_window

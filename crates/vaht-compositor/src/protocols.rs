@@ -23,10 +23,12 @@ mod xdg_shell;
 use smithay::input::SeatState;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::wayland::alpha_modifier::AlphaModifierState;
+use smithay::wayland::commit_timing::CommitTimingManagerState;
 use smithay::wayland::compositor::CompositorState;
 use smithay::wayland::content_type::ContentTypeState;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufState};
+use smithay::wayland::fifo::FifoManagerState;
 use smithay::wayland::fixes::FixesState;
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
@@ -114,6 +116,10 @@ pub(crate) struct ProtocolStates {
     /// `wp_presentation`: clients told when their frames showed, by the
     /// monotonic clock. Held only to keep the global alive.
     _presentation: PresentationState,
+    /// `wp_fifo_manager_v1` and `wp_commit_timing_manager_v1`: frames held
+    /// until the last one showed, or until a moment
+    /// ([`crate::frame_pacing`]). Held only to keep the globals alive.
+    _frame_pacing: (FifoManagerState, CommitTimingManagerState),
     /// `xdg_system_bell_v1` and `xdg_toplevel_tag_manager_v1`: a bell
     /// rung, and a window's tag. Held only to keep the globals alive.
     _window_hints: (XdgSystemBellState, XdgToplevelTagManager),
@@ -205,6 +211,10 @@ impl ProtocolStates {
             _presentation: PresentationState::new::<Compositor>(
                 display,
                 <Monotonic as ClockSource>::ID as u32,
+            ),
+            _frame_pacing: (
+                FifoManagerState::new::<Compositor>(display),
+                CommitTimingManagerState::new::<Compositor>(display),
             ),
             _window_hints: (
                 XdgSystemBellState::new::<Compositor>(display),
