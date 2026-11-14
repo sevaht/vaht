@@ -97,6 +97,9 @@ pub(crate) enum MenuChoice {
         client: u64,
         /// Whether it may.
         is_allowed: bool,
+        /// The program, if the answer is for it from now on, not just
+        /// until vaht exits.
+        from_now_on: Option<String>,
     },
 }
 

@@ -234,8 +234,10 @@ rest by name, so a setting never silently does nothing:
   is pointed at (`LIBEI_SOCKET`); only vaht's own Xwayland may connect.
   Each program, by the name Xwayland gives it (its command, such as
   `steam`), is let in if `allow` names it, refused if `deny` does, and
-  otherwise as `default` says: `ask` (a menu asks; closing it refuses; the
-  answer lasts until vaht exits), `allow` or `deny`. Emulated input is
+  otherwise as `default` says: `ask` (a menu asks; closing it refuses;
+  "Allow" and "Deny" last until vaht exits, "Allow from now on" and "Deny
+  from now on" add the program to `allow` or `deny` as `set-setting`
+  does, which `save-settings` writes), `allow` or `deny`. Emulated input is
   dropped while the session is locked, and what a program holds is let go
   when it stops, leaves or the session locks. X Shape clipping is exact
   (04 §8.1), the pointer an X11 window sees stays in step while it moves

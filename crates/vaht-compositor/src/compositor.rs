@@ -2156,6 +2156,31 @@ impl Compositor {
         self.show_input_emulation_question();
     }
 
+    /// Adds `program` to the programs that may (`is_allowed`) or may not
+    /// emulate input, as a change of the settings in place, which lasts
+    /// across reloads and which `save-settings` writes.
+    fn remember_emulation_answer(&mut self, program: &str, is_allowed: bool) {
+        let settings = &self.config.settings.xwayland.input_emulation;
+        let (list, name) = if is_allowed {
+            (&settings.allow, "allow")
+        } else {
+            (&settings.deny, "deny")
+        };
+        if list.iter().any(|known| known == program) {
+            return;
+        }
+        let programs = list
+            .iter()
+            .map(String::as_str)
+            .chain(std::iter::once(program))
+            .map(|known| toml::Value::String(known.to_owned()))
+            .collect();
+        self.change_setting(SettingChange::new(
+            &["xwayland", "input_emulation", name],
+            &toml::Value::Array(programs),
+        ));
+    }
+
     /// Shows the question about the next program waiting to emulate input,
     /// if no question shows.
     fn show_input_emulation_question(&mut self) {
@@ -2169,15 +2194,25 @@ impl Compositor {
         else {
             return;
         };
-        let choice = |label: &str, is_allowed| MenuItem::Choice {
+        tracing::info!(program, "asking whether a program may emulate input");
+        let choice = |label: &str, is_allowed, is_lasting: bool| MenuItem::Choice {
             label: label.to_owned(),
-            choice: MenuChoice::AnswerInputEmulation { client, is_allowed },
+            choice: MenuChoice::AnswerInputEmulation {
+                client,
+                is_allowed,
+                from_now_on: is_lasting.then(|| program.clone()),
+            },
             mark: None,
             icon: None,
         };
         let model = MenuModel {
             title: Some(format!("Let {program} control the pointer and keys?")),
-            items: vec![choice("Allow", true), choice("Deny", false)],
+            items: vec![
+                choice("Allow", true, false),
+                choice("Allow from now on", true, true),
+                choice("Deny", false, false),
+                choice("Deny from now on", false, true),
+            ],
         };
         let at = self.pointer_location().to_i32_round();
         let bounds = self.output_areas().at(at).usable;
@@ -2578,10 +2613,17 @@ impl Compositor {
                 self.execute(&command, &mut ExecutionContext::for_window(window));
             }
             MenuChoice::Activate(window) => self.window_manager.activate(window),
-            MenuChoice::AnswerInputEmulation { client, is_allowed } => {
+            MenuChoice::AnswerInputEmulation {
+                client,
+                is_allowed,
+                from_now_on,
+            } => {
                 if let Some(emulation) = &mut self.input_emulation {
                     let emulated = emulation.answer(client, is_allowed);
                     self.carry_out_emulated(emulated);
+                }
+                if let Some(program) = from_now_on {
+                    self.remember_emulation_answer(&program, is_allowed);
                 }
             }
         }

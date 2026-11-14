@@ -8,7 +8,7 @@ use std::process::Command;
 use vaht_ipc::{Reply, WindowInfo};
 use vaht_test_support::{
     BUTTON_LEFT, Bounds, ClipboardManager, HeadlessVaht, Selection, TestClient, WINDOW_COLOR,
-    X11Client,
+    X11Client, keys,
 };
 
 /// The executable cargo built for these tests.
@@ -409,5 +409,34 @@ fn an_x11_program_refused_input_emulation_cannot_type() {
         desktop.x11.key_codes_pressed(window),
         [56],
         "only the real \"b\", not the emulated \"a\""
+    );
+}
+
+#[test]
+fn allowing_input_emulation_from_now_on_is_a_setting_save_settings_keeps() {
+    let (mut desktop, window) = emulating_desktop("default = \"ask\"");
+    desktop.x11.emulate_key(38);
+    desktop
+        .vaht
+        .wait_for_logged("asking whether a program may emulate input", 1);
+    // Allow, Allow from now on, Deny, Deny from now on.
+    desktop.wayland.type_chord(&[keys::DOWN]);
+    desktop.wayland.type_chord(&[keys::DOWN]);
+    desktop.wayland.type_chord(&[keys::ENTER]);
+    desktop.vaht.wait_for_logged("is_allowed=true", 1);
+    desktop.x11.emulate_key(38);
+    assert!(desktop.x11.wait_for_key_press(window), "allowed now");
+
+    let output = Command::new(EXECUTABLE)
+        .args(["msg", "run", "save-settings"])
+        .env(vaht_ipc::SOCKET_VARIABLE, desktop.vaht.ipc_socket())
+        .output()
+        .expect("vaht msg runs");
+    assert!(output.status.success(), "{output:?}");
+    let settings = std::fs::read_to_string(desktop.vaht.config_directory().join("settings.toml"))
+        .expect("the settings are there");
+    assert!(
+        settings.contains("[xwayland.input_emulation]\ndefault = \"ask\"\nallow = ["),
+        "{settings}"
     );
 }
