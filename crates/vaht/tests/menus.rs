@@ -186,3 +186,39 @@ fn the_window_list_shows_each_window_s_icon() {
         [0x00, 0xff, 0x00]
     );
 }
+
+#[test]
+fn a_menu_item_shows_the_icon_it_names_or_the_image_it_points_to() {
+    let green = [0x00, 0xff, 0x00];
+    let red = [0xff, 0x00, 0x00];
+    let menus = "[menu.root]\ntitle = \"test\"\nitems = [\n\
+                 { label = \"Named\", command = \"exec true\", icon = \"vaht-test-icon\" },\n\
+                 { label = \"File\", command = \"exec true\", icon = \"./red.png\" },\n\
+                 { label = \"None\", command = \"exec true\" },\n]\n\
+                 [menu.window]\nitems = []\n[menu.workspace]\nitems = []\n";
+    let vaht = HeadlessVaht::start_with_files(
+        Path::new(EXECUTABLE),
+        &[
+            ("menus.toml", menus.as_bytes()),
+            ("bindings.toml", b"[keys]\nF1 = \"root-menu\"\n"),
+            ("red.png", &vaht_test_support::solid_png(32, red)),
+        ],
+        &[(
+            "icons/hicolor/32x32/apps/vaht-test-icon.png",
+            &vaht_test_support::solid_png(32, green),
+        )],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.move_pointer_to(OPENED_AT.0, OPENED_AT.1);
+    client.type_chord(&[keys::F1]);
+    let screenshot = client.screenshot();
+    let icon_spot = |index: u32| {
+        screenshot.rgb(
+            OPENED_AT.0 + BORDER + 4,
+            OPENED_AT.1 + BORDER + TITLE_HEIGHT + BORDER + index * ITEM_HEIGHT + ITEM_HEIGHT / 2,
+        )
+    };
+    assert_eq!(icon_spot(0), green, "the icon theme's");
+    assert_eq!(icon_spot(1), red, "the image file");
+    assert_eq!(icon_spot(2), MENU_BODY, "no icon");
+}

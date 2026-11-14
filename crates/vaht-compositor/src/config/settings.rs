@@ -543,7 +543,7 @@ impl XwaylandSettings {
 /// Returns the file `path` a setting names: `~/` read as the home
 /// directory, and a relative path taken from `config_directory`; none for
 /// `~/` with no home.
-fn file_path(path: &str, config_directory: &Path) -> Option<PathBuf> {
+pub(super) fn file_path(path: &str, config_directory: &Path) -> Option<PathBuf> {
     match path.strip_prefix("~/") {
         Some(rest) => Some(PathBuf::from(std::env::var_os("HOME")?).join(rest)),
         None => Some(config_directory.join(path)),

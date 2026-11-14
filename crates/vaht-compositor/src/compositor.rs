@@ -2543,7 +2543,9 @@ impl Compositor {
         }
         let window = window.or_else(|| self.window_manager.focused());
         let icons = self.window_icons_for_menus();
+        let named_icons = self.named_icons_for_menus();
         let builder = MenuBuilder::new(&self.config.menus, &self.window_manager, window)
+            .with_named_icons(named_icons)
             .with_themes(
                 ThemeFile::available(self.config_source.directory()),
                 self.config.settings.theme.as_deref(),
@@ -2594,6 +2596,22 @@ impl Compositor {
         self.window_manager
             .windows_top_down()
             .filter_map(|window| Some((window.id(), window.icon_in(&mut self.icons, size)?)))
+            .collect()
+    }
+
+    /// Returns the icons `menus.toml` names, by the name written, those
+    /// found, sized for menu items.
+    fn named_icons_for_menus(&mut self) -> std::collections::HashMap<String, vaht_ui::Icon> {
+        let size = vaht_ui::WidgetIcon::side(self.config.theme.metrics().menu.item_height);
+        let directory = self.config_source.directory();
+        self.config
+            .menus
+            .icons()
+            .into_iter()
+            .filter_map(|icon| {
+                let lookup = Menus::icon_lookup(icon, directory)?;
+                Some((icon.to_owned(), self.icons.named(&lookup, size)?))
+            })
             .collect()
     }
 

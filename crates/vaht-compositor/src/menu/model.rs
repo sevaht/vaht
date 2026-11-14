@@ -118,6 +118,8 @@ pub(crate) struct MenuBuilder<'state> {
     current_theme: Option<&'state str>,
     /// Each window's icon, for lists of windows that show them.
     window_icons: HashMap<WindowId, vaht_ui::Icon>,
+    /// The icons `menus.toml` names, by the name written, those found.
+    named_icons: HashMap<String, vaht_ui::Icon>,
     /// The profiles and outputs, for the `profiles` and `outputs` lists.
     outputs: OutputChoices,
 }
@@ -161,6 +163,7 @@ impl<'state> MenuBuilder<'state> {
             themes: Vec::new(),
             current_theme: None,
             window_icons: HashMap::new(),
+            named_icons: HashMap::new(),
             outputs: OutputChoices::default(),
         }
     }
@@ -169,6 +172,13 @@ impl<'state> MenuBuilder<'state> {
     #[must_use]
     pub(crate) fn with_outputs(mut self, choices: OutputChoices) -> Self {
         self.outputs = choices;
+        self
+    }
+
+    /// Returns the builder showing `icons`, by the name `menus.toml`
+    /// writes, beside the items naming them.
+    pub(crate) fn with_named_icons(mut self, icons: HashMap<String, vaht_ui::Icon>) -> Self {
+        self.named_icons = icons;
         self
     }
 
@@ -209,14 +219,20 @@ impl<'state> MenuBuilder<'state> {
         let mut items = Vec::new();
         for entry in &definition.items {
             match entry {
-                MenuEntry::Command { label, command } => items.push(MenuItem::Choice {
+                MenuEntry::Command {
+                    label,
+                    command,
+                    icon,
+                } => items.push(MenuItem::Choice {
                     label: label.clone(),
                     choice: MenuChoice::Run {
                         command: command.clone(),
                         window: self.window,
                     },
                     mark: None,
-                    icon: None,
+                    icon: icon
+                        .as_ref()
+                        .and_then(|name| self.named_icons.get(name).cloned()),
                 }),
                 MenuEntry::Submenu { label, menu } => {
                     if depth >= Self::MAX_DEPTH {

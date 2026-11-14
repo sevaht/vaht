@@ -729,8 +729,11 @@ items = [
   one back. `[menus] window_icons` (from `clientMenu.usePixmap`) shows
   each window's icon in lists of windows. `generate` also lists the
   display profiles (`profiles`, the one applied checked) and the outputs
-  (`outputs`, choosing one makes it primary). Not yet: `pipe`, `icon`,
-  and the GTK presenter.
+  (`outputs`, choosing one makes it primary). An item running a command
+  may show an `icon`: an icon theme's name for it (`firefox`), or an image
+  file if it has a `/` in it (`~/` is the home directory, a relative path
+  is from the configuration directory); Fluxbox's `<icon>` on `[exec]`
+  converts. Not yet: icons on other items, `pipe`, and the GTK presenter.
 - **Dropped:**
   - Fluxbox's `[config]` editor menu: settings are reached through
     `set-setting`.

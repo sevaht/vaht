@@ -219,12 +219,23 @@ impl MenuFiles {
                 }
                 "end" => break,
                 _ => {
-                    if line.icon.is_some() {
-                        report.note(file, line.line, Reason::NotYetInVaht, "menu icons");
+                    let Some(mut item) = self.convert_item(file, line, reading, report) else {
+                        continue;
+                    };
+                    if let Some(icon) = &line.icon {
+                        match item.as_inline_table_mut() {
+                            Some(table) if table.contains_key("command") => {
+                                table.insert("icon", Value::from(icon.as_str()));
+                            }
+                            _ => report.note(
+                                file,
+                                line.line,
+                                Reason::NotYetInVaht,
+                                "icons on items other than commands",
+                            ),
+                        }
                     }
-                    if let Some(item) = self.convert_item(file, line, reading, report) {
-                        items.push(item);
-                    }
+                    items.push(item);
                 }
             }
         }
@@ -432,6 +443,12 @@ mod tests {
             "{menus}"
         );
         assert!(
+            menus.contains(
+                "{ label = \"xterm\", command = \"exec xterm\", icon = \"~/icons/xterm.png\" }"
+            ),
+            "{menus}"
+        );
+        assert!(
             menus.contains("{ label = \"Misc\", submenu = \"misc\" }"),
             "{menus}"
         );
@@ -466,11 +483,10 @@ mod tests {
             notes,
             [
                 (2, Reason::Dropped),
-                (5, Reason::NotYetInVaht),
                 (8, Reason::Dropped),
                 (15, Reason::Dropped),
             ],
-            "encoding, the icon, config, endencoding ([restart] reloads)"
+            "encoding, config, endencoding ([restart] reloads)"
         );
     }
 

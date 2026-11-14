@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::path::Path;
 
 use serde::de::{self, Deserializer};
 
@@ -43,6 +44,38 @@ impl Menus {
                 | MenuEntry::Inert { .. } => None,
             })
         })
+    }
+
+    /// Returns the icons the menus' items name, each once.
+    pub(crate) fn icons(&self) -> Vec<&str> {
+        let mut icons: Vec<&str> = self
+            .by_name
+            .values()
+            .flat_map(|menu| &menu.items)
+            .filter_map(|entry| match entry {
+                MenuEntry::Command { icon, .. } => icon.as_deref(),
+                MenuEntry::Submenu { .. }
+                | MenuEntry::Toggle { .. }
+                | MenuEntry::Generate { .. }
+                | MenuEntry::Separator
+                | MenuEntry::Inert { .. } => None,
+            })
+            .collect();
+        icons.sort_unstable();
+        icons.dedup();
+        icons
+    }
+
+    /// Returns what to look the icon `icon` up by: a theme's icon name as
+    /// it is, or a file's path, `~/` read as the home directory and a
+    /// relative path taken from `config_directory`.
+    pub(crate) fn icon_lookup(icon: &str, config_directory: &Path) -> Option<String> {
+        if icon.contains('/') {
+            super::settings::file_path(icon, config_directory)
+                .map(|path| path.display().to_string())
+        } else {
+            Some(icon.to_owned())
+        }
     }
 
     /// Returns the menu named `name`, if there is one.
@@ -111,6 +144,9 @@ pub(crate) enum MenuEntry {
         label: String,
         /// What it runs.
         command: Command,
+        /// The icon shown beside it: an icon theme's name for it, or an
+        /// image file.
+        icon: Option<String>,
     },
     /// Opens another menu.
     Submenu {
@@ -167,11 +203,18 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
             /// Whether a generated list stands in place.
             #[serde(default)]
             inline: bool,
+            /// A command's icon.
+            icon: Option<String>,
         }
 
         let file = EntryFile::deserialize(deserializer)?;
         if file.inline && file.generate.is_none() {
             return Err(de::Error::custom("only a generated list can be inline"));
+        }
+        if file.icon.is_some() && file.command.is_none() {
+            return Err(de::Error::custom(
+                "only an item running a command shows an icon",
+            ));
         }
         let entry = match (
             file.command,
@@ -190,7 +233,11 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
                         ));
                     }
                 };
-                Self::Command { label, command }
+                Self::Command {
+                    label,
+                    command,
+                    icon: file.icon,
+                }
             }
             (None, Some(menu), None, None, false) => Self::Submenu {
                 label: file.label.unwrap_or_else(|| menu.clone()),
@@ -384,7 +431,8 @@ mod tests {
             [
                 MenuEntry::Command {
                     label: "kitty".to_owned(),
-                    command: Command::Run(Action::Exec("kitty".to_owned()))
+                    command: Command::Run(Action::Exec("kitty".to_owned())),
+                    icon: None,
                 },
                 MenuEntry::Submenu {
                     label: "More".to_owned(),
@@ -405,7 +453,8 @@ mod tests {
                 },
                 MenuEntry::Command {
                     label: "reload".to_owned(),
-                    command: Command::Run(Action::Reload)
+                    command: Command::Run(Action::Reload),
+                    icon: None,
                 },
             ]
         );
@@ -422,6 +471,10 @@ mod tests {
     )]
     #[case::unknown_list("[menu.root]\nitems = [{ generate = \"pets\" }]\n", "no list")]
     #[case::empty_item("[menu.root]\nitems = [{}]\n", "needs a label")]
+    #[case::icon_without_a_command(
+        "[menu.root]\nitems = [{ separator = true, icon = \"x\" }]\n",
+        "only an item running a command"
+    )]
     fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {
         let error = read(text).expect_err(text);
         assert!(error.message().contains(expected), "{error}");
