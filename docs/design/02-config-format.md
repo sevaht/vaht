@@ -226,8 +226,17 @@ rest by name, so a setting never silently does nothing:
   setting (tests use it). `resources` names an X resources file
   (`~/.Xresources`; a relative path is from the configuration directory)
   loaded into Xwayland when it starts, as xrdb does, from fluxland's
-  `session.xwayland.resources`. Not yet: input emulation for X11 programs
-  (`session.xwayland.inputEmulation`, an EIS server for Steam Input). X Shape clipping is exact
+  `session.xwayland.resources`. `[xwayland.input_emulation]` (fluxland's
+  `session.xwayland.inputEmulation` and its `.allow` and `.deny`, which
+  `vaht import` converts): X programs' XTest input (Steam Input's desktop
+  controls, xdotool) reaches the session through an EIS server Xwayland
+  is pointed at (`LIBEI_SOCKET`); only vaht's own Xwayland may connect.
+  Each program, by the name Xwayland gives it (its command, such as
+  `steam`), is let in if `allow` names it, refused if `deny` does, and
+  otherwise as `default` says: `ask` (a menu asks; closing it refuses; the
+  answer lasts until vaht exits), `allow` or `deny`. Emulated input is
+  dropped while the session is locked, and what a program holds is let go
+  when it stops, leaves or the session locks. X Shape clipping is exact
   (04 §8.1), the pointer an X11 window sees stays in step while it moves
   (04 §8.2), and a window whose Motif hints ask for no decorations gets no
   frame.

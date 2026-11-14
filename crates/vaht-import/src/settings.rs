@@ -163,12 +163,44 @@ impl InitFile {
             }
         }
         self.convert_activation_environment(report);
+        self.convert_input_emulation(report);
         self.accept_what_vaht_does();
         self.report_unused(report);
         InitConversion {
             settings: self.document,
             outputs: outputs.document(),
             switches,
+        }
+    }
+
+    /// Which X programs may emulate input:
+    /// `session.xwayland.inputEmulation` (`ask`, `allow`, `deny`) and its
+    /// `.allow` and `.deny` lists (names split by spaces or commas).
+    fn convert_input_emulation(&mut self, report: &mut Report) {
+        const PREFIX: &str = "session.xwayland.inputEmulation";
+        if let Some(resource) = self.resources.get(PREFIX).cloned() {
+            let value = resource.value.to_ascii_lowercase();
+            match value.as_str() {
+                "ask" | "allow" | "deny" => self.set(
+                    &["xwayland", "input_emulation", "default"],
+                    Value::from(value.as_str()),
+                ),
+                _ => self.note(
+                    report,
+                    resource.line,
+                    format!("{PREFIX} = {}", resource.value),
+                ),
+            }
+        }
+        for list in ["allow", "deny"] {
+            let Some(names) = self.resources.value(&format!("{PREFIX}.{list}")) else {
+                continue;
+            };
+            let names: Array = names
+                .split(|character: char| character == ',' || character.is_whitespace())
+                .filter(|name| !name.is_empty())
+                .collect();
+            self.set(&["xwayland", "input_emulation", list], Value::Array(names));
         }
     }
 
@@ -883,6 +915,21 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    #[test]
+    fn input_emulation_is_converted() {
+        let init = "session.xwayland.inputEmulation.allow:\tsteam, xdotool\n\
+                    session.xwayland.inputEmulation:\tdeny\n";
+        let mut report = Report::default();
+        let document = InitFile::new(Resources::parse(Path::new("init"), init))
+            .convert(&mut report)
+            .settings;
+        assert_eq!(
+            document.to_string(),
+            "[xwayland.input_emulation]\ndefault = \"deny\"\nallow = [\"steam\", \"xdotool\"]\n"
+        );
+        assert!(report.notes().is_empty(), "{report}");
+    }
 
     #[test]
     fn the_activation_environment_setting_is_converted() {

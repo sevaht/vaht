@@ -19,6 +19,7 @@ jiff.workspace = true
 nix.workspace = true
 procfs.workspace = true
 regex.workspace = true
+reis.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 smithay.workspace = true

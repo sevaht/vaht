@@ -12,6 +12,7 @@
 mod shape;
 
 use std::os::fd::OwnedFd;
+use std::path::Path;
 use std::process::Stdio;
 
 use smithay::reexports::calloop::LoopHandle;
@@ -69,11 +70,19 @@ impl XwaylandServer {
         handle: &LoopHandle<'static, Compositor>,
         display: &DisplayHandle,
         ledger: &ResourceLedger,
+        input_emulation: Option<&Path>,
     ) -> Result<Self, String> {
+        // XTest input goes to vaht's EIS socket, if it serves one.
+        let environment = input_emulation.map(|socket| {
+            (
+                "LIBEI_SOCKET".to_owned(),
+                socket.to_string_lossy().into_owned(),
+            )
+        });
         let (xwayland, client) = XWayland::spawn(
             display,
             None,
-            std::iter::empty::<(String, String)>(),
+            environment,
             std::iter::empty::<String>(),
             true,
             Stdio::null(),

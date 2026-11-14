@@ -2985,6 +2985,7 @@ dependencies = [
  "procfs",
  "proptest",
  "regex",
+ "reis",
  "rstest",
  "serde",
  "serde_json",

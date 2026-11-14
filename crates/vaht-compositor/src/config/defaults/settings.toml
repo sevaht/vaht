@@ -161,6 +161,16 @@ enabled = true
 # An X resources file loaded into Xwayland when it starts, as xrdb does in
 # an X session, such as resources = "~/.Xresources".
 
+[xwayland.input_emulation]
+# Which X programs may move the pointer and press keys through XTest (Steam
+# Input's desktop controls, xdotool), by the name Xwayland gives them (their
+# command, such as "steam"). Programs in neither list are asked about
+# ("ask"; an answer lasts until vaht exits), let in ("allow", as on Xorg) or
+# refused ("deny").
+default = "ask"
+allow = []
+deny = []
+
 [input]
 # How pointing devices behave, as libinput sets them; a setting set
 # nowhere keeps libinput's default. Settings go in scopes, the more

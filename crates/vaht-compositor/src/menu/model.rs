@@ -90,6 +90,14 @@ pub(crate) enum MenuChoice {
     /// Brings a window forward: shows its workspace, restores it, focuses
     /// and raises it.
     Activate(WindowId),
+    /// Answers whether an X program (its emulating client `client`) may
+    /// emulate input.
+    AnswerInputEmulation {
+        /// The client asked about.
+        client: u64,
+        /// Whether it may.
+        is_allowed: bool,
+    },
 }
 
 /// Makes menus from `menus.toml` and the window manager's state.

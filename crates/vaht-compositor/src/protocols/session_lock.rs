@@ -16,6 +16,8 @@ impl SessionLockHandler for Compositor {
 
     fn lock(&mut self, confirmation: SessionLocker) {
         self.menus.close();
+        // Nothing an X program held stays held behind the lock.
+        self.release_all_emulated();
         self.session_lock.lock(confirmation);
         self.settle();
         self.schedule_render();

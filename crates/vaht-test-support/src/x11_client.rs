@@ -40,8 +40,9 @@ pub struct X11Client {
     wm_delete_window: u32,
     /// The windows vaht asked to close, so far.
     close_requests: Vec<Window>,
-    /// The windows that received a key press, so far.
-    key_presses: Vec<Window>,
+    /// The windows that received a key press, so far, with each key's
+    /// code.
+    key_presses: Vec<(Window, u8)>,
     /// The text this program holds on each selection it owns, by the
     /// selection's atom.
     copied: HashMap<Atom, String>,
@@ -270,6 +271,25 @@ impl X11Client {
         (reply.root_x, reply.root_y)
     }
 
+    /// Waits until the X server has the pointer at `expected` on its
+    /// screen, looking again at each event (the pointer moving over this
+    /// program's windows sends one); returns where it has it in the end.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server does not answer.
+    pub fn wait_for_pointer(&mut self, expected: (i16, i16)) -> (i16, i16) {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let now = self.pointer_position();
+            let left = deadline.saturating_duration_since(Instant::now());
+            if now == expected || left.is_zero() {
+                return now;
+            }
+            self.wait_for_events(left, None);
+        }
+    }
+
     /// Returns the X resources the server holds (`RESOURCE_MANAGER` on the
     /// root window), as X programs read their settings.
     ///
@@ -347,7 +367,11 @@ impl X11Client {
     /// time.
     pub fn wait_for_key_press(&mut self, window: Window) -> bool {
         let deadline = Instant::now() + PATIENCE;
-        while !self.key_presses.contains(&window) {
+        while !self
+            .key_presses
+            .iter()
+            .any(|(pressed, _)| *pressed == window)
+        {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 return false;
@@ -355,6 +379,57 @@ impl X11Client {
             self.wait_for_events(left, None);
         }
         true
+    }
+
+    /// Returns the X keycodes of the keys `window` received so far, in
+    /// order.
+    #[must_use]
+    pub fn key_codes_pressed(&self, window: Window) -> Vec<u8> {
+        self.key_presses
+            .iter()
+            .filter(|(pressed, _)| *pressed == window)
+            .map(|(_, code)| *code)
+            .collect()
+    }
+
+    /// Presses and lets go the key `keycode` (an X keycode: evdev's plus 8)
+    /// through XTest, as Steam Input and xdotool do.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server refuses the request.
+    pub fn emulate_key(&mut self, keycode: u8) {
+        use x11rb::protocol::xtest::ConnectionExt as _;
+        for kind in [
+            x11rb::protocol::xproto::KEY_PRESS_EVENT,
+            x11rb::protocol::xproto::KEY_RELEASE_EVENT,
+        ] {
+            self.connection
+                .xtest_fake_input(kind, keycode, x11rb::CURRENT_TIME, self.root, 0, 0, 0)
+                .expect("the request is sent");
+        }
+        self.connection.flush().expect("the requests are sent");
+    }
+
+    /// Moves the pointer to `(x, y)` on the X screen through XTest.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server refuses the request.
+    pub fn emulate_motion(&mut self, x: i16, y: i16) {
+        use x11rb::protocol::xtest::ConnectionExt as _;
+        self.connection
+            .xtest_fake_input(
+                x11rb::protocol::xproto::MOTION_NOTIFY_EVENT,
+                0,
+                x11rb::CURRENT_TIME,
+                self.root,
+                x,
+                y,
+                0,
+            )
+            .expect("the request is sent");
+        self.connection.flush().expect("the request is sent");
     }
 
     /// Puts `text` on `selection`, owned by `window`, as an X program's
@@ -512,7 +587,9 @@ impl X11Client {
         let aux = CreateWindowAux::new()
             .background_pixel(pixel)
             .override_redirect(u32::from(is_override_redirect))
-            .event_mask(EventMask::STRUCTURE_NOTIFY | EventMask::KEY_PRESS);
+            .event_mask(
+                EventMask::STRUCTURE_NOTIFY | EventMask::KEY_PRESS | EventMask::POINTER_MOTION,
+            );
         self.connection
             .create_window(
                 x11rb::COPY_DEPTH_FROM_PARENT,
@@ -570,7 +647,7 @@ impl X11Client {
                 {
                     self.close_requests.push(message.window);
                 }
-                Event::KeyPress(press) => self.key_presses.push(press.event),
+                Event::KeyPress(press) => self.key_presses.push((press.event, press.detail)),
                 Event::SelectionRequest(request) => self.answer_selection_request(&request),
                 Event::SelectionNotify(notify) => {
                     self.pasted.insert(notify.requestor, notify.property);

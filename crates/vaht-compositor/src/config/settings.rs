@@ -23,6 +23,7 @@ pub(crate) use self::input::{
 pub(crate) use self::taskbar::{
     TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent,
 };
+use crate::input_emulation::InputEmulationSettings;
 use crate::session_environment::ActivationUpdate;
 use crate::window_manager::{
     ColumnDirection, PlacementStrategy, Room, RowDirection, TileCell, TitlebarButton,
@@ -466,6 +467,8 @@ pub(crate) struct XwaylandSettings {
     /// The X resources file loaded into Xwayland when it starts, as xrdb
     /// does in an X session (`~/.Xresources`); none without it.
     pub(crate) resources: Option<String>,
+    /// Which X programs may move the pointer and press keys through XTest.
+    pub(crate) input_emulation: InputEmulationSettings,
 }
 
 impl Default for XwaylandSettings {
@@ -473,6 +476,7 @@ impl Default for XwaylandSettings {
         Self {
             enabled: true,
             resources: None,
+            input_emulation: InputEmulationSettings::default(),
         }
     }
 }

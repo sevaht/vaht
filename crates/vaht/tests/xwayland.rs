@@ -300,21 +300,17 @@ fn an_x11_window_moving_itself_sees_the_pointer_where_it_is() {
     assert_eq!(desktop.x11.wait_for_position(window, corner), corner);
     // Once the X server has the window where it went, it has the pointer
     // where it is too, so nothing that slid under the drag's start seems
-    // hovered (fluxland's ROTK launcher issue).
-    desktop
-        .vaht
-        .wait_for_logged("frame drawn", desktop.vaht.logged_count("frame drawn") + 1);
+    // hovered (fluxland's ROTK launcher issue). Without the fix it stays
+    // at the drag's start; Xwayland takes vaht's motion a moment after
+    // vaht sends it, so the test waits for it.
+    let expected = (to_x(moved_to.0), to_x(moved_to.1));
     assert_eq!(
-        desktop.x11.pointer_position(),
-        (to_x(moved_to.0), to_x(moved_to.1)),
+        desktop.x11.wait_for_pointer(expected),
+        expected,
         "during the drag"
     );
     desktop.wayland.release(BUTTON_LEFT);
-    assert_eq!(
-        desktop.x11.pointer_position(),
-        (to_x(moved_to.0), to_x(moved_to.1)),
-        "after it"
-    );
+    assert_eq!(desktop.x11.wait_for_pointer(expected), expected, "after it");
 }
 
 #[test]
@@ -368,4 +364,50 @@ fn a_wayland_program_pastes_what_an_x11_program_copied() {
         .x11
         .answer_while(|| manager.wait_for_text(Selection::Clipboard, "from X"));
     assert!(pasted, "the X program's copy reached Wayland");
+}
+
+/// Starts vaht with Xwayland and input emulation `policy` (a TOML table
+/// body), with an X window open and shown; returns the desktop and the
+/// window.
+fn emulating_desktop(policy: &str) -> (XDesktop, u32) {
+    let settings =
+        format!("[placement]\nstrategy = \"cascade\"\n[xwayland.input_emulation]\n{policy}\n");
+    let vaht = HeadlessVaht::start_with_xwayland(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", settings.as_bytes())],
+    );
+    let x11 = X11Client::connect(&vaht.x_display());
+    let wayland = TestClient::connect(vaht.socket());
+    let mut desktop = XDesktop { vaht, x11, wayland };
+    let window = desktop.open_window();
+    let _ = desktop.wait_for_color(X_COLOR);
+    (desktop, window)
+}
+
+#[test]
+fn an_x11_program_allowed_to_emulate_input_types_and_moves_the_pointer() {
+    let (mut desktop, window) = emulating_desktop("default = \"allow\"");
+    // 38 is "a".
+    desktop.x11.emulate_key(38);
+    assert!(
+        desktop.x11.wait_for_key_press(window),
+        "the key went through vaht to the focused window"
+    );
+    desktop.x11.emulate_motion(150, 90);
+    assert_eq!(desktop.x11.wait_for_pointer((150, 90)), (150, 90));
+}
+
+#[test]
+fn an_x11_program_refused_input_emulation_cannot_type() {
+    let (mut desktop, window) = emulating_desktop("default = \"deny\"");
+    desktop.x11.emulate_key(38);
+    desktop.vaht.wait_for_logged("input emulation refused", 1);
+    // A key typed for real comes after the refused one would have.
+    desktop.wayland.type_text("b");
+    assert!(desktop.x11.wait_for_key_press(window));
+    assert_eq!(
+        desktop.x11.key_codes_pressed(window),
+        [56],
+        "only the real \"b\", not the emulated \"a\""
+    );
 }

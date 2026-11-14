@@ -80,10 +80,13 @@ use crate::gestures;
 use crate::grab::{GrabKind, WindowGrab};
 use crate::idle::IdleInhibitors;
 use crate::input::{self, AfterClick, ButtonPress, Input, KeyPress, PressOutcome};
+use crate::input_emulation::{DeviceSetup, Emulated, InputEmulation};
 use crate::ipc::IpcServer;
 use crate::launcher::Launcher;
 use crate::layers::{LayerMaps, Layers, OutputLayers};
-use crate::menu::{MenuBuilder, MenuChoice, MenuKey, MenuStack, OutputChoices};
+use crate::menu::{
+    MenuBuilder, MenuChoice, MenuItem, MenuKey, MenuModel, MenuStack, OutputChoices,
+};
 use crate::outputs::{OutputChanges, Outputs};
 use crate::pointer_lock::{self, PointerHold};
 use crate::protocols::ProtocolStates;
@@ -139,6 +142,8 @@ pub struct Compositor {
     pub(crate) fence_waits: FenceWaits,
     /// Whether the activation environment is told of the session.
     exports_activation_environment: bool,
+    /// The EIS server X programs emulate input through, with Xwayland.
+    input_emulation: Option<InputEmulation>,
     /// The windows as programs outside vaht see them listed.
     toplevel_list: ToplevelList<WindowId, ForeignToplevelHandle>,
     /// Windows, workspaces and focus, and every rule about them.
@@ -233,6 +238,7 @@ impl Compositor {
                 ipc.release_ended();
             }
             compositor.launcher.release_ended_outputs();
+            compositor.follow_input_emulation_question();
             compositor.settle();
             display
                 .dispatch_clients(&mut compositor)
@@ -325,6 +331,7 @@ impl Compositor {
             frame_pacing: FramePacing::default(),
             fence_waits: FenceWaits::default(),
             exports_activation_environment: false,
+            input_emulation: None,
             toplevel_list: ToplevelList::default(),
             window_manager,
             toplevels: Toplevels::default(),
@@ -806,7 +813,17 @@ impl Compositor {
             tracing::info!("Xwayland is off ([xwayland] enabled)");
             return;
         }
-        match XwaylandServer::start(&self.loop_handle, &self.display_handle, &self.ledger) {
+        match InputEmulation::start(&self.loop_handle, &self.ledger) {
+            Ok(emulation) => self.input_emulation = Some(emulation),
+            Err(error) => tracing::warn!(error, "no input emulation for X programs"),
+        }
+        let socket = self.input_emulation.as_ref().map(InputEmulation::socket);
+        match XwaylandServer::start(
+            &self.loop_handle,
+            &self.display_handle,
+            &self.ledger,
+            socket,
+        ) {
             Ok(server) => self.xwayland = Some(server),
             Err(error) => tracing::warn!(error, "no X11 programs"),
         }
@@ -1715,6 +1732,169 @@ impl Compositor {
         }
     }
 
+    /// Takes a program's new connection to the EIS server.
+    pub(crate) fn emulating_client_connected(&mut self, context: reis::eis::Context) {
+        if let Some(emulation) = &mut self.input_emulation {
+            emulation.add_client(context, (&self.loop_handle, &self.ledger));
+        }
+    }
+
+    /// Follows what emulating client `id` sent on `connection`; returns
+    /// what to do with its source.
+    pub(crate) fn follow_emulating_client(
+        &mut self,
+        id: u64,
+        event: Result<reis::calloop::EisRequestSourceEvent, reis::Error>,
+        connection: &mut reis::request::Connection,
+    ) -> calloop::PostAction {
+        let display = self
+            .xwayland
+            .as_ref()
+            .and_then(XwaylandServer::display_name);
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .expect("the seat gets a keyboard at startup");
+        let outputs = &self.outputs;
+        let Some(emulation) = &mut self.input_emulation else {
+            return calloop::PostAction::Remove;
+        };
+        let (action, emulated) = emulation.follow(
+            (id, event),
+            connection,
+            (
+                display.as_deref(),
+                &self.config.settings.xwayland.input_emulation,
+            ),
+            || DeviceSetup {
+                keymap: keyboard.keymap_file(),
+                regions: outputs.iter().map(Outputs::geometry).collect(),
+            },
+        );
+        self.carry_out_emulated(emulated);
+        action
+    }
+
+    /// Carries out what emulating programs did: their input goes in as a
+    /// device's does, but not behind the session lock.
+    fn carry_out_emulated(&mut self, emulated: Vec<Emulated>) {
+        for emulated in emulated {
+            match emulated {
+                Emulated::Pointer(event) => {
+                    if !self.session_lock.is_locked() {
+                        // Absolute motion is in global coordinates.
+                        let whole = Rectangle::from_size(self.outputs.bounds().size);
+                        self.handle_input_within(event, Some(whole));
+                    }
+                }
+                Emulated::Key {
+                    code,
+                    is_pressed,
+                    source,
+                } => {
+                    if !self.session_lock.is_locked() {
+                        self.protocols.idle_notifier.notify_activity(&self.seat);
+                        let state = if is_pressed {
+                            KeyState::Pressed
+                        } else {
+                            KeyState::Released
+                        };
+                        self.press_key(source, Keycode::new(code + 8), state, InputTime::now());
+                    }
+                }
+                Emulated::Release { buttons, source } => self.release_emulated(source, &buttons),
+                Emulated::Ask { id, name } => {
+                    tracing::info!(id, program = name, "asking about input emulation");
+                }
+            }
+        }
+        self.show_input_emulation_question();
+    }
+
+    /// Lets go of the keys of keyboard `source` and of `buttons`, which an
+    /// emulating program held.
+    fn release_emulated(&mut self, source: KeyboardSource, buttons: &[u32]) {
+        let keyboard = self
+            .seat
+            .get_keyboard()
+            .expect("the seat gets a keyboard at startup");
+        keyboard.release_source(self, source);
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        for button in buttons {
+            pointer.button(
+                self,
+                &ButtonEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: InputTime::now(),
+                    button: *button,
+                    state: ButtonState::Released,
+                },
+            );
+        }
+        pointer.frame(self);
+    }
+
+    /// Lets go of what every emulating program holds: the session locked.
+    pub(crate) fn release_all_emulated(&mut self) {
+        if let Some(emulation) = &mut self.input_emulation {
+            let emulated = emulation.release_all();
+            self.carry_out_emulated(emulated);
+        }
+    }
+
+    /// Follows the question about input emulation: one closed unanswered
+    /// is a refusal, and the next waiting is shown.
+    pub(crate) fn follow_input_emulation_question(&mut self) {
+        let Some(emulation) = &mut self.input_emulation else {
+            return;
+        };
+        emulation.prune();
+        if let Some(asked) = emulation.prompted()
+            && !self.menus.is_open()
+        {
+            let emulated = emulation.answer(asked, false);
+            self.carry_out_emulated(emulated);
+        }
+        self.show_input_emulation_question();
+    }
+
+    /// Shows the question about the next program waiting to emulate input,
+    /// if no question shows.
+    fn show_input_emulation_question(&mut self) {
+        if self.session_lock.is_locked() {
+            return;
+        }
+        let Some((client, program)) = self
+            .input_emulation
+            .as_mut()
+            .and_then(InputEmulation::next_question)
+        else {
+            return;
+        };
+        let choice = |label: &str, is_allowed| MenuItem::Choice {
+            label: label.to_owned(),
+            choice: MenuChoice::AnswerInputEmulation { client, is_allowed },
+            mark: None,
+            icon: None,
+        };
+        let model = MenuModel {
+            title: Some(format!("Let {program} control the pointer and keys?")),
+            items: vec![choice("Allow", true), choice("Deny", false)],
+        };
+        let at = self.pointer_location().to_i32_round();
+        let bounds = self.output_areas().at(at).usable;
+        self.menus.open(
+            model,
+            at,
+            bounds,
+            (&self.config.theme, &mut self.typesetter),
+        );
+        self.schedule_render();
+    }
+
     /// Returns where the pointer is.
     pub(crate) fn pointer_location(&self) -> Point<f64, Logical> {
         self.seat
@@ -2070,6 +2250,12 @@ impl Compositor {
                 self.execute(&command, &mut ExecutionContext::for_window(window));
             }
             MenuChoice::Activate(window) => self.window_manager.activate(window),
+            MenuChoice::AnswerInputEmulation { client, is_allowed } => {
+                if let Some(emulation) = &mut self.input_emulation {
+                    let emulated = emulation.answer(client, is_allowed);
+                    self.carry_out_emulated(emulated);
+                }
+            }
         }
         self.schedule_render();
     }

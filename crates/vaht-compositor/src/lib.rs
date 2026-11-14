@@ -29,6 +29,7 @@ mod gestures;
 mod grab;
 mod idle;
 mod input;
+mod input_emulation;
 mod ipc;
 mod launcher;
 mod layers;
