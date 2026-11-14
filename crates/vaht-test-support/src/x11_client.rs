@@ -211,6 +211,52 @@ impl X11Client {
         window
     }
 
+    /// Asks the window manager to move `window` with the pointer, which is
+    /// at `pointer` on the X screen with its left button held: what a
+    /// frameless window's own title bar does (`_NET_WM_MOVERESIZE`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server refuses the request.
+    pub fn request_move(&mut self, window: Window, pointer: (i16, i16)) {
+        /// `_NET_WM_MOVERESIZE_MOVE`.
+        const MOVE: u32 = 8;
+        let move_resize = self.atom(b"_NET_WM_MOVERESIZE");
+        let to_card = |value: i16| u32::from_ne_bytes(i32::from(value).to_ne_bytes());
+        let event = x11rb::protocol::xproto::ClientMessageEvent::new(
+            32,
+            window,
+            move_resize,
+            [to_card(pointer.0), to_card(pointer.1), MOVE, 1, 1],
+        );
+        self.connection
+            .send_event(
+                false,
+                self.root,
+                EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+                event,
+            )
+            .expect("the request is sent");
+        self.connection.flush().expect("the request is sent");
+    }
+
+    /// Returns where the X server thinks the pointer is on its screen:
+    /// what an X program asks to know what it hovers.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server does not answer.
+    #[must_use]
+    pub fn pointer_position(&self) -> (i16, i16) {
+        let reply = self
+            .connection
+            .query_pointer(self.root)
+            .expect("the request is sent")
+            .reply()
+            .expect("the X server answers");
+        (reply.root_x, reply.root_y)
+    }
+
     /// Returns where the X server thinks `window`'s top left corner is on
     /// its screen: what an X program places its menus by.
     ///

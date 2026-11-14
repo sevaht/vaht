@@ -259,11 +259,13 @@ impl XwmHandler for Compositor {
         &mut self,
         _xwm: XwmId,
         window: X11Surface,
-        _geometry: Rectangle<i32, Logical>,
+        geometry: Rectangle<i32, Logical>,
         _above: Option<u32>,
     ) {
         if window.is_override_redirect() {
             self.schedule_render();
+        } else {
+            self.x11_position_confirmed(&window, geometry.loc);
         }
     }
 

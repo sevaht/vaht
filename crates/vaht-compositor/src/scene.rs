@@ -475,7 +475,9 @@ impl<'state> Scene<'state> {
                 && let Some((surface, offset)) =
                     toplevel.surface_under(point - surface_origin.to_f64())
             {
-                let origin = (offset + surface_origin).to_f64();
+                // The pointer is given relative to where the client thinks
+                // its window is (an X11 window lags while it moves).
+                let origin = (offset + toplevel.pointer_origin(surface_origin)).to_f64();
                 return Some(WindowTarget::Surface {
                     window: id,
                     surface,

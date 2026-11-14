@@ -649,6 +649,58 @@ impl Compositor {
         }
     }
 
+    /// Notes that the X server has the X11 window `surface`'s content at
+    /// `origin`; if the pointer is on it, tells the window where the pointer
+    /// is again, now that the X server agrees where the window is.
+    pub(crate) fn x11_position_confirmed(
+        &mut self,
+        surface: &X11Surface,
+        origin: Point<i32, Logical>,
+    ) {
+        let Some(window) = self.toplevels.window_of_x11(surface) else {
+            return;
+        };
+        let Some(toplevel) = self.toplevels.get_mut(window) else {
+            return;
+        };
+        toplevel.confirm_position(origin);
+        let own = toplevel.wl_surface();
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        let is_pointed_at = own.is_some_and(|own| {
+            pointer.current_focus().as_ref() == Some(&own)
+                || pointer
+                    .grab_start_data()
+                    .and_then(|start| start.focus)
+                    .is_some_and(|(focus, _)| focus == own)
+        });
+        if is_pointed_at {
+            self.move_pointer_to(self.pointer_location(), InputTime::now());
+        }
+    }
+
+    /// Returns where the pointer goes during a drag of `window` that began
+    /// at `start`: for an X11 window dragged from its own surface (it asked
+    /// to move), its surface, relative to where the X server has it; none
+    /// for any other drag.
+    pub(crate) fn x11_drag_focus(
+        &self,
+        window: WindowId,
+        start: &GrabStartData<Self>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        let toplevel = self.toplevels.get(window)?;
+        toplevel.x11()?;
+        let surface = toplevel.wl_surface()?;
+        let (pressed, _) = start.focus.as_ref()?;
+        if *pressed != surface {
+            return None;
+        }
+        let placed = self.window_manager.window(window)?.surface_origin();
+        Some((surface, toplevel.pointer_origin(placed).to_f64()))
+    }
+
     /// Passes the X11 window `surface`'s `request` on to the window manager.
     pub(crate) fn honor_x11_request(&mut self, surface: &X11Surface, request: ClientRequest) {
         if let Some(window) = self.toplevels.window_of_x11(surface) {

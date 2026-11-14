@@ -219,6 +219,15 @@ Smithay can tell: `XwmHandler::configure_notify` is called for every
 3. on release, the same once more, so XWayland's pointer ends where the real
    one is before anything else is hovered.
 
+**Built.** Each X11 toplevel keeps the position the X server last confirmed
+(`Toplevel::confirm_position`, from `configure_notify`); the pointer is
+given to an X11 surface relative to it (`Toplevel::pointer_origin`), and a
+move an X11 window asked for keeps the pointer on it during the drag
+(`Compositor::x11_drag_focus`), re-sent on every confirmation. The test
+`an_x11_window_moving_itself_sees_the_pointer_where_it_is` asks the X
+server where the pointer is, during and after such a drag; without the
+fix it reports the drag's start, as fluxland's ROTK launcher showed.
+
 Steps 2 and 3 order the pointer after the X server has the position, which
 is the most a compositor can do; the rest of the race is XWayland's (one
 request setting the window position and the pointer together would end it).

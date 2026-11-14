@@ -126,8 +126,13 @@ impl PointerGrab<Compositor> for WindowGrab {
         _focus: Option<(WlSurface, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
-        // While the drag lasts, no client has the pointer.
-        handle.motion(compositor, None, event);
+        // While the drag lasts, no client has the pointer, but an X11
+        // window moving itself keeps it, relative to where the X server has
+        // it, so what it hovers stays what is under the pointer (04 §8.2).
+        let focus = self
+            .window
+            .and_then(|window| compositor.x11_drag_focus(window, &self.start));
+        handle.motion(compositor, focus, event);
         let delta = event.location - self.start.location;
         self.begin_drag_if_moved(compositor, delta);
         if let (GrabKind::Drag(_), Some(window)) = (self.kind, self.window) {

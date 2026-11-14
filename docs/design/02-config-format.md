@@ -214,9 +214,10 @@ rest by name, so a setting never silently does nothing:
   (override-redirect windows) show over every window. The clipboard and
   primary selection pass both ways. `vaht --no-xwayland` overrides the
   setting (tests use it). Not yet: `resources` (`~/.Xresources`) and input
-  emulation (fluxland's `session.xwayland.*`), and the pointer kept in step
-  during moves (04 §8.2). X Shape clipping is exact (04 §8.1), and a window
-  whose Motif hints ask for no decorations gets no frame.
+  emulation (fluxland's `session.xwayland.*`). X Shape clipping is exact
+  (04 §8.1), the pointer an X11 window sees stays in step while it moves
+  (04 §8.2), and a window whose Motif hints ask for no decorations gets no
+  frame.
 - `theme`: the name of a theme in `themes/` (§10); without it, the built-in
   theme.
 - `[taskbar]`: `enabled`, `output` (the name of the output it shows on,

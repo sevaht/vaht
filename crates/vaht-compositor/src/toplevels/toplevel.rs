@@ -47,6 +47,10 @@ pub(crate) struct Toplevel {
     /// The area an X11 window was last told it covers, so it is told only
     /// when that changes.
     told_area: Option<Rectangle<i32, Logical>>,
+    /// Where the X server last confirmed an X11 window's content is
+    /// (`ConfigureNotify`), which may lag where vaht has put it while it
+    /// moves (04 §8.2).
+    confirmed_origin: Option<Point<i32, Logical>>,
 }
 
 impl Toplevel {
@@ -56,6 +60,7 @@ impl Toplevel {
             window: SurfaceWindow::new_wayland_window(surface),
             read_icon: None,
             told_area: None,
+            confirmed_origin: None,
         }
     }
 
@@ -65,6 +70,7 @@ impl Toplevel {
             window: SurfaceWindow::new_x11_window(surface),
             read_icon: None,
             told_area: None,
+            confirmed_origin: None,
         }
     }
 
@@ -79,6 +85,19 @@ impl Toplevel {
         self.window
             .wl_surface()
             .is_some_and(|own| own.as_ref() == surface)
+    }
+
+    /// Notes that the X server has the window's content at `origin`.
+    pub(crate) const fn confirm_position(&mut self, origin: Point<i32, Logical>) {
+        self.confirmed_origin = Some(origin);
+    }
+
+    /// Returns where the client's surface is for the pointer: for an X11
+    /// window, where the X server last confirmed it, so the pointer the
+    /// window sees agrees with where it thinks it is; else, or before any
+    /// confirmation, `placed`, where vaht put it.
+    pub(crate) fn pointer_origin(&self, placed: Point<i32, Logical>) -> Point<i32, Logical> {
+        self.x11().and(self.confirmed_origin).unwrap_or(placed)
     }
 
     /// Returns the X11 side of the window, if it is an X11 window.

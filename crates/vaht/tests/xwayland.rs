@@ -275,3 +275,41 @@ fn an_x11_window_that_draws_its_own_frame_gets_none() {
         "no titlebar above it"
     );
 }
+
+#[test]
+fn an_x11_window_moving_itself_sees_the_pointer_where_it_is() {
+    let mut desktop = XDesktop::new();
+    let window = desktop.open_window();
+    let shown = desktop.wait_for_color(X_COLOR);
+    let grip = (shown.left + 20, shown.top + 20);
+    let to_x = |value: u32| i16::try_from(value).expect("small");
+    desktop.wayland.move_pointer_to(grip.0, grip.1);
+    desktop.wayland.press(BUTTON_LEFT);
+    // Its own title bar dragged: the program asks vaht to move it.
+    let started = desktop.vaht.logged_count("drag started");
+    desktop
+        .x11
+        .request_move(window, (to_x(grip.0), to_x(grip.1)));
+    desktop.vaht.wait_for_logged("drag started", started + 1);
+    let moved_to = (grip.0 + 150, grip.1 + 40);
+    desktop.wayland.move_pointer_to(moved_to.0, moved_to.1);
+    let corner = (to_x(shown.left + 150), to_x(shown.top + 40));
+    assert_eq!(desktop.x11.wait_for_position(window, corner), corner);
+    // Once the X server has the window where it went, it has the pointer
+    // where it is too, so nothing that slid under the drag's start seems
+    // hovered (fluxland's ROTK launcher issue).
+    desktop
+        .vaht
+        .wait_for_logged("frame drawn", desktop.vaht.logged_count("frame drawn") + 1);
+    assert_eq!(
+        desktop.x11.pointer_position(),
+        (to_x(moved_to.0), to_x(moved_to.1)),
+        "during the drag"
+    );
+    desktop.wayland.release(BUTTON_LEFT);
+    assert_eq!(
+        desktop.x11.pointer_position(),
+        (to_x(moved_to.0), to_x(moved_to.1)),
+        "after it"
+    );
+}
