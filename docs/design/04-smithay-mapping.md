@@ -53,7 +53,7 @@ re-renders its buffer only when its content changes.
 | Protocol | Why vaht needs it | Note |
 |---|---|---|
 | wlr-output-management | wlr-randr, kanshi, outside tools | niri implements it. vaht's built-in display profiles go through the same internal output configuration code |
-| wlr-foreign-toplevel-management | Taskbars and docks outside the compositor | niri implements it |
+| wlr-foreign-toplevel-management | Taskbars and docks outside the compositor | **built** (§8.6) |
 | ext-workspace | External pagers | niri implements it |
 | ~~wlr-screencopy~~ | | dropped: the installed xdg-desktop-portal-wlr 0.8.4 and grim 1.5 use ext-image-copy-capture |
 | wlr-gamma-control | Night-light tools | niri implements it |
@@ -258,7 +258,8 @@ of its own; vaht listens there until the engine closes its end
 listener end), and marks each client accepted there as sandboxed
 (`ClientState::is_unrestricted`). Sandboxed programs are not offered the
 globals that reach beyond their own windows: data control (every
-selection), the toplevel list, session lock, screen capture, virtual
+selection), the toplevel list and toplevel management, input methods,
+session lock, screen capture, virtual
 pointer and keyboard, layer shell, and security contexts themselves. The
 test `a_sandboxed_program_is_offered_windows_but_not_the_privileged_globals`
 drives a sandbox engine's socket and lists what each side is offered.
@@ -273,6 +274,17 @@ over the window through its `PopupManager`
 method, which reads every key. The test
 `an_input_method_types_into_the_focused_window` types Japanese through a
 test input method into a test window.
+
+### 8.6 Taskbars outside vaht
+
+`zwlr_foreign_toplevel_manager_v1` is not in Smithay; vaht serves it
+(`toplevel_management.rs`, `protocols/toplevel_management.rs`), as
+fluxland did. Each program binding it gets a handle per window, told the
+title, program, state and outputs; `WindowFacts::changes` decides what to
+tell again, and requests to activate, minimize, maximize, fullscreen or
+close a window go to the window manager. Sandboxed programs are not
+offered it. The test `a_taskbar_outside_vaht_sees_and_works_the_windows`
+works two windows through it.
 
 
 ## 9. The DRM backend (built; not yet run on hardware)

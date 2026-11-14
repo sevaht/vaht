@@ -18,6 +18,7 @@ mod seat;
 mod selection;
 mod session_lock;
 mod surfaces;
+mod toplevel_management;
 mod virtual_input;
 mod window_hints;
 mod xdg_shell;

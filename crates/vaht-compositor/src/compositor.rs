@@ -101,11 +101,14 @@ use crate::signals::ProcessSignals;
 use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
 use crate::tooltip::Tooltip;
 use crate::toplevel_list::{ForeignToplevels, ToplevelList};
+use crate::toplevel_management::{
+    Covering, HandleRequest, ToplevelManagement, ToplevelStates, WindowFacts,
+};
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::tray::TrayAction;
 use crate::window_manager::{
-    ClientRequest, FramePart, OutputArea, OutputAreas, PlacementKind, Window, WindowDrag, WindowId,
-    WindowManager, WorkspaceTarget,
+    Axes, ClientRequest, FramePart, OutputArea, OutputAreas, Placement, PlacementKind, Window,
+    WindowDrag, WindowId, WindowManager, WorkspaceTarget,
 };
 use crate::xwayland::XwaylandServer;
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
@@ -151,6 +154,8 @@ pub struct Compositor {
     input_emulation: Option<InputEmulation>,
     /// The windows as programs outside vaht see them listed.
     toplevel_list: ToplevelList<WindowId, ForeignToplevelHandle>,
+    /// The windows as `zwlr_foreign_toplevel_manager_v1` tells them.
+    pub(crate) toplevel_management: ToplevelManagement,
     /// Windows, workspaces and focus, and every rule about them.
     pub(crate) window_manager: WindowManager,
     /// The client's side of every window.
@@ -343,6 +348,7 @@ impl Compositor {
             output_memory: OutputMemory::default(),
             input_emulation: None,
             toplevel_list: ToplevelList::default(),
+            toplevel_management: ToplevelManagement::new(&display.handle()),
             window_manager,
             toplevels: Toplevels::default(),
             frame_textures: FrameTextures::default(),
@@ -1361,7 +1367,78 @@ impl Compositor {
                 state: &mut self.protocols.foreign_toplevel_list,
             },
         );
+        let facts = self.window_facts();
+        self.toplevel_management.follow(facts, &self.display_handle);
         tracing::trace!("frame drawn");
+    }
+
+    /// Returns what programs managing windows are told of each placed
+    /// window, in the order they opened.
+    fn window_facts(&self) -> Vec<(WindowId, WindowFacts<Output>)> {
+        let focused = self.window_manager.focused();
+        let mut facts: Vec<_> = self
+            .window_manager
+            .windows_top_down()
+            .filter(|window| window.is_placed())
+            .map(|window| {
+                let area = window.content_area();
+                let states = ToplevelStates {
+                    covering: match window.placement() {
+                        Placement::Maximized { .. } => Covering::Maximized,
+                        Placement::Fullscreen { .. } => Covering::Fullscreen,
+                        Placement::Floating | Placement::Tiled { .. } => Covering::Placed,
+                    },
+                    is_minimized: window.state().is_minimized,
+                    is_activated: focused == Some(window.id()),
+                };
+                let outputs = self
+                    .outputs
+                    .iter()
+                    .filter(|output| Outputs::geometry(output).overlaps(area))
+                    .cloned()
+                    .collect();
+                let facts = WindowFacts {
+                    title: window.title().to_owned(),
+                    app_id: window.app_id().to_owned(),
+                    states,
+                    outputs,
+                };
+                (window.id(), facts)
+            })
+            .collect();
+        facts.sort_by_key(|(window, _)| *window);
+        facts
+    }
+
+    /// Carries out what a program managing windows asked of `window`.
+    pub(crate) fn carry_out_toplevel_request(&mut self, window: WindowId, asked: &HandleRequest) {
+        let Some(target) = self.window_manager.window(window) else {
+            return;
+        };
+        let placement = target.placement();
+        let is_maximized = matches!(placement, Placement::Maximized { .. });
+        let is_fullscreen = matches!(placement, Placement::Fullscreen { .. });
+        let is_minimized = target.state().is_minimized;
+        let action = match asked {
+            HandleRequest::Activate | HandleRequest::Minimize(false) => {
+                self.window_manager.activate(window);
+                None
+            }
+            HandleRequest::Minimize(true) => {
+                (!is_minimized).then_some(WindowManagerAction::Minimize)
+            }
+            HandleRequest::Maximize(wants) => {
+                (*wants != is_maximized).then_some(WindowManagerAction::Maximize(Axes::Both))
+            }
+            HandleRequest::Fullscreen(wants) => {
+                (*wants != is_fullscreen).then_some(WindowManagerAction::Fullscreen)
+            }
+            HandleRequest::Close => Some(WindowManagerAction::Close),
+        };
+        if let Some(action) = action {
+            self.window_manager.run(&action, Some(window));
+        }
+        self.schedule_render();
     }
 
     /// Turns each monitor's variable refresh on or off as its `vrr` setting

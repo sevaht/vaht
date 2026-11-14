@@ -455,6 +455,16 @@ impl TestClient {
         self.state.close_requests
     }
 
+    /// Waits until vaht has asked this client to close a window `count`
+    /// times in all; returns whether it has.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn wait_for_close_requests(&mut self, count: usize) -> bool {
+        self.dispatch_for(crate::wait::PATIENCE, |state| state.close_requests >= count)
+    }
+
     /// Returns how many of this client's layer surfaces vaht has closed,
     /// after reading everything vaht sent.
     ///

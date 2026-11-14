@@ -50,6 +50,7 @@ mod signals;
 mod taskbar;
 mod tooltip;
 mod toplevel_list;
+mod toplevel_management;
 mod toplevels;
 mod tray;
 mod wall_clock;
