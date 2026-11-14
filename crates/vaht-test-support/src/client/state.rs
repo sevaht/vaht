@@ -21,6 +21,8 @@ use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client:
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3;
+use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::zwp_text_input_v3::{self, ZwpTextInputV3};
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::{self, ZwpRelativePointerV1};
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
@@ -132,6 +134,10 @@ pub(super) struct ClientState {
     pub(super) presentation_clock: Option<u32>,
     /// How vaht reported the last frame asked about, once it has.
     pub(super) presentation: Option<Presentation>,
+    /// The text an input method typed into the client's text field.
+    pub(super) typed_text: String,
+    /// Text an input method committed, until its `done`.
+    pending_text: Option<String>,
 }
 
 impl ClientState {
@@ -179,6 +185,8 @@ impl ClientState {
             presentation_clock: None,
             presentation: None,
             is_session_locked: None,
+            typed_text: String::new(),
+            pending_text: None,
         }
     }
 
@@ -280,6 +288,7 @@ ignore_events!(
     ZwpKeyboardShortcutsInhibitManagerV1,
     ZwpKeyboardShortcutsInhibitorV1,
     ZwpRelativePointerManagerV1,
+    ZwpTextInputManagerV3,
     ZwpPointerConstraintsV1,
     ZwpVirtualKeyboardManagerV1,
     ZwpVirtualKeyboardV1,
@@ -446,6 +455,43 @@ impl Dispatch2<WpPresentationFeedback, ClientState> for FeedbackEvents {
                 state.presentation = Some(Presentation::Discarded);
             }
             _ => {}
+        }
+    }
+}
+
+/// User data of the client's text field: it takes text whenever one of
+/// the client's windows has keyboard focus, and records what an input
+/// method types.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct TextFieldEvents;
+
+impl Dispatch2<ZwpTextInputV3, ClientState> for TextFieldEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        text_input: &ZwpTextInputV3,
+        event: zwp_text_input_v3::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        match event {
+            zwp_text_input_v3::Event::Enter { .. } => {
+                text_input.enable();
+                text_input.commit();
+            }
+            zwp_text_input_v3::Event::CommitString { text } => state.pending_text = text,
+            zwp_text_input_v3::Event::Done { .. } => {
+                if let Some(text) = state.pending_text.take() {
+                    state.typed_text.push_str(&text);
+                }
+            }
+            zwp_text_input_v3::Event::Leave { .. }
+            | zwp_text_input_v3::Event::PreeditString { .. }
+            | zwp_text_input_v3::Event::DeleteSurroundingText { .. }
+            | zwp_text_input_v3::Event::Action { .. }
+            | zwp_text_input_v3::Event::Language { .. }
+            | zwp_text_input_v3::Event::PreeditHint { .. }
+            | _ => {}
         }
     }
 }

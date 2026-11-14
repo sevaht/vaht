@@ -10,6 +10,7 @@ mod activation;
 mod decoration;
 mod dmabuf;
 mod idle;
+mod input_method;
 mod layer_shell;
 mod output;
 mod sandbox;
@@ -37,6 +38,7 @@ use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
 use smithay::wayland::idle_notify::IdleNotifierState;
 use smithay::wayland::image_capture_source::OutputCaptureSourceState;
 use smithay::wayland::image_copy_capture::ImageCopyCaptureState;
+use smithay::wayland::input_method::InputMethodManagerState;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::PointerConstraintsState;
@@ -54,6 +56,7 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
+use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::virtual_pointer::VirtualPointerManagerState;
@@ -171,12 +174,11 @@ pub(crate) struct ProtocolStates {
     pub(crate) output_capture_source: OutputCaptureSourceState,
     /// `ext_image_copy_capture_manager_v1`: screenshots and recording.
     pub(crate) image_copy_capture: ImageCopyCaptureState,
-    /// `zwlr_virtual_pointer_manager_v1`: pointer input from programs. Held
-    /// only to keep the global alive.
-    _virtual_pointer: VirtualPointerManagerState,
-    /// `zwp_virtual_keyboard_manager_v1`: key input from programs. Held only
-    /// to keep the global alive.
-    _virtual_keyboard: VirtualKeyboardManagerState,
+    /// Input from programs: `zwlr_virtual_pointer_manager_v1`,
+    /// `zwp_virtual_keyboard_manager_v1`, and `zwp_input_method_manager_v2`
+    /// with `zwp_text_input_manager_v3` (input methods composing text for
+    /// the focused window). Held only to keep the globals alive.
+    _input_from_programs: InputFromPrograms,
     /// `wp_security_context_manager_v1`: sandbox engines giving their
     /// programs a socket of their own. Held only to keep the global alive.
     _security_context: SecurityContextState,
@@ -185,7 +187,31 @@ pub(crate) struct ProtocolStates {
     _toplevel_icon: XdgToplevelIconManager,
 }
 
+/// The globals through which programs give input: virtual pointers and
+/// keyboards, and input methods with the text fields they type into.
+type InputFromPrograms = (
+    VirtualPointerManagerState,
+    VirtualKeyboardManagerState,
+    InputMethodManagerState,
+    TextInputManagerState,
+);
+
 impl ProtocolStates {
+    /// Creates the globals through which programs give input on `display`;
+    /// sandboxed programs may not inject input, nor be an input method,
+    /// which reads every key.
+    fn input_from_programs(display: &DisplayHandle) -> InputFromPrograms {
+        (
+            VirtualPointerManagerState::new::<Compositor, _>(display, ClientState::is_unrestricted),
+            VirtualKeyboardManagerState::new::<Compositor, _>(
+                display,
+                ClientState::is_unrestricted,
+            ),
+            InputMethodManagerState::new::<Compositor, _>(display, ClientState::is_unrestricted),
+            TextInputManagerState::new::<Compositor>(display),
+        )
+    }
+
     /// The icon sizes windows are asked to draw, in pixels: around the
     /// taskbar's (18 by default) and larger, which read well scaled down.
     const TOPLEVEL_ICON_SIZES: [i32; 4] = [16, 24, 32, 48];
@@ -273,14 +299,7 @@ impl ProtocolStates {
                 display,
                 ClientState::is_unrestricted,
             ),
-            _virtual_pointer: VirtualPointerManagerState::new::<Compositor, _>(
-                display,
-                ClientState::is_unrestricted,
-            ),
-            _virtual_keyboard: VirtualKeyboardManagerState::new::<Compositor, _>(
-                display,
-                ClientState::is_unrestricted,
-            ),
+            _input_from_programs: Self::input_from_programs(display),
             // A sandboxed program may not make a sandbox of its own.
             _security_context: SecurityContextState::new::<Compositor, _>(
                 display,

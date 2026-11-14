@@ -40,10 +40,12 @@ use smithay_client_toolkit::shell::xdg::window::WindowDecorations;
 
 pub use self::input::keys;
 use self::input::{KeyMotion, VirtualInput};
+use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3;
+use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::zwp_text_input_v3::ZwpTextInputV3;
 use self::state::{
     CaptureFrameEvents, CaptureSessionEvents, ClientState, FeedbackEvents, IdleEvents,
     KeyboardEvents, LockEvents, LockSurfaceEvents, NoEvents, PointerEvents, PresentationEvents,
-    RelativeMotionEvents, SessionLockEvents, bind,
+    RelativeMotionEvents, SessionLockEvents, TextFieldEvents, bind,
 };
 use crate::screenshot::Screenshot;
 
@@ -139,6 +141,8 @@ pub struct TestClient {
     commit_timing: WpCommitTimingManagerV1,
     /// Each window's fifo and commit timer, by window, once asked for.
     pacing: Vec<(usize, WpFifoV1, WpCommitTimerV1)>,
+    /// The text field input methods type into.
+    _text_field: ZwpTextInputV3,
 }
 
 /// How vaht reported a frame (`wp_presentation`).
@@ -200,6 +204,9 @@ impl TestClient {
         let pointer_warp: WpPointerWarpV1 = bind(&globals, &handle, "wp_pointer_warp_v1");
         let commit_timing: WpCommitTimingManagerV1 =
             bind(&globals, &handle, "wp_commit_timing_manager_v1");
+        let text_inputs: ZwpTextInputManagerV3 =
+            bind(&globals, &handle, "zwp_text_input_manager_v3");
+        let text_field = text_inputs.get_text_input(&seat, &handle, TextFieldEvents);
         let mut state = ClientState::bind(&globals, &handle);
         // Learn the outputs before anything needs them.
         queue
@@ -224,7 +231,19 @@ impl TestClient {
             commit_timing,
             pacing: Vec::new(),
             pointer_warp,
+            _text_field: text_field,
         }
+    }
+
+    /// Returns the text an input method typed into the client's text
+    /// field, which takes text while one of its windows has focus.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn typed_text(&mut self) -> String {
+        self.roundtrip();
+        self.state.typed_text.clone()
     }
 
     /// Asks vaht to move the pointer to `(x, y)` on window `index` (in

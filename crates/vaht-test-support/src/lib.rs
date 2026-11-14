@@ -13,6 +13,7 @@
 mod client;
 mod clipboard;
 mod headless;
+mod input_method;
 mod metrics;
 mod picture;
 mod sandbox;
@@ -27,6 +28,7 @@ pub use client::{
 };
 pub use clipboard::{ClipboardManager, Selection};
 pub use headless::{ExitReport, HeadlessVaht};
+pub use input_method::InputMethod;
 pub use metrics::{BUILT_IN_METRICS, ThemeMetrics};
 pub use picture::{solid_png, solid_xcursor};
 pub use sandbox::Sandbox;

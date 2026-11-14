@@ -263,6 +263,17 @@ pointer and keyboard, layer shell, and security contexts themselves. The
 test `a_sandboxed_program_is_offered_windows_but_not_the_privileged_globals`
 drives a sandbox engine's socket and lists what each side is offered.
 
+### 8.5 Input methods
+
+fcitx5 or ibus binds `zwp_input_method_v2` and types for the focused
+window through its `zwp_text_input_v3`; Smithay routes the text and
+follows keyboard focus, and vaht shows the input method's candidate popup
+over the window through its `PopupManager`
+(`protocols/input_method.rs`). Sandboxed programs cannot be the input
+method, which reads every key. The test
+`an_input_method_types_into_the_focused_window` types Japanese through a
+test input method into a test window.
+
 
 ## 9. The DRM backend (built; not yet run on hardware)
 
