@@ -173,10 +173,12 @@ fn programs_are_told_to_prefer_wayland() {
 fn the_activation_environment_learns_of_the_session_and_forgets_it_on_exit() {
     let directory = tempfile::tempdir().expect("a temporary directory");
     let calls = directory.path().join("calls");
+    let seen = directory.path().join("seen");
     let tool = directory.path().join("dbus-update-activation-environment");
+    // Slow, so autostart racing it would find nothing.
     std::fs::write(
         &tool,
-        format!("#!/bin/sh\necho \"$*\" >> {}\n", calls.display()),
+        format!("#!/bin/sh\nsleep 0.2\necho \"$*\" >> {}\n", calls.display()),
     )
     .expect("written");
     std::fs::set_permissions(&tool, std::os::unix::fs::PermissionsExt::from_mode(0o755))
@@ -190,9 +192,20 @@ fn the_activation_environment_learns_of_the_session_and_forgets_it_on_exit() {
         Path::new(EXECUTABLE),
         &[(
             "settings.toml",
-            b"[session]\nupdate_activation_environment = \"always\"\n",
+            format!(
+                "[session]\nupdate_activation_environment = \"always\"\n\
+                 autostart = [\"cat {calls} > {seen}.part; mv {seen}.part {seen}\"]\n",
+                calls = calls.display(),
+                seen = seen.display(),
+            )
+            .as_bytes(),
         )],
         &[("PATH", &path)],
+    );
+    let autostarted = vaht_test_support::wait_for_file(&seen, |_| true);
+    assert!(
+        autostarted.contains("WAYLAND_DISPLAY"),
+        "autostart runs once services can find the session: {autostarted:?}"
     );
     let exported =
         vaht_test_support::wait_for_file(&calls, |text| text.contains("WAYLAND_DISPLAY"));

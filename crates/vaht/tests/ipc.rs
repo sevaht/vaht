@@ -190,10 +190,11 @@ fn programs_vaht_starts_learn_the_desktop_and_session() {
     let directory = tempfile::tempdir().expect("a directory for the result");
     let result = directory.path().join("environment");
     let command = format!(
-        "exec printf '%s %s' \"$XDG_CURRENT_DESKTOP\" \"$XDG_SESSION_TYPE\" > {}",
+        "exec printf '%s %s %s' \"$XDG_CURRENT_DESKTOP\" \"$XDG_SESSION_DESKTOP\" \
+         \"$XDG_SESSION_TYPE\" > {}",
         result.display()
     );
     let output = message(&vaht, &["run", &command]);
     assert!(output.status.success(), "{output:?}");
-    wait_for_file(&result, |text| text == "vaht wayland");
+    wait_for_file(&result, |text| text == "vaht vaht wayland");
 }

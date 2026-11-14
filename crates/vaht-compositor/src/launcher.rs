@@ -67,8 +67,8 @@ impl Launcher {
     /// The shell that runs command lines.
     const SHELL: &str = "/bin/sh";
 
-    /// The desktop's name, as `XDG_CURRENT_DESKTOP` and the session file's
-    /// `DesktopNames` give it.
+    /// The desktop's name, as `XDG_CURRENT_DESKTOP`, `XDG_SESSION_DESKTOP`
+    /// and the session file's `DesktopNames` give it.
     const DESKTOP_NAME: &str = "vaht";
 
     /// Creates a launcher whose programs connect to `socket_name`, and
@@ -92,6 +92,10 @@ impl Launcher {
                 // vaht-portals.conf, and Wayland rather than X11.
                 (
                     OsString::from("XDG_CURRENT_DESKTOP"),
+                    OsString::from(Self::DESKTOP_NAME),
+                ),
+                (
+                    OsString::from("XDG_SESSION_DESKTOP"),
                     OsString::from(Self::DESKTOP_NAME),
                 ),
                 (
@@ -127,6 +131,21 @@ impl Launcher {
         let arguments = ["sh", "-c", command_line].map(OsStr::new);
         if let Err(error) = self.start(Path::new(Self::SHELL), &arguments, command_line, None) {
             Self::warn_not_started(&error, command_line);
+        }
+    }
+
+    /// Starts `first` with the shell, and each of `then` once it is done,
+    /// as the autostart programs follow the activation environment's
+    /// update: services they start must find the session.
+    pub(crate) fn run_in_order(&mut self, first: &str, then: &[String]) {
+        let script = format!("{first}\nfor line do sh -c \"$line\" & done");
+        let arguments: Vec<&OsStr> = ["sh", "-c", &script, "sh"]
+            .into_iter()
+            .chain(then.iter().map(String::as_str))
+            .map(OsStr::new)
+            .collect();
+        if let Err(error) = self.start(Path::new(Self::SHELL), &arguments, first, None) {
+            Self::warn_not_started(&error, first);
         }
     }
 

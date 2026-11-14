@@ -393,9 +393,13 @@ impl Compositor {
             .session
             .update_activation_environment
             .applies(owns_seat);
-        self.update_activation_environment(false);
-        for command_line in &self.config.settings.session.autostart {
-            self.launcher.run(command_line);
+        let autostart = &self.config.settings.session.autostart;
+        if let Some(command) = self.activation_update(false) {
+            self.launcher.run_in_order(&command, autostart);
+        } else {
+            for command_line in autostart {
+                self.launcher.run(command_line);
+            }
         }
         self.follow_output_changes(output_changes);
     }
@@ -880,14 +884,22 @@ impl Compositor {
     /// Tells the D-Bus and systemd activation environment of the session,
     /// or empties it there (`is_clearing`), if vaht exports it.
     fn update_activation_environment(&mut self, is_clearing: bool) {
+        if let Some(command) = self.activation_update(is_clearing) {
+            self.launcher.run(&command);
+        }
+    }
+
+    /// Returns the command that tells the activation environment of the
+    /// session, or empties it there (`is_clearing`), if vaht exports it.
+    fn activation_update(&self, is_clearing: bool) -> Option<String> {
         if !self.exports_activation_environment {
-            return;
+            return None;
         }
         let launcher = &self.launcher;
         let command =
             session_environment::update_command(is_clearing, |name| launcher.is_set(name));
         tracing::info!(command, "activation environment updated");
-        self.launcher.run(&command);
+        Some(command)
     }
 
     /// Loads the X resources file the settings name into Xwayland on

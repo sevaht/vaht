@@ -204,9 +204,10 @@ rest by name, so a setting never silently does nothing:
   runs the session from a terminal, not nested or headless), `always` or
   `never`. vaht then runs `dbus-update-activation-environment --systemd`
   with `WAYLAND_DISPLAY`, `DISPLAY` (once Xwayland is ready),
-  `XDG_CURRENT_DESKTOP`, `XDG_SESSION_TYPE` and `VAHT_SOCKET`, so portals
-  and other D-Bus-activated services find the session, and empties them
-  when it exits. Programs vaht starts are also told
+  `XDG_CURRENT_DESKTOP`, `XDG_SESSION_DESKTOP`, `XDG_SESSION_TYPE` and
+  `VAHT_SOCKET`, so portals
+  and other D-Bus-activated services find the session (the autostart
+  programs run once it is done), and empties them when it exits. Programs vaht starts are also told
   `QT_QPA_PLATFORM=wayland;xcb`, `SDL_VIDEODRIVER=wayland,x11` and
   `_JAVA_AWT_WM_NONREPARENTING=1`, unless vaht's own environment sets
   them.

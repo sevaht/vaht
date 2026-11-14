@@ -21,10 +21,11 @@ pub(crate) const TOOLKIT_DEFAULTS: [(&str, &str); 3] = [
 ];
 
 /// The variables exported to the activation environment.
-const EXPORTED: [&str; 5] = [
+const EXPORTED: [&str; 6] = [
     "WAYLAND_DISPLAY",
     "DISPLAY",
     "XDG_CURRENT_DESKTOP",
+    "XDG_SESSION_DESKTOP",
     "XDG_SESSION_TYPE",
     vaht_ipc::SOCKET_VARIABLE,
 ];
@@ -92,7 +93,7 @@ mod tests {
         assert_eq!(
             command,
             "dbus-update-activation-environment --systemd WAYLAND_DISPLAY \
-             XDG_CURRENT_DESKTOP XDG_SESSION_TYPE VAHT_SOCKET"
+             XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE VAHT_SOCKET"
         );
     }
 
@@ -100,7 +101,8 @@ mod tests {
     fn on_exit_every_variable_is_emptied() {
         let command = update_command(true, |_| false);
         assert!(command.ends_with(
-            "WAYLAND_DISPLAY= DISPLAY= XDG_CURRENT_DESKTOP= XDG_SESSION_TYPE= VAHT_SOCKET="
+            "WAYLAND_DISPLAY= DISPLAY= XDG_CURRENT_DESKTOP= XDG_SESSION_DESKTOP= \
+             XDG_SESSION_TYPE= VAHT_SOCKET="
         ));
     }
 }
