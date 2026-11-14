@@ -500,6 +500,10 @@ impl WindowManager {
             WindowManagerAction::FocusDirection(direction) => self.focus_direction(*direction),
             WindowManagerAction::MarkWindow(key) => self.mark(window, key),
             WindowManagerAction::SendToOutput(target) => self.send_to_output(window, *target),
+            WindowManagerAction::RenameWorkspace(name) => {
+                self.workspaces.rename_current(name);
+                self.is_redraw_needed = true;
+            }
             WindowManagerAction::ToggleFrame => {
                 self.change_window(window, |target, _| target.toggle_frame());
                 // Its content stays where it is, or fills its place again.
@@ -1475,6 +1479,17 @@ mod tests {
         desk.run(&action("toggle-frame"));
         assert!(desk.window(window).has_frame());
         assert_eq!(desk.window(window).content_area(), content);
+    }
+
+    #[test]
+    fn the_workspace_shown_is_renamed() {
+        let mut desk = Desk::new();
+        desk.manager.run(&action("workspace 2"), None);
+        desk.manager
+            .run(&action("rename-workspace Games and more"), None);
+        assert_eq!(desk.manager.current_workspace_name(), "Games and more");
+        desk.manager.run(&action("workspace 1"), None);
+        assert_ne!(desk.manager.current_workspace_name(), "Games and more");
     }
 
     #[test]

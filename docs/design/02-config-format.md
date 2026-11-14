@@ -533,7 +533,9 @@ lid-close = "exec swaylock"
   where it is, or with it again (Fluxbox's `ToggleDecor`).
   `toggle-taskbar` turns the taskbar off, giving back the room it
   reserved and resting its clock, or on again (Fluxbox's
-  `ToggleToolbarHidden`).
+  `ToggleToolbarHidden`). `rename-workspace <name>` names the workspace
+  shown, until the settings are read again (Fluxbox's
+  `SetWorkspaceName`).
 - `tile` takes a cell in thousandths of the usable area:
   `tile <x> <y> <width> <height>`, the left half being `tile 0 0 500 1000`.
 - `next-window` and `previous-window` walk windows in the order they last

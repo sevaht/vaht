@@ -30,7 +30,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "arrange",
     "key-mode",
     "reload-theme",
-    "rename-workspace",
     "restart",
     "set-setting",
     "taskbar-to-output",
@@ -504,6 +503,9 @@ pub(crate) enum WindowManagerAction {
     GoToMarkedWindow(String),
     /// Shows the window without its frame, or with it again.
     ToggleFrame,
+    /// Names the workspace shown (`rename-workspace <name>`), until the
+    /// settings are read again.
+    RenameWorkspace(String),
     /// Moves the window to another output (`send-to-output
     /// next|previous|<head>`, heads numbered from 1 left to right).
     SendToOutput(OutputTarget),
@@ -734,6 +736,10 @@ impl WindowManagerAction {
             }
             "mark-window" => Ok(Self::MarkWindow(arguments.to_owned())),
             "toggle-frame" => without_arguments(Self::ToggleFrame),
+            "rename-workspace" if arguments.is_empty() => {
+                Err("`rename-workspace` needs the workspace's new name".to_owned())
+            }
+            "rename-workspace" => Ok(Self::RenameWorkspace(arguments.to_owned())),
             "send-to-output" => match arguments {
                 "next" => Ok(Self::SendToOutput(OutputTarget::Next)),
                 "previous" => Ok(Self::SendToOutput(OutputTarget::Previous)),
@@ -825,6 +831,7 @@ impl fmt::Display for WindowManagerAction {
             Self::MarkWindow(key) => write!(formatter, "mark-window {key}"),
             Self::GoToMarkedWindow(key) => write!(formatter, "go-to-marked-window {key}"),
             Self::ToggleFrame => formatter.write_str("toggle-frame"),
+            Self::RenameWorkspace(name) => write!(formatter, "rename-workspace {name}"),
             Self::SendToOutput(OutputTarget::Next) => formatter.write_str("send-to-output next"),
             Self::SendToOutput(OutputTarget::Previous) => {
                 formatter.write_str("send-to-output previous")

@@ -164,6 +164,13 @@ impl Workspaces {
         removes.then_some(last)
     }
 
+    /// Names the workspace shown `name`.
+    pub(crate) fn rename_current(&mut self, name: &str) {
+        if let Some(current) = self.names.get_mut(self.current.0) {
+            name.clone_into(current);
+        }
+    }
+
     /// Adds a workspace at the end, and returns it.
     pub(crate) fn add(&mut self) -> Workspace {
         self.names.push(Self::default_name(self.count() + 1));
