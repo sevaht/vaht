@@ -103,7 +103,8 @@ use crate::session_environment;
 use crate::session_lock::SessionLock;
 use crate::signals::ProcessSignals;
 use crate::tablet;
-use crate::taskbar::{Taskbar, TaskbarHit, TaskbarView};
+use crate::taskbar::TaskbarHit;
+use crate::taskbars::Taskbars;
 use crate::tooltip::Tooltip;
 use crate::toplevel_list::{ForeignToplevels, ToplevelList};
 use crate::toplevel_management::{
@@ -177,7 +178,7 @@ pub struct Compositor {
     /// The mapped layer surfaces.
     pub(crate) layers: Layers,
     /// The taskbar, if the settings want one.
-    pub(crate) taskbar: Option<Taskbar>,
+    pub(crate) taskbars: Taskbars,
     /// The menus open.
     pub(crate) menus: MenuStack,
     /// The wallpaper.
@@ -369,7 +370,7 @@ impl Compositor {
             frame_textures: FrameTextures::default(),
             popups: PopupManager::default(),
             layers: Layers::default(),
-            taskbar: Taskbar::new(&config.settings.taskbar),
+            taskbars: Taskbars::new(&config.settings.taskbar),
             menus: MenuStack::with_search(config.settings.menus.search),
             backdrop: Backdrop::new(&config.settings.wallpaper, config_source.directory()),
             outline: Outline::default(),
@@ -471,7 +472,7 @@ impl Compositor {
             &self.toplevels,
             Drawn {
                 frames: &self.frame_textures,
-                taskbar: self.taskbar.as_ref(),
+                taskbars: &self.taskbars,
                 menus: &self.menus,
                 backdrop: &self.backdrop,
                 outline: &self.outline,
@@ -556,12 +557,10 @@ impl Compositor {
         self.menus.close();
         self.menus.set_search(config.settings.menus.search);
         self.window_manager.apply_settings(&config.settings);
-        if config.settings.taskbar != self.config.settings.taskbar {
-            self.taskbar = Taskbar::new(&config.settings.taskbar);
-        }
+        self.taskbars.apply(&config.settings.taskbar);
         if config.theme != self.config.theme {
             self.window_manager.restyle(config.theme.metrics());
-            if let Some(taskbar) = &mut self.taskbar {
+            for taskbar in self.taskbars.iter_mut() {
                 taskbar.invalidate();
             }
         }
@@ -573,7 +572,7 @@ impl Compositor {
         }
         // A reload is when icons installed or changed since show.
         self.icons.forget();
-        if let Some(taskbar) = &mut self.taskbar {
+        for taskbar in self.taskbars.iter_mut() {
             taskbar.forget_icons();
         }
         self.input.bindings_changed(&config.bindings);
@@ -1273,7 +1272,7 @@ impl Compositor {
     /// anew, and the hooks are told of `changes`.
     fn follow_output_changes(&mut self, changes: &OutputChanges) {
         self.layers.close_off(&self.outputs);
-        if let Some(taskbar) = &mut self.taskbar {
+        for taskbar in self.taskbars.iter_mut() {
             taskbar.invalidate();
         }
         let hooks = &self.config.outputs.hooks;
@@ -1314,7 +1313,7 @@ impl Compositor {
             &self.toplevels,
             Drawn {
                 frames: &self.frame_textures,
-                taskbar: self.taskbar.as_ref(),
+                taskbars: &self.taskbars,
                 menus: &self.menus,
                 backdrop: &self.backdrop,
                 outline: &self.outline,
@@ -1494,22 +1493,18 @@ impl Compositor {
             .paint_frames(&self.config.theme, &mut self.typesetter);
         self.frame_textures
             .update(&self.window_manager, &self.config.theme, &self.ledger);
-        let taskbar_whole = Outputs::geometry(self.taskbar_output());
-        if let Some(taskbar) = &mut self.taskbar {
-            let now = Zoned::now();
-            let view = TaskbarView {
-                window_manager: &self.window_manager,
-                settings: &self.config.settings.taskbar,
-                whole: taskbar_whole,
-                now: &now,
-            };
-            taskbar.prepare(
-                view,
-                &self.config.theme,
-                &mut self.typesetter,
-                &mut self.icons,
-            );
-        }
+        self.sync_taskbars();
+        let outputs = &self.outputs;
+        self.taskbars.prepare(
+            |name| {
+                outputs
+                    .named(name)
+                    .map_or_else(|| outputs.primary_geometry(), Outputs::geometry)
+            },
+            (&self.window_manager, &self.config.settings.taskbar),
+            &self.config.theme,
+            (&mut self.typesetter, &mut self.icons),
+        );
         self.menus.prepare(&self.config.theme, &mut self.typesetter);
         let output_areas: Vec<_> = self.outputs.iter().map(Outputs::geometry).collect();
         self.backdrop.prepare(&output_areas, &self.window_manager);
@@ -2003,15 +1998,14 @@ impl Compositor {
     /// Returns the parts of each output windows can be placed in: all of
     /// it, and what panels, the taskbar among them, leave free.
     fn output_areas(&self) -> OutputAreas {
-        let taskbar_output = self.taskbar_output();
         let area_of = |output: &Output| {
             let whole = Outputs::geometry(output);
             let usable = OutputLayers::new(output, whole).usable_area();
-            let usable = match &self.taskbar {
-                Some(taskbar) if output == taskbar_output => {
+            let usable = match self.taskbars.on_output(&output.name()) {
+                Some(taskbar) => {
                     taskbar.reserve(usable, whole, self.config.theme.metrics().taskbar_height)
                 }
-                Some(_) | None => usable,
+                None => usable,
             };
             OutputArea { whole, usable }
         };
@@ -2021,8 +2015,31 @@ impl Compositor {
         )
     }
 
-    /// Returns the output the taskbar shows on: the one the settings name,
-    /// or the primary one.
+    /// Puts a taskbar on each output that has one by the settings, for the
+    /// output areas about to be worked out, which then take their room;
+    /// returns whether any came or went.
+    fn sync_taskbars_quietly(&mut self) -> bool {
+        let main = self.taskbar_output().name();
+        let others: Vec<String> = self.outputs.iter().map(Output::name).collect();
+        let has_changed = self
+            .taskbars
+            .follow_outputs(&main, others.iter().map(String::as_str));
+        if has_changed {
+            self.start_taskbar_services();
+        }
+        has_changed
+    }
+
+    /// Puts a taskbar on each output that has one by the settings, the
+    /// windows kept off those that came.
+    fn sync_taskbars(&mut self) {
+        if self.sync_taskbars_quietly() {
+            self.refresh_output_area();
+        }
+    }
+
+    /// Returns the output the main taskbar shows on: the one the settings
+    /// name, or the primary one.
     fn taskbar_output(&self) -> &Output {
         self.config
             .settings
@@ -2075,16 +2092,13 @@ impl Compositor {
     /// tray, as it shows them.
     fn start_taskbar_services(&mut self) {
         self.schedule_clock();
-        if let Some(taskbar) = &mut self.taskbar {
-            taskbar.start_tray((&self.loop_handle, &self.ledger));
-        }
+        self.taskbars.start_tray((&self.loop_handle, &self.ledger));
     }
 
-    /// Wakes vaht when the taskbar's clock next changes, if it shows one.
-    fn schedule_clock(&mut self) {
-        if let Some(taskbar) = &mut self.taskbar {
-            taskbar.schedule_clock(&Zoned::now(), (&self.loop_handle, &self.ledger));
-        }
+    /// Wakes vaht when a taskbar's clock next changes, if one shows.
+    pub(crate) fn schedule_clock(&mut self) {
+        self.taskbars
+            .schedule_clock(&Zoned::now(), (&self.loop_handle, &self.ledger));
     }
 
     /// Hands a wheel turn of `steps` (in 120ths of a notch, positive down)
@@ -2101,10 +2115,9 @@ impl Compositor {
             reason = "a wheel turn is a few notches, far inside i32"
         )]
         let notches = (steps.unwrap_or(0.0) / 120.0).round() as i32;
-        if notches != 0
-            && let Some(taskbar) = &self.taskbar
-        {
-            taskbar.act_on_tray(item, TrayAction::Scroll(notches), location);
+        if notches != 0 {
+            self.taskbars
+                .act_on_tray(item, TrayAction::Scroll(notches), location);
         }
         true
     }
@@ -2113,9 +2126,9 @@ impl Compositor {
     /// doing what clicking it means if the pointer is still on it.
     fn release_taskbar_button(&mut self, location: Point<f64, Logical>) {
         let Some(clicked) = self
-            .taskbar
-            .as_mut()
-            .and_then(|taskbar| taskbar.release(location))
+            .taskbars
+            .iter_mut()
+            .find_map(|taskbar| taskbar.release(location))
         else {
             return;
         };
@@ -2424,6 +2437,7 @@ impl Compositor {
 
     /// Tells the window manager where windows can be placed now.
     fn refresh_output_area(&mut self) {
+        self.sync_taskbars_quietly();
         let outputs = self.output_areas();
         self.window_manager.set_output_areas(outputs);
     }
@@ -2636,31 +2650,45 @@ impl Compositor {
     fn run_taskbar_action(&mut self, action: &TaskbarAction) {
         match action {
             TaskbarAction::Toggle => {
-                if let Some(taskbar) = &mut self.taskbar {
-                    taskbar.toggle();
-                    // Its room is given back or taken, and its clock rests
-                    // while it is off.
+                if self.taskbars.is_enabled() {
+                    self.taskbars.toggle();
+                    // Their room is given back or taken, and their clocks
+                    // rest while they are off.
                     self.refresh_output_area();
                     self.schedule_clock();
                     self.schedule_render();
                 }
             }
             TaskbarAction::ActivateEntry(number) => {
-                let settings = &self.config.settings.taskbar;
-                if self.taskbar.is_some()
-                    && let Some(window) = Taskbar::entry(&self.window_manager, settings, *number)
-                {
+                // The taskbar on the output the pointer is on lists the
+                // entries counted; the main one otherwise.
+                let pointer_output = self.outputs.at(self.pointer_location()).map(Output::name);
+                let taskbar = pointer_output
+                    .and_then(|name| self.taskbars.on_output(&name))
+                    .or_else(|| self.taskbars.main());
+                let window = taskbar.and_then(|taskbar| {
+                    let whole = self
+                        .outputs
+                        .named(taskbar.output())
+                        .map_or_else(|| self.outputs.primary_geometry(), Outputs::geometry);
+                    taskbar.entry(
+                        &self.window_manager,
+                        &self.config.settings.taskbar,
+                        (*number, whole),
+                    )
+                });
+                if let Some(window) = window {
                     self.window_manager.activate_or_minimize(window);
                     self.schedule_render();
                 }
             }
             TaskbarAction::TrayItem { number, request } => {
-                if let Some(taskbar) = &self.taskbar
-                    && let Some((item, location)) =
-                        taskbar.tray_item(*number, &self.config.settings.taskbar)
-                {
-                    taskbar.act_on_tray(item, request.action(), location);
-                    self.tray_grant = taskbar.tray_item_pid(item).map(|pid| (pid, Instant::now()));
+                if let Some((item, location)) = self.taskbars.tray_item(*number) {
+                    self.taskbars.act_on_tray(item, request.action(), location);
+                    self.tray_grant = self
+                        .taskbars
+                        .tray_item_pid(item)
+                        .map(|pid| (pid, Instant::now()));
                 }
             }
             TaskbarAction::ToOutput(target) => {
@@ -2959,11 +2987,9 @@ impl Compositor {
     /// taskbar's entries and tray items, while no menu is open.
     fn follow_tooltip(&mut self, location: Point<f64, Logical>) {
         let text = self
-            .taskbar
-            .as_ref()
-            .filter(|taskbar| {
-                taskbar.is_shown() && taskbar.covers(location) && !self.menus.is_open()
-            })
+            .taskbars
+            .at(location)
+            .filter(|_| !self.menus.is_open())
             .and_then(|taskbar| {
                 taskbar.tooltip_at(location, &self.config.theme, &mut self.typesetter)
             });
@@ -3004,10 +3030,15 @@ impl Compositor {
                     .and_then(PointerTarget::window)
             })
             .flatten();
-        let whole = Outputs::geometry(self.taskbar_output());
-        if let Some(taskbar) = &mut self.taskbar
-            && taskbar.follow_pointer(location, whole, (&self.loop_handle, &self.ledger))
-        {
+        let outputs = &self.outputs;
+        let mut has_shown = false;
+        for taskbar in self.taskbars.iter_mut() {
+            let whole = outputs
+                .named(taskbar.output())
+                .map_or_else(|| outputs.primary_geometry(), Outputs::geometry);
+            has_shown |= taskbar.follow_pointer(location, whole, (&self.loop_handle, &self.ledger));
+        }
+        if has_shown {
             // It showed: its clock ticks again, and the output shows it.
             self.schedule_clock();
             self.schedule_render();
@@ -3184,16 +3215,17 @@ impl Compositor {
                 self.window_manager.press_titlebar_button(pressed, location);
             }
             AfterClick::HoldTaskbarButton => {
-                if let Some(taskbar) = &mut self.taskbar {
+                if let Some(taskbar) = self.taskbars.at_mut(location) {
                     taskbar.press(location);
                 }
                 self.schedule_render();
             }
             AfterClick::AskTrayItem(item, action) => {
-                if let Some(taskbar) = &self.taskbar {
-                    taskbar.act_on_tray(item, action, location);
-                    self.tray_grant = taskbar.tray_item_pid(item).map(|pid| (pid, Instant::now()));
-                }
+                self.taskbars.act_on_tray(item, action, location);
+                self.tray_grant = self
+                    .taskbars
+                    .tray_item_pid(item)
+                    .map(|pid| (pid, Instant::now()));
             }
             AfterClick::RunBinding { press, drag } => {
                 if let Some(command) = press {

@@ -52,6 +52,7 @@ mod shared_memory;
 mod signals;
 mod tablet;
 mod taskbar;
+mod taskbars;
 mod tooltip;
 mod toplevel_list;
 mod toplevel_management;

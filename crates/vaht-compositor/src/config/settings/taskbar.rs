@@ -14,12 +14,20 @@ use crate::config::WindowMatcher;
 /// The taskbar.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is a switch of settings.toml's own, independent of the others"
+)]
 pub(crate) struct TaskbarSettings {
     /// Whether there is one.
     pub(crate) enabled: bool,
     /// The name of the output it shows on, such as `HDMI-A-1`; the
     /// primary output without one, or while that output is not there.
+    /// With `on_every_output`, this is the main taskbar, the one with the
+    /// tray.
     pub(crate) output: Option<String>,
+    /// Whether every output has a taskbar, not only `output`.
+    pub(crate) on_every_output: bool,
     /// The output edge it runs along.
     pub(crate) edge: TaskbarEdge,
     /// How much of the edge it spans.
@@ -50,6 +58,7 @@ impl Default for TaskbarSettings {
         Self {
             enabled: true,
             output: None,
+            on_every_output: false,
             edge: TaskbarEdge::Bottom,
             width_percent: WidthPercent::WHOLE,
             align: TaskbarAlign::Center,
@@ -259,6 +268,8 @@ pub(crate) struct WindowListSettings {
     pub(crate) entry_width: EntryWidth,
     /// Whether entries show their application's icon.
     pub(crate) icons: bool,
+    /// Whose windows a taskbar lists: every output's, or its own output's.
+    pub(crate) windows: WindowListScope,
 }
 
 impl Default for WindowListSettings {
@@ -267,8 +278,20 @@ impl Default for WindowListSettings {
             show: WindowMatcher::on_current_workspace(),
             entry_width: EntryWidth::default(),
             icons: true,
+            windows: WindowListScope::default(),
         }
     }
+}
+
+/// Whose windows a taskbar's window list lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum WindowListScope {
+    /// Every output's.
+    #[default]
+    All,
+    /// Those mostly on the taskbar's own output.
+    OwnOutput,
 }
 
 /// How wide a window list's entries are: equal shares of the list, up to

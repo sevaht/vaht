@@ -59,6 +59,7 @@ use crate::menu::MenuStack;
 use crate::outputs::Outputs;
 use crate::session_lock::SessionLock;
 use crate::taskbar::{Taskbar, TaskbarHit};
+use crate::taskbars::Taskbars;
 use crate::tooltip::Tooltip;
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::window_manager::{FramePart, Window, WindowId, WindowManager};
@@ -216,8 +217,8 @@ pub(crate) struct Scene<'state> {
 pub(crate) struct Drawn<'state> {
     /// The windows' frames, as the renderer takes them.
     pub(crate) frames: &'state FrameTextures,
-    /// The taskbar, if there is one.
-    pub(crate) taskbar: Option<&'state Taskbar>,
+    /// The taskbars.
+    pub(crate) taskbars: &'state Taskbars,
     /// The menus open.
     pub(crate) menus: &'state MenuStack,
     /// The wallpaper.
@@ -295,8 +296,8 @@ impl<'state> Scene<'state> {
             .or_else(|| layer(self.layers_above_windows(), false))
             .or_else(|| self.window_at(point, true).map(PointerTarget::Window))
             .or_else(|| {
-                self.shown_taskbar()
-                    .filter(|taskbar| taskbar.covers(point))
+                self.shown_taskbars()
+                    .find(|taskbar| taskbar.covers(point))
                     .map(|taskbar| PointerTarget::Taskbar(taskbar.hit_at(point)))
             })
             .or_else(|| self.window_at(point, false).map(PointerTarget::Window))
@@ -414,8 +415,8 @@ impl<'state> Scene<'state> {
         self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
         self.push_windows(&mut elements, renderer, scale, true);
         elements.extend(
-            self.shown_taskbar()
-                .and_then(|taskbar| taskbar.render_element(renderer, scale)),
+            self.shown_taskbars()
+                .filter_map(|taskbar| taskbar.render_element(renderer, scale)),
         );
         self.push_windows(&mut elements, renderer, scale, false);
         self.push_layers(&mut elements, renderer, &BELOW_WINDOWS, scale);
@@ -585,12 +586,14 @@ impl<'state> Scene<'state> {
         }
     }
 
-    /// Returns the taskbar, unless it is auto-hidden or a fullscreen window
-    /// covers it.
-    fn shown_taskbar(&self) -> Option<&'state Taskbar> {
+    /// Returns the taskbars shown: none while a fullscreen window covers
+    /// them, nor those auto-hidden.
+    fn shown_taskbars(&self) -> impl Iterator<Item = &'state Taskbar> {
+        let is_covered = self.is_fullscreen_on_top();
         self.drawn
-            .taskbar
-            .filter(|taskbar| taskbar.is_shown() && !self.is_fullscreen_on_top())
+            .taskbars
+            .iter()
+            .filter(move |taskbar| taskbar.is_shown() && !is_covered)
     }
 
     /// Returns the topmost shown window's client surface or frame at

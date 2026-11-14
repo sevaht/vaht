@@ -374,3 +374,46 @@ fn a_title_too_long_for_its_entry_shows_in_a_tooltip_until_a_click() {
         "a click hides it"
     );
 }
+
+/// Starts vaht on two outputs (800 × 600, then 640 × 480) with the test
+/// theme, a window list taskbar on every output listing `windows`, and one
+/// window open on the first output; returns the first entry's color on
+/// each output's taskbar.
+fn every_output_with(windows: &str) -> ([u8; 3], [u8; 3]) {
+    let settings = format!(
+        "theme = \"test\"\n[taskbar]\nwidgets = [\"window-list\"]\non_every_output = true\n\
+         [taskbar.window_list]\nwindows = \"{windows}\"\n"
+    );
+    let vaht = HeadlessVaht::start_with_outputs(
+        Path::new(EXECUTABLE),
+        "800x600,640x480",
+        &[
+            ("settings.toml", settings.as_bytes()),
+            ("themes/test.toml", THEME.as_bytes()),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let first_entry = |client: &mut TestClient, output: &str| {
+        let screenshot = client.screenshot_of(output);
+        screenshot.rgb(5, screenshot.height() - HEIGHT / 2)
+    };
+    (
+        first_entry(&mut client, "HEADLESS-1"),
+        first_entry(&mut client, "HEADLESS-2"),
+    )
+}
+
+#[test]
+fn every_output_can_have_a_taskbar_listing_all_windows_or_its_own() {
+    assert_eq!(
+        every_output_with("all"),
+        (FOCUSED, FOCUSED),
+        "both list the window"
+    );
+    assert_eq!(
+        every_output_with("own-output"),
+        (FOCUSED, BACKGROUND),
+        "only the window's own output lists it"
+    );
+}

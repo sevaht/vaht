@@ -49,6 +49,7 @@ pub(crate) use self::settings::{
     AccelProfile, AccelSpeed, ClickMethod, DeviceSettings, FocusModel, FrameSettings,
     InputSettings, MenuSearch, ScrollMethod, SendEvents, Settings, SnapSettings, TapButtonMap,
     TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WallpaperSettings, WidthPercent,
+    WindowListScope,
 };
 pub(crate) use self::source::ConfigSource;
 pub(crate) use self::theme::ThemeFile;

@@ -271,7 +271,12 @@ rest by name, so a setting never silently does nothing:
   theme.
 - `[taskbar]`: `enabled`, `output` (the name of the output it shows on,
   such as `HDMI-A-1`; the primary output without one, or while that one
-  is not there), `edge` (`top` or `bottom`), `width_percent`
+  is not there), `on_every_output` (off by default: on, every output has a
+  taskbar, the one on `output` being the main one, the only one with the
+  tray, as a desktop has one; each keeps its own output's room and
+  auto-hides at its own edge), `[taskbar.window_list] windows` (`all`, the
+  default, or `own-output`: each taskbar lists only the windows whose
+  middle is on its output), `edge` (`top` or `bottom`), `width_percent`
   (1 to 100) and `align` (`left`, `center`, `right`; from `placement`'s
   second half), `auto_hide` and `auto_hide_delay_ms` (hidden until the
   pointer touches the edge, hidden again that long after it leaves; an

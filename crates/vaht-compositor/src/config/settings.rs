@@ -23,7 +23,7 @@ pub(crate) use self::input::{
     TapButtonMap,
 };
 pub(crate) use self::taskbar::{
-    TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent,
+    TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent, WindowListScope,
 };
 use crate::input_emulation::InputEmulationSettings;
 use crate::session_environment::ActivationUpdate;

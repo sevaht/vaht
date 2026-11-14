@@ -202,7 +202,7 @@ impl ImageCopyCaptureHandler for Compositor {
             &self.toplevels,
             Drawn {
                 frames: &self.frame_textures,
-                taskbar: self.taskbar.as_ref(),
+                taskbars: &self.taskbars,
                 menus: &self.menus,
                 backdrop: &self.backdrop,
                 outline: &self.outline,

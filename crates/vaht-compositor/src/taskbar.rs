@@ -21,7 +21,8 @@
 //!
 //! The clock wakes vaht when its text changes: at each minute, or each
 //! second if its format shows seconds, as the time of day has them, and
-//! whenever the time of day jumps ([`WallClock`]).
+//! whenever the time of day jumps ([`crate::wall_clock::WallClock`]). The
+//! taskbars share one such alarm and one tray ([`crate::taskbars`]).
 
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -36,13 +37,13 @@ use vaht_ui::{
 };
 
 use crate::Compositor;
-use crate::bus::Bus;
-use crate::config::{TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent};
+use crate::config::{
+    TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent, WindowListScope,
+};
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
 use crate::scene::{PanelTexture, SceneElement};
-use crate::tray::{ItemIcon, Tray, TrayAction, TrayHooks, TrayItem, TrayItemKey};
-use crate::wall_clock::{ClockHooks, WallClock, ZoneSources};
+use crate::tray::{ItemIcon, Tray, TrayItem, TrayItemKey};
 use crate::window_manager::{Area, Window, WindowId, WindowManager};
 
 /// What clicking the taskbar can report.
@@ -112,12 +113,12 @@ pub(crate) struct Taskbar {
     texture: PanelTexture,
     /// Whether its clock shows seconds, and so ticks each second.
     clock_shows_seconds: bool,
-    /// Wakes vaht when the clock's text next changes.
-    wall_clock: Option<WallClock<Compositor>>,
-    /// The tray, once started, if the taskbar shows one.
-    tray: Option<Tray<Compositor>>,
     /// How opaque it is drawn, as the theme says.
     opacity: f32,
+    /// The output it is on, by connector.
+    output: String,
+    /// Whether its window list lists only its own output's windows.
+    lists_own_output: bool,
 }
 
 /// Whether the taskbar shows.
@@ -133,11 +134,18 @@ enum Visibility {
 
 impl Taskbar {
     /// Creates the taskbar `settings` describe, if they want one.
-    pub(crate) fn new(settings: &TaskbarSettings) -> Option<Self> {
+    pub(crate) fn new(settings: &TaskbarSettings, output: &str, is_main: bool) -> Option<Self> {
+        // A desktop has one tray: the main taskbar's.
+        let widgets: Vec<TaskbarWidget> = settings
+            .widgets
+            .iter()
+            .copied()
+            .filter(|widget| is_main || *widget != TaskbarWidget::Tray)
+            .collect();
         settings.enabled.then(|| Self {
             panel: Panel::new(
                 TaskbarContent {
-                    widgets: settings.widgets.clone(),
+                    widgets: widgets.clone(),
                     workspace_name: String::new(),
                     entries: Vec::new(),
                     entry_max_width: settings.window_list.entry_width.max,
@@ -162,10 +170,10 @@ impl Taskbar {
             area: Area::default(),
             texture: PanelTexture::new(),
             clock_shows_seconds: settings.clock.format.shows_seconds()
-                && settings.widgets.contains(&TaskbarWidget::Clock),
-            wall_clock: None,
-            tray: None,
+                && widgets.contains(&TaskbarWidget::Clock),
             opacity: 1.0,
+            output: output.to_owned(),
+            lists_own_output: settings.window_list.windows == WindowListScope::OwnOutput,
         })
     }
 
@@ -238,17 +246,15 @@ impl Taskbar {
             self.hide_timer = None;
         } else if self.hide_timer.as_ref().is_none_or(Timer::has_fired) {
             let (handle, ledger) = event_loop;
-            let timer = Timer::once(handle, ledger, delay, |compositor: &mut Compositor| {
-                if let Some(taskbar) = &mut compositor.taskbar
+            let output = self.output.clone();
+            let timer = Timer::once(handle, ledger, delay, move |compositor: &mut Compositor| {
+                if let Some(taskbar) = compositor.taskbars.on_output_mut(&output)
                     && taskbar.visibility == Visibility::Shown
                 {
                     taskbar.visibility = Visibility::AutoHidden;
-                    tracing::debug!("taskbar hidden");
+                    tracing::debug!(output, "taskbar hidden");
                     // Its clock rests while it cannot be seen.
-                    taskbar.schedule_clock(
-                        &Zoned::now(),
-                        (&compositor.loop_handle, &compositor.ledger),
-                    );
+                    compositor.schedule_clock();
                 }
                 compositor.schedule_render();
             });
@@ -291,32 +297,29 @@ impl Taskbar {
         self.panel.hit_at(self.local(point.to_i32_floor()))
     }
 
+    /// Returns the output it is on, by connector.
+    pub(crate) fn output(&self) -> &str {
+        &self.output
+    }
+
     /// Returns the window of the `number`th entry, from 1 at the left, of
-    /// the window list showing `window_manager`'s windows as `settings`
-    /// say.
+    /// its window list, showing `window_manager`'s windows as `settings`
+    /// say, on an output covering `whole`.
     pub(crate) fn entry(
+        &self,
         window_manager: &WindowManager,
         settings: &TaskbarSettings,
-        number: NonZeroUsize,
+        (number, whole): (NonZeroUsize, Area),
     ) -> Option<WindowId> {
-        TaskbarContent::listed(window_manager, settings)
+        let own = self.lists_own_output.then_some(whole);
+        TaskbarContent::listed(window_manager, settings, own)
             .get(number.get() - 1)
             .map(|window| window.id())
     }
 
-    /// Returns the `number`th tray item, from 1 at the left, in the order
-    /// `settings` pin, and the global point at its middle (the taskbar's
-    /// until it is laid out).
-    pub(crate) fn tray_item(
-        &self,
-        number: NonZeroUsize,
-        settings: &TaskbarSettings,
-    ) -> Option<(TrayItemKey, Point<f64, Logical>)> {
-        let tray = self.tray.as_ref()?;
-        let key = tray
-            .ordered(&settings.tray.pin_left, &settings.tray.pin_right)
-            .get(number.get() - 1)?
-            .key;
+    /// Returns the global point at the middle of the tray item `key`, or of
+    /// the taskbar until it is laid out.
+    pub(crate) fn tray_item_middle(&self, key: TrayItemKey) -> Point<f64, Logical> {
         let local = self.panel.area_of(TaskbarHit::TrayItem(key)).map_or_else(
             || {
                 Point::from((self.area.size.w, self.area.size.h))
@@ -330,12 +333,21 @@ impl Taskbar {
                 ))
             },
         );
-        Some((key, local + self.area.loc.to_f64()))
+        local + self.area.loc.to_f64()
     }
 
-    /// Returns the process of the tray item `key`, if known.
-    pub(crate) fn tray_item_pid(&self, key: TrayItemKey) -> Option<u32> {
-        self.tray.as_ref()?.pid_of(key)
+    /// Returns whether it shows the tray: only the main taskbar does.
+    pub(crate) fn has_tray(&self) -> bool {
+        self.panel.content().widgets.contains(&TaskbarWidget::Tray)
+    }
+
+    /// Returns whether it shows a clock, and whether that shows seconds.
+    pub(crate) fn clock(&self) -> Option<bool> {
+        self.panel
+            .content()
+            .widgets
+            .contains(&TaskbarWidget::Clock)
+            .then_some(self.clock_shows_seconds)
     }
 
     /// Returns the tooltip for global `point`: a window list entry's title
@@ -394,11 +406,17 @@ impl Taskbar {
             .style(ThemeElement::Taskbar, WidgetState::Focused)
             .opacity();
         self.area = self.area_in(view.whole, height);
-        let tray_items: Vec<&TrayItem> = self.tray.as_ref().map_or_else(Vec::new, |tray| {
-            tray.ordered(&view.settings.tray.pin_left, &view.settings.tray.pin_right)
-        });
+        let shows_tray = self.panel.content().widgets.contains(&TaskbarWidget::Tray);
+        let tray_items: Vec<&TrayItem> = view
+            .tray
+            .filter(|_| shows_tray)
+            .map_or_else(Vec::new, |tray| {
+                tray.ordered(&view.settings.tray.pin_left, &view.settings.tray.pin_right)
+            });
+        let own = self.lists_own_output.then_some(view.whole);
         let content = TaskbarContent::of(
             &view,
+            own,
             &self.panel.content().widgets,
             &tray_items,
             (icons, height),
@@ -459,95 +477,9 @@ impl Taskbar {
             .render_element(renderer, self.area.loc, scale, self.opacity)
     }
 
-    /// Wakes vaht to draw the clock anew when its text next changes, at
-    /// `now`: the next whole minute, or second if it shows seconds.
-    pub(crate) fn schedule_clock(
-        &mut self,
-        now: &Zoned,
-        event_loop: (&LoopHandle<'static, Compositor>, &ResourceLedger),
-    ) {
-        if !self.panel.content().widgets.contains(&TaskbarWidget::Clock) {
-            self.wall_clock = None;
-            return;
-        }
-        if self.wall_clock.is_none() {
-            let (handle, ledger) = event_loop;
-            let hooks = ClockHooks {
-                on_change: Compositor::show_time_change,
-                find: Self::wall_clock_of,
-            };
-            let started = WallClock::start(handle, ledger, &ZoneSources::system(), hooks);
-            match started {
-                Ok(wall_clock) => self.wall_clock = Some(wall_clock),
-                Err(error) => {
-                    tracing::warn!(
-                        error = &error as &dyn std::error::Error,
-                        "the clock cannot tick"
-                    );
-                    return;
-                }
-            }
-        }
-        let Some(wall_clock) = &self.wall_clock else {
-            return;
-        };
-        let armed = if self.is_shown() {
-            wall_clock.ring_at(Self::next_clock_change(now, self.clock_shows_seconds))
-        } else {
-            wall_clock.disarm()
-        };
-        if let Err(error) = armed {
-            tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                "could not schedule the clock"
-            );
-        }
-    }
-
-    /// Starts the tray, if the taskbar shows one and it has not started.
-    pub(crate) fn start_tray(
-        &mut self,
-        event_loop: (&LoopHandle<'static, Compositor>, &ResourceLedger),
-    ) {
-        if !self.panel.content().widgets.contains(&TaskbarWidget::Tray) || self.tray.is_some() {
-            return;
-        }
-        let (handle, ledger) = event_loop;
-        let hooks = TrayHooks {
-            on_change: Compositor::schedule_render,
-            find: Self::tray_of,
-        };
-        match Tray::start(handle, ledger, Bus::Session, hooks) {
-            Ok(tray) => self.tray = Some(tray),
-            Err(error) => tracing::warn!(%error, "the tray cannot start"),
-        }
-    }
-
-    /// Asks the tray item `key` for `action`, the pointer at global `at`.
-    pub(crate) fn act_on_tray(
-        &self,
-        key: TrayItemKey,
-        action: TrayAction,
-        at: Point<f64, Logical>,
-    ) {
-        if let Some(tray) = &self.tray {
-            tray.act(key, action, at.to_i32_round());
-        }
-    }
-
-    /// Returns the taskbar's tray in `compositor`, while it has one.
-    fn tray_of(compositor: &mut Compositor) -> Option<&mut Tray<Compositor>> {
-        compositor.taskbar.as_mut()?.tray.as_mut()
-    }
-
-    /// Returns the taskbar's wall clock in `compositor`, while it has one.
-    fn wall_clock_of(compositor: &mut Compositor) -> Option<&mut WallClock<Compositor>> {
-        compositor.taskbar.as_mut()?.wall_clock.as_mut()
-    }
-
     /// Returns when a clock's text next changes after `now`: at the next
     /// whole second if it `shows_seconds`, else at the next whole minute.
-    fn next_clock_change(now: &Zoned, shows_seconds: bool) -> Timestamp {
+    pub(crate) fn next_clock_change(now: &Zoned, shows_seconds: bool) -> Timestamp {
         let unit = if shows_seconds {
             Unit::Second
         } else {
@@ -582,6 +514,8 @@ pub(crate) struct TaskbarView<'state> {
     pub(crate) whole: Area,
     /// The time.
     pub(crate) now: &'state Zoned,
+    /// The tray, if it started.
+    pub(crate) tray: Option<&'state Tray<Compositor>>,
 }
 
 /// What the taskbar shows.
@@ -614,6 +548,7 @@ impl TaskbarContent {
     /// its height.
     fn of(
         view: &TaskbarView<'_>,
+        own: Option<Area>,
         widgets: &[TaskbarWidget],
         tray_items: &[&TrayItem],
         icons: (&mut IconStore, u32),
@@ -644,7 +579,7 @@ impl TaskbarContent {
         Self {
             widgets: widgets.to_vec(),
             workspace_name: manager.current_workspace_name().to_owned(),
-            entries: Self::listed(manager, view.settings)
+            entries: Self::listed(manager, view.settings, own)
                 .into_iter()
                 .map(|window| WindowListEntry {
                     window: window.id(),
@@ -668,12 +603,22 @@ impl TaskbarContent {
     fn listed<'state>(
         manager: &'state WindowManager,
         settings: &TaskbarSettings,
+        own: Option<Area>,
     ) -> Vec<&'state Window> {
         let current = manager.current_workspace();
+        let is_on_own_output = |window: &Window| {
+            own.is_none_or(|own| {
+                let area = window.content_area();
+                let middle = area.loc + area.size.downscale(2).to_point();
+                own.contains(middle)
+            })
+        };
         let mut windows: Vec<&Window> = manager
             .windows_top_down()
             .filter(|window| {
-                window.is_placed() && settings.window_list.show.matches(window, current)
+                window.is_placed()
+                    && settings.window_list.show.matches(window, current)
+                    && is_on_own_output(window)
             })
             .collect();
         windows.sort_by_key(|window| window.id());
@@ -843,7 +788,7 @@ mod tests {
             edge,
             ..TaskbarSettings::default()
         };
-        Taskbar::new(&settings).expect("enabled by default")
+        Taskbar::new(&settings, "OUT", true).expect("enabled by default")
     }
 
     #[rstest]
@@ -879,7 +824,7 @@ mod tests {
             reserve_space: false,
             ..TaskbarSettings::default()
         };
-        let bar = Taskbar::new(&settings).expect("enabled");
+        let bar = Taskbar::new(&settings, "OUT", true).expect("enabled");
         assert_eq!(bar.reserve(whole(), whole(), 20), whole());
     }
 
@@ -893,7 +838,7 @@ mod tests {
             align,
             ..TaskbarSettings::default()
         };
-        let bar = Taskbar::new(&settings).expect("enabled");
+        let bar = Taskbar::new(&settings, "OUT", true).expect("enabled");
         let area = bar.area_in(whole(), 20);
         assert_eq!((area.loc.x, area.size.w), (left, 960));
     }
@@ -904,7 +849,7 @@ mod tests {
             auto_hide: true,
             ..TaskbarSettings::default()
         };
-        let bar = Taskbar::new(&settings).expect("enabled");
+        let bar = Taskbar::new(&settings, "OUT", true).expect("enabled");
         assert!(!bar.is_shown());
         assert_eq!(bar.reserve(whole(), whole(), 20), whole());
     }
@@ -918,7 +863,7 @@ mod tests {
             auto_hide: true,
             ..TaskbarSettings::default()
         };
-        let mut bar = Taskbar::new(&settings).expect("enabled");
+        let mut bar = Taskbar::new(&settings, "OUT", true).expect("enabled");
         let handle = event_loop.handle();
         assert!(!bar.follow_pointer((500.0, 1070.0).into(), whole(), (&handle, &ledger)));
         assert!(!bar.is_shown(), "near the edge is not at it");
@@ -939,7 +884,7 @@ mod tests {
             enabled: false,
             ..TaskbarSettings::default()
         };
-        assert!(Taskbar::new(&settings).is_none());
+        assert!(Taskbar::new(&settings, "OUT", true).is_none());
     }
 
     #[test]
