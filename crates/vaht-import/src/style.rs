@@ -53,6 +53,8 @@ enum Property {
     Bullet,
     /// `bullet_position`.
     BulletPosition,
+    /// `alpha`.
+    Alpha,
 }
 
 impl Property {
@@ -69,6 +71,7 @@ impl Property {
                 | Self::Corners
                 | Self::Bullet
                 | Self::BulletPosition
+                | Self::Alpha
         )
     }
 
@@ -88,6 +91,7 @@ impl Property {
             Self::Corners => "corners",
             Self::Bullet => "bullet",
             Self::BulletPosition => "bullet_position",
+            Self::Alpha => "alpha",
         }
     }
 }
@@ -713,11 +717,14 @@ impl StyleFile {
                 Written(Value::from(i64::from(radius))),
             );
         }
-        if self
+        if let Some(alpha) = self
             .number(&["systray.tooltip.alpha"])
-            .is_some_and(|alpha| alpha < 255)
+            .filter(|alpha| *alpha < 255)
         {
-            self.note_resource("systray.tooltip.alpha", report, "translucent tooltips");
+            cell.insert(
+                Property::Alpha,
+                Written(Value::from(i64::from(alpha.clamp(0, 255)))),
+            );
         }
         cell
     }
@@ -1385,6 +1392,7 @@ menu.bullet:\tsquare
                     Property::Corners => got.rounded_corners == want.rounded_corners,
                     Property::Bullet => got.bullet == want.bullet,
                     Property::BulletPosition => got.bullet_side == want.bullet_side,
+                    Property::Alpha => got.alpha == want.alpha,
                 };
                 assert!(
                     matches,

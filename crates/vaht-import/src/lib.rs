@@ -139,12 +139,16 @@ impl FluxboxSetup {
         }
         if let Some((path, text)) = &self.style {
             let name = Self::theme_name(path);
-            let theme = StyleFile::new(path, text).convert(&mut report);
+            let mut theme = StyleFile::new(path, text).convert(&mut report);
+            Self::place_alphas(&init.alphas, Some(&mut theme), &init_path, &mut report);
             settings.insert("theme", toml_edit::value(name.clone()));
             files.push(OutputFile {
                 name: format!("themes/{name}.toml"),
                 text: header(path) + &theme.to_string(),
             });
+        }
+        if self.style.is_none() {
+            Self::place_alphas(&init.alphas, None, &init_path, &mut report);
         }
         if let Some((path, text)) = &self.startup {
             let why = match StartupWallpaper::find(text) {
@@ -214,6 +218,36 @@ impl FluxboxSetup {
             source: self.directory,
             files,
             report,
+        }
+    }
+
+    /// Puts the `alphas` `init` (at `init_path`) sets into the converted
+    /// `theme`; without one, notes in `report` that they are left out.
+    fn place_alphas(
+        alphas: &[(&str, i64, usize)],
+        theme: Option<&mut toml_edit::DocumentMut>,
+        init_path: &Path,
+        report: &mut Report,
+    ) {
+        let Some(theme) = theme else {
+            for (element, _, line) in alphas {
+                report.note(
+                    init_path,
+                    *line,
+                    Reason::NotYetInVaht,
+                    format!(
+                        "a translucent {element}: with no style converted, add `alpha` to a theme"
+                    ),
+                );
+            }
+            return;
+        };
+        for (element, alpha, _) in alphas {
+            let mut table = theme.as_item_mut();
+            for part in element.split('.') {
+                table = &mut table[part];
+            }
+            table["alpha"] = toml_edit::value(*alpha);
         }
     }
 

@@ -25,7 +25,15 @@ use crate::texture::{Bevel, GradientDirection, Texture};
 use crate::widget::MarkSide;
 
 /// Style properties of 02 §10.1 that vaht does not have yet.
-const PLANNED_PROPERTIES: [&str; 3] = ["alpha", "submenu_indicator", "interlaced"];
+const PLANNED_PROPERTIES: [&str; 2] = ["submenu_indicator", "interlaced"];
+
+/// The elements drawn whole with an `alpha`: the taskbar, a menu and a
+/// tooltip.
+const TRANSLUCENT_ELEMENTS: [ThemeElement; 3] = [
+    ThemeElement::Taskbar,
+    ThemeElement::MenuFrame,
+    ThemeElement::Tooltip,
+];
 
 /// The properties only the element that may be rounded takes.
 const CORNER_PROPERTIES: [&str; 2] = ["corner_radius", "corners"];
@@ -260,7 +268,21 @@ impl StylePatch {
                 ),
             ));
         }
+        if key == "alpha" && !element.is_some_and(|element| TRANSLUCENT_ELEMENTS.contains(&element))
+        {
+            return Err(refuse(
+                map,
+                format!(
+                    "`alpha` goes in [{}], [{}] or [{}] alone: the taskbar, menus and \
+                     tooltips are drawn translucent whole",
+                    TRANSLUCENT_ELEMENTS[0].path(),
+                    TRANSLUCENT_ELEMENTS[1].path(),
+                    TRANSLUCENT_ELEMENTS[2].path()
+                ),
+            ));
+        }
         match key {
+            "alpha" => self.alpha = Some(map.next_value()?),
             "texture" => self.texture = Some(map.next_value::<TextureValue>()?.0),
             "font" => self.font = Some(map.next_value::<FontFile>()?.into_font()),
             "text_color" => self.text_color = Some(map.next_value::<ColorText>()?.0),
@@ -741,7 +763,8 @@ mod tests {
     #[rstest]
     #[case::unknown_element("[window.lable]\nheight = 1\n", "`window.lable` is no element", 1)]
     #[case::unknown_property("[window.label]\ncolour = \"red\"\n", "`colour` in [window.label]", 2)]
-    #[case::planned_property("[window.label]\nalpha = 4\n", "not available in vaht yet", 2)]
+    #[case::planned_property("[window.label]\ninterlaced = true\n", "not available in vaht yet", 2)]
+    #[case::alpha_elsewhere("[window.label]\nalpha = 4\n", "the taskbar, menus and tooltips", 2)]
     #[case::corners_off_the_frame(
         "[window.label]\ncorner_radius = 4\n",
         "goes in [window.border], [menu.frame] or [tooltip] alone",

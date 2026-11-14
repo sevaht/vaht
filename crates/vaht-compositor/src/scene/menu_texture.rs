@@ -26,6 +26,8 @@ pub(crate) struct MenuTexture {
     separators: Vec<SolidColorBuffer>,
     /// Each corner's arc, in [`Corner`]'s order.
     corners: [CornerTexture; 4],
+    /// How opaque the menu is drawn, as the theme says.
+    opacity: f32,
 }
 
 impl MenuTexture {
@@ -36,6 +38,7 @@ impl MenuTexture {
             lines: std::array::from_fn(|_| SolidColorBuffer::default()),
             separators: Vec::new(),
             corners: std::array::from_fn(|_| CornerTexture::new()),
+            opacity: 1.0,
         }
     }
 
@@ -49,6 +52,7 @@ impl MenuTexture {
     ) {
         self.panel.upload(panel);
         let frame = theme.style(ThemeElement::MenuFrame, WidgetState::Focused);
+        self.opacity = frame.opacity();
         let outline = frame.border.color;
         for (buffer, line) in self.lines.iter_mut().zip(&geometry.lines) {
             buffer.update(line.size, Self::to_render_color(outline));
@@ -89,7 +93,12 @@ impl MenuTexture {
             .iter()
             .zip(<Corner as strum::IntoEnumIterator>::iter())
             .filter_map(|(texture, corner)| {
-                texture.render_element(renderer, geometry.corner_square(corner), scale, 1.0)
+                texture.render_element(
+                    renderer,
+                    geometry.corner_square(corner),
+                    scale,
+                    self.opacity,
+                )
             })
             .collect();
         let solid = |buffer: &SolidColorBuffer, line: &Rectangle<i32, Logical>| {
@@ -98,7 +107,7 @@ impl MenuTexture {
                     buffer,
                     line.loc.to_physical_precise_round(scale),
                     scale,
-                    1.0,
+                    self.opacity,
                     Kind::Unspecified,
                 ))
             })
@@ -110,10 +119,12 @@ impl MenuTexture {
                 .chain(self.separators.iter().zip(&geometry.separators))
                 .filter_map(|(buffer, line)| solid(buffer, line)),
         );
-        elements.extend(
-            self.panel
-                .render_element(renderer, geometry.panel.loc, scale, 1.0),
-        );
+        elements.extend(self.panel.render_element(
+            renderer,
+            geometry.panel.loc,
+            scale,
+            self.opacity,
+        ));
         elements
     }
 

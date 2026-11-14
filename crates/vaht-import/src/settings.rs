@@ -98,6 +98,10 @@ pub(crate) struct InitConversion {
     pub(crate) settings: DocumentMut,
     /// `outputs.toml`.
     pub(crate) outputs: Option<DocumentMut>,
+    /// The theme's `alpha`s `init` sets, below fully opaque: each the
+    /// theme element's path (`taskbar`, `menu.frame`), the alpha, and the
+    /// line it came from. Fluxbox keeps them in `init`, vaht in the theme.
+    pub(crate) alphas: Vec<(&'static str, i64, usize)>,
     /// `bindings.toml`'s `[switches]`, with the line of `init` each came
     /// from.
     pub(crate) switches: Vec<(&'static str, Value, usize)>,
@@ -167,11 +171,26 @@ impl InitFile {
         self.convert_input_emulation(report);
         self.accept_what_vaht_does();
         self.report_unused(report);
+        let alphas = self.theme_alphas();
         InitConversion {
             settings: self.document,
             outputs: outputs.document(),
+            alphas,
             switches,
         }
+    }
+
+    /// Returns the toolbar's and the menus' alpha, those below fully
+    /// opaque, as the theme elements vaht keeps them in.
+    fn theme_alphas(&mut self) -> Vec<(&'static str, i64, usize)> {
+        [("toolbar.alpha", "taskbar"), ("menu.alpha", "menu.frame")]
+            .into_iter()
+            .filter_map(|(name, element)| {
+                let resource = self.resources.get(&format!("{SCREEN}{name}"))?.clone();
+                let alpha: i64 = resource.value.parse().ok()?;
+                (alpha < 255).then(|| (element, alpha.clamp(0, 255), resource.line))
+            })
+            .collect()
     }
 
     /// Which X programs may emulate input:

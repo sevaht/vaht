@@ -169,6 +169,9 @@ pub struct Style {
     pub bullet: Bullet,
     /// Which side of a menu item its bullet, and a toggle's check, are on.
     pub bullet_side: MarkSide,
+    /// How opaque the whole of it is drawn, 0 (clear) to 255 (opaque): the
+    /// taskbar's, a menu's (its `menu.frame`) or a tooltip's.
+    pub alpha: u8,
 }
 
 /// A menu's submenu bullet (Fluxbox's `menu.bullet`).
@@ -200,6 +203,12 @@ impl Bullet {
 }
 
 impl Style {
+    /// Returns how opaque the whole of it is drawn, 0.0 to 1.0.
+    #[must_use]
+    pub fn opacity(&self) -> f32 {
+        f32::from(self.alpha) / 255.0
+    }
+
     /// Returns how round each corner is.
     #[must_use]
     pub fn corner_radii(&self) -> CornerRadii {
@@ -229,6 +238,7 @@ impl Style {
             rounded_corners: CornerSet::ALL,
             bullet: Bullet::Triangle,
             bullet_side: MarkSide::Right,
+            alpha: u8::MAX,
         }
     }
 }
@@ -262,6 +272,8 @@ pub struct StylePatch {
     pub bullet: Option<Bullet>,
     /// The bullet's side, if this layer sets it.
     pub bullet_side: Option<MarkSide>,
+    /// How opaque the whole element is, if this layer sets it.
+    pub alpha: Option<u8>,
 }
 
 impl StylePatch {
@@ -305,6 +317,9 @@ impl StylePatch {
         }
         if let Some(corners) = self.rounded_corners {
             style.rounded_corners = corners;
+        }
+        if let Some(alpha) = self.alpha {
+            style.alpha = alpha;
         }
     }
 }

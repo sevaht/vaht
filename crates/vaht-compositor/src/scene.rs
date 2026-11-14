@@ -391,7 +391,7 @@ impl<'state> Scene<'state> {
             .unwrap_or_default();
         elements.extend(self.drawn.tooltip.render_elements(renderer, scale));
         elements.extend(self.drawn.menus.render_elements(renderer, scale));
-        elements.extend(self.drawn.outline.render_elements(renderer, scale));
+        elements.extend(self.drawn.outline.render_elements(renderer, scale, 1.0));
         elements.extend(self.drawn.snap.picker_element(renderer, scale));
         // An X program's menus and tooltips are over every window.
         for window in self

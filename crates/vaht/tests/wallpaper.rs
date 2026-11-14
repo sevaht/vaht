@@ -115,3 +115,33 @@ fn a_workspace_with_its_own_image_shows_it_while_shown() {
     run("workspace 3");
     assert_eq!(client.screenshot().rgb(5, 300), SKY, "the settings' image");
 }
+
+#[test]
+fn a_translucent_taskbar_shows_the_wallpaper_through() {
+    let taskbar_at = |alpha: u8| -> [u8; 3] {
+        let theme = format!("[taskbar]\ntexture = {{ solid = \"#000000\" }}\nalpha = {alpha}\n");
+        let settings = "theme = \"see-through\"\n[wallpaper]\nimage = \"sky.png\"\nfit = \"tile\"\n\
+                        [taskbar]\nwidgets = []\n";
+        let vaht = HeadlessVaht::start_with_files(
+            Path::new(EXECUTABLE),
+            &[
+                ("settings.toml", settings.as_bytes()),
+                ("themes/see-through.toml", theme.as_bytes()),
+                ("sky.png", &solid_png(16, SKY)),
+            ],
+            &[],
+        );
+        let mut client = TestClient::connect(vaht.socket());
+        let screenshot = client.screenshot();
+        screenshot.rgb(100, screenshot.height() - 2)
+    };
+    assert_eq!(taskbar_at(255), [0, 0, 0], "opaque");
+    assert_eq!(taskbar_at(0), SKY, "clear");
+    let half = taskbar_at(128);
+    for (blended, sky) in half.iter().zip(SKY) {
+        assert!(
+            (i32::from(*blended) - i32::from(sky) / 2).abs() <= 2,
+            "half of the wallpaper: {half:?}"
+        );
+    }
+}

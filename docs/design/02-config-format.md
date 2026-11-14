@@ -898,8 +898,11 @@ exactly what each element gets.
   `taskbar.window-list.empty`, `menu.title`, `menu.frame`, `menu.item`,
   `dialog.field`, `wireframe` (a resize's outline, drawn in its
   `border`) and `tooltip` (converted from fluxland's `systray.tooltip.*`,
-  rounded as `corner_radius` says, as frames and menus are; its `alpha` is
-  not built). States: `focused`, `unfocused`, `pressed`, `hovered`,
+  rounded as `corner_radius` says, as frames and menus are). `alpha`, 0
+  (clear) to 255 (opaque), draws the whole of `taskbar`, a menu (in
+  `menu.frame`) or a tooltip translucent, as Fluxbox's `toolbar.alpha`,
+  `menu.alpha` and fluxland's `systray.tooltip.alpha`, which `vaht import`
+  converts into the theme. States: `focused`, `unfocused`, `pressed`, `hovered`,
   `disabled`.
 - Properties: `texture` (solid or gradient, with a bevel), `font`,
   `text_color`, `text_effect`, `justify`, `glyph_color`, `padding`,

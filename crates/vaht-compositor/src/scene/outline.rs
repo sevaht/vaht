@@ -158,11 +158,13 @@ impl Outline {
         Rectangle::new((x, y).into(), (radius, radius).into())
     }
 
-    /// Returns the elements that draw the outline, if one shows.
+    /// Returns the elements that draw the outline, if one shows, `opacity`
+    /// opaque (1.0 for wholly).
     pub(crate) fn render_elements<R>(
         &self,
         renderer: &mut R,
         scale: Scale<f64>,
+        opacity: f32,
     ) -> Vec<SceneElement<R>>
     where
         R: Renderer + ImportAll + ImportMem,
@@ -185,7 +187,7 @@ impl Outline {
                     renderer,
                     Self::corner_square(*area, corner, *corners),
                     scale,
-                    1.0,
+                    opacity,
                 )
             })
             .collect();
@@ -199,7 +201,7 @@ impl Outline {
                         buffer,
                         line.loc.to_physical_precise_round(scale),
                         scale,
-                        1.0,
+                        opacity,
                         Kind::Unspecified,
                     ))
                 }),

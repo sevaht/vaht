@@ -177,7 +177,8 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     let setup = tempfile::tempdir().expect("a temporary directory");
     std::fs::write(
         setup.path().join("init"),
-        "session.screen0.focusModel: MouseFocus\nsession.styleFile: styles/Night Sky\n",
+        "session.screen0.focusModel: MouseFocus\nsession.styleFile: styles/Night Sky\n\
+         session.screen0.toolbar.alpha: 200\n",
     )
     .expect("written");
     std::fs::create_dir_all(setup.path().join("styles/Night Sky")).expect("made");
@@ -222,6 +223,10 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
         std::fs::read_to_string(target.path().join("themes/Night-Sky.toml")).expect("written");
     assert!(theme.contains("SteelBlue"), "{theme}");
     assert!(theme.contains("height = 24"), "{theme}");
+    assert!(
+        theme.contains("alpha = 200"),
+        "the toolbar's alpha: {theme}"
+    );
     assert!(
         printed.contains("slit.color: the slit is gone"),
         "{printed}"

@@ -116,6 +116,8 @@ pub(crate) struct Taskbar {
     wall_clock: Option<WallClock<Compositor>>,
     /// The tray, once started, if the taskbar shows one.
     tray: Option<Tray<Compositor>>,
+    /// How opaque it is drawn, as the theme says.
+    opacity: f32,
 }
 
 /// Whether the taskbar shows.
@@ -163,6 +165,7 @@ impl Taskbar {
                 && settings.widgets.contains(&TaskbarWidget::Clock),
             wall_clock: None,
             tray: None,
+            opacity: 1.0,
         })
     }
 
@@ -387,6 +390,9 @@ impl Taskbar {
         icons: &mut IconStore,
     ) {
         let height = theme.metrics().taskbar_height;
+        self.opacity = theme
+            .style(ThemeElement::Taskbar, WidgetState::Focused)
+            .opacity();
         self.area = self.area_in(view.whole, height);
         let tray_items: Vec<&TrayItem> = self.tray.as_ref().map_or_else(Vec::new, |tray| {
             tray.ordered(&view.settings.tray.pin_left, &view.settings.tray.pin_right)
@@ -450,7 +456,7 @@ impl Taskbar {
         R::TextureId: Send + Clone + 'static,
     {
         self.texture
-            .render_element(renderer, self.area.loc, scale, 1.0)
+            .render_element(renderer, self.area.loc, scale, self.opacity)
     }
 
     /// Wakes vaht to draw the clock anew when its text next changes, at

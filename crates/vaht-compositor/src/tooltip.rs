@@ -45,6 +45,8 @@ struct Shown {
     texture: PanelTexture,
     /// Its border.
     outline: Outline,
+    /// How opaque it is drawn, as the theme says.
+    opacity: f32,
 }
 
 /// What a tooltip panel shows: its lines.
@@ -176,6 +178,7 @@ impl Tooltip {
             border,
             texture,
             outline,
+            opacity: tooltip.opacity(),
         });
     }
 
@@ -193,9 +196,15 @@ impl Tooltip {
         let Some(shown) = &self.shown else {
             return Vec::new();
         };
-        let mut elements = shown.outline.render_elements(renderer, scale);
+        let mut elements = shown
+            .outline
+            .render_elements(renderer, scale, shown.opacity);
         let inside = shown.area.loc + Point::from((shown.border, shown.border));
-        elements.extend(shown.texture.render_element(renderer, inside, scale, 1.0));
+        elements.extend(
+            shown
+                .texture
+                .render_element(renderer, inside, scale, shown.opacity),
+        );
         elements
     }
 }
