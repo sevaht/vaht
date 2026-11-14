@@ -31,7 +31,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "restart",
     "set-setting",
     "taskbar-to-output",
-    "toggle-taskbar",
     "tray-item-menu",
 ];
 
@@ -284,6 +283,8 @@ pub(crate) enum Action {
     OpenMenu(MenuRequest),
     /// Closes every menu.
     HideMenus,
+    /// Turns the taskbar off, or on again.
+    ToggleTaskbar,
 }
 
 /// Which menu an action opens.
@@ -431,6 +432,7 @@ impl Action {
             }
             "custom-menu" => Ok(Self::OpenMenu(MenuRequest::Custom(arguments.to_owned()))),
             "hide-menus" => without_arguments(Self::HideMenus),
+            "toggle-taskbar" => without_arguments(Self::ToggleTaskbar),
             "exit" => without_arguments(Self::Exit),
             "set-environment" => {
                 let (variable, value) = arguments
@@ -545,6 +547,7 @@ impl fmt::Display for Action {
             Self::OpenMenu(MenuRequest::WindowList) => formatter.write_str("window-list-menu"),
             Self::OpenMenu(MenuRequest::Custom(name)) => write!(formatter, "custom-menu {name}"),
             Self::HideMenus => formatter.write_str("hide-menus"),
+            Self::ToggleTaskbar => formatter.write_str("toggle-taskbar"),
         }
     }
 }

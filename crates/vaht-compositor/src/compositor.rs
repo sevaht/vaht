@@ -2166,6 +2166,16 @@ impl Compositor {
                 self.menus.close();
                 self.schedule_render();
             }
+            Action::ToggleTaskbar => {
+                if let Some(taskbar) = &mut self.taskbar {
+                    taskbar.toggle();
+                    // Its room is given back or taken, and its clock rests
+                    // while it is off.
+                    self.refresh_output_area();
+                    self.schedule_clock();
+                    self.schedule_render();
+                }
+            }
         }
     }
 

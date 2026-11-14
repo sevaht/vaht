@@ -527,6 +527,9 @@ lid-close = "exec swaylock"
   there (Fluxbox's `SendToNextHead`, `SendToPrevHead`, `SetHead`).
   `toggle-frame` shows the window without its frame, its content staying
   where it is, or with it again (Fluxbox's `ToggleDecor`).
+  `toggle-taskbar` turns the taskbar off, giving back the room it
+  reserved and resting its clock, or on again (Fluxbox's
+  `ToggleToolbarHidden`).
 - `tile` takes a cell in thousandths of the usable area:
   `tile <x> <y> <width> <height>`, the left half being `tile 0 0 500 1000`.
 - `next-window` and `previous-window` walk windows in the order they last

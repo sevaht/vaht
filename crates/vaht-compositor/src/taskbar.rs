@@ -100,8 +100,9 @@ pub(crate) struct Taskbar {
     /// How long after the pointer leaves it it hides; none if it never
     /// hides.
     hide_delay: Option<Duration>,
-    /// Whether it is hidden, waiting for the pointer at its edge.
-    is_hidden: bool,
+    /// Whether it shows, waits hidden for the pointer at its edge, or was
+    /// turned off.
+    visibility: Visibility,
     /// Hides it, once the pointer has been away long enough.
     hide_timer: Option<Timer<Compositor>>,
     /// Where it is, in global coordinates; set as frames are prepared.
@@ -114,6 +115,17 @@ pub(crate) struct Taskbar {
     wall_clock: Option<WallClock<Compositor>>,
     /// The tray, once started, if the taskbar shows one.
     tray: Option<Tray<Compositor>>,
+}
+
+/// Whether the taskbar shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Visibility {
+    /// It shows.
+    Shown,
+    /// It auto-hides, and waits hidden for the pointer at its edge.
+    AutoHidden,
+    /// It was turned off (`toggle-taskbar`).
+    Off,
 }
 
 impl Taskbar {
@@ -138,7 +150,11 @@ impl Taskbar {
             reserves_space: settings.reserve_space && !settings.auto_hide,
             hide_delay: settings.hide_delay(),
             // An auto-hiding taskbar starts hidden, as Fluxbox's does.
-            is_hidden: settings.auto_hide,
+            visibility: if settings.auto_hide {
+                Visibility::AutoHidden
+            } else {
+                Visibility::Shown
+            },
             hide_timer: None,
             area: Area::default(),
             texture: PanelTexture::new(),
@@ -164,9 +180,23 @@ impl Taskbar {
         Rectangle::new((left, top).into(), (width, height).into())
     }
 
-    /// Returns whether the taskbar shows: not while auto-hidden.
+    /// Returns whether the taskbar shows: not while auto-hidden or turned
+    /// off.
     pub(crate) const fn is_shown(&self) -> bool {
-        !self.is_hidden
+        matches!(self.visibility, Visibility::Shown)
+    }
+
+    /// Turns the taskbar off (`toggle-taskbar`), or on again: shown, or
+    /// hidden at its edge if it auto-hides. While off it shows for nothing
+    /// and reserves no room.
+    pub(crate) fn toggle(&mut self) {
+        self.hide_timer = None;
+        self.visibility = match (self.visibility, self.hide_delay) {
+            (Visibility::Off, Some(_)) => Visibility::AutoHidden,
+            (Visibility::Off, None) => Visibility::Shown,
+            (Visibility::Shown | Visibility::AutoHidden, _) => Visibility::Off,
+        };
+        tracing::debug!(visibility = ?self.visibility, "taskbar toggled");
     }
 
     /// Follows the pointer, now at global `point` on an output covering
@@ -182,6 +212,9 @@ impl Taskbar {
         let Some(delay) = self.hide_delay else {
             return false;
         };
+        if self.visibility == Visibility::Off {
+            return false;
+        }
         let pixel = point.to_i32_floor();
         let edge_row = match self.edge {
             TaskbarEdge::Top => whole.loc.y,
@@ -189,9 +222,9 @@ impl Taskbar {
         };
         let is_at_edge =
             pixel.y == edge_row && pixel.x >= whole.loc.x && pixel.x < whole.loc.x + whole.size.w;
-        if self.is_hidden {
+        if self.visibility == Visibility::AutoHidden {
             if is_at_edge {
-                self.is_hidden = false;
+                self.visibility = Visibility::Shown;
                 self.hide_timer = None;
                 return true;
             }
@@ -202,8 +235,10 @@ impl Taskbar {
         } else if self.hide_timer.as_ref().is_none_or(Timer::has_fired) {
             let (handle, ledger) = event_loop;
             let timer = Timer::once(handle, ledger, delay, |compositor: &mut Compositor| {
-                if let Some(taskbar) = &mut compositor.taskbar {
-                    taskbar.is_hidden = true;
+                if let Some(taskbar) = &mut compositor.taskbar
+                    && taskbar.visibility == Visibility::Shown
+                {
+                    taskbar.visibility = Visibility::AutoHidden;
                     tracing::debug!("taskbar hidden");
                     // Its clock rests while it cannot be seen.
                     taskbar.schedule_clock(
@@ -227,7 +262,7 @@ impl Taskbar {
     /// Returns `usable` less the taskbar's area, if it reserves its space,
     /// on an output covering `whole`.
     pub(crate) fn reserve(&self, usable: Area, whole: Area, height: u32) -> Area {
-        if !self.reserves_space {
+        if !self.reserves_space || self.visibility == Visibility::Off {
             return usable;
         }
         let taken = self.area_in(whole, height);
@@ -407,10 +442,10 @@ impl Taskbar {
         let Some(wall_clock) = &self.wall_clock else {
             return;
         };
-        let armed = if self.is_hidden {
-            wall_clock.disarm()
-        } else {
+        let armed = if self.is_shown() {
             wall_clock.ring_at(Self::next_clock_change(now, self.clock_shows_seconds))
+        } else {
+            wall_clock.disarm()
         };
         if let Err(error) = armed {
             tracing::warn!(
@@ -767,6 +802,17 @@ mod tests {
         assert_eq!((area.size.w, area.size.h), (1920, 20));
         let usable = bar.reserve(whole(), whole(), 20);
         assert_eq!((usable.loc.y, usable.size.h), usable_span);
+    }
+
+    #[test]
+    fn a_taskbar_turned_off_shows_for_nothing_and_reserves_no_room() {
+        let mut bar = taskbar(TaskbarEdge::Bottom);
+        bar.toggle();
+        assert!(!bar.is_shown());
+        assert_eq!(bar.reserve(whole(), whole(), 20), whole());
+        bar.toggle();
+        assert!(bar.is_shown(), "on again");
+        assert_ne!(bar.reserve(whole(), whole(), 20), whole());
     }
 
     #[test]
