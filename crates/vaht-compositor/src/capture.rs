@@ -15,6 +15,8 @@ use std::time::Duration;
 
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::renderer::element::RenderElement;
+use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::{Bind, ExportMem, ImportAll, ImportMem, Offscreen, Renderer};
 use smithay::output::{Output, WeakOutput};
 use smithay::reexports::wayland_server::protocol::wl_shm::Format;
@@ -77,22 +79,14 @@ where
         .ok_or(CaptureError::EmptyOutput)?;
     let width = usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?;
     let height = usize::try_from(size.h).map_err(|_negative| CaptureError::EmptyOutput)?;
-    let scale: smithay::utils::Scale<f64> = output.current_scale().fractional_scale().into();
     let buffer_size: Size<i32, smithay::utils::Buffer> = (size.w, size.h).into();
     let mut target = renderer
         .create_buffer(Fourcc::Argb8888, buffer_size)
         .map_err(CaptureError::renderer)?;
     let elements = scene.output_elements(renderer, output);
     let mut framebuffer = renderer.bind(&mut target).map_err(CaptureError::renderer)?;
-    OutputDamageTracker::new(size, scale, output.current_transform())
-        .render_output(
-            renderer,
-            &mut framebuffer,
-            0,
-            &elements,
-            scene::BACKGROUND_COLOR,
-        )
-        .map_err(|error| CaptureError::Draw(error.to_string()))?;
+    // Reading the frame back below waits for the GPU to finish it.
+    let _drawn = render_output(renderer, &mut framebuffer, &elements, output)?;
     let region = Rectangle::from_size((size.w, size.h).into());
     let mapping = renderer
         .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
@@ -108,21 +102,78 @@ where
     })
 }
 
+/// Draws what `scene` shows on `output` with `renderer` straight into
+/// `target`, a client's GPU buffer, and waits until the GPU is done, so
+/// the client never reads half a frame. Nothing is copied through the
+/// CPU: screen sharing and recording at full rate cost the GPU alone.
+///
+/// # Errors
+///
+/// Returns an error if the output has no mode, or the scene could not be
+/// drawn into the buffer.
+pub(crate) fn draw_capture_into<R, Target>(
+    renderer: &mut R,
+    scene: &Scene<'_>,
+    output: &Output,
+    target: &mut Target,
+) -> Result<(), CaptureError>
+where
+    R: Renderer + ImportAll + ImportMem + Bind<Target>,
+    R::TextureId: Send + Clone + 'static,
+    R::Error: Send + Sync + 'static,
+{
+    let elements = scene.output_elements(renderer, output);
+    let mut framebuffer = renderer.bind(target).map_err(CaptureError::renderer)?;
+    let sync = render_output(renderer, &mut framebuffer, &elements, output)?;
+    sync.wait()
+        .map_err(|_interrupted| CaptureError::Draw("the GPU did not finish".to_owned()))
+}
+
+/// Draws `elements` of `output` into `framebuffer` as the output shows
+/// them, turned as it is; returns when the GPU will be done.
+fn render_output<R, Element>(
+    renderer: &mut R,
+    framebuffer: &mut R::Framebuffer<'_>,
+    elements: &[Element],
+    output: &Output,
+) -> Result<SyncPoint, CaptureError>
+where
+    R: Renderer,
+    Element: RenderElement<R>,
+{
+    let size = output
+        .current_mode()
+        .map(|mode| mode.size)
+        .ok_or(CaptureError::EmptyOutput)?;
+    let scale: smithay::utils::Scale<f64> = output.current_scale().fractional_scale().into();
+    let mut tracker = OutputDamageTracker::new(size, scale, output.current_transform());
+    let result = tracker
+        .render_output(renderer, framebuffer, 0, elements, scene::BACKGROUND_COLOR)
+        .map_err(|error| CaptureError::Draw(error.to_string()))?;
+    Ok(result.sync)
+}
+
 impl ScreenCapture {
-    /// Fills `frame` with `image`, of an output turned as `transform`
-    /// says, made `time` after vaht started, or fails it for why the image
-    /// could not be made.
+    /// Fills `frame`, a shared-memory buffer's, with `image`, of an output
+    /// turned as `transform`, made `time` after vaht started, or fails it
+    /// for why the image could not be made.
     fn fill(
         frame: Frame,
         image: Result<CapturedImage, CaptureError>,
         transform: Transform,
         time: Duration,
     ) {
-        let result = image.and_then(|image| {
+        let written = image.and_then(|image| {
             shared_memory::write_frame(&frame.buffer(), &image.pixels, image.width, image.height)
                 .map_err(CaptureError::Write)
         });
-        match result {
+        Self::finish(frame, written, transform, time);
+    }
+
+    /// Tells `frame`'s client its image is ready (`drawn`), of an output
+    /// turned as `transform`, made `time` after vaht started, or why not.
+    fn finish(frame: Frame, drawn: Result<(), CaptureError>, transform: Transform, time: Duration) {
+        match drawn {
             Ok(()) => frame.success(transform, None, time),
             Err(error) => {
                 tracing::warn!(error = &error as &dyn std::error::Error, "capture failed");
@@ -170,9 +221,9 @@ impl ImageCopyCaptureHandler for Compositor {
         Some(BufferConstraints {
             size: mode.size.to_logical(1).to_buffer(1, Transform::Normal),
             shm: vec![Format::Argb8888, Format::Xrgb8888],
-            // Captures are copied into shared memory; GPU buffers are not
-            // offered yet.
-            dma: None,
+            // On the hardware, captures are drawn straight into GPU buffers
+            // too, as screen sharing and OBS ask for.
+            dma: self.backend.capture_dmabuf_constraints(),
         })
     }
 
@@ -219,13 +270,15 @@ impl ImageCopyCaptureHandler for Compositor {
         } else {
             scene
         };
-        let image = self.backend.capture(&scene, &output);
-        ScreenCapture::fill(
-            frame,
-            image,
-            output.current_transform(),
-            self.start_time.elapsed(),
-        );
+        let (transform, time) = (output.current_transform(), self.start_time.elapsed());
+        if let Ok(dmabuf) = smithay::wayland::dmabuf::get_dmabuf(&frame.buffer()) {
+            let mut dmabuf = dmabuf.clone();
+            let drawn = self.backend.capture_into(&scene, &output, &mut dmabuf);
+            ScreenCapture::finish(frame, drawn, transform, time);
+        } else {
+            let image = self.backend.capture(&scene, &output);
+            ScreenCapture::fill(frame, image, transform, time);
+        }
     }
 }
 

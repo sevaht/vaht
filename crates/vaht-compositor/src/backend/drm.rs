@@ -19,10 +19,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
-use smithay::backend::allocator::Fourcc;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
+use smithay::backend::allocator::{Fourcc, Modifier};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
 use smithay::backend::drm::{
     DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmNode, NodeType,
@@ -33,7 +33,7 @@ use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface}
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{GpuManager, MultiRenderer};
-use smithay::backend::renderer::{ImportDma as _, Renderer as _};
+use smithay::backend::renderer::{Bind, ImportDma as _, Renderer as _};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session as _};
 use smithay::backend::udev::{self, UdevBackend, UdevEvent};
@@ -47,6 +47,7 @@ use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{DeviceFd, Transform};
 use smithay::wayland::drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd};
+use smithay::wayland::image_copy_capture::DmabufConstraints;
 
 use self::device::{DeviceContext, GpuDevice, GpuOutputManager};
 use self::plan::{GpuQuirks, TopWindow};
@@ -726,6 +727,48 @@ impl DrmBackend {
         {
             tracing::warn!(%error, "could not free unused textures");
         }
+    }
+
+    /// Returns what GPU buffers a capture may be drawn into: allocated on
+    /// the primary GPU's render node, in a format and modifier its
+    /// renderer draws into.
+    pub(crate) fn capture_dmabuf_constraints(&mut self) -> Option<DmabufConstraints> {
+        let node = self
+            .primary_gpu
+            .node_with_type(NodeType::Render)
+            .and_then(Result::ok)
+            .unwrap_or(self.primary_gpu);
+        let renderer = self.renderer().ok()?;
+        let formats = Bind::<Dmabuf>::supported_formats(&renderer)?;
+        let mut grouped: Vec<(Fourcc, Vec<Modifier>)> = Vec::new();
+        for format in formats.iter() {
+            match grouped.iter_mut().find(|(code, _)| *code == format.code) {
+                Some((_, modifiers)) => modifiers.push(format.modifier),
+                None => grouped.push((format.code, vec![format.modifier])),
+            }
+        }
+        Some(DmabufConstraints {
+            node,
+            formats: grouped,
+        })
+    }
+
+    /// Draws what `scene` shows on `output` straight into `dmabuf`, a
+    /// client's GPU buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns why it could not be drawn.
+    pub(crate) fn capture_into(
+        &mut self,
+        scene: &Scene<'_>,
+        output: &Output,
+        dmabuf: &mut Dmabuf,
+    ) -> Result<(), CaptureError> {
+        let mut renderer = self
+            .renderer()
+            .map_err(|error| CaptureError::Draw(error.to_string()))?;
+        capture::draw_capture_into(&mut renderer, scene, output, dmabuf)
     }
 
     /// Draws `scene` as `output` shows it, for a screenshot.

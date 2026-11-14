@@ -20,6 +20,7 @@ use smithay::reexports::pixman::Image;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::utils::{Rectangle, Transform};
+use smithay::wayland::image_copy_capture::DmabufConstraints;
 
 pub(crate) use self::drm::DrmBackend;
 pub(crate) use self::drm::plan::{TopWindow, virtual_terminal};
@@ -239,6 +240,37 @@ impl Backend {
                 output,
             ),
             Self::Drm(backend) => backend.capture(scene, output),
+        }
+    }
+
+    /// Returns what GPU buffers captures may be drawn into: on the DRM
+    /// backend, the primary GPU's; none elsewhere, where captures go
+    /// through shared memory.
+    pub(crate) fn capture_dmabuf_constraints(&mut self) -> Option<DmabufConstraints> {
+        match self {
+            Self::Drm(backend) => backend.capture_dmabuf_constraints(),
+            Self::Winit(_) | Self::Headless(_) => None,
+        }
+    }
+
+    /// Draws what `scene` shows on `output` straight into `dmabuf`, a
+    /// client's GPU buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns why it could not be drawn: only the DRM backend offers GPU
+    /// buffers.
+    pub(crate) fn capture_into(
+        &mut self,
+        scene: &Scene<'_>,
+        output: &Output,
+        dmabuf: &mut Dmabuf,
+    ) -> Result<(), CaptureError> {
+        match self {
+            Self::Drm(backend) => backend.capture_into(scene, output, dmabuf),
+            Self::Winit(_) | Self::Headless(_) => Err(CaptureError::Draw(
+                "GPU buffers are offered on the DRM backend alone".to_owned(),
+            )),
         }
     }
 
