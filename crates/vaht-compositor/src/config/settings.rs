@@ -9,6 +9,8 @@
 mod input;
 mod taskbar;
 
+use std::collections::BTreeMap;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -443,6 +445,11 @@ pub(crate) struct WallpaperSettings {
     image: Option<String>,
     /// How it fills the output.
     pub(crate) fit: WallpaperFit,
+    /// Images of particular workspaces, by number from 1, in place of
+    /// `image` while they are shown (fluxland's
+    /// `session.screen0.workspaceN.wallpaper`).
+    #[serde(deserialize_with = "WallpaperSettings::deserialize_workspaces")]
+    workspaces: BTreeMap<NonZeroUsize, String>,
 }
 
 impl WallpaperSettings {
@@ -451,6 +458,37 @@ impl WallpaperSettings {
     /// or with `~/` and no home.
     pub(crate) fn image_path(&self, config_directory: &Path) -> Option<PathBuf> {
         file_path(self.image.as_deref()?, config_directory)
+    }
+
+    /// Returns the path of the image workspace `number` shows in place of
+    /// `image`, read as [`Self::image_path`] reads it, and each such
+    /// workspace's number.
+    pub(crate) fn workspace_image_paths<'settings>(
+        &'settings self,
+        config_directory: &'settings Path,
+    ) -> impl Iterator<Item = (NonZeroUsize, Option<PathBuf>)> + 'settings {
+        self.workspaces
+            .iter()
+            .map(|(number, image)| (*number, file_path(image, config_directory)))
+    }
+
+    /// Reads `[wallpaper.workspaces]`, whose keys are workspace numbers
+    /// from 1.
+    fn deserialize_workspaces<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<NonZeroUsize, String>, D::Error> {
+        let written: BTreeMap<String, String> = serde::Deserialize::deserialize(deserializer)?;
+        written
+            .into_iter()
+            .map(|(number, image)| {
+                let number = number.parse().map_err(|_not_a_number| {
+                    serde::de::Error::custom(format!(
+                        "[wallpaper.workspaces] names workspaces by number from 1, not `{number}`"
+                    ))
+                })?;
+                Ok((number, image))
+            })
+            .collect()
     }
 }
 

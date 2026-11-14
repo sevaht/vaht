@@ -85,3 +85,33 @@ fn set_alpha_makes_a_window_translucent_and_nothing_restores_it() {
     client.type_chord(&[keys::F2]);
     assert_eq!(client.screenshot().rgb(MIDDLE.0, MIDDLE.1), WINDOW_COLOR);
 }
+
+#[test]
+fn a_workspace_with_its_own_image_shows_it_while_shown() {
+    const BEACH: [u8; 3] = [0xe0, 0xc0, 0x80];
+    let settings = "[wallpaper]\nimage = \"sky.png\"\nfit = \"tile\"\n\
+                    [wallpaper.workspaces]\n2 = \"beach.png\"\n";
+    let vaht = HeadlessVaht::start_with_files(
+        Path::new(EXECUTABLE),
+        &[
+            ("settings.toml", settings.as_bytes()),
+            ("sky.png", &solid_png(16, SKY)),
+            ("beach.png", &solid_png(16, BEACH)),
+        ],
+        &[],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    let run = |command: &str| {
+        let output = std::process::Command::new(EXECUTABLE)
+            .args(["msg", "run", command])
+            .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+            .output()
+            .expect("vaht msg runs");
+        assert!(output.status.success(), "{output:?}");
+    };
+    assert_eq!(client.screenshot().rgb(5, 300), SKY);
+    run("workspace 2");
+    assert_eq!(client.screenshot().rgb(5, 300), BEACH, "its own image");
+    run("workspace 3");
+    assert_eq!(client.screenshot().rgb(5, 300), SKY, "the settings' image");
+}

@@ -2,7 +2,10 @@
 //! pieces of it pseudo-transparent windows show through (00 §4).
 //!
 //! The image is decoded once, when the settings name it, and painted once
-//! for each output, at its size ([`vaht_ui::Wallpaper`]). A window a rule makes
+//! for each output, at its size ([`vaht_ui::Wallpaper`]). A workspace may
+//! show an image of its own in place of it; each image is painted for an
+//! output the first time it shows there, and kept, so switching
+//! workspaces paints nothing again. A window a rule makes
 //! pseudo-transparent gets its own copy of the piece under its content,
 //! drawn beneath its surface and over the windows below, so where it is
 //! translucent only the wallpaper shows (fluxland's `pseudo_transparency.c`,
@@ -11,7 +14,8 @@
 //! A piece is copied again only when its window's area or the wallpaper
 //! changes.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
 use smithay::backend::renderer::{ImportMem, Renderer};
@@ -31,7 +35,12 @@ pub(crate) struct Backdrop {
     config_directory: PathBuf,
     /// The decoded image; none without one, or if it could not be read.
     image: Option<Wallpaper>,
-    /// The image painted for each output.
+    /// The decoded images of workspaces with their own, by number; one
+    /// that could not be read is left out, so its workspace shows `image`.
+    workspace_images: BTreeMap<NonZeroUsize, Wallpaper>,
+    /// The workspace whose own image shows now; none while `image` does.
+    shown: Option<NonZeroUsize>,
+    /// Each image painted for each output it showed on.
     paintings: Vec<Painting>,
     /// Counts paintings, so pieces know when theirs is stale.
     generation: u64,
@@ -42,6 +51,8 @@ pub(crate) struct Backdrop {
 /// The wallpaper painted for one output.
 #[derive(Debug)]
 struct Painting {
+    /// The workspace whose own image it is; none for `image`.
+    image: Option<NonZeroUsize>,
     /// The output's area, in global coordinates.
     area: Rectangle<i32, Logical>,
     /// The pixels.
@@ -77,7 +88,9 @@ impl Backdrop {
         Self {
             settings: settings.clone(),
             config_directory: config_directory.to_owned(),
-            image: Self::load(settings, config_directory),
+            image: Self::load(settings.image_path(config_directory)),
+            workspace_images: Self::load_workspaces(settings, config_directory),
+            shown: None,
             paintings: Vec::new(),
             generation: 0,
             pieces: HashMap::new(),
@@ -88,7 +101,8 @@ impl Backdrop {
     /// changed image file is seen.
     pub(crate) fn apply(&mut self, settings: &WallpaperSettings) {
         self.settings = settings.clone();
-        self.image = Self::load(settings, &self.config_directory);
+        self.image = Self::load(settings.image_path(&self.config_directory));
+        self.workspace_images = Self::load_workspaces(settings, &self.config_directory);
         self.paintings.clear();
     }
 
@@ -100,6 +114,11 @@ impl Backdrop {
         outputs: &[Rectangle<i32, Logical>],
         window_manager: &WindowManager,
     ) {
+        let current = window_manager.current_workspace().number();
+        self.shown = self
+            .workspace_images
+            .contains_key(&current)
+            .then_some(current);
         self.paint(outputs);
         self.pieces.retain(|window, _| {
             window_manager
@@ -114,20 +133,24 @@ impl Backdrop {
         }
     }
 
-    /// Paints the image for each of `outputs` not painted for, and drops
-    /// the paintings of outputs gone or changed.
+    /// Paints the image shown for each of `outputs` not painted for, and
+    /// drops the paintings of outputs gone or changed.
     fn paint(&mut self, outputs: &[Rectangle<i32, Logical>]) {
-        let Some(image) = &self.image else {
-            self.paintings.clear();
-            return;
-        };
         self.paintings
             .retain(|painting| outputs.contains(&painting.area));
+        let shown = self.shown;
+        let image = match shown {
+            Some(workspace) => self.workspace_images.get(&workspace),
+            None => self.image.as_ref(),
+        };
+        let Some(image) = image else {
+            return;
+        };
         for output in outputs {
             if self
                 .paintings
                 .iter()
-                .any(|painting| painting.area == *output)
+                .any(|painting| painting.image == shown && painting.area == *output)
             {
                 continue;
             }
@@ -137,6 +160,7 @@ impl Backdrop {
                 let mut texture = PanelTexture::new();
                 texture.upload_pixels(&pixels, self.generation);
                 self.paintings.push(Painting {
+                    image: shown,
                     area: *output,
                     pixels,
                     generation: self.generation,
@@ -150,9 +174,7 @@ impl Backdrop {
     /// output showing most of it, unless its piece is up to date.
     fn cut_piece(&mut self, window: &Window) {
         let content = window.content_area();
-        let under = self
-            .paintings
-            .iter()
+        let under = Self::shown_in(&self.paintings, self.shown)
             .filter_map(|painting| Some((painting, painting.area.intersection(content)?)))
             .max_by_key(|(_, area)| area.size.w * area.size.h);
         let Some((painting, area)) = under else {
@@ -196,14 +218,24 @@ impl Backdrop {
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
-        self.paintings
-            .iter()
+        Self::shown_in(&self.paintings, self.shown)
             .filter_map(|painting| {
                 painting
                     .texture
                     .render_element(renderer, painting.area.loc, scale, 1.0)
             })
             .collect()
+    }
+
+    /// Returns those of `paintings` of the image `shown` (a workspace's
+    /// own, or none for the settings' image).
+    fn shown_in(
+        paintings: &[Painting],
+        shown: Option<NonZeroUsize>,
+    ) -> impl Iterator<Item = &Painting> {
+        paintings
+            .iter()
+            .filter(move |painting| painting.image == shown)
     }
 
     /// Returns the element that draws the wallpaper under `window`, if it
@@ -224,20 +256,33 @@ impl Backdrop {
             .render_element(renderer, piece.area.loc, scale, 1.0)
     }
 
-    /// Reads the image `settings` name; none, with a warning, if it cannot
-    /// be read.
-    fn load(settings: &WallpaperSettings, config_directory: &Path) -> Option<Wallpaper> {
-        let path = settings.image_path(config_directory)?;
+    /// Reads the image at `path`; none without a path, or, with a warning,
+    /// if it cannot be read.
+    fn load(path: Option<PathBuf>) -> Option<Wallpaper> {
+        let path = path?;
         match Wallpaper::load(&path) {
             Ok(image) => Some(image),
             Err(error) => {
                 tracing::warn!(
                     error = &error as &dyn std::error::Error,
-                    "no wallpaper: its image could not be read"
+                    path = %path.display(),
+                    "a wallpaper image could not be read"
                 );
                 None
             }
         }
+    }
+
+    /// Reads the images of the workspaces `settings` give their own;
+    /// those that cannot be read are left out.
+    fn load_workspaces(
+        settings: &WallpaperSettings,
+        config_directory: &Path,
+    ) -> BTreeMap<NonZeroUsize, Wallpaper> {
+        settings
+            .workspace_image_paths(config_directory)
+            .filter_map(|(workspace, path)| Some((workspace, Self::load(path)?)))
+            .collect()
     }
 }
 

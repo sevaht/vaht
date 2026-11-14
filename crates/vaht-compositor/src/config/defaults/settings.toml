@@ -140,6 +140,10 @@ window_icons = true
 # fill (cover the output, cutting off what overflows), fit (all of it,
 # with grey beside), center or tile (at its own size), or stretch.
 fit = "fill"
+# Images of particular workspaces, by number, shown in place of image while
+# they are, such as:
+# [wallpaper.workspaces]
+# 2 = "~/Pictures/beach.png"
 
 [ipc]
 # Whether programs other than vaht's own dialogs may run commands over the

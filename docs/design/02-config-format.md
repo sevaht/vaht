@@ -153,7 +153,8 @@ search = "item-start"           # off | item-start | anywhere
 [wallpaper]                     # new: native (00 §4)
 image = "~/Pictures/wallpaper/gucken/Starry_Night_by_gucken_1920x1080.png"
 fit = "fill"                    # fill | fit | center | tile | stretch
-# per_workspace = ["a.png", "b.png", ...]    # optional
+# [wallpaper.workspaces]        # optional: a workspace's own image, by number
+# 2 = "~/Pictures/beach.png"
 
 [xwayland]
 resources = "~/.Xresources"
@@ -216,7 +217,12 @@ rest by name, so a setting never silently does nothing:
   path is from the configuration directory) and `fit` (`fill`, `fit`,
   `center`, `tile`, `stretch`). It is decoded once, painted once for each
   output, at its size, and drawn beneath everything; where it does not reach, and with no
-  image, the desktop is dark grey. `per_workspace` is not built.
+  image, the desktop is dark grey. `[wallpaper.workspaces]` gives
+  particular workspaces, by number, an image of their own, shown in place
+  of `image` while the workspace is (fluxland's
+  `session.screen0.workspaceN.wallpaper`, which `vaht import` converts,
+  N + 1 being the number); each image is painted for an output the first
+  time it shows there and kept, so switching workspaces paints nothing.
 - `[xwayland]` `enabled` (on by default; read at start): vaht starts
   Xwayland and is its window manager, and programs it starts find it in
   `DISPLAY`. X11 windows are windows like any other (rules match their

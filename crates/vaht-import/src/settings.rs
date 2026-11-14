@@ -142,6 +142,7 @@ impl InitFile {
         self.convert_placement(report);
         self.convert_windows(report);
         self.convert_workspaces();
+        self.convert_workspace_wallpapers(report);
         self.convert_taskbar(report);
         if let Some(delay) = self.number(&format!("{SCREEN}menuDelay")) {
             self.set(&["menus", "submenu_delay_ms"], Value::from(delay));
@@ -270,6 +271,51 @@ impl InitFile {
         switches
     }
 
+    /// Fluxland's wallpapers of particular workspaces:
+    /// `session.screen0.workspaceN.wallpaper`, N counting from 0, become
+    /// `[wallpaper.workspaces]`, counting from 1. A relative path is
+    /// fluxland's, from its configuration directory, so it becomes
+    /// absolute.
+    fn convert_workspace_wallpapers(&mut self, report: &mut Report) {
+        let prefix = format!("{SCREEN}workspace");
+        for name in self.resources.names_with_prefix(&prefix) {
+            let Some(index) = name
+                .strip_prefix(&prefix)
+                .and_then(|rest| rest.strip_suffix(".wallpaper"))
+            else {
+                continue;
+            };
+            let Some(resource) = self.resources.get(&name).cloned() else {
+                continue;
+            };
+            let Ok(index) = index.parse::<usize>() else {
+                self.note(
+                    report,
+                    resource.line,
+                    format!("{name} = {}", resource.value),
+                );
+                continue;
+            };
+            let path = self.absolute(&resource.value);
+            let number = (index + 1).to_string();
+            self.set(&["wallpaper", "workspaces", &number], Value::from(path));
+        }
+    }
+
+    /// Returns `path`, written in fluxland's configuration: as it is if it
+    /// is absolute or from the home directory, otherwise from fluxland's
+    /// configuration directory.
+    fn absolute(&self, path: &str) -> String {
+        if path.starts_with("~/") || path.starts_with('/') {
+            path.to_owned()
+        } else {
+            self.resources.path().parent().map_or_else(
+                || path.to_owned(),
+                |directory| directory.join(path).display().to_string(),
+            )
+        }
+    }
+
     /// The X resources file Xwayland loads: `session.xwayland.resources`. A
     /// relative path is fluxland's, from its configuration directory, so it
     /// becomes absolute.
@@ -281,14 +327,7 @@ impl InitFile {
         else {
             return;
         };
-        let path = if path.starts_with("~/") || path.starts_with('/') {
-            path
-        } else {
-            self.resources.path().parent().map_or_else(
-                || path.clone(),
-                |directory| directory.join(&path).display().to_string(),
-            )
-        };
+        let path = self.absolute(&path);
         self.set(&["xwayland", "resources"], Value::from(path));
     }
 
@@ -1049,6 +1088,24 @@ session.screen0.toolbar.widthPercent:\t80
         assert_eq!(
             document.to_string(),
             format!("[xwayland]\nresources = \"{expected}\"\n")
+        );
+        assert!(report.notes().is_empty(), "{report}");
+    }
+
+    #[test]
+    fn workspace_wallpapers_convert_counting_from_one() {
+        let init = "session.screen0.workspace0.wallpaper:\t~/a.png\n\
+                    session.screen0.workspace2.wallpaper:\tb.png\n";
+        let mut report = Report::default();
+        let document = InitFile::new(Resources::parse(
+            Path::new("/home/me/.config/fluxland/init"),
+            init,
+        ))
+        .convert(&mut report)
+        .settings;
+        assert_eq!(
+            document.to_string(),
+            "[wallpaper.workspaces]\n1 = \"~/a.png\"\n3 = \"/home/me/.config/fluxland/b.png\"\n"
         );
         assert!(report.notes().is_empty(), "{report}");
     }
