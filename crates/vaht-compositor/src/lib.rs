@@ -34,6 +34,7 @@ mod ipc;
 mod launcher;
 mod layers;
 mod menu;
+mod output_memory;
 mod outputs;
 mod pointer_lock;
 mod pointing_devices;

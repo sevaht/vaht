@@ -765,6 +765,13 @@ primary_output_changed = "~/bin/on-primary"    # the output's connector as $1
 
 ---
 
+**Windows and monitors coming and going (as built).** When a monitor
+leaves, its windows come onto the monitors left. vaht remembers where each
+was, by the monitor's name; when a monitor of that name is plugged in
+again, each window still where it was brought goes back to its place
+there (a maximized or tiled one fills its part of it), and one moved in
+the meantime stays where it was put (`output_memory.rs`).
+
 ## 10. Themes: `themes/<name>.toml`
 
 ### 10.1 Model

@@ -87,6 +87,7 @@ use crate::layers::{LayerMaps, Layers, OutputLayers};
 use crate::menu::{
     MenuBuilder, MenuChoice, MenuItem, MenuKey, MenuModel, MenuStack, OutputChoices,
 };
+use crate::output_memory::OutputMemory;
 use crate::outputs::{OutputChanges, Outputs};
 use crate::pointer_lock::{self, PointerHold};
 use crate::protocols::ProtocolStates;
@@ -144,6 +145,8 @@ pub struct Compositor {
     exports_activation_environment: bool,
     /// Delayed commands waiting to run.
     delays: Vec<(Delay, Timer<Self>)>,
+    /// Where windows were on outputs that left, to go back to them.
+    output_memory: OutputMemory<WindowId>,
     /// The EIS server X programs emulate input through, with Xwayland.
     input_emulation: Option<InputEmulation>,
     /// The windows as programs outside vaht see them listed.
@@ -334,6 +337,7 @@ impl Compositor {
             fence_waits: FenceWaits::default(),
             exports_activation_environment: false,
             delays: Vec::new(),
+            output_memory: OutputMemory::default(),
             input_emulation: None,
             toplevel_list: ToplevelList::default(),
             window_manager,
@@ -1117,11 +1121,27 @@ impl Compositor {
             let settings = &self.config.outputs;
             let changes = match event {
                 OutputEvent::Connected(output) => {
-                    self.outputs.connect(output, settings, &mut self.backend)
+                    let changes = self
+                        .outputs
+                        .connect(output.clone(), settings, &mut self.backend);
+                    self.follow_output_changes(&changes);
+                    self.bring_windows_back_to(&output);
+                    continue;
                 }
                 OutputEvent::Disconnected(output) => {
-                    self.outputs
-                        .disconnect(&output, settings, &mut self.backend)
+                    self.remember_windows_on(&output);
+                    let changes =
+                        self.outputs
+                            .disconnect(&output, &self.config.outputs, &mut self.backend);
+                    self.follow_output_changes(&changes);
+                    let metrics = self.window_manager.metrics();
+                    let window_manager = &self.window_manager;
+                    self.output_memory.note_brought(|window| {
+                        window_manager
+                            .window(window)
+                            .map(|window| window.outer_area(metrics))
+                    });
+                    continue;
                 }
                 OutputEvent::Changed(output) => {
                     tracing::info!(output = output.name(), "output changed");
@@ -1130,6 +1150,52 @@ impl Compositor {
             };
             self.follow_output_changes(&changes);
         }
+    }
+
+    /// Remembers where the windows on `output`, which is leaving, are.
+    fn remember_windows_on(&mut self, output: &Output) {
+        let metrics = self.window_manager.metrics();
+        let windows: Vec<_> = self
+            .window_manager
+            .windows_top_down()
+            .filter(|window| window.is_placed())
+            .map(|window| (window.id(), window.outer_area(metrics)))
+            .filter(|(_, area)| self.outputs.most_overlapping(*area) == Some(output))
+            .collect();
+        self.output_memory
+            .output_leaving(&output.name(), Outputs::geometry(output).loc, windows);
+    }
+
+    /// Puts back on `output`, plugged in again, the windows that were on it
+    /// and have not been moved since.
+    fn bring_windows_back_to(&mut self, output: &Output) {
+        let geometry = Outputs::geometry(output);
+        let metrics = self.window_manager.metrics();
+        let window_manager = &self.window_manager;
+        let back = self
+            .output_memory
+            .output_back(&output.name(), geometry.loc, |window| {
+                window_manager
+                    .window(window)
+                    .map(|window| window.outer_area(metrics))
+            });
+        if back.is_empty() {
+            return;
+        }
+        let Some(area) = self
+            .output_areas()
+            .iter()
+            .copied()
+            .find(|area| area.whole.loc == geometry.loc)
+        else {
+            return;
+        };
+        for (window, corner) in back {
+            tracing::debug!(%window, output = output.name(), "window back on its output");
+            self.window_manager.return_to(window, area, corner);
+        }
+        self.settle();
+        self.schedule_render();
     }
 
     /// Follows the outputs being set up again: layer surfaces on outputs

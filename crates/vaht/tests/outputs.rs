@@ -403,6 +403,54 @@ fn unplugging_a_monitor_brings_its_windows_to_the_others() {
 }
 
 #[test]
+fn a_window_goes_back_to_its_monitor_when_it_is_plugged_in_again() {
+    let mut desk = Desk::new();
+    desk.client.move_pointer_to(900, 100);
+    desk.client.open_windows(1);
+    let on_right = desk
+        .client
+        .screenshot_of("RIGHT")
+        .bounds_of(WINDOW_COLOR)
+        .expect("the window opened on the right");
+    desk.plug("LEFT 800x600\n", "output disconnected");
+    desk.plug("LEFT 800x600\nRIGHT 640x480\n", "output connected");
+    let back = desk
+        .client
+        .screenshot_of("RIGHT")
+        .bounds_of(WINDOW_COLOR)
+        .expect("the window is back on the right");
+    assert_eq!(
+        (back.left, back.top),
+        (on_right.left, on_right.top),
+        "where it was"
+    );
+    assert!(
+        desk.client
+            .screenshot_of("LEFT")
+            .bounds_of(WINDOW_COLOR)
+            .is_none(),
+        "and gone from the left"
+    );
+}
+
+#[test]
+fn a_window_moved_while_its_monitor_was_away_stays_put() {
+    let mut desk = Desk::new();
+    desk.client.move_pointer_to(900, 100);
+    desk.client.open_windows(1);
+    desk.plug("LEFT 800x600\n", "output disconnected");
+    run(&desk.vaht, &["move", "-100", "10"]);
+    desk.plug("LEFT 800x600\nRIGHT 640x480\n", "output connected");
+    assert!(
+        desk.client
+            .screenshot_of("RIGHT")
+            .bounds_of(WINDOW_COLOR)
+            .is_none(),
+        "the user put it on the left"
+    );
+}
+
+#[test]
 fn unplugging_the_primary_monitor_moves_the_taskbar() {
     let mut desk = Desk::new();
     desk.plug("RIGHT 640x480\n", "output disconnected");

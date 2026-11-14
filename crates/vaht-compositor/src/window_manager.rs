@@ -531,6 +531,26 @@ impl WindowManager {
         self.is_redraw_needed = true;
     }
 
+    /// Puts `window` back on the output covering `to`, its corner at
+    /// `corner` if it floats; maximized or tiled, it fills its part there.
+    pub(crate) fn return_to(
+        &mut self,
+        window: WindowId,
+        to: OutputArea,
+        corner: Point<i32, Logical>,
+    ) {
+        self.change_window(Some(window), |window, metrics| {
+            let placement = window.placement().clone();
+            if placement == Placement::Floating {
+                let outer = window.outer_area(metrics);
+                window.move_by(corner - outer.loc, metrics);
+            } else {
+                window.place(placement, to, metrics);
+            }
+        });
+        self.is_redraw_needed = true;
+    }
+
     /// Marks `window` with `key`, which then marks it alone.
     fn mark(&mut self, window: Option<WindowId>, key: &str) {
         if let Some(window) = window {
