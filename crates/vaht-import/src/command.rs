@@ -113,6 +113,12 @@ impl FluxboxCommand<'_> {
             "stick" | "stickwindow" => plain("stick"),
             "snapstep" => with("snap-step"),
             "showdesktop" => plain("show-desktop"),
+            "focusleft" => plain("focus-direction left"),
+            "focusright" => plain("focus-direction right"),
+            "focusup" => plain("focus-direction up"),
+            "focusdown" => plain("focus-direction down"),
+            "markwindow" if !arguments.is_empty() => with("mark-window"),
+            "gotomarkedwindow" if !arguments.is_empty() => with("go-to-marked-window"),
             "nextworkspace" => plain("workspace next"),
             "prevworkspace" => plain("workspace previous"),
             "workspace" => with("workspace"),
@@ -330,6 +336,22 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+
+    #[test]
+    fn directional_focus_and_marks_translate() {
+        let vaht = |fluxbox| {
+            FluxboxCommand(fluxbox)
+                .to_vaht()
+                .map(|translated| translated.value.as_str().unwrap_or_default().to_owned())
+        };
+        assert_eq!(vaht("FocusLeft").as_deref(), Ok("focus-direction left"));
+        assert_eq!(vaht("FocusDown").as_deref(), Ok("focus-direction down"));
+        assert_eq!(vaht("MarkWindow a").as_deref(), Ok("mark-window a"));
+        assert_eq!(
+            vaht("GotoMarkedWindow a").as_deref(),
+            Ok("go-to-marked-window a")
+        );
+    }
 
     /// Translates `command` and returns the vaht value as TOML text.
     fn translate(command: &str) -> String {

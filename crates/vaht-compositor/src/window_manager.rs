@@ -13,6 +13,7 @@
 //! It holds no protocol object and never calls Smithay's seat, so every
 //! rule here is tested on its own, by unit and property tests below.
 
+mod direction;
 mod focus;
 mod output_areas;
 mod placement_strategy;
@@ -134,6 +135,8 @@ pub(crate) struct WindowManager {
     endings: Vec<(WindowId, Ending)>,
     /// Whether anything shown changed since the compositor last asked.
     is_redraw_needed: bool,
+    /// The windows marked (`mark-window`), each with its key.
+    marks: Vec<(String, WindowId)>,
 }
 
 impl WindowManager {
@@ -158,6 +161,7 @@ impl WindowManager {
             drag_snap: None,
             endings: Vec::new(),
             is_redraw_needed: false,
+            marks: Vec::new(),
         }
     }
 
@@ -311,6 +315,7 @@ impl WindowManager {
             self.held_titlebar = None;
         }
         self.endings.retain(|(ending, _)| *ending != id);
+        self.marks.retain(|(_, marked)| *marked != id);
         if was_focused {
             self.focus_most_recent();
         }
@@ -492,6 +497,47 @@ impl WindowManager {
             WindowManagerAction::SetTitle(title) => self.set_title(window, title.clone()),
             WindowManagerAction::SetLayer(layer) => self.set_layer(window, *layer),
             WindowManagerAction::SetAlpha(change) => self.change_alpha(window, *change),
+            WindowManagerAction::FocusDirection(direction) => self.focus_direction(*direction),
+            WindowManagerAction::MarkWindow(key) => self.mark(window, key),
+            WindowManagerAction::GoToMarkedWindow(key) => self.go_to_marked(key),
+        }
+    }
+
+    /// Marks `window` with `key`, which then marks it alone.
+    fn mark(&mut self, window: Option<WindowId>, key: &str) {
+        if let Some(window) = window {
+            self.marks
+                .retain(|(known, marked)| *marked != window && known != key);
+            self.marks.push((key.to_owned(), window));
+        }
+    }
+
+    /// Brings forward the window `key` marks, if one is.
+    fn go_to_marked(&mut self, key: &str) {
+        let marked = self
+            .marks
+            .iter()
+            .find(|(known, _)| known == key)
+            .map(|(_, window)| *window);
+        if let Some(window) = marked {
+            self.activate(window);
+        }
+    }
+
+    /// Focuses and raises the nearest window shown in `direction` from the
+    /// focused one.
+    fn focus_direction(&mut self, direction: Direction) {
+        let Some(from) = self.focused().and_then(|focused| self.window(focused)) else {
+            return;
+        };
+        let (from_id, from_area) = (from.id(), from.content_area());
+        let shown = self
+            .shown_top_down()
+            .filter(|window| window.id() != from_id)
+            .map(|window| (window.id(), window.content_area()));
+        if let Some(window) = direction::nearest_in(from_area, direction, shown) {
+            self.focus(Some(window));
+            self.raise(window);
         }
     }
 
@@ -1316,6 +1362,48 @@ mod tests {
             desk.outer(second).loc,
             Point::from((desk.outer(first).size.w, 0)),
             "the row strategy puts it right of the first"
+        );
+    }
+
+    #[test]
+    fn focus_moves_to_the_window_beside_the_focused_one() {
+        let mut desk = Desk::new();
+        let left = desk.open();
+        let right = desk.open();
+        assert_eq!(desk.manager.focused(), Some(right), "the newest has focus");
+        desk.manager.run(&action("focus-direction left"), None);
+        assert_eq!(desk.manager.focused(), Some(left));
+        assert_eq!(desk.shown().first(), Some(&left), "and is raised");
+        desk.manager.run(&action("focus-direction left"), None);
+        assert_eq!(desk.manager.focused(), Some(left), "nothing further left");
+        desk.manager.run(&action("focus-direction right"), None);
+        assert_eq!(desk.manager.focused(), Some(right));
+    }
+
+    #[test]
+    fn a_marked_window_is_brought_forward_by_its_key() {
+        let mut desk = Desk::new();
+        let marked = desk.open();
+        let other = desk.open();
+        desk.manager.run(&action("mark-window e"), Some(marked));
+        desk.manager.run(&action("minimize"), Some(marked));
+        desk.manager
+            .run(&action("go-to-marked-window e"), Some(other));
+        assert_eq!(desk.manager.focused(), Some(marked));
+        assert!(!desk.window(marked).state().is_minimized, "restored");
+        desk.manager.run(&action("mark-window e"), Some(other));
+        desk.manager.run(&action("go-to-marked-window e"), None);
+        assert_eq!(
+            desk.manager.focused(),
+            Some(other),
+            "a key marks one window"
+        );
+        desk.manager.remove_window(other);
+        desk.manager.run(&action("go-to-marked-window e"), None);
+        assert_eq!(
+            desk.manager.focused(),
+            Some(marked),
+            "a closed window's mark is gone"
         );
     }
 

@@ -25,10 +25,7 @@ const PLANNED_ACTIONS: &[&str] = &[
     "activate-tray-item",
     "activate-window-list-entry",
     "arrange",
-    "focus-direction",
-    "go-to-marked-window",
     "key-mode",
-    "mark-window",
     "reload-theme",
     "rename-workspace",
     "restart",
@@ -375,6 +372,14 @@ pub(crate) enum WindowManagerAction {
     /// <unfocused>]`, each 0 to 255 or a change like `+10`; nothing goes
     /// back to the settings').
     SetAlpha(AlphaChange),
+    /// Focuses and raises the nearest window shown in a direction from the
+    /// focused one (`focus-direction left|right|up|down`).
+    FocusDirection(Direction),
+    /// Marks the window with a key, any word (`mark-window <key>`); a key
+    /// marks one window at a time.
+    MarkWindow(String),
+    /// Brings forward the window a key marks (`go-to-marked-window <key>`).
+    GoToMarkedWindow(String),
 }
 
 impl Action {
@@ -589,6 +594,17 @@ impl WindowManagerAction {
             "next-window" => without_arguments(Self::NextWindow(WindowCycle::default())),
             "previous-window" => without_arguments(Self::PreviousWindow(WindowCycle::default())),
             "show-desktop" => without_arguments(Self::ShowDesktop),
+            "focus-direction" => arguments
+                .parse()
+                .map(Self::FocusDirection)
+                .map_err(|_unknown| {
+                    format!("`focus-direction` takes left, right, up or down, not `{arguments}`")
+                }),
+            "mark-window" | "go-to-marked-window" if arguments.is_empty() => {
+                Err(format!("`{name}` needs a key, such as `mark-window a`"))
+            }
+            "mark-window" => Ok(Self::MarkWindow(arguments.to_owned())),
+            "go-to-marked-window" => Ok(Self::GoToMarkedWindow(arguments.to_owned())),
             _ if PLANNED_ACTIONS.contains(&name) => {
                 Err(format!("`{name}` is not available in vaht yet"))
             }
@@ -662,6 +678,9 @@ impl fmt::Display for WindowManagerAction {
             Self::SetLayer(layer) => write!(formatter, "set-layer {layer}"),
             Self::SetTitle(None) => formatter.write_str("set-title"),
             Self::SetTitle(Some(title)) => write!(formatter, "set-title {title}"),
+            Self::FocusDirection(direction) => write!(formatter, "focus-direction {direction}"),
+            Self::MarkWindow(key) => write!(formatter, "mark-window {key}"),
+            Self::GoToMarkedWindow(key) => write!(formatter, "go-to-marked-window {key}"),
         }
     }
 }

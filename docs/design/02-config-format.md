@@ -516,6 +516,11 @@ lid-close = "exec swaylock"
   available in vaht yet"), as are key chains, key modes and the structured
   forms other than `repeat` and `action`. A file that uses them fails
   `vaht check` instead of half-working.
+- `focus-direction <left|right|up|down>` focuses and raises the nearest
+  shown window whose middle lies that way, within 45 degrees, from the
+  focused one's (Fluxbox's `FocusLeft` and its kin). `mark-window <key>`
+  marks the window with a word, one window per key, and
+  `go-to-marked-window <key>` brings it forward.
 - `tile` takes a cell in thousandths of the usable area:
   `tile <x> <y> <width> <height>`, the left half being `tile 0 0 500 1000`.
 - `next-window` and `previous-window` walk windows in the order they last
