@@ -114,6 +114,29 @@ impl Layers {
         }
     }
 
+    /// Closes the layer surfaces on outputs no longer among `outputs` (one
+    /// unplugged or turned off): each client is told, as the protocol
+    /// asks, and may open its surface again on another output.
+    pub(crate) fn close_off(&mut self, outputs: &Outputs) {
+        let keyboard = &mut self.keyboard;
+        self.mapped.retain(|(layer, output, _)| {
+            let is_on = outputs.iter().any(|on| on == output);
+            if !is_on {
+                tracing::debug!(
+                    namespace = layer.namespace(),
+                    output = output.name(),
+                    "layer surface closed: its output is gone"
+                );
+                layer.layer_surface().send_close();
+                layer_map_for_output(output).unmap_layer(layer);
+                if keyboard.as_ref() == Some(layer.wl_surface()) {
+                    *keyboard = None;
+                }
+            }
+            is_on
+        });
+    }
+
     /// Returns whether the layer surface `surface` takes the keyboard when
     /// clicked.
     fn takes_keyboard_on_click(&self, surface: &WlSurface) -> bool {

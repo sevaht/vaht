@@ -319,3 +319,124 @@ fn a_profile_applies_itself_and_cycling_moves_through_profiles_and_primaries() {
     run(&vaht, &["apply-profile", "right"]);
     assert_eq!(outputs_on(&vaht), ["*HEADLESS-2"]);
 }
+
+/// A desk of two monitors whose outputs file is rewritten to plug and
+/// unplug them, with a client.
+struct Desk {
+    /// The compositor.
+    vaht: HeadlessVaht,
+    /// The client.
+    client: TestClient,
+    /// Holds the outputs file.
+    directory: tempfile::TempDir,
+}
+
+impl Desk {
+    /// Starts vaht with LEFT (800×600) and RIGHT (640×480) plugged in.
+    fn new() -> Self {
+        let directory = tempfile::tempdir().expect("a directory for the outputs file");
+        let file = directory.path().join("outputs");
+        std::fs::write(&file, "LEFT 800x600\nRIGHT 640x480\n").expect("the file is written");
+        let vaht = HeadlessVaht::start_with_output_file(Path::new(EXECUTABLE), &file, &[]);
+        let client = TestClient::connect(vaht.socket());
+        Self {
+            vaht,
+            client,
+            directory,
+        }
+    }
+
+    /// Makes the monitors plugged in the ones `outputs` lists, and waits
+    /// until vaht has followed: `event` logged once more.
+    fn plug(&self, outputs: &str, event: &str) {
+        let seen = self.vaht.logged_count(event);
+        let file = self.directory.path().join("outputs");
+        let temporary = self.directory.path().join("outputs.new");
+        std::fs::write(&temporary, outputs).expect("the file is written");
+        std::fs::rename(&temporary, &file).expect("the file is replaced");
+        self.vaht.wait_for_logged(event, seen + 1);
+    }
+}
+
+#[test]
+fn a_monitor_plugged_in_joins_the_layout_on_the_right() {
+    let mut desk = Desk::new();
+    desk.plug(
+        "LEFT 800x600\nRIGHT 640x480\nTHIRD 320x240\n",
+        "output connected",
+    );
+    let listed = listed_outputs(&desk.vaht);
+    let third = listed
+        .iter()
+        .find(|output| output.connector == "THIRD")
+        .expect("listed");
+    assert_eq!(third.position, [1440, 0]);
+    let screenshot = desk.client.screenshot_of("THIRD");
+    assert_eq!((screenshot.width(), screenshot.height()), (320, 240));
+}
+
+#[test]
+fn unplugging_a_monitor_brings_its_windows_to_the_others() {
+    let mut desk = Desk::new();
+    desk.client.move_pointer_to(900, 100);
+    desk.client.open_windows(1);
+    assert!(
+        desk.client
+            .screenshot_of("RIGHT")
+            .bounds_of(WINDOW_COLOR)
+            .is_some(),
+        "the window opened on the right"
+    );
+    desk.plug("LEFT 800x600\n", "output disconnected");
+    assert_eq!(
+        outputs_on(&desk.vaht),
+        ["*LEFT"],
+        "only the left monitor is left"
+    );
+    assert!(
+        desk.client
+            .screenshot_of("LEFT")
+            .bounds_of(WINDOW_COLOR)
+            .is_some(),
+        "the window came to the left monitor"
+    );
+}
+
+#[test]
+fn unplugging_the_primary_monitor_moves_the_taskbar() {
+    let mut desk = Desk::new();
+    desk.plug("RIGHT 640x480\n", "output disconnected");
+    assert_eq!(outputs_on(&desk.vaht), ["*RIGHT"]);
+    let right = desk.client.screenshot_of("RIGHT");
+    assert_ne!(
+        right.rgb(5, right.height() - 2),
+        right.rgb(5, 5),
+        "the taskbar is on the right monitor now"
+    );
+}
+
+#[test]
+fn a_monitor_whose_mode_changes_is_laid_out_again() {
+    let desk = Desk::new();
+    desk.plug("LEFT 1024x768\nRIGHT 640x480\n", "output changed");
+    let listed = listed_outputs(&desk.vaht);
+    let right = listed
+        .iter()
+        .find(|output| output.connector == "RIGHT")
+        .expect("listed");
+    assert_eq!(right.position, [1024, 0], "moved over for the wider left");
+}
+
+#[test]
+fn a_panel_on_a_monitor_unplugged_is_closed() {
+    let mut desk = Desk::new();
+    desk.client.move_pointer_to(900, 100);
+    desk.client.open_backdrop(TestLayer::Background, BACKDROP);
+    assert_eq!(desk.client.closed_layers(), 0);
+    desk.plug("LEFT 800x600\n", "output disconnected");
+    assert_eq!(
+        desk.client.closed_layers(),
+        1,
+        "told, so it can open again elsewhere"
+    );
+}

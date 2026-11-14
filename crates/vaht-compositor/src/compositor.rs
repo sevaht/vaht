@@ -53,7 +53,7 @@ use smithay::wayland::shell::xdg::{PopupSurface, ToplevelSurface};
 use smithay::wayland::virtual_keyboard::VirtualKeyboardKeyEvent;
 use vaht_ui::Typesetter;
 
-use crate::backend::{Backend, BackendChoice, BackendError};
+use crate::backend::{Backend, BackendChoice, BackendError, OutputEvent};
 use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::{
@@ -427,9 +427,42 @@ impl Compositor {
         }
     }
 
-    /// Follows the outputs being set up again: the taskbar is laid out
+    /// Follows the headless backend's outputs file (at `path`) changing:
+    /// simulated monitors plugged in, unplugged or changed.
+    pub(crate) fn reread_headless_outputs(&mut self, path: &Path) {
+        let events = match &mut self.backend {
+            Backend::Headless(backend) => backend.reread_output_file(path),
+            Backend::Winit(_) => Vec::new(),
+        };
+        self.handle_output_events(events);
+    }
+
+    /// Follows the backend's outputs changing, as `events` say.
+    pub(crate) fn handle_output_events(&mut self, events: Vec<OutputEvent>) {
+        for event in events {
+            let settings = &self.config.outputs;
+            let changes = match event {
+                OutputEvent::Connected(output) => {
+                    self.outputs.connect(output, settings, &mut self.backend)
+                }
+                OutputEvent::Disconnected(output) => {
+                    self.outputs
+                        .disconnect(&output, settings, &mut self.backend)
+                }
+                OutputEvent::Changed(output) => {
+                    tracing::info!(output = output.name(), "output changed");
+                    self.outputs.configure(settings, &mut self.backend)
+                }
+            };
+            self.follow_output_changes(&changes);
+        }
+    }
+
+    /// Follows the outputs being set up again: layer surfaces on outputs
+    /// gone are closed, windows are placed again, the taskbar is laid out
     /// anew, and the hooks are told of `changes`.
     fn follow_output_changes(&mut self, changes: &OutputChanges) {
+        self.layers.close_off(&self.outputs);
         if let Some(taskbar) = &mut self.taskbar {
             taskbar.invalidate();
         }
@@ -445,6 +478,8 @@ impl Compositor {
         {
             self.launcher.run_hook(hook, output);
         }
+        self.refresh_layer_keyboard();
+        self.settle();
         self.schedule_render();
     }
 

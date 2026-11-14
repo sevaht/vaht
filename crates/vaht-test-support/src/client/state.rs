@@ -81,6 +81,8 @@ pub(super) struct ClientState {
     pub(super) drawn: Vec<wl_surface::WlSurface>,
     /// How many times vaht asked to close a window.
     pub(super) close_requests: usize,
+    /// How many of its layer surfaces vaht has closed.
+    pub(super) closed_layers: usize,
     /// The buffer size the current capture session asked for.
     pub(super) capture_size: Option<(u32, u32)>,
     /// How the current capture ended.
@@ -121,6 +123,7 @@ impl ClientState {
             first_draws: 0,
             drawn: Vec::new(),
             close_requests: 0,
+            closed_layers: 0,
             capture_size: None,
             capture_result: None,
             keyboard_focus: None,
@@ -389,7 +392,9 @@ impl ProvidesRegistryState for ClientState {
 }
 
 impl LayerShellHandler for ClientState {
-    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &LayerSurface) {}
+    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &LayerSurface) {
+        self.closed_layers += 1;
+    }
 
     fn configure(
         &mut self,

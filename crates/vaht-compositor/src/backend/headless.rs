@@ -6,7 +6,10 @@
 //! as on a real display. Tests use this to run vaht anywhere, with no GPU and
 //! no host compositor.
 
+mod hotplug;
+
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -19,6 +22,8 @@ use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::reexports::wayland_server::backend::GlobalId;
 use smithay::utils::{Physical, Size, Transform};
 
+use self::hotplug::{OutputFileWatch, OutputList};
+use super::OutputEvent;
 use super::{BackendError, RenderError};
 use crate::Compositor;
 use crate::config::OutputMode;
@@ -31,10 +36,10 @@ use crate::scene::{self, Scene};
 pub(crate) struct HeadlessBackend {
     /// The software renderer.
     renderer: PixmanRenderer,
-    /// The first output, which is primary.
-    primary: Screen,
-    /// The rest.
-    others: Vec<Screen>,
+    /// The outputs, in the order found; at least one at start.
+    screens: Vec<Screen>,
+    /// The watch on the outputs file, when one names the outputs.
+    _output_file: Option<OutputFileWatch>,
     /// Registers the frame timer.
     loop_handle: LoopHandle<'static, Compositor>,
     /// Counts the frame timer.
@@ -61,9 +66,14 @@ struct Screen {
 
 impl HeadlessBackend {
     /// The environment variable that sets the outputs' sizes, such as
-    /// `1920x1080,1280x1024` for two; one output of [`Self::DEFAULT_SIZE`]
-    /// without it.
+    /// `1920x1080,1280x1024` for two (`HEADLESS-1` and `HEADLESS-2`); one
+    /// output of [`Self::DEFAULT_SIZE`] without it.
     pub(crate) const OUTPUTS_VARIABLE: &str = "VAHT_HEADLESS_OUTPUTS";
+
+    /// The environment variable naming a file of outputs (see
+    /// [`hotplug`]): the outputs at start, and rewriting it plugs and
+    /// unplugs them. It takes the place of [`Self::OUTPUTS_VARIABLE`].
+    pub(crate) const OUTPUTS_FILE_VARIABLE: &str = "VAHT_HEADLESS_OUTPUTS_FILE";
 
     /// An output's width and height unless asked otherwise: a common
     /// desktop resolution, so clients size themselves as they would on a
@@ -88,32 +98,32 @@ impl HeadlessBackend {
         ledger: &ResourceLedger,
     ) -> Result<Self, BackendError> {
         let renderer = PixmanRenderer::new().map_err(BackendError::SoftwareRenderer)?;
-        let asked = std::env::var(Self::OUTPUTS_VARIABLE).ok();
-        let sizes = asked.as_deref().map_or_else(Vec::new, |text| {
-            Self::sizes(text).unwrap_or_else(|| {
-                tracing::warn!(
-                    variable = Self::OUTPUTS_VARIABLE,
-                    value = text,
-                    "not a list of sizes such as 1920x1080,1280x1024; one output it is"
-                );
-                Vec::new()
-            })
-        });
-        let (first, rest) = sizes
-            .split_first()
-            .map_or((Self::DEFAULT_SIZE.into(), &[][..]), |(first, rest)| {
-                (*first, rest)
-            });
-        let primary = Screen::new(1, first, display)?;
-        let others = rest
+        let file = std::env::var_os(Self::OUTPUTS_FILE_VARIABLE).map(PathBuf::from);
+        let list = match &file {
+            Some(path) => Self::read_output_file(path),
+            None => Self::list_from_sizes(std::env::var(Self::OUTPUTS_VARIABLE).ok().as_deref()),
+        };
+        let mut screens: Vec<Screen> = list
+            .outputs()
             .iter()
-            .zip(2..)
-            .map(|(size, number)| Screen::new(number, *size, display))
+            .map(|(name, size)| Screen::new(name.clone(), *size, display))
             .collect::<Result<_, _>>()?;
+        if screens.is_empty() {
+            screens.push(Screen::new(
+                "HEADLESS-1".to_owned(),
+                Self::DEFAULT_SIZE.into(),
+                display,
+            )?);
+        }
+        let output_file = file.and_then(|path| {
+            OutputFileWatch::start(handle, ledger, &path)
+                .inspect_err(|error| tracing::warn!(error, "the outputs file is not watched"))
+                .ok()
+        });
         Ok(Self {
             renderer,
-            primary,
-            others,
+            screens,
+            _output_file: output_file,
             loop_handle: handle.clone(),
             ledger: ledger.clone(),
             frame_timer: None,
@@ -121,27 +131,110 @@ impl HeadlessBackend {
         })
     }
 
-    /// Reads `WIDTHxHEIGHT` sizes separated by commas; none if one is not
-    /// a size.
-    fn sizes(text: &str) -> Option<Vec<Size<i32, Physical>>> {
-        text.split(',')
-            .map(|size| {
-                let (width, height) = size.trim().split_once('x')?;
-                let (width, height) = (width.parse().ok()?, height.parse().ok()?);
-                (width > 0 && height > 0).then(|| Size::from((width, height)))
+    /// Returns the outputs `sizes` (as [`Self::OUTPUTS_VARIABLE`] gives
+    /// them) ask for, named `HEADLESS-1` on; none, with a warning, for
+    /// sizes it cannot read.
+    fn list_from_sizes(sizes: Option<&str>) -> OutputList {
+        let Some(sizes) = sizes else {
+            return OutputList::default();
+        };
+        let lines: Vec<String> = sizes
+            .split(',')
+            .zip(1..)
+            .map(|(size, number)| format!("HEADLESS-{number} {}", size.trim()))
+            .collect();
+        OutputList::parse(&lines.join("\n")).unwrap_or_else(|error| {
+            tracing::warn!(
+                variable = Self::OUTPUTS_VARIABLE,
+                value = sizes,
+                error,
+                "not a list of sizes such as 1920x1080,1280x1024; one output it is"
+            );
+            OutputList::default()
+        })
+    }
+
+    /// Reads the outputs file at `path`; none, with a warning, if it
+    /// cannot be read.
+    fn read_output_file(path: &Path) -> OutputList {
+        std::fs::read_to_string(path)
+            .map_err(|error| error.to_string())
+            .and_then(|text| OutputList::parse(&text))
+            .unwrap_or_else(|error| {
+                tracing::warn!(path = %path.display(), error, "the outputs file is not usable");
+                OutputList::default()
             })
-            .collect()
     }
 
     /// Returns the outputs, laid out side by side.
+    ///
+    /// # Panics
+    ///
+    /// Never: the backend starts with an output, and this is asked at
+    /// start.
     pub(crate) fn outputs(&self) -> Outputs {
+        let (first, rest) = self
+            .screens
+            .split_first()
+            .expect("the headless backend starts with an output");
         Outputs::in_a_row(
-            self.primary.output.clone(),
-            self.others
-                .iter()
-                .map(|screen| screen.output.clone())
-                .collect(),
+            first.output.clone(),
+            rest.iter().map(|screen| screen.output.clone()).collect(),
         )
+    }
+
+    /// Makes the outputs the ones the file at `path` lists now, and
+    /// returns what changed.
+    pub(crate) fn reread_output_file(&mut self, path: &Path) -> Vec<OutputEvent> {
+        let list = Self::read_output_file(path);
+        let current: Vec<_> = self
+            .screens
+            .iter()
+            .map(|screen| (screen.output.name(), screen.preferred))
+            .collect();
+        let changes = list.changes_from(&current);
+        let mut events = Vec::new();
+        for name in &changes.removed {
+            if let Some(index) = self
+                .screens
+                .iter()
+                .position(|screen| screen.output.name() == *name)
+            {
+                let mut screen = self.screens.remove(index);
+                if let Some(global) = screen.global.take() {
+                    self.display.remove_global::<Compositor>(global);
+                }
+                events.push(OutputEvent::Disconnected(screen.output));
+            }
+        }
+        for (name, size) in changes.added {
+            match Screen::new(name, size, &self.display) {
+                Ok(screen) => {
+                    events.push(OutputEvent::Connected(screen.output.clone()));
+                    self.screens.push(screen);
+                }
+                Err(error) => tracing::warn!(
+                    error = &error as &dyn std::error::Error,
+                    "a headless output could not be made"
+                ),
+            }
+        }
+        for (name, size) in changes.resized {
+            if let Some(screen) = self
+                .screens
+                .iter_mut()
+                .find(|screen| screen.output.name() == name)
+            {
+                screen.preferred = size;
+                let mode = Mode {
+                    size,
+                    refresh: Self::REFRESH_MILLIHERTZ,
+                };
+                screen.output.set_preferred(mode);
+                events.push(OutputEvent::Changed(screen.output.clone()));
+            }
+        }
+        events
     }
 
     /// Returns the renderer.
@@ -193,7 +286,7 @@ impl HeadlessBackend {
     /// are still drawn.
     pub(crate) fn render(&mut self, scene: &Scene<'_>) -> Result<(), RenderError> {
         let mut result = Ok(());
-        for screen in std::iter::once(&mut self.primary).chain(&mut self.others) {
+        for screen in &mut self.screens {
             if screen.global.is_some() {
                 let drawn = screen.render(&mut self.renderer, scene);
                 result = result.and(drawn);
@@ -202,14 +295,11 @@ impl HeadlessBackend {
         result
     }
 
-    /// Returns every output.
-    fn screens_mut(&mut self) -> impl Iterator<Item = &mut Screen> {
-        std::iter::once(&mut self.primary).chain(&mut self.others)
-    }
-
     /// Returns the output `output` is.
     fn screen_mut(&mut self, output: &Output) -> Option<&mut Screen> {
-        self.screens_mut().find(|screen| screen.output == *output)
+        self.screens
+            .iter_mut()
+            .find(|screen| screen.output == *output)
     }
 }
 
@@ -252,20 +342,19 @@ impl OutputControl for HeadlessBackend {
 }
 
 impl Screen {
-    /// Creates output `number` (counting from 1) of `size` and advertises
-    /// it on `display`.
+    /// Creates the output `name` of `size` and advertises it on `display`.
     ///
     /// # Errors
     ///
     /// Returns an error if its image cannot be created.
     fn new(
-        number: usize,
+        name: String,
         size: Size<i32, Physical>,
         display: &DisplayHandle,
     ) -> Result<Self, BackendError> {
         let target = Self::image(size)?;
         let output = Output::new(
-            format!("HEADLESS-{number}"),
+            name,
             PhysicalProperties {
                 size: (0, 0).into(),
                 subpixel: Subpixel::Unknown,
@@ -356,8 +445,7 @@ impl fmt::Debug for HeadlessBackend {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("HeadlessBackend")
-            .field("primary", &self.primary.output.name())
-            .field("others", &self.others.len())
+            .field("screens", &self.screens.len())
             .finish_non_exhaustive()
     }
 }
@@ -367,12 +455,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sizes_are_read_from_a_list() {
+    fn sizes_name_their_outputs_in_order() {
+        let list = HeadlessBackend::list_from_sizes(Some("1920x1080, 1280x1024"));
         assert_eq!(
-            HeadlessBackend::sizes("1920x1080, 1280x1024"),
-            Some(vec![Size::from((1920, 1080)), Size::from((1280, 1024))])
+            list.outputs(),
+            [
+                ("HEADLESS-1".to_owned(), Size::from((1920, 1080))),
+                ("HEADLESS-2".to_owned(), Size::from((1280, 1024))),
+            ]
         );
-        assert_eq!(HeadlessBackend::sizes("1920x0"), None);
-        assert_eq!(HeadlessBackend::sizes("wide"), None);
+        assert_eq!(
+            HeadlessBackend::list_from_sizes(Some("1920x0")),
+            OutputList::default()
+        );
     }
 }

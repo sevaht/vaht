@@ -122,6 +122,29 @@ impl HeadlessVaht {
         )
     }
 
+    /// Starts `executable` headless with the outputs the file at
+    /// `outputs_file` lists (one `NAME WIDTHxHEIGHT` a line); rewriting the
+    /// file plugs and unplugs them as monitors. `files` are configuration
+    /// files, each a path in its directory and its contents.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the files cannot be written, or vaht cannot start or does
+    /// not accept clients in time.
+    #[must_use]
+    pub fn start_with_output_file(
+        executable: &Path,
+        outputs_file: &Path,
+        files: &[(&str, &[u8])],
+    ) -> Self {
+        let path = outputs_file.to_string_lossy();
+        Self::launch(
+            executable,
+            (files, &[]),
+            &[("VAHT_HEADLESS_OUTPUTS_FILE", &path)],
+        )
+    }
+
     /// Starts `executable` headless with configuration and data files
     /// `(config, data)` and the further `environment` variables, and waits
     /// until it accepts clients.
@@ -172,6 +195,7 @@ impl HeadlessVaht {
             .env("DBUS_SESSION_BUS_ADDRESS", Self::absent_bus(runtime.path()))
             .env_remove("VAHT_LOG")
             .env_remove("VAHT_HEADLESS_OUTPUTS")
+            .env_remove("VAHT_HEADLESS_OUTPUTS_FILE")
             .envs(environment.iter().copied())
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("DISPLAY")

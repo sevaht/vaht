@@ -101,6 +101,41 @@ impl Outputs {
         self.arrange(settings, profile, backend, is_new)
     }
 
+    /// Adds `output`, which the backend just found (a monitor plugged in
+    /// or turned on), and sets every output up again.
+    pub(crate) fn connect(
+        &mut self,
+        output: Output,
+        settings: &OutputSettings,
+        backend: &mut impl OutputControl,
+    ) -> OutputChanges {
+        if !self.connected.contains(&output) {
+            tracing::info!(output = output.name(), "output connected");
+            self.connected.push(output);
+        }
+        self.configure(settings, backend)
+    }
+
+    /// Removes `output`, which the backend lost (a monitor unplugged), and
+    /// sets the rest up again. While no output is connected the layout
+    /// stays as it was, showing nothing, so windows keep their places
+    /// until one comes.
+    pub(crate) fn disconnect(
+        &mut self,
+        output: &Output,
+        settings: &OutputSettings,
+        backend: &mut impl OutputControl,
+    ) -> OutputChanges {
+        tracing::info!(output = output.name(), "output disconnected");
+        self.connected.retain(|connected| connected != output);
+        if self.connected.is_empty() {
+            tracing::warn!("no output is connected; nothing shows until one is");
+            self.others.clear();
+            return OutputChanges::default();
+        }
+        self.configure(settings, backend)
+    }
+
     /// Applies the profile called `name`.
     ///
     /// # Errors
@@ -534,6 +569,58 @@ position = [0, 0]
 "#,
         );
         assert_eq!(outputs.primary().name(), "THREE");
+    }
+
+    #[test]
+    fn a_monitor_plugged_in_goes_to_the_right() {
+        let (mut outputs, mut backend) = configured("");
+        let changes = outputs.connect(
+            output("FOUR", 640, 480),
+            &OutputSettings::default(),
+            &mut backend,
+        );
+        assert_eq!(changes, OutputChanges::default());
+        let fourth = outputs.named("FOUR").expect("connected and on");
+        assert_eq!(
+            Outputs::geometry(fourth),
+            Rectangle::new((4000, 0).into(), (640, 480).into())
+        );
+    }
+
+    #[test]
+    fn unplugging_the_primary_monitor_makes_the_next_primary() {
+        let (mut outputs, mut backend) = configured("");
+        let one = outputs.named("ONE").cloned().expect("on");
+        let changes = outputs.disconnect(&one, &OutputSettings::default(), &mut backend);
+        assert_eq!(changes.primary.as_deref(), Some("TWO"));
+        assert!(outputs.connected().all(|connected| *connected != one));
+        let areas: Vec<_> = outputs.iter().map(Outputs::geometry).collect();
+        assert_eq!(
+            areas,
+            [
+                Rectangle::new((0, 0).into(), (1280, 720).into()),
+                Rectangle::new((1280, 0).into(), (800, 600).into()),
+            ],
+            "the rest close up from the left"
+        );
+    }
+
+    #[test]
+    fn with_every_monitor_unplugged_the_layout_waits() {
+        let (mut outputs, mut backend) = configured("");
+        let settings = OutputSettings::default();
+        for name in ["TWO", "THREE", "ONE"] {
+            let output = outputs
+                .connected()
+                .find(|output| output.name() == name)
+                .cloned()
+                .expect("connected");
+            let _ = outputs.disconnect(&output, &settings, &mut backend);
+        }
+        assert_eq!(outputs.primary().name(), "ONE", "kept until another comes");
+        assert_eq!(outputs.others().count(), 0);
+        let changes = outputs.connect(output("NEW", 1024, 768), &settings, &mut backend);
+        assert_eq!(changes.primary.as_deref(), Some("NEW"));
     }
 
     #[test]

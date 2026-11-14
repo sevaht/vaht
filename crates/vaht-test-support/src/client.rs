@@ -225,6 +225,17 @@ impl TestClient {
         self.state.close_requests
     }
 
+    /// Returns how many of this client's layer surfaces vaht has closed,
+    /// after reading everything vaht sent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn closed_layers(&mut self) -> usize {
+        self.roundtrip();
+        self.state.closed_layers
+    }
+
     /// Moves the pointer to `x`, `y` in global coordinates, which start at
     /// the first output's top left corner.
     ///
@@ -505,6 +516,9 @@ impl TestClient {
     /// Panics if vaht has no such output, or the capture fails or the
     /// connection to vaht does.
     pub fn screenshot_of(&mut self, name: &str) -> Screenshot {
+        // An output just plugged in is announced, then described.
+        self.roundtrip();
+        self.roundtrip();
         let output = self
             .state
             .outputs

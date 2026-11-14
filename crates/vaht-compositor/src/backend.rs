@@ -40,6 +40,18 @@ pub enum BackendChoice {
     Headless,
 }
 
+/// A change in the outputs a backend has.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum OutputEvent {
+    /// An output appeared: a monitor plugged in or turned on.
+    Connected(Output),
+    /// An output went away: a monitor unplugged or turned off.
+    Disconnected(Output),
+    /// An output's preferred mode changed while it stayed connected (its
+    /// monitor told more about itself, or was swapped for another).
+    Changed(Output),
+}
+
 /// How vaht shows frames and receives input.
 ///
 /// The variants are boxed: backends are large and differ in size by a factor
