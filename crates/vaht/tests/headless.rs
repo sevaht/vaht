@@ -81,24 +81,41 @@ fn clients_find_the_protocols_everyday_programs_use() {
     let client = TestClient::connect(vaht.socket());
     let interfaces = client.global_interfaces();
     for expected in [
+        "ext_data_control_manager_v1",
         "wl_compositor",
         "wl_data_device_manager",
+        "wl_fixes",
         "wl_seat",
         "wl_shm",
+        "wp_alpha_modifier_v1",
+        "wp_content_type_manager_v1",
         "wp_cursor_shape_manager_v1",
         "wp_fractional_scale_manager_v1",
         "wp_single_pixel_buffer_manager_v1",
         "wp_viewporter",
         "xdg_activation_v1",
+        "xdg_system_bell_v1",
+        "xdg_toplevel_tag_manager_v1",
         "xdg_wm_base",
+        "zwlr_data_control_manager_v1",
         "zwp_primary_selection_device_manager_v1",
         "zxdg_decoration_manager_v1",
+        "zxdg_exporter_v2",
+        "zxdg_importer_v2",
     ] {
         assert!(
             interfaces.iter().any(|name| name == expected),
             "{expected} missing: {interfaces:?}"
         );
     }
+    assert_eq!(
+        interfaces
+            .iter()
+            .filter(|name| *name == "zwp_primary_selection_device_manager_v1")
+            .count(),
+        1,
+        "one primary selection"
+    );
     assert!(
         !interfaces.iter().any(|name| name == "zwp_linux_dmabuf_v1"),
         "the software renderer cannot import GPU buffers, so clients must not be offered them"

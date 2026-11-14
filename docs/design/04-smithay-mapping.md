@@ -158,7 +158,7 @@ answers a question the object model depends on.
 3. **DRM tearing and VRR.** Find out what the DRM compositor exposes for async
    page flips and VRR at the pinned revision.
 
-## 8. Two Xwayland problems fluxland could not solve on wlroots
+## 8. Xwayland problems: two fluxland could not solve on wlroots, and the clipboard
 
 Both are recorded in fluxland's README ("Known issues") and
 COMPATIBILITY.md; Smithay gives what wlroots lacked, so vaht builds them
@@ -233,6 +233,22 @@ is the most a compositor can do; the rest of the race is XWayland's (one
 request setting the window position and the pointer together would end it).
 Test it with the ROTK launcher, and with `xdotool getmouselocation` during
 and after a drag, which should follow the real pointer.
+
+### 8.3 The clipboard between X11 and Wayland programs
+
+Smithay's X window manager stands in for X programs in both directions,
+but the compositor must connect it to the Wayland selections itself
+(`SelectionHandler::new_selection` and `send_selection`, in
+`protocols/selection.rs`); without that, Wayland clients could neither
+paste what an X program copied nor offer X programs what they copied.
+`X11Wm::new_selection` also queues the change of owner without sending it,
+so an X program pasting right after a Wayland copy found no owner until
+the window manager next wrote to X; vaht sends it at once
+(`XwaylandServer::offer_selection`). The tests
+`an_x11_program_pastes_what_a_wayland_program_copied` and
+`a_wayland_program_pastes_what_an_x11_program_copied` drive both
+directions, and both selections, through a clipboard manager (data
+control) and an X program of the tests' own.
 
 
 ## 9. The DRM backend (built; not yet run on hardware)

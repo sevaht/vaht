@@ -11,6 +11,7 @@
 //! reaches the developer's own session.
 
 mod client;
+mod clipboard;
 mod headless;
 mod metrics;
 mod picture;
@@ -22,6 +23,7 @@ pub use client::{
     BUTTON_LEFT, BUTTON_RIGHT, KeyboardFocus, TestClient, TestLayer, WINDOW_COLOR, WINDOW_SIZE,
     keys,
 };
+pub use clipboard::{ClipboardManager, Selection};
 pub use headless::{ExitReport, HeadlessVaht};
 pub use metrics::{BUILT_IN_METRICS, ThemeMetrics};
 pub use picture::{solid_png, solid_xcursor};

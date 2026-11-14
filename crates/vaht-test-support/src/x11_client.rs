@@ -4,20 +4,25 @@
 //! and its process id, as an ordinary X program's are, and override-
 //! redirect windows (an X program's menus) where it says; it hears vaht
 //! ask a window to close, and asks the X server where it thinks a window
-//! is, which is where an X program puts its menus.
+//! is, which is where an X program puts its menus. It copies to and pastes
+//! from the clipboard and the primary selection, as X programs do.
 
-use std::os::fd::AsFd as _;
-use std::time::Duration;
+use std::collections::HashMap;
+use std::os::fd::{AsFd as _, BorrowedFd, OwnedFd};
+use std::time::{Duration, Instant};
 
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use x11rb::connection::Connection as _;
 use x11rb::protocol::Event;
 use x11rb::protocol::shape::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{
-    AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, Window, WindowClass,
+    Atom, AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, SelectionNotifyEvent,
+    SelectionRequestEvent, Window, WindowClass,
 };
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
+
+use crate::clipboard::Selection;
 
 /// How long a test waits for the X server or vaht to answer.
 const PATIENCE: Duration = Duration::from_secs(10);
@@ -37,6 +42,12 @@ pub struct X11Client {
     close_requests: Vec<Window>,
     /// The windows that received a key press, so far.
     key_presses: Vec<Window>,
+    /// The text this program holds on each selection it owns, by the
+    /// selection's atom.
+    copied: HashMap<Atom, String>,
+    /// The answers to this program's pastes, by the window that asked:
+    /// the property the text is in, or none if there was no text.
+    pasted: HashMap<Window, Atom>,
 }
 
 impl X11Client {
@@ -67,6 +78,8 @@ impl X11Client {
             wm_delete_window,
             close_requests: Vec::new(),
             key_presses: Vec::new(),
+            copied: HashMap::new(),
+            pasted: HashMap::new(),
         }
     }
 
@@ -305,27 +318,27 @@ impl X11Client {
     ///
     /// Panics if the X server does not answer.
     pub fn wait_for_position(&mut self, window: Window, position: (i16, i16)) -> (i16, i16) {
-        let deadline = std::time::Instant::now() + PATIENCE;
+        let deadline = Instant::now() + PATIENCE;
         loop {
             let now = self.position_of(window);
-            if now == position || std::time::Instant::now() >= deadline {
+            if now == position || Instant::now() >= deadline {
                 return now;
             }
             // A move arrives as an event (ConfigureNotify); wait for one.
-            self.wait_for_events(deadline.saturating_duration_since(std::time::Instant::now()));
+            self.wait_for_events(deadline.saturating_duration_since(Instant::now()), None);
         }
     }
 
     /// Waits until vaht asks `window` to close (`WM_DELETE_WINDOW`);
     /// returns whether it did in time.
     pub fn wait_for_close_request(&mut self, window: Window) -> bool {
-        let deadline = std::time::Instant::now() + PATIENCE;
+        let deadline = Instant::now() + PATIENCE;
         while !self.close_requests.contains(&window) {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 return false;
             }
-            self.wait_for_events(left);
+            self.wait_for_events(left, None);
         }
         true
     }
@@ -333,15 +346,155 @@ impl X11Client {
     /// Waits until `window` receives a key press; returns whether it did in
     /// time.
     pub fn wait_for_key_press(&mut self, window: Window) -> bool {
-        let deadline = std::time::Instant::now() + PATIENCE;
+        let deadline = Instant::now() + PATIENCE;
         while !self.key_presses.contains(&window) {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 return false;
             }
-            self.wait_for_events(left);
+            self.wait_for_events(left, None);
         }
         true
+    }
+
+    /// Puts `text` on `selection`, owned by `window`, as an X program's
+    /// copy does; [`Self::answer_while`] gives it to whoever pastes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server refuses the request.
+    pub fn copy(&mut self, window: Window, selection: Selection, text: &str) {
+        let selection = self.selection_atom(selection);
+        self.connection
+            .set_selection_owner(window, selection, x11rb::CURRENT_TIME)
+            .expect("the request is sent");
+        self.connection.flush().expect("the request is sent");
+        self.copied.insert(selection, text.to_owned());
+    }
+
+    /// Returns the text on `selection` as UTF-8, pasted into `window`, if
+    /// there is any, as an X program's paste does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server refuses a request, or does not answer in
+    /// time.
+    pub fn paste(&mut self, window: Window, selection: Selection) -> Option<String> {
+        let selection = self.selection_atom(selection);
+        let utf8 = self.atom(b"UTF8_STRING");
+        let property = self.atom(b"VAHT_TEST_PASTE");
+        self.pasted.remove(&window);
+        self.connection
+            .convert_selection(window, selection, utf8, property, x11rb::CURRENT_TIME)
+            .expect("the request is sent");
+        self.connection.flush().expect("the request is sent");
+        let deadline = Instant::now() + PATIENCE;
+        let answer = loop {
+            if let Some(answer) = self.pasted.remove(&window) {
+                break answer;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            assert!(!left.is_zero(), "the paste was never answered");
+            self.wait_for_events(left, None);
+        };
+        if answer == x11rb::NONE {
+            return None;
+        }
+        let reply = self
+            .connection
+            .get_property(true, window, answer, AtomEnum::ANY, 0, u32::MAX / 4)
+            .expect("the request is sent")
+            .reply()
+            .expect("the X server answers");
+        Some(String::from_utf8(reply.value).expect("the selection is text"))
+    }
+
+    /// Runs `work` on its own thread, answering meanwhile whoever pastes
+    /// what this program copied; returns what `work` returns.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `work` panics.
+    pub fn answer_while<T: Send>(&mut self, work: impl FnOnce() -> T + Send) -> T {
+        let (done, finished) = nix::unistd::pipe().expect("a pipe");
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(move || {
+                let result = work();
+                drop(finished);
+                result
+            });
+            let deadline = Instant::now() + PATIENCE;
+            while !is_closed(&done) {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                self.wait_for_events(left, Some(done.as_fd()));
+            }
+            worker.join().expect("the work finishes")
+        })
+    }
+
+    /// Returns the atom of `selection`.
+    fn selection_atom(&self, selection: Selection) -> Atom {
+        match selection {
+            Selection::Clipboard => self.atom(b"CLIPBOARD"),
+            Selection::Primary => AtomEnum::PRIMARY.into(),
+        }
+    }
+
+    /// Answers `request`, for a selection this program owns: its types or
+    /// its text, written where the requestor asked.
+    fn answer_selection_request(&self, request: &SelectionRequestEvent) {
+        let targets = self.atom(b"TARGETS");
+        let utf8 = self.atom(b"UTF8_STRING");
+        let text = self.copied.get(&request.selection);
+        let property = if request.property == x11rb::NONE {
+            request.target
+        } else {
+            request.property
+        };
+        let written = match text {
+            Some(_) if request.target == targets => {
+                let types = [targets, utf8, AtomEnum::STRING.into()];
+                self.connection
+                    .change_property32(
+                        PropMode::REPLACE,
+                        request.requestor,
+                        property,
+                        AtomEnum::ATOM,
+                        &types,
+                    )
+                    .is_ok()
+            }
+            Some(text)
+                if request.target == utf8 || request.target == u32::from(AtomEnum::STRING) =>
+            {
+                self.connection
+                    .change_property8(
+                        PropMode::REPLACE,
+                        request.requestor,
+                        property,
+                        request.target,
+                        text.as_bytes(),
+                    )
+                    .is_ok()
+            }
+            Some(_) | None => false,
+        };
+        let notify = SelectionNotifyEvent {
+            response_type: x11rb::protocol::xproto::SELECTION_NOTIFY_EVENT,
+            sequence: 0,
+            time: request.time,
+            requestor: request.requestor,
+            selection: request.selection,
+            target: request.target,
+            property: if written { property } else { x11rb::NONE },
+        };
+        let _ = self
+            .connection
+            .send_event(false, request.requestor, EventMask::NO_EVENT, notify);
+        let _ = self.connection.flush();
     }
 
     /// Creates a window covering `area`, all `color`, override-redirect or
@@ -388,15 +541,19 @@ impl X11Client {
             .atom
     }
 
-    /// Waits up to `timeout` for the X server to send something, then
-    /// reads every event, noting close requests.
-    fn wait_for_events(&mut self, timeout: Duration) {
-        let mut fds = [PollFd::new(
+    /// Waits up to `timeout` for the X server to send something (or `also`
+    /// to be readable), then reads every event: notes close requests, key
+    /// presses and answers to pastes, and answers requests for what this
+    /// program copied.
+    fn wait_for_events(&mut self, timeout: Duration, also: Option<BorrowedFd<'_>>) {
+        let millis = u16::try_from(timeout.as_millis()).unwrap_or(u16::MAX);
+        let mut fds = vec![PollFd::new(
             self.connection.stream().as_fd(),
             PollFlags::POLLIN,
         )];
-        let millis = u16::try_from(timeout.as_millis()).unwrap_or(u16::MAX);
+        fds.extend(also.map(|fd| PollFd::new(fd, PollFlags::POLLIN)));
         let _ = poll(&mut fds, PollTimeout::from(millis));
+        drop(fds);
         while let Some(event) = self
             .connection
             .poll_for_event()
@@ -404,7 +561,7 @@ impl X11Client {
         {
             #[expect(
                 clippy::wildcard_enum_match_arm,
-                reason = "of the X server's hundred events, a test hears two"
+                reason = "of the X server's hundred events, a test hears four"
             )]
             match event {
                 Event::ClientMessage(message)
@@ -414,8 +571,18 @@ impl X11Client {
                     self.close_requests.push(message.window);
                 }
                 Event::KeyPress(press) => self.key_presses.push(press.event),
+                Event::SelectionRequest(request) => self.answer_selection_request(&request),
+                Event::SelectionNotify(notify) => {
+                    self.pasted.insert(notify.requestor, notify.property);
+                }
                 _ => {}
             }
         }
     }
+}
+
+/// Returns whether the pipe `reader` reads from was closed at its other end.
+fn is_closed(reader: &OwnedFd) -> bool {
+    let mut fds = [PollFd::new(reader.as_fd(), PollFlags::POLLIN)];
+    poll(&mut fds, PollTimeout::ZERO).unwrap_or(0) > 0
 }

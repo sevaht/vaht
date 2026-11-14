@@ -17,13 +17,17 @@ mod selection;
 mod session_lock;
 mod surfaces;
 mod virtual_input;
+mod window_hints;
 mod xdg_shell;
 
 use smithay::input::SeatState;
 use smithay::reexports::wayland_server::DisplayHandle;
+use smithay::wayland::alpha_modifier::AlphaModifierState;
 use smithay::wayland::compositor::CompositorState;
+use smithay::wayland::content_type::ContentTypeState;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufState};
+use smithay::wayland::fixes::FixesState;
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
 use smithay::wayland::idle_notify::IdleNotifierState;
@@ -35,6 +39,7 @@ use smithay::wayland::pointer_constraints::PointerConstraintsState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
+use smithay::wayland::selection::{ext_data_control, wlr_data_control};
 use smithay::wayland::session_lock::SessionLockManagerState;
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
@@ -45,7 +50,10 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
 use smithay::wayland::virtual_pointer::VirtualPointerManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
+use smithay::wayland::xdg_foreign::XdgForeignState;
+use smithay::wayland::xdg_system_bell::XdgSystemBellState;
 use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager;
+use smithay::wayland::xdg_toplevel_tag::XdgToplevelTagManager;
 use smithay::wayland::xwayland_shell::XWaylandShellState;
 
 use smithay::reexports::calloop::LoopHandle;
@@ -71,21 +79,39 @@ pub(crate) struct ProtocolStates {
     pub(crate) data_device: DataDeviceState,
     /// `zwp_primary_selection_device_manager_v1`: the middle-click paste.
     pub(crate) primary_selection: PrimarySelectionState,
+    /// `ext_data_control_manager_v1` and `zwlr_data_control_manager_v1`:
+    /// clipboard managers reading and setting both selections.
+    pub(crate) data_control: (
+        ext_data_control::DataControlState,
+        wlr_data_control::DataControlState,
+    ),
     /// `xdg_activation_v1`: programs bringing their windows forward.
     pub(crate) activation: XdgActivationState,
+    /// `zxdg_exporter_v2` and `zxdg_importer_v2`: a window made the parent
+    /// of another program's (a portal's dialog).
+    pub(crate) xdg_foreign: XdgForeignState,
     /// `zwp_linux_dmabuf_v1`: GPU buffers.
     pub(crate) dmabuf: DmabufState,
     /// The dmabuf global, when the renderer can import GPU buffers.
     pub(crate) dmabuf_global: Option<DmabufGlobal>,
-    /// `wp_viewporter`, `wp_fractional_scale_manager_v1` and
-    /// `wp_single_pixel_buffer_manager_v1`: surfaces scaled and cropped,
-    /// told their scale, and filled with one color. Held only to keep the
-    /// globals alive; Smithay applies them when drawing.
+    /// `wp_viewporter`, `wp_fractional_scale_manager_v1`,
+    /// `wp_single_pixel_buffer_manager_v1`, `wp_alpha_modifier_v1`,
+    /// `wp_content_type_manager_v1` and `wl_fixes`: surfaces scaled and
+    /// cropped, told their scale, filled with one color, made translucent,
+    /// saying what they show (video, a game), and registry objects
+    /// destroyed. Held only to keep the globals alive; Smithay applies them
+    /// when drawing.
     _surface_extensions: (
         ViewporterState,
         FractionalScaleManagerState,
         SinglePixelBufferState,
+        AlphaModifierState,
+        ContentTypeState,
+        FixesState,
     ),
+    /// `xdg_system_bell_v1` and `xdg_toplevel_tag_manager_v1`: a bell
+    /// rung, and a window's tag. Held only to keep the globals alive.
+    _window_hints: (XdgSystemBellState, XdgToplevelTagManager),
     /// `zwp_relative_pointer_manager_v1` and `zwp_pointer_constraints_v1`:
     /// games reading the mouse's motion and locking or confining the
     /// pointer. Held only to keep the globals.
@@ -134,6 +160,7 @@ impl ProtocolStates {
     /// Creates every global on `display`; idle notifications time out on
     /// `handle`'s loop.
     pub(crate) fn new(display: &DisplayHandle, handle: &LoopHandle<'static, Compositor>) -> Self {
+        let primary_selection = PrimarySelectionState::new::<Compositor>(display);
         Self {
             compositor: CompositorState::new::<Compositor>(display),
             xdg_shell: XdgShellState::new::<Compositor>(display),
@@ -142,14 +169,37 @@ impl ProtocolStates {
             _output_manager: OutputManagerState::new_with_xdg_output::<Compositor>(display),
             seat: SeatState::new(),
             data_device: DataDeviceState::new::<Compositor>(display),
-            primary_selection: PrimarySelectionState::new::<Compositor>(display),
+            // TODO(security): every client may read the selections, as on
+            // other wlroots-style compositors; restrict with security-context
+            // once sandboxed clients exist.
+            data_control: (
+                ext_data_control::DataControlState::new::<Compositor, _>(
+                    display,
+                    Some(&primary_selection),
+                    |_client| true,
+                ),
+                wlr_data_control::DataControlState::new::<Compositor, _>(
+                    display,
+                    Some(&primary_selection),
+                    |_client| true,
+                ),
+            ),
+            primary_selection,
             activation: XdgActivationState::new::<Compositor>(display),
+            xdg_foreign: XdgForeignState::new::<Compositor>(display),
             dmabuf: DmabufState::new(),
             dmabuf_global: None,
             _surface_extensions: (
                 ViewporterState::new::<Compositor>(display),
                 FractionalScaleManagerState::new::<Compositor>(display),
                 SinglePixelBufferState::new::<Compositor>(display),
+                AlphaModifierState::new::<Compositor>(display),
+                ContentTypeState::new::<Compositor>(display),
+                FixesState::new::<Compositor>(display),
+            ),
+            _window_hints: (
+                XdgSystemBellState::new::<Compositor>(display),
+                XdgToplevelTagManager::new::<Compositor>(display),
             ),
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
             _cursor_shape: CursorShapeManagerState::new::<Compositor>(display),

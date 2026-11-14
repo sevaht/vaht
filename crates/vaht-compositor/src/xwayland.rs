@@ -167,6 +167,52 @@ impl XwaylandServer {
         }
     }
 
+    /// Tells X programs that a Wayland client now holds `selection`,
+    /// offering `mime_types`, or that it was cleared (none), so X programs
+    /// paste it.
+    pub(crate) fn offer_selection(
+        &mut self,
+        selection: SelectionTarget,
+        mime_types: Option<Vec<String>>,
+    ) {
+        let Some(wm) = &mut self.wm else {
+            return;
+        };
+        // Smithay queues the change of owner without sending it, so an X
+        // program pasting before the window manager next writes would find
+        // no owner. A stacking update of no windows writes nothing more and
+        // sends what is queued.
+        let offered = wm
+            .new_selection(selection, mime_types)
+            .map_err(|error| error.to_string());
+        let sent = offered.and_then(|()| {
+            wm.update_stacking_order_upwards(std::iter::empty::<&X11Surface>())
+                .map_err(|error| error.to_string())
+        });
+        if let Err(error) = sent {
+            tracing::debug!(
+                error,
+                ?selection,
+                "X programs could not be offered the selection"
+            );
+        }
+    }
+
+    /// Asks the X program holding `selection` to write it as `mime_type`
+    /// to `fd`, which a Wayland client reads.
+    pub(crate) fn give_selection(
+        &mut self,
+        selection: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+    ) {
+        if let Some(wm) = &mut self.wm
+            && let Err(error) = wm.send_selection(selection, mime_type, fd)
+        {
+            tracing::debug!(%error, ?selection, "an X program's selection could not be read");
+        }
+    }
+
     /// Returns the shape of `window`, if it is shaped.
     pub(crate) fn shape_of(&self, window: &X11Surface) -> Option<&WindowShape> {
         self.shapes.as_ref()?.shape_of(window.window_id())

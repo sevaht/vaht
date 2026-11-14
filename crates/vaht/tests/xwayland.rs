@@ -6,7 +6,10 @@ use std::path::Path;
 use std::process::Command;
 
 use vaht_ipc::{Reply, WindowInfo};
-use vaht_test_support::{BUTTON_LEFT, Bounds, HeadlessVaht, TestClient, WINDOW_COLOR, X11Client};
+use vaht_test_support::{
+    BUTTON_LEFT, Bounds, ClipboardManager, HeadlessVaht, Selection, TestClient, WINDOW_COLOR,
+    X11Client,
+};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
@@ -333,4 +336,36 @@ fn x_resources_named_in_the_settings_are_loaded_for_x_programs() {
         "{resources}"
     );
     assert!(resources.contains("Xft.dpi: 96"), "{resources}");
+}
+
+#[test]
+fn an_x11_program_pastes_what_a_wayland_program_copied() {
+    let mut desktop = XDesktop::new();
+    let window = desktop.open_window();
+    let _ = desktop.wait_for_color(X_COLOR);
+    let mut manager = ClipboardManager::connect(desktop.vaht.socket());
+    manager.copy(Selection::Clipboard, "from Wayland");
+    manager.copy(Selection::Primary, "selected in Wayland");
+    let x11 = &mut desktop.x11;
+    let (clipboard, primary) = manager.answer_while(|| {
+        (
+            x11.paste(window, Selection::Clipboard),
+            x11.paste(window, Selection::Primary),
+        )
+    });
+    assert_eq!(clipboard.as_deref(), Some("from Wayland"));
+    assert_eq!(primary.as_deref(), Some("selected in Wayland"));
+}
+
+#[test]
+fn a_wayland_program_pastes_what_an_x11_program_copied() {
+    let mut desktop = XDesktop::new();
+    let window = desktop.open_window();
+    let _ = desktop.wait_for_color(X_COLOR);
+    let mut manager = ClipboardManager::connect(desktop.vaht.socket());
+    desktop.x11.copy(window, Selection::Clipboard, "from X");
+    let pasted = desktop
+        .x11
+        .answer_while(|| manager.wait_for_text(Selection::Clipboard, "from X"));
+    assert!(pasted, "the X program's copy reached Wayland");
 }

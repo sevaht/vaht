@@ -20,7 +20,6 @@ use smithay::wayland::keyboard_shortcuts_inhibit::{
 use smithay::wayland::pointer_constraints::{
     ConstraintRemove, PointerConstraint, PointerConstraintsHandler,
 };
-use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
 };
@@ -85,10 +84,6 @@ impl PointerConstraintsHandler for Compositor {
     ) {
         self.pointer_lock_hint = Some((surface.clone(), location));
     }
-}
-
-impl SelectionHandler for Compositor {
-    type SelectionUserData = ();
 }
 
 impl DataDeviceHandler for Compositor {
