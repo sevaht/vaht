@@ -62,6 +62,7 @@ use vaht_ui::Typesetter;
 use crate::backend::{
     Backend, BackendChoice, BackendError, OutputEvent, TopWindow, virtual_terminal,
 };
+use crate::buffer_fences::FenceWaits;
 use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::FocusStealing;
@@ -132,6 +133,8 @@ pub struct Compositor {
     pub(crate) session_lock: SessionLock,
     /// Holds back and lets through clients' paced and timed frames.
     pub(crate) frame_pacing: FramePacing,
+    /// Holds clients' frames until the GPU has drawn them.
+    pub(crate) fence_waits: FenceWaits,
     /// The windows as programs outside vaht see them listed.
     toplevel_list: ToplevelList<WindowId, ForeignToplevelHandle>,
     /// Windows, workspaces and focus, and every rule about them.
@@ -315,6 +318,7 @@ impl Compositor {
             idle_inhibitors: IdleInhibitors::default(),
             session_lock: SessionLock::default(),
             frame_pacing: FramePacing::default(),
+            fence_waits: FenceWaits::default(),
             toplevel_list: ToplevelList::default(),
             window_manager,
             toplevels: Toplevels::default(),

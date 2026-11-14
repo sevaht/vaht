@@ -45,6 +45,7 @@ use smithay::reexports::input::Libinput;
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::utils::{DeviceFd, Transform};
+use smithay::wayland::drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd};
 
 use self::device::{DeviceContext, GpuDevice, GpuOutputManager};
 use self::plan::{GpuQuirks, TopWindow};
@@ -103,6 +104,9 @@ pub(crate) struct DrmBackend {
     keyboards: Vec<smithay::reexports::input::Device>,
     /// The lights the keyboards show.
     leds: smithay::reexports::input::Led,
+    /// Explicit sync (`wp_linux_drm_syncobj_manager_v1`), when the
+    /// primary GPU can wait on its timelines.
+    syncobj: Option<DrmSyncobjState>,
     /// udev, libinput and the session's events, registered while the
     /// backend lives.
     _sources: Vec<EventSource<Compositor>>,
@@ -156,6 +160,7 @@ impl DrmBackend {
             is_active: true,
             keyboards: Vec::new(),
             leds: smithay::reexports::input::Led::empty(),
+            syncobj: None,
             _sources: sources,
         };
         // The primary GPU first, so a display-only one can borrow its
@@ -169,6 +174,20 @@ impl DrmBackend {
             return Err(BackendError::Gpu("no GPU could be opened".to_owned()));
         }
         Ok(backend)
+    }
+
+    /// Returns explicit sync's state for clients on `display`, if the GPU
+    /// `fd` opens can wait on its timelines (NVIDIA's driver needs it;
+    /// others gain from it).
+    fn explicit_sync(display: &DisplayHandle, fd: &DrmDeviceFd) -> Option<DrmSyncobjState> {
+        let is_supported = supports_syncobj_eventfd(fd);
+        tracing::info!(is_supported, "explicit sync");
+        is_supported.then(|| DrmSyncobjState::new::<Compositor>(display, fd.clone()))
+    }
+
+    /// Returns explicit sync's state, if the primary GPU offers it.
+    pub(crate) const fn syncobj(&mut self) -> Option<&mut DrmSyncobjState> {
+        self.syncobj.as_mut()
     }
 
     /// Returns the GPU that composes: the one udev calls primary (the one
@@ -260,6 +279,9 @@ impl DrmBackend {
         let fd = DrmDeviceFd::new(DeviceFd::from(fd));
         let (drm, notifier) = DrmDevice::new(fd.clone(), true)
             .map_err(|error| format!("not a DRM device: {error}"))?;
+        if node == self.primary_gpu && self.syncobj.is_none() {
+            self.syncobj = Self::explicit_sync(&self.display, &fd);
+        }
         let gbm = GbmDevice::new(fd).map_err(|error| format!("no GBM: {error}"))?;
         let render_node = self.add_renderer(node, &gbm);
         let allocator = match render_node {

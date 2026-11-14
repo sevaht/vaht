@@ -14,6 +14,7 @@
 //! registrations ([`event_source`]).
 
 mod backend;
+mod buffer_fences;
 mod bus;
 mod capture;
 mod client;

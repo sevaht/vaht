@@ -292,12 +292,21 @@ rest only carries the decisions out.
   menu sees the key. Switching away pauses libinput and the GPUs; back,
   they are resumed, monitors scanned again and every output drawn anew.
 - **Input** comes from libinput on the seat; keyboards' lights follow Caps,
-  Num and Scroll Lock.
+  Num and Scroll Lock. Touchpad gestures go to the client under the
+  pointer.
+- **Sync.** A client's GPU buffer is shown only once drawn
+  (`buffer_fences.rs`): at the acquire point the client named with
+  explicit sync (`wp_linux_drm_syncobj_v1`, offered when the primary GPU
+  supports `syncobj_eventfd`; NVIDIA needs it for games and Xwayland
+  without flicker), else when the buffer's own fence allows reading.
+- **Presentation.** Each frame carries its surfaces' presentation feedback
+  to the page flip, reported with the flip's time and sequence; fifo
+  barriers lift at the flip, or after the refresh wait of an unchanged
+  frame (`frame_pacing.rs`).
 - **Not yet:** per-device input settings (tap to click, natural scrolling,
   acceleration: fluxland's `session.input.*`, which my config does not
-  use); explicit sync (drm-syncobj), which NVIDIA needs for games and
-  Xwayland without flicker; DRM leasing for headsets; gamma; dmabuf
-  feedback per surface; presentation-time feedback.
+  use); DRM leasing for headsets; gamma; dmabuf feedback per surface;
+  tearing (not in this Smithay).
 - **First run on hardware**, from a free terminal: `vaht` (log in
   `~/.local/state/vaht/vaht.log`); Ctrl+Alt+F<n> back to the old terminal
   at any time.

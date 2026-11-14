@@ -41,6 +41,9 @@ impl CompositorHandler for Compositor {
         // runs before Smithay's registers the moment, so it asks only
         // whether the surface was ever timed.
         add_pre_commit_hook::<Self, _>(surface, |compositor, _, surface| {
+            compositor
+                .fence_waits
+                .hold_until_drawn(surface, (&compositor.loop_handle, &compositor.ledger));
             let is_timed = with_states(surface, |states| {
                 states.data_map.get::<CommitTimerStateUserData>().is_some()
             });
