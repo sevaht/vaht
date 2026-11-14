@@ -185,6 +185,15 @@ from a connection of vaht's own to Xwayland (x11rb with the `shape`
 feature): `ShapeSelectInput` per managed window, `ShapeGetRectangles` on map
 and on each `ShapeNotify`, so it follows the shape as it changes.
 
+**Built.** `xwayland/shape.rs` follows shapes over vaht's own x11rb
+connection; `scene/shaped_element.rs` clips. Each shape gives the
+window's surfaces new element ids, so a shape that changes redraws the
+window whole. Tests shape a window to a ring (its hole shows what is
+below, and a click there goes to the window below) and to a hundred
+rectangles. X11 windows whose Motif hints ask for no decorations (a
+frameless Electron window, such as the ROTK launcher) get no frame, as in
+Fluxbox.
+
 ### 8.2 The pointer seen by an X11 window that vaht moves
 
 Seen with the ROTK launcher (Wine/Chromium, a frameless Electron window

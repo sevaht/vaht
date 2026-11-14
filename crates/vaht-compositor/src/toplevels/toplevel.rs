@@ -109,6 +109,7 @@ impl Toplevel {
                 icon: None,
                 geometry: self.window.geometry(),
                 size_limits: self.size_limits(),
+                is_self_decorated: surface.is_decorated(),
             };
         }
         let Some(root) = self.wl_surface() else {
@@ -142,6 +143,8 @@ impl Toplevel {
             icon,
             geometry: self.window.geometry(),
             size_limits: self.size_limits(),
+            // vaht draws every Wayland window's frame (xdg-decoration).
+            is_self_decorated: false,
         }
     }
 

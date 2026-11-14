@@ -35,6 +35,9 @@ pub(crate) struct CommittedState {
     pub(crate) geometry: Rectangle<i32, Logical>,
     /// The content sizes the client accepts.
     pub(crate) size_limits: SizeLimits,
+    /// Whether the client draws its own frame and asks for none (an X11
+    /// window's Motif hints say no decorations), as Fluxbox honors.
+    pub(crate) is_self_decorated: bool,
 }
 
 /// What vaht asks a client to make of its window.

@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use vaht_ipc::{Reply, WindowInfo};
-use vaht_test_support::{Bounds, HeadlessVaht, TestClient, X11Client};
+use vaht_test_support::{BUTTON_LEFT, Bounds, HeadlessVaht, TestClient, WINDOW_COLOR, X11Client};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
@@ -85,6 +85,19 @@ impl XDesktop {
         panic!("{color:?} never showed");
     }
 
+    /// Waits until the screen shows `color` at `point`, waiting for vaht to
+    /// draw between looks; returns whether it did.
+    fn wait_for_color_at(&mut self, point: (u32, u32), color: [u8; 3]) -> bool {
+        for _ in 0..50 {
+            let drawn = self.vaht.logged_count("frame drawn");
+            if self.wayland.screenshot().rgb(point.0, point.1) == color {
+                return true;
+            }
+            self.vaht.wait_for_logged("frame drawn", drawn + 1);
+        }
+        false
+    }
+
     /// Opens the X window and waits until vaht shows it; returns it.
     fn open_window(&mut self) -> u32 {
         let window = self
@@ -158,5 +171,107 @@ fn keys_typed_reach_the_focused_x11_window() {
     assert!(
         desktop.x11.wait_for_key_press(window),
         "the X program has the keyboard, through X's input focus"
+    );
+}
+
+/// The X window's size as rectangles: a ring 20 pixels wide around a hole.
+const RING: [(i16, i16, u16, u16); 4] = [
+    (0, 0, 200, 20),
+    (0, 100, 200, 20),
+    (0, 20, 20, 80),
+    (180, 20, 20, 80),
+];
+
+#[test]
+fn a_shaped_x11_window_shows_only_its_shape() {
+    let mut desktop = XDesktop::new();
+    let window = desktop.open_window();
+    let shown = desktop.wait_for_color(X_COLOR);
+    let middle = (shown.left + 100, shown.top + 60);
+    let band = (shown.left + 5, shown.top + 60);
+    desktop.x11.shape(window, &RING);
+    assert!(
+        desktop.wait_for_color_at(band, X_COLOR),
+        "the band shows the window"
+    );
+    let screenshot = desktop.wayland.screenshot();
+    assert_ne!(
+        screenshot.rgb(middle.0, middle.1),
+        X_COLOR,
+        "the hole shows what is below"
+    );
+}
+
+#[test]
+fn a_shape_of_many_rectangles_is_clipped_exactly() {
+    let mut desktop = XDesktop::new();
+    let window = desktop.open_window();
+    let shown = desktop.wait_for_color(X_COLOR);
+    // A hundred one-pixel rows, every other row of the window: far more
+    // rectangles than fluxland drew before giving up.
+    let rows: Vec<(i16, i16, u16, u16)> = (0..100).map(|row| (0, row * 2, 200, 1)).collect();
+    desktop.x11.shape(window, &rows);
+    let shape_row = (shown.left + 50, shown.top + 40);
+    let gap_row = (shown.left + 50, shown.top + 41);
+    assert!(desktop.wait_for_color_at(shape_row, X_COLOR));
+    let screenshot = desktop.wayland.screenshot();
+    assert_ne!(
+        screenshot.rgb(gap_row.0, gap_row.1),
+        X_COLOR,
+        "the rows between show through"
+    );
+    // Deep in the list, the 60th row shows and the gap above it does not.
+    assert_eq!(screenshot.rgb(shown.left + 50, shown.top + 118), X_COLOR);
+    assert_ne!(screenshot.rgb(shown.left + 50, shown.top + 117), X_COLOR);
+}
+
+#[test]
+fn a_click_in_a_hole_goes_to_the_window_below() {
+    let mut desktop = XDesktop::new();
+    desktop.wayland.open_windows(1);
+    let below = desktop.wait_for_color(WINDOW_COLOR);
+    let window = desktop.open_window();
+    let shown = desktop.wait_for_color(X_COLOR);
+    desktop.x11.shape(window, &RING);
+    assert!(desktop.wait_for_color_at((shown.left + 5, shown.top + 60), X_COLOR));
+    // The hole's middle, over the window below.
+    let hole = (shown.left + 100, shown.top + 60);
+    assert!(
+        hole.0 <= below.right && hole.1 <= below.bottom,
+        "the windows overlap at the hole: {below:?} {shown:?}"
+    );
+    desktop.wayland.click(hole.0, hole.1, BUTTON_LEFT);
+    let focused: Vec<_> = desktop
+        .windows()
+        .into_iter()
+        .filter(|window| window.is_focused)
+        .map(|window| window.app_id)
+        .collect();
+    assert_eq!(
+        focused,
+        ["vaht.test"],
+        "the Wayland window below took the click"
+    );
+}
+
+#[test]
+fn an_x11_window_that_draws_its_own_frame_gets_none() {
+    let mut desktop = XDesktop::new();
+    let _window = desktop
+        .x11
+        .open_self_decorated_window(X_SIZE, X_COLOR, "frameless");
+    desktop.vaht.wait_for_logged("placed first", 1);
+    let shown = desktop.wait_for_color(X_COLOR);
+    let screenshot = desktop.wayland.screenshot();
+    let desktop_color = screenshot.rgb(2, 2);
+    assert_eq!(
+        screenshot.rgb(shown.left - 1, shown.top - 1),
+        desktop_color,
+        "no border at its corner"
+    );
+    assert_eq!(
+        screenshot.rgb(shown.left + 50, shown.top - 5),
+        desktop_color,
+        "no titlebar above it"
     );
 }

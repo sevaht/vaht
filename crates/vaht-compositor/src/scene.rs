@@ -19,13 +19,14 @@ mod frame_textures;
 mod menu_texture;
 mod outline;
 mod panel_texture;
+mod shaped_element;
 mod snap_overlay;
 
-use smithay::backend::renderer::element::AsRenderElements as _;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
+use smithay::backend::renderer::element::{AsRenderElements as _, Element as _};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::WindowSurfaceType;
 use smithay::output::Output;
@@ -39,6 +40,7 @@ pub(crate) use self::frame_textures::FrameTextures;
 pub(crate) use self::menu_texture::MenuTexture;
 pub(crate) use self::outline::Outline;
 pub(crate) use self::panel_texture::PanelTexture;
+pub(crate) use self::shaped_element::ShapedElement;
 pub(crate) use self::snap_overlay::SnapOverlay;
 use crate::cursor::Cursor;
 use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, LayerMaps};
@@ -48,7 +50,7 @@ use crate::taskbar::{Taskbar, TaskbarHit};
 use crate::tooltip::Tooltip;
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::window_manager::{FramePart, Window, WindowId, WindowManager};
-use crate::xwayland::XwaylandServer;
+use crate::xwayland::{WindowShape, XwaylandServer};
 
 /// What is drawn where nothing else is, the wallpaper included: a dark
 /// grey, [`Backdrop`]'s own background.
@@ -63,6 +65,9 @@ smithay::backend::renderer::element::render_elements! {
     Panel = MemoryRenderBufferRenderElement<R>,
     /// A plain colored rectangle, such as a border line.
     Solid = SolidColorRenderElement,
+    /// A client surface drawn only inside its window's shape (an X11
+    /// window's X Shape).
+    Shaped = ShapedElement<WaylandSurfaceRenderElement<R>>,
 }
 
 /// One drawable part of a frame, moved from global coordinates to where
@@ -298,7 +303,11 @@ impl<'state> Scene<'state> {
             let origin = window.last_configure().loc.to_physical_precise_round(scale);
             let surface_elements: Vec<WaylandSurfaceRenderElement<R>> =
                 window.render_elements(renderer, origin, scale, 1.0);
-            elements.extend(surface_elements.into_iter().map(SceneElement::Surface));
+            let shape = self
+                .drawn
+                .xwayland
+                .and_then(|server| server.shape_of(window));
+            elements.extend(Self::clipped(surface_elements, shape, origin, scale));
         }
         self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
         self.push_windows(&mut elements, renderer, scale, true);
@@ -356,17 +365,17 @@ impl<'state> Scene<'state> {
         for (window, toplevel) in windows {
             if window.shows_content() {
                 let origin = window.surface_origin().to_physical_precise_round(scale);
-                elements.extend(
-                    toplevel
-                        .render_elements(
-                            renderer,
-                            origin,
-                            scale,
-                            self.window_manager.opacity(window),
-                        )
-                        .into_iter()
-                        .map(SceneElement::Surface),
+                let surface_elements = toplevel.render_elements(
+                    renderer,
+                    origin,
+                    scale,
+                    self.window_manager.opacity(window),
                 );
+                let shape = toplevel
+                    .x11()
+                    .zip(self.drawn.xwayland)
+                    .and_then(|(surface, server)| server.shape_of(surface));
+                elements.extend(Self::clipped(surface_elements, shape, origin, scale));
                 elements.extend(
                     self.drawn
                         .backdrop
@@ -385,6 +394,35 @@ impl<'state> Scene<'state> {
             // Where a moved window would snap is just under it.
             elements.extend(self.drawn.snap.preview_elements(window.id(), scale));
         }
+    }
+
+    /// Returns `surface_elements` as scene elements, clipped to `shape`
+    /// (relative to the window, whose corner is at `corner`) if the window
+    /// is shaped.
+    fn clipped<R>(
+        surface_elements: Vec<WaylandSurfaceRenderElement<R>>,
+        shape: Option<&WindowShape>,
+        corner: Point<i32, Physical>,
+        scale: Scale<f64>,
+    ) -> Vec<SceneElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let Some(shape) = shape else {
+            return surface_elements
+                .into_iter()
+                .map(SceneElement::Surface)
+                .collect();
+        };
+        let clip = shape.clip(scale);
+        surface_elements
+            .into_iter()
+            .map(|element| {
+                let id = shape.element_id(element.id());
+                SceneElement::Shaped(ShapedElement::new(element, &clip, corner, (id, scale)))
+            })
+            .collect()
     }
 
     /// Returns whether the topmost window shown is fullscreen: it then
@@ -426,7 +464,14 @@ impl<'state> Scene<'state> {
         windows.into_iter().find_map(|(window, toplevel)| {
             let id = window.id();
             let surface_origin = window.surface_origin();
+            let shape = toplevel
+                .x11()
+                .zip(self.drawn.xwayland)
+                .and_then(|(surface, server)| server.shape_of(surface));
+            let is_in_shape =
+                shape.is_none_or(|shape| shape.contains(point - surface_origin.to_f64()));
             if window.shows_content()
+                && is_in_shape
                 && let Some((surface, offset)) =
                     toplevel.surface_under(point - surface_origin.to_f64())
             {
@@ -455,6 +500,13 @@ impl<'state> Scene<'state> {
                 // The point is relative to the window; the origin comes
                 // back in global coordinates.
                 let corner = window.last_configure().loc;
+                let shape = self
+                    .drawn
+                    .xwayland
+                    .and_then(|server| server.shape_of(window));
+                if shape.is_some_and(|shape| !shape.contains(point - corner.to_f64())) {
+                    return None;
+                }
                 let (surface, origin) = window.surface_under(
                     point - corner.to_f64(),
                     corner,

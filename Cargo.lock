@@ -2999,6 +2999,7 @@ dependencies = [
  "tracing",
  "vaht-ipc",
  "vaht-ui",
+ "x11rb",
  "xcursor",
  "zbus",
 ]

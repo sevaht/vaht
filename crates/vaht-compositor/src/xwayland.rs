@@ -9,6 +9,8 @@
 //! ([`XwaylandServer::unmanaged`]). The clipboard and primary selection
 //! pass both ways between X and Wayland programs.
 
+mod shape;
+
 use std::os::fd::OwnedFd;
 use std::process::Stdio;
 
@@ -25,9 +27,11 @@ use smithay::wayland::selection::primary_selection::{
     set_primary_selection,
 };
 use smithay::wayland::xwayland_shell::{XWaylandShellHandler, XWaylandShellState};
-use smithay::xwayland::xwm::{Reorder, ResizeEdge, XwmId};
+use smithay::xwayland::xwm::{Reorder, ResizeEdge, WmWindowProperty, XwmId};
 use smithay::xwayland::{X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler};
 
+use self::shape::ShapeTracker;
+pub(crate) use self::shape::WindowShape;
 use crate::Compositor;
 use crate::event_source::EventSource;
 use crate::focus_target::FocusTarget;
@@ -43,6 +47,8 @@ pub(crate) struct XwaylandServer {
     display_number: Option<u32>,
     /// The override-redirect windows mapped, bottom first.
     unmanaged: Vec<X11Surface>,
+    /// Every window's shape, once Xwayland is ready.
+    shapes: Option<ShapeTracker>,
     /// Xwayland's readiness, registered while the server lives.
     _source: EventSource<Compositor>,
 }
@@ -88,15 +94,61 @@ impl XwaylandServer {
             wm: None,
             display_number: None,
             unmanaged: Vec::new(),
+            shapes: None,
             _source: source,
         })
     }
 
-    /// Becomes the window manager of the ready server on `display_number`.
-    pub(crate) fn manage(&mut self, wm: X11Wm, display_number: u32) {
-        tracing::info!(display = display_number, "Xwayland is ready");
+    /// Becomes the window manager of the ready server on `display_number`,
+    /// and follows its windows' shapes over a connection of vaht's own.
+    pub(crate) fn manage(
+        &mut self,
+        wm: X11Wm,
+        display_number: u32,
+        (handle, ledger): (&LoopHandle<'static, Compositor>, &ResourceLedger),
+    ) {
         self.wm = Some(wm);
         self.display_number = Some(display_number);
+        let display = format!(":{display_number}");
+        self.shapes = ShapeTracker::connect(&display, handle, ledger)
+            .inspect_err(|error| {
+                tracing::warn!(
+                    error,
+                    "X11 windows' shapes are not followed; shaped windows show whole"
+                );
+            })
+            .ok();
+        tracing::info!(display = display_number, "Xwayland is ready");
+    }
+
+    /// Stops following the shape of `window`, unmapped or gone.
+    pub(crate) fn untrack_shape(&mut self, window: &X11Surface) {
+        if let Some(shapes) = &mut self.shapes {
+            shapes.untrack(window.window_id());
+        }
+    }
+
+    /// Starts following the shape of `window`, just mapped.
+    fn track_shape(&mut self, window: &X11Surface) {
+        if let Some(shapes) = &mut self.shapes {
+            shapes.track(window.window_id(), window.last_configure().size);
+        }
+    }
+
+    /// Returns the shape of `window`, if it is shaped.
+    pub(crate) fn shape_of(&self, window: &X11Surface) -> Option<&WindowShape> {
+        self.shapes.as_ref()?.shape_of(window.window_id())
+    }
+
+    /// Reads the shapes that changed; returns whether any did. `size_of`
+    /// gives an X window's size by its id.
+    pub(crate) fn follow_shapes(
+        &mut self,
+        size_of: impl Fn(u32) -> Option<smithay::utils::Size<i32, Logical>>,
+    ) -> bool {
+        self.shapes
+            .as_mut()
+            .is_some_and(|shapes| shapes.follow_changes(size_of))
     }
 
     /// Returns the X display programs connect to, such as `:0`, once
@@ -112,6 +164,7 @@ impl XwaylandServer {
 
     /// Shows the override-redirect window `window` on top.
     fn show_unmanaged(&mut self, window: X11Surface) {
+        self.track_shape(&window);
         self.unmanaged.retain(|known| *known != window);
         self.unmanaged.push(window);
     }
@@ -119,6 +172,7 @@ impl XwaylandServer {
     /// Forgets the override-redirect window `window`; returns whether it
     /// was one.
     pub(crate) fn forget_unmanaged(&mut self, window: &X11Surface) -> bool {
+        self.untrack_shape(window);
         let count = self.unmanaged.len();
         self.unmanaged.retain(|known| known != window);
         self.unmanaged.len() != count
@@ -147,6 +201,9 @@ impl XwmHandler for Compositor {
         if let Err(error) = window.set_mapped(true) {
             tracing::warn!(%error, "an X11 window could not be mapped");
             return;
+        }
+        if let Some(server) = &mut self.xwayland {
+            server.track_shape(&window);
         }
         self.add_x11_window(window);
     }
@@ -208,6 +265,11 @@ impl XwmHandler for Compositor {
         if window.is_override_redirect() {
             self.schedule_render();
         }
+    }
+
+    fn property_notify(&mut self, _xwm: XwmId, window: X11Surface, _property: WmWindowProperty) {
+        // A title, class or decorations hint changed.
+        self.x11_properties_changed(&window);
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {

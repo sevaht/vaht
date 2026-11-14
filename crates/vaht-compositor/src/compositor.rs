@@ -548,7 +548,7 @@ impl Compositor {
             tracing::debug!(%error, "X programs keep Xwayland's own pointer");
         }
         if let Some(server) = &mut self.xwayland {
-            server.manage(wm, display_number);
+            server.manage(wm, display_number, (&self.loop_handle, &self.ledger));
             if let Some(name) = server.display_name() {
                 self.launcher.set_environment("DISPLAY".to_owned(), name);
             }
@@ -578,10 +578,46 @@ impl Compositor {
             self.schedule_render();
             return;
         }
+        if let Some(server) = &mut self.xwayland {
+            server.untrack_shape(surface);
+        }
         if let Some(window) = self.toplevels.remove_x11(surface) {
             self.window_manager.remove_window(window);
             self.settle();
             self.schedule_render();
+        }
+    }
+
+    /// Reads the X11 windows' shapes that changed, and draws again if any
+    /// did.
+    pub(crate) fn xwayland_shapes_changed(&mut self) {
+        let toplevels = &self.toplevels;
+        let windows: Vec<X11Surface> = self
+            .window_manager
+            .windows_top_down()
+            .filter_map(|window| toplevels.get(window.id())?.x11().cloned())
+            .collect();
+        let Some(server) = &mut self.xwayland else {
+            return;
+        };
+        let unmanaged: Vec<X11Surface> = server.unmanaged().cloned().collect();
+        let size_of = |id: u32| {
+            windows
+                .iter()
+                .chain(&unmanaged)
+                .find(|window| window.window_id() == id)
+                .map(|window| window.last_configure().size)
+        };
+        if server.follow_shapes(size_of) {
+            self.schedule_render();
+        }
+    }
+
+    /// Follows the X11 window `surface`'s title, class or decorations hint
+    /// changing.
+    pub(crate) fn x11_properties_changed(&mut self, surface: &X11Surface) {
+        if let Some(window) = self.toplevels.window_of_x11(surface) {
+            self.commit_toplevel(window);
         }
     }
 

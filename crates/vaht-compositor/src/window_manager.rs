@@ -1208,6 +1208,23 @@ mod tests {
                 icon: None,
                 geometry: Rectangle::from_size(size.into()),
                 size_limits: SizeLimits::default(),
+                is_self_decorated: false,
+            };
+            self.commit(window, committed);
+            self.settle();
+            window
+        }
+
+        /// Opens a window of 400 × 300 content that draws its own frame.
+        fn open_self_decorated(&mut self) -> WindowId {
+            let window = self.manager.add_window(&self.config.settings, &self.ledger);
+            let committed = CommittedState {
+                title: format!("window {window}"),
+                app_id: "self".to_owned(),
+                icon: None,
+                geometry: Rectangle::from_size((400, 300).into()),
+                size_limits: SizeLimits::default(),
+                is_self_decorated: true,
             };
             self.commit(window, committed);
             self.settle();
@@ -1419,6 +1436,20 @@ mod tests {
         assert_eq!(desk.outer(window), output(0).usable);
         desk.run(&action("maximize"));
         assert_eq!(desk.outer(window), floating);
+    }
+
+    #[test]
+    fn a_window_drawing_its_own_frame_gets_none_and_maximizes_its_content() {
+        let mut desk = Desk::new();
+        let window = desk.open_self_decorated();
+        assert!(!desk.window(window).has_frame());
+        assert_eq!(
+            desk.outer(window),
+            desk.window(window).content_area(),
+            "nothing around its content"
+        );
+        desk.run(&action("maximize"));
+        assert_eq!(desk.window(window).content_area(), output(0).usable);
     }
 
     #[test]

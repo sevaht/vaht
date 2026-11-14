@@ -12,6 +12,7 @@ use std::time::Duration;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use x11rb::connection::Connection as _;
 use x11rb::protocol::Event;
+use x11rb::protocol::shape::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{
     AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, Window, WindowClass,
 };
@@ -126,6 +127,73 @@ impl X11Client {
         connection.map_window(window).expect("the request is sent");
         connection.flush().expect("the requests are sent");
         window
+    }
+
+    /// Opens and maps a window like [`Self::open_window`] whose Motif hints
+    /// ask for no decorations: it draws its own, as a frameless Electron
+    /// window does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server refuses a request.
+    pub fn open_self_decorated_window(
+        &mut self,
+        size: (u16, u16),
+        color: [u8; 3],
+        title: &str,
+    ) -> Window {
+        let window = self.create(((0, 0), size), color, false);
+        let hints = self.atom(b"_MOTIF_WM_HINTS");
+        // flags: decorations given; decorations: none.
+        self.connection
+            .change_property32(PropMode::REPLACE, window, hints, hints, &[2, 0, 0, 0, 0])
+            .expect("the request is sent");
+        self.connection
+            .change_property8(
+                PropMode::REPLACE,
+                window,
+                AtomEnum::WM_NAME,
+                AtomEnum::STRING,
+                title.as_bytes(),
+            )
+            .expect("the request is sent");
+        self.connection
+            .map_window(window)
+            .expect("the request is sent");
+        self.connection.flush().expect("the requests are sent");
+        window
+    }
+
+    /// Shapes `window` to `rectangles` (`(x, y, width, height)` relative
+    /// to it), as Wine's layered windows do.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server refuses the request.
+    pub fn shape(&mut self, window: Window, rectangles: &[(i16, i16, u16, u16)]) {
+        let rectangles: Vec<_> = rectangles
+            .iter()
+            .map(
+                |&(x, y, width, height)| x11rb::protocol::xproto::Rectangle {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+            )
+            .collect();
+        self.connection
+            .shape_rectangles(
+                shape::SO::SET,
+                shape::SK::BOUNDING,
+                x11rb::protocol::xproto::ClipOrdering::UNSORTED,
+                window,
+                0,
+                0,
+                &rectangles,
+            )
+            .expect("the request is sent");
+        self.connection.flush().expect("the request is sent");
     }
 
     /// Opens and maps an override-redirect window (a menu) covering `area`

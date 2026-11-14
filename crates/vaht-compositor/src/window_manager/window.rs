@@ -296,9 +296,25 @@ impl Window {
         !self.state.is_minimized && (self.state.is_sticky || self.workspace == current)
     }
 
-    /// Returns whether vaht draws a frame around it: not while fullscreen.
+    /// Returns whether vaht draws a frame around it: not while fullscreen,
+    /// nor around a window that draws its own and asks for none.
     pub(crate) const fn has_frame(&self) -> bool {
-        !self.placement.is_fullscreen()
+        self.is_framed_when(&self.placement)
+    }
+
+    /// Returns whether it has a frame when placed as `placement`.
+    const fn is_framed_when(&self, placement: &Placement) -> bool {
+        !placement.is_fullscreen() && !self.committed.is_self_decorated
+    }
+
+    /// Returns where its content goes when its frame (if it has one when
+    /// placed as `placement`) covers `outer`.
+    fn content_within(&self, outer: Area, placement: &Placement, metrics: Metrics) -> Area {
+        if self.is_framed_when(placement) {
+            FrameGeometry::content_within(outer, metrics)
+        } else {
+            outer
+        }
     }
 
     /// Returns whether its content is shown: not while shaded.
@@ -415,7 +431,7 @@ impl Window {
     /// Puts the window where it first goes: its frame at `outer`. If that
     /// is not its size, the client is asked for the content size that fits.
     pub(crate) fn place_initially(&mut self, outer: Area, metrics: Metrics) {
-        let content = FrameGeometry::content_within(outer, metrics);
+        let content = self.content_within(outer, &self.placement, metrics);
         self.location = content.loc;
         if content.size != self.content_area().size {
             self.request_size(content.size);
@@ -435,11 +451,7 @@ impl Window {
             | Placement::Tiled { .. }
             | Placement::Fullscreen { .. } => placement.area(current, output.usable, output.whole),
         };
-        let content = if placement.is_fullscreen() {
-            outer
-        } else {
-            FrameGeometry::content_within(outer, metrics)
-        };
+        let content = self.content_within(outer, &placement, metrics);
         tracing::debug!(window = %self.id, ?placement, "placed");
         self.drag = None;
         self.location = content.loc;
@@ -650,7 +662,7 @@ impl Window {
             }
             None => current,
         };
-        let content = FrameGeometry::content_within(outer, metrics);
+        let content = self.content_within(outer, &Placement::Floating, metrics);
         self.placement = Placement::Floating;
         self.location = content.loc;
         self.request(|requested| requested.placement = PlacementKind::Floating);

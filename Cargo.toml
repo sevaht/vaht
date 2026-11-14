@@ -55,7 +55,7 @@ image = { version = "0.25", default-features = false, features = ["bmp", "gif", 
 # Application icons drawn as SVG; no text or fonts, which icons do not need.
 resvg = { version = "0.49", default-features = false }
 toml = "1"
-# The X11 test client: X windows, their shapes, through Xwayland.
+# X11 windows' shapes, for vaht and the X11 test client.
 x11rb = { version = "0.14", features = ["shape"] }
 # Pointer pictures from the xcursor theme, on outputs vaht draws the pointer on.
 xcursor = "0.3"
