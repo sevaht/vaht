@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use smithay_client_toolkit::reexports::client::protocol::wl_output;
+
 /// A pixel rectangle: left and top columns and rows, then right and bottom,
 /// all inclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +48,64 @@ impl Screenshot {
         Self {
             width,
             height,
+            pixels,
+        }
+    }
+
+    /// Returns the image turned back from `transform`, the way a captured
+    /// output's image is turned: as the output's own orientation shows it.
+    #[must_use]
+    pub fn with_transform_undone(self, transform: wl_output::Transform) -> Self {
+        use wl_output::Transform;
+        let (flips, quarter_turns) = match transform {
+            Transform::_90 => (false, 1),
+            Transform::_180 => (false, 2),
+            Transform::_270 => (false, 3),
+            Transform::Flipped => (true, 0),
+            Transform::Flipped90 => (true, 1),
+            Transform::Flipped180 => (true, 2),
+            Transform::Flipped270 => (true, 3),
+            Transform::Normal | _ => (false, 0),
+        };
+        let mut image = self;
+        for _ in 0..quarter_turns {
+            image = image.turned_clockwise();
+        }
+        if flips { image.flipped() } else { image }
+    }
+
+    /// Returns the image turned a quarter clockwise.
+    fn turned_clockwise(&self) -> Self {
+        let (width, height) = (self.height, self.width);
+        let mut pixels = vec![0; self.pixels.len()];
+        for y in 0..height {
+            for x in 0..width {
+                // The new (x, y) shows the old (y, old height - 1 - x).
+                let from = (to_index(self.height - 1 - x) * to_index(self.width) + to_index(y))
+                    * Self::BYTES_PER_PIXEL;
+                let to = (to_index(y) * to_index(width) + to_index(x)) * Self::BYTES_PER_PIXEL;
+                pixels[to..to + Self::BYTES_PER_PIXEL]
+                    .copy_from_slice(&self.pixels[from..from + Self::BYTES_PER_PIXEL]);
+            }
+        }
+        Self {
+            width,
+            height,
+            pixels,
+        }
+    }
+
+    /// Returns the image mirrored left to right.
+    fn flipped(&self) -> Self {
+        let row = to_index(self.width) * Self::BYTES_PER_PIXEL;
+        let pixels = self
+            .pixels
+            .chunks(row)
+            .flat_map(|line| line.chunks(Self::BYTES_PER_PIXEL).rev().flatten().copied())
+            .collect();
+        Self {
+            width: self.width,
+            height: self.height,
             pixels,
         }
     }

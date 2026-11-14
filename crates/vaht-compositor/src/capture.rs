@@ -7,7 +7,9 @@
 //! into the client's buffer ([`crate::shared_memory`]). Drawing with the
 //! backend's renderer is what lets windows drawn on the GPU show; every
 //! backend runs the same function, so the software one tests it. A capture
-//! never disturbs what the outputs show.
+//! never disturbs what the outputs show. A turned output is drawn as its
+//! monitor shows it, at its mode's size, and the frame says the transform,
+//! which grim and the portal undo.
 
 use std::time::Duration;
 
@@ -82,7 +84,7 @@ where
         .map_err(CaptureError::renderer)?;
     let elements = scene.output_elements(renderer, output);
     let mut framebuffer = renderer.bind(&mut target).map_err(CaptureError::renderer)?;
-    OutputDamageTracker::new(size, scale, Transform::Normal)
+    OutputDamageTracker::new(size, scale, output.current_transform())
         .render_output(
             renderer,
             &mut framebuffer,
@@ -107,15 +109,21 @@ where
 }
 
 impl ScreenCapture {
-    /// Fills `frame` with `image`, made `time` after vaht started, or
-    /// fails it for why the image could not be made.
-    fn fill(frame: Frame, image: Result<CapturedImage, CaptureError>, time: Duration) {
+    /// Fills `frame` with `image`, of an output turned as `transform`
+    /// says, made `time` after vaht started, or fails it for why the image
+    /// could not be made.
+    fn fill(
+        frame: Frame,
+        image: Result<CapturedImage, CaptureError>,
+        transform: Transform,
+        time: Duration,
+    ) {
         let result = image.and_then(|image| {
             shared_memory::write_frame(&frame.buffer(), &image.pixels, image.width, image.height)
                 .map_err(CaptureError::Write)
         });
         match result {
-            Ok(()) => frame.success(Transform::Normal, None, time),
+            Ok(()) => frame.success(transform, None, time),
             Err(error) => {
                 tracing::warn!(error = &error as &dyn std::error::Error, "capture failed");
                 let reason = match error {
@@ -212,7 +220,12 @@ impl ImageCopyCaptureHandler for Compositor {
             scene
         };
         let image = self.backend.capture(&scene, &output);
-        ScreenCapture::fill(frame, image, self.start_time.elapsed());
+        ScreenCapture::fill(
+            frame,
+            image,
+            output.current_transform(),
+            self.start_time.elapsed(),
+        );
     }
 }
 

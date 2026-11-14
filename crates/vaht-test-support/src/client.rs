@@ -975,6 +975,7 @@ impl TestClient {
         frame.damage_buffer(0, 0, signed(width), signed(height));
         frame.capture();
         self.state.capture_result = None;
+        self.state.capture_transform = wl_output::Transform::Normal;
         self.dispatch_until(|state| state.capture_result.is_some());
         let result = self
             .state
@@ -988,7 +989,8 @@ impl TestClient {
             .to_vec();
         frame.destroy();
         session.destroy();
-        Screenshot::new(width, height, pixels)
+        // As grim does: the image as the output's own orientation shows it.
+        Screenshot::new(width, height, pixels).with_transform_undone(self.state.capture_transform)
     }
 
     /// Sends a button event and waits until vaht has processed it.

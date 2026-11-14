@@ -42,7 +42,7 @@ re-renders its buffer only when its content changes.
 | presentation-time, content-type, fractional-scale | `presentation.c` | `wayland::*` |
 | **fifo-v1, commit-timing-v1** | `frame_pacing.c` (736 lines, hand-written) | `wayland::{fifo, commit_timing}` |
 | linux-drm-syncobj (explicit sync), drm-lease | `drm_syncobj.c`, `drm_lease.c` | `wayland::{drm_syncobj, drm_lease}` |
-| ext-image-copy-capture, image-capture-source | `screencopy.c` | `wayland::{image_copy_capture, image_capture_source}` |
+| ext-image-copy-capture, image-capture-source | `screencopy.c` | `wayland::{image_copy_capture, image_capture_source}`; vaht draws the output again into shared memory (`capture.rs`), a turned output as its monitor shows it, the frame saying the transform for grim and the portal to undo |
 | ext-foreign-toplevel-list | `foreign_toplevel.c` | `wayland::foreign_toplevel_list` |
 | **libei / EIS** (emulated input from X11 programs, Steam Input) | `eis.c` (959 lines, hand-written) | `backend::libei` |
 | **Xwayland keyboard grab**, xwayland-shell | `xwayland_grab.c` | `wayland::{xwayland_keyboard_grab, xwayland_shell}` |

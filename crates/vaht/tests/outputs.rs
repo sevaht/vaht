@@ -624,3 +624,19 @@ fn a_program_arranging_outputs_sees_them_and_moves_them() {
     );
     assert_eq!(outputs_on(&vaht), ["*HEADLESS-1"]);
 }
+
+#[test]
+fn a_turned_output_is_captured_as_it_shows() {
+    let (_vaht, mut client) = with_files(
+        "",
+        "[[output]]\nmatch = { connector = \"HEADLESS-1\" }\ntransform = \"90\"\n",
+    );
+    let turned = client.screenshot_of("HEADLESS-1");
+    assert_eq!((turned.width(), turned.height()), (600, 800), "upright");
+    assert_ne!(
+        turned.rgb(5, turned.height() - 2),
+        SKY,
+        "the taskbar along its bottom"
+    );
+    assert_eq!(turned.rgb(5, 2), SKY, "the wallpaper above");
+}

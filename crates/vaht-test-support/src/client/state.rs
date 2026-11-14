@@ -26,7 +26,7 @@ use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::z
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::{self, ZwpRelativePointerV1};
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
-use smithay_client_toolkit::reexports::client::{Connection, QueueHandle};
+use smithay_client_toolkit::reexports::client::{Connection, QueueHandle, WEnum};
 use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation::{self, WpPresentation};
 use smithay_client_toolkit::reexports::protocols::wp::pointer_warp::v1::client::wp_pointer_warp_v1::WpPointerWarpV1;
 use smithay_client_toolkit::reexports::protocols::wp::fifo::v1::client::wp_fifo_manager_v1::WpFifoManagerV1;
@@ -111,6 +111,9 @@ pub(super) struct ClientState {
     pub(super) capture_size: Option<(u32, u32)>,
     /// How the current capture ended.
     pub(super) capture_result: Option<Result<(), String>>,
+    /// How the current capture's image is turned from the output's own
+    /// orientation.
+    pub(super) capture_transform: wl_output::Transform,
     /// The surface with keyboard focus, as vaht last told.
     pub(super) keyboard_focus: Option<wl_surface::WlSurface>,
     /// How far the mouse moved, as relative motion told, in all.
@@ -175,6 +178,7 @@ impl ClientState {
             closed_layers: 0,
             capture_size: None,
             capture_result: None,
+            capture_transform: wl_output::Transform::Normal,
             keyboard_focus: None,
             relative_motion: (0.0, 0.0),
             is_pointer_locked: false,
@@ -323,10 +327,7 @@ impl Dispatch2<wl_keyboard::WlKeyboard, ClientState> for KeyboardEvents {
             wl_keyboard::Event::Leave { .. } => state.keyboard_focus = None,
             wl_keyboard::Event::Key {
                 key,
-                state:
-                    smithay_client_toolkit::reexports::client::WEnum::Value(
-                        wl_keyboard::KeyState::Pressed,
-                    ),
+                state: WEnum::Value(wl_keyboard::KeyState::Pressed),
                 ..
             } => state.received_keys.push(key),
             _ => {}
@@ -628,6 +629,9 @@ impl Dispatch2<ExtImageCopyCaptureFrameV1, ClientState> for CaptureFrameEvents {
             reason = "only the frame's outcome matters to a test"
         )]
         match event {
+            ext_image_copy_capture_frame_v1::Event::Transform {
+                transform: WEnum::Value(transform),
+            } => state.capture_transform = transform,
             ext_image_copy_capture_frame_v1::Event::Ready => state.capture_result = Some(Ok(())),
             ext_image_copy_capture_frame_v1::Event::Failed { reason } => {
                 state.capture_result = Some(Err(format!("{reason:?}")));
