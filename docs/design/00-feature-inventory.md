@@ -98,7 +98,7 @@ These are structural problems in fluxland that vaht's design should avoid.
 |---|---|---|---|
 | Managed windows, one abstraction over xdg-shell and X11 | `view.c`, `view_xdg.c`, `xwayland.c` (`wm_view_impl` vtable) | keep | Becomes a `Window` that owns a `ClientSurface` enum (`Xdg` / `X11`); see M11 and R-M15 rung 2 |
 | Unmanaged X11 windows (override-redirect) stacked as X does | `xwayland.c` | keep | |
-| X11 Shape clipping | `xwayland_shape.c` | keep | |
+| X11 Shape clipping | `xwayland_shape.c` | keep, exact | fluxland made a clipped scene node per rectangle and gave up past 32 (`WM_XSHAPE_PIECES_MAX`), drawing the whole window. vaht clips exactly, with no limit: see 04 §8 |
 | Size hints (min, max, increments, aspect) | `view_geometry.c` | keep ★ | `maxIgnoreIncrement` |
 | Server-side frame: titlebar, label, buttons, handle, grips, border, round corners | `decoration.c` | keep ★ | First user of the unified panel model |
 | Negotiate client-side decoration fallback (xdg-decoration, KDE protocol, Motif hints) | `decoration.c`, `xwayland.c` | keep | |

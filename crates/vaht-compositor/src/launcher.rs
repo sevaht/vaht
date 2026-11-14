@@ -66,6 +66,10 @@ impl Launcher {
     /// The shell that runs command lines.
     const SHELL: &str = "/bin/sh";
 
+    /// The desktop's name, as `XDG_CURRENT_DESKTOP` and the session file's
+    /// `DesktopNames` give it.
+    const DESKTOP_NAME: &str = "vaht";
+
     /// Creates a launcher whose programs connect to `socket_name`, and
     /// whose dialogs are shown by `executable`; their errors are read on
     /// `loop_handle`'s loop.
@@ -81,7 +85,19 @@ impl Launcher {
             error_outputs: BTreeMap::new(),
             ended_outputs: Vec::new(),
             loop_handle: loop_handle.clone(),
-            environment: BTreeMap::from([(OsString::from("WAYLAND_DISPLAY"), socket_name)]),
+            environment: BTreeMap::from([
+                (OsString::from("WAYLAND_DISPLAY"), socket_name),
+                // Portals and toolkits choose by these: vaht's own
+                // vaht-portals.conf, and Wayland rather than X11.
+                (
+                    OsString::from("XDG_CURRENT_DESKTOP"),
+                    OsString::from(Self::DESKTOP_NAME),
+                ),
+                (
+                    OsString::from("XDG_SESSION_TYPE"),
+                    OsString::from("wayland"),
+                ),
+            ]),
             executable,
             ledger: ledger.clone(),
         }

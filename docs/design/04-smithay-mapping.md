@@ -157,3 +157,62 @@ answers a question the object model depends on.
    Compare quality against fluxland and the dependency weight.
 3. **DRM tearing and VRR.** Find out what the DRM compositor exposes for async
    page flips and VRR at the pinned revision.
+
+## 8. Two Xwayland problems fluxland could not solve on wlroots
+
+Both are recorded in fluxland's README ("Known issues") and
+COMPATIBILITY.md; Smithay gives what wlroots lacked, so vaht builds them
+right with Xwayland.
+
+### 8.1 X Shape clipping, exactly
+
+XWayland does not show a window's X Shape (the bounding region Wine's
+layered windows and Proton's focus overlays use, which are rings), so the
+compositor must. fluxland fetched the shape's rectangles over XCB and made
+one clipped `wlr_scene` subsurface tree per rectangle, up to 32; a shape of
+more (a ring with rounded corners easily has hundreds) fell back to the
+whole, unclipped window.
+
+vaht clips with one render element per surface and no limit: a
+`ShapedElement` wraps the window's surface elements and holds the shape as
+a list of rectangles (an X shape *is* a set of rectangles, so this is exact,
+not an approximation). Its `draw` gets the damage to redraw and passes on
+only the damage that lies within the shape; its `opaque_regions` and
+`damage_since` are cut to the shape too, so the damage tracker never
+assumes a hole is covered. Hit-testing (`Scene::target_at`) asks the same
+shape, so a click in a hole goes to what shows through it. The shape comes
+from a connection of vaht's own to Xwayland (x11rb with the `shape`
+feature): `ShapeSelectInput` per managed window, `ShapeGetRectangles` on map
+and on each `ShapeNotify`, so it follows the shape as it changes.
+
+### 8.2 The pointer seen by an X11 window that vaht moves
+
+Seen with the ROTK launcher (Wine/Chromium, a frameless Electron window
+dragged by its own title bar): while it moves, title bar entries that slide
+under where the drag began light up as if hovered. While the compositor
+moves a window it sends the pointer to nobody, so XWayland's pointer stays
+where the grab began; XWayland places the pointer on the X screen as (the
+window's position it knows) + (the surface-local position last sent), and
+the window's position comes over the X connection, unordered with the
+Wayland events. An X client that asks (Wine's `GetCursorPos`) sees the two
+out of step. fluxland's workaround, sending motion once a frame, changed
+nothing, since it could not tell when the X server had the new position.
+
+Smithay can tell: `XwmHandler::configure_notify` is called for every
+`ConfigureNotify` of a mapped window. vaht's move of an X11 window will:
+
+1. `configure()` it at the new position and remember the position asked for;
+2. on `configure_notify()` with that position, send the pointer to the
+   window's surface at its surface-local position relative to the position
+   the X server now has (a motion with the pointer focus kept on the
+   window during the grab, as the X server expects for a window being
+   dragged);
+3. on release, the same once more, so XWayland's pointer ends where the real
+   one is before anything else is hovered.
+
+Steps 2 and 3 order the pointer after the X server has the position, which
+is the most a compositor can do; the rest of the race is XWayland's (one
+request setting the window position and the pointer together would end it).
+Test it with the ROTK launcher, and with `xdotool getmouselocation` during
+and after a drag, which should follow the real pointer.
+

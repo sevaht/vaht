@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=vaht
+Comment=A Fluxbox-style stacking Wayland compositor
+Exec=vaht
+Type=Application
+DesktopNames=vaht
+Keywords=wayland;compositor;window manager;smithay;fluxbox;stacking;

@@ -183,3 +183,17 @@ fn commands_can_be_turned_off_for_other_programs() {
         "asking is still allowed"
     );
 }
+
+#[test]
+fn programs_vaht_starts_learn_the_desktop_and_session() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let directory = tempfile::tempdir().expect("a directory for the result");
+    let result = directory.path().join("environment");
+    let command = format!(
+        "exec printf '%s %s' \"$XDG_CURRENT_DESKTOP\" \"$XDG_SESSION_TYPE\" > {}",
+        result.display()
+    );
+    let output = message(&vaht, &["run", &command]);
+    assert!(output.status.success(), "{output:?}");
+    wait_for_file(&result, |text| text == "vaht wayland");
+}
