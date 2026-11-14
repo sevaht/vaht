@@ -30,6 +30,32 @@ pub const SOCKET_VARIABLE: &str = "VAHT_SOCKET";
 /// broken or hostile, and is disconnected rather than buffered.
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
+/// Returns the protocol's JSON Schema (draft 2020-12): every message is a
+/// [`Request`], a [`Reply`] or an [`Event`], each defined in `$defs`, which
+/// is how other languages can check or generate their own types.
+///
+/// # Panics
+///
+/// Never: the schema is plain data that always encodes.
+#[must_use]
+pub fn schema() -> serde_json::Value {
+    let mut generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
+    let messages = [
+        generator.subschema_for::<Request>(),
+        generator.subschema_for::<Reply>(),
+        generator.subschema_for::<Event>(),
+    ];
+    let definitions = generator.take_definitions(true);
+    serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "vaht IPC message",
+        "description": "One JSON object per line over vaht's IPC socket: a request a client sends, \
+                        or a reply or event vaht sends.",
+        "oneOf": messages,
+        "$defs": definitions,
+    })
+}
+
 /// Returns where the vaht serving Wayland display `display` listens:
 /// beside the display's own socket in `runtime_directory`.
 #[must_use]
@@ -42,6 +68,29 @@ pub fn socket_path(runtime_directory: &Path, display: &OsStr) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_schema_defines_every_message_and_kind() {
+        let schema = schema();
+        let definitions = schema["$defs"].as_object().expect("definitions");
+        for name in ["Request", "Reply", "Event", "WindowInfo", "EventKind"] {
+            assert!(definitions.contains_key(name), "{name}: {schema}");
+        }
+        let request = definitions["Request"].to_string();
+        for kind in [
+            "version",
+            "run",
+            "windows",
+            "workspaces",
+            "outputs",
+            "subscribe",
+        ] {
+            assert!(
+                request.contains(&format!("\"{kind}\"")),
+                "{kind}: {request}"
+            );
+        }
+    }
 
     #[test]
     fn the_socket_sits_beside_the_displays() {

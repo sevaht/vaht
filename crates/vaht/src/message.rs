@@ -81,6 +81,20 @@ pub fn follow(events: Vec<EventKind>, json: bool) -> ExitCode {
     }
 }
 
+/// Prints the IPC protocol's JSON Schema.
+///
+/// # Panics
+///
+/// Never: the schema is plain data that always encodes.
+#[must_use]
+pub fn print_schema() -> ExitCode {
+    let mut text = serde_json::to_string_pretty(&vaht_ipc::schema())
+        .expect("the schema is plain data, always encodable");
+    text.push('\n');
+    terminal::print(&text);
+    ExitCode::SUCCESS
+}
+
 /// Returns `reply` as lines for a person to read.
 fn readable(reply: &Reply) -> String {
     let mut text = String::new();

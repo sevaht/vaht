@@ -25,6 +25,7 @@ fn main() -> ExitCode {
             let to = to.clone().unwrap_or_else(|| arguments.config_directory());
             return vaht::import::fluxbox(from.as_deref(), &to, *force);
         }
+        Some(Subcommand::Schema) => return vaht::message::print_schema(),
         Some(Subcommand::Dialog { dialog }) => {
             return vaht::dialog::show(*dialog, &arguments.config_directory());
         }

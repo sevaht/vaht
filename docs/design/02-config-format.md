@@ -1125,7 +1125,10 @@ dialogs use too.
   (in `XDG_RUNTIME_DIR`, mode 0700), so this guards against the user's
   other programs, which can already type through the virtual keyboard
   protocol.
-- **Not built yet:** the JSON Schema export.
+- **`vaht schema`** prints the protocol's JSON Schema (draft 2020-12),
+  made from the message types themselves (`vaht_ipc::schema`), so it
+  cannot drift: every message is a request, a reply or an event, each in
+  `$defs`.
 
 ---
 

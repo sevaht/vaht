@@ -11,6 +11,7 @@
 //! A client that subscribes is then sent an [`Event`] (`"event"`) with the
 //! whole of each list it subscribed to, at once and whenever it changes.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// What a client asks of vaht.
@@ -18,7 +19,7 @@ use serde::{Deserialize, Serialize};
 /// Requests without fields are written `Version {}` rather than as unit
 /// variants, so a field they do not take is refused like any other: serde
 /// ignores unknown fields beside a unit variant's tag.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "request", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Request {
     /// vaht's version.
@@ -47,7 +48,9 @@ pub enum Request {
 }
 
 /// A list a client may subscribe to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum EventKind {
     /// The windows, as [`Request::Windows`] answers.
@@ -59,7 +62,7 @@ pub enum EventKind {
 }
 
 /// A list a client subscribed to, sent at once and whenever it changes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Event {
     /// The windows, topmost first.
@@ -104,7 +107,7 @@ impl Event {
 }
 
 /// What vaht answers a request with.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "reply", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Reply {
     /// vaht's version, for [`Request::Version`].
@@ -139,7 +142,7 @@ pub enum Reply {
 }
 
 /// One window, as IPC describes it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WindowInfo {
     /// Its id, which no other window ever has while vaht runs.
@@ -159,7 +162,7 @@ pub struct WindowInfo {
 }
 
 /// One workspace, as IPC describes it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceInfo {
     /// Its number, from 1.
@@ -171,7 +174,7 @@ pub struct WorkspaceInfo {
 }
 
 /// One output, as IPC describes it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OutputInfo {
     /// Its connector's name, such as `HDMI-A-1`.
@@ -195,7 +198,7 @@ pub struct OutputInfo {
 }
 
 /// An output's mode, as IPC describes it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ModeInfo {
     /// Its width, in pixels.

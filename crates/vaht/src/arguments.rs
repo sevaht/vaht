@@ -98,6 +98,9 @@ pub enum Subcommand {
         #[command(subcommand)]
         request: MessageRequest,
     },
+    /// Prints the JSON Schema of the IPC protocol's messages: requests,
+    /// replies and events.
+    Schema,
 }
 
 /// The dialogs `vaht dialog` shows.

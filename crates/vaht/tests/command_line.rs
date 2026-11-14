@@ -241,3 +241,16 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
         "what import writes is valid: {checked:?}"
     );
 }
+
+#[test]
+fn schema_prints_the_ipc_protocols_json_schema() {
+    let logs = log_directory();
+    let output = run_executable(&["schema"], logs.path());
+    assert!(output.status.success(), "{output:?}");
+    let schema: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON");
+    assert_eq!(
+        schema["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
+    assert!(schema["$defs"]["Request"].is_object(), "{schema}");
+}
