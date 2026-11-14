@@ -13,6 +13,9 @@ use std::num::NonZeroU32;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use smithay::utils::{Logical, Point, Rectangle, Size};
 
+mod forms;
+
+pub(crate) use self::forms::{Condition, Delay, Toggle};
 use super::matcher::WindowMatcher;
 use crate::window_manager::{
     AlphaChange, Axes, Direction, HorizontalEdge, OutputTarget, ResizeEdges, StackLayer, TileCell,
@@ -33,9 +36,6 @@ const PLANNED_ACTIONS: &[&str] = &[
     "taskbar-to-output",
     "tray-item-menu",
 ];
-
-/// Structured command forms of 02 §4 that vaht does not have yet.
-const PLANNED_FORMS: [&str; 4] = ["toggle", "if", "for_each", "delay_ms"];
 
 /// The windows `next-window` and `previous-window` go through, and in what
 /// order: `{ action = "next-window", windows = <matcher>, order = "opening" }`.
@@ -89,6 +89,27 @@ pub(crate) enum Command {
         /// Repeats per second; the keyboard's own rate when absent.
         rate: Option<NonZeroU32>,
     },
+    /// Commands run in turn, one each time (Fluxbox's `ToggleCmd`).
+    Toggle(Toggle),
+    /// One command or another, as a condition holds of the window
+    /// (Fluxbox's `If` and `Cond`).
+    If {
+        /// What is asked of the window.
+        condition: Condition,
+        /// What runs if it holds.
+        then: Box<Command>,
+        /// What runs if not, if anything.
+        otherwise: Option<Box<Command>>,
+    },
+    /// A command run on each window matching (Fluxbox's `ForEach`).
+    ForEach {
+        /// Which windows.
+        windows: WindowMatcher,
+        /// What runs on each.
+        command: Box<Command>,
+    },
+    /// A command run a while later (Fluxbox's `Delay`).
+    Delay(Delay),
 }
 
 impl Command {
@@ -99,7 +120,21 @@ impl Command {
             Self::Run(Action::OpenMenu(MenuRequest::Custom(name))) => vec![name.as_str()],
             Self::Run(_) => Vec::new(),
             Self::Sequence(commands) => commands.iter().flat_map(Self::custom_menus).collect(),
-            Self::Repeat { command, .. } => command.custom_menus(),
+            Self::Toggle(toggle) => toggle
+                .commands
+                .iter()
+                .flat_map(Self::custom_menus)
+                .collect(),
+            Self::If {
+                then, otherwise, ..
+            } => then
+                .custom_menus()
+                .into_iter()
+                .chain(otherwise.iter().flat_map(|command| command.custom_menus()))
+                .collect(),
+            Self::Repeat { command, .. }
+            | Self::ForEach { command, .. }
+            | Self::Delay(Delay { command, .. }) => command.custom_menus(),
         }
     }
 
@@ -135,17 +170,105 @@ impl Command {
         if entries.iter().any(|(key, _)| key == "action") {
             return Self::from_action_table(entries);
         }
+        let has = |name: &str| entries.iter().any(|(key, _)| key == name);
+        if has("toggle") || has("if") || has("for_each") || has("delay_ms") {
+            return Self::from_form_table(&entries);
+        }
         let mut entries = entries.into_iter();
         let (Some((name, value)), None) = (entries.next(), entries.next()) else {
             return Err(
                 "an action table holds exactly one action, such as { exec = \"kitty\" }".to_owned(),
             );
         };
-        if PLANNED_FORMS.contains(&name.as_str()) {
-            return Err(format!("`{name}` is not available in vaht yet"));
-        }
         let arguments = Action::arguments_from_value(&name, &value)?;
         Action::from_parts(&name, &arguments).map(Self::Run)
+    }
+
+    /// Builds a structured form: `{ toggle = [..] }`, `{ if = condition,
+    /// then = cmd, else = cmd }`, `{ for_each = matcher, do = cmd }` or
+    /// `{ delay_ms = n, do = cmd }`.
+    fn from_form_table(entries: &[(String, toml::Value)]) -> Result<Self, String> {
+        let command = |value: &toml::Value| -> Result<Self, String> {
+            value
+                .clone()
+                .try_into()
+                .map_err(|error: toml::de::Error| error.message().to_owned())
+        };
+        let get = |name: &str| {
+            entries
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value)
+        };
+        let only = |allowed: &[&str]| -> Result<(), String> {
+            match entries
+                .iter()
+                .find(|(key, _)| !allowed.contains(&key.as_str()))
+            {
+                Some((key, _)) => {
+                    let others: Vec<String> = allowed[1..]
+                        .iter()
+                        .map(|other| format!("`{other}`"))
+                        .collect();
+                    let takes = if others.is_empty() {
+                        "nothing else".to_owned()
+                    } else {
+                        others.join(" and ")
+                    };
+                    Err(format!(
+                        "`{key}` does not go with `{}`, which takes {takes}",
+                        allowed[0]
+                    ))
+                }
+                None => Ok(()),
+            }
+        };
+        let body = |form: &str| -> Result<Self, String> {
+            get("do")
+                .ok_or_else(|| format!("`{form}` needs `do`, the command to run"))
+                .and_then(command)
+        };
+        if let Some(commands) = get("toggle") {
+            only(&["toggle"])?;
+            let commands = commands
+                .as_array()
+                .ok_or("`toggle` takes an array of commands")?
+                .iter()
+                .map(command)
+                .collect::<Result<Vec<_>, _>>()?;
+            return Toggle::new(commands)
+                .map(Self::Toggle)
+                .ok_or_else(|| "`toggle` needs a command".to_owned());
+        }
+        if let Some(condition) = get("if") {
+            only(&["if", "then", "else"])?;
+            let then = get("then").ok_or("`if` needs `then`")?;
+            return Ok(Self::If {
+                condition: Condition::from_value(condition)?,
+                then: Box::new(command(then)?),
+                otherwise: get("else").map(command).transpose()?.map(Box::new),
+            });
+        }
+        if let Some(windows) = get("for_each") {
+            only(&["for_each", "do"])?;
+            return Ok(Self::ForEach {
+                windows: windows
+                    .clone()
+                    .try_into()
+                    .map_err(|error: toml::de::Error| format!("for_each: {}", error.message()))?,
+                command: Box::new(body("for_each")?),
+            });
+        }
+        let delay = get("delay_ms").ok_or("not a command form")?;
+        only(&["delay_ms", "do"])?;
+        let millis = delay
+            .as_integer()
+            .and_then(|millis| u64::try_from(millis).ok())
+            .ok_or("`delay_ms` is a whole number of milliseconds")?;
+        Ok(Self::Delay(Delay::new(
+            std::time::Duration::from_millis(millis),
+            body("delay_ms")?,
+        )))
     }
 
     /// Builds the command of `{ action = "...", windows = matcher }`: an
@@ -802,6 +925,72 @@ mod tests {
 
     use super::*;
 
+    /// Reads `toml` as a command value, or why not.
+    fn form(toml: &str) -> Result<Command, String> {
+        #[derive(serde::Deserialize)]
+        struct Holder {
+            /// The command.
+            command: Command,
+        }
+        toml::from_str::<Holder>(&format!("command = {toml}"))
+            .map(|holder| holder.command)
+            .map_err(|error| error.message().to_owned())
+    }
+
+    #[test]
+    fn the_command_forms_are_read() {
+        assert!(matches!(
+            form("{ toggle = [\"raise\", \"lower\"] }"),
+            Ok(Command::Toggle(_))
+        ));
+        assert!(matches!(
+            form(
+                "{ if = { any = [{ app_id = \"kitty\" }, { not = { title = \"x\" } }] }, then = \"close\" }"
+            ),
+            Ok(Command::If {
+                otherwise: None,
+                ..
+            })
+        ));
+        assert!(matches!(
+            form("{ for_each = { app_id = \"kitty\" }, do = \"minimize\" }"),
+            Ok(Command::ForEach { .. })
+        ));
+        assert!(matches!(
+            form("{ delay_ms = 50, do = \"raise\" }"),
+            Ok(Command::Delay(_))
+        ));
+    }
+
+    #[test]
+    fn a_form_missing_or_mixing_parts_is_refused() {
+        assert!(form("{ toggle = [] }").is_err(), "nothing to toggle");
+        assert!(form("{ if = { app_id = \"a\" } }").is_err(), "no then");
+        assert!(form("{ for_each = { app_id = \"a\" } }").is_err(), "no do");
+        let mixed = form("{ delay_ms = 5, do = \"raise\", then = \"lower\" }")
+            .expect_err("then is not a delay's");
+        assert!(
+            mixed.contains("`then` does not go with `delay_ms`"),
+            "{mixed}"
+        );
+    }
+
+    #[test]
+    fn a_toggle_takes_turns_across_its_copies() {
+        let Ok(Command::Toggle(toggle)) = form("{ toggle = [\"raise\", \"lower\"] }") else {
+            panic!("a toggle");
+        };
+        let copy = toggle.clone();
+        assert_eq!(
+            toggle.next(),
+            &Command::Run(Action::parse("raise").expect("valid"))
+        );
+        assert_eq!(
+            copy.next(),
+            &Command::Run(Action::parse("lower").expect("valid"))
+        );
+    }
+
     /// Parses `text` as the value of a TOML key.
     fn command(text: &str) -> Result<Command, String> {
         #[derive(serde::Deserialize)]
@@ -945,7 +1134,7 @@ mod tests {
         "{ action = \"next-window\", windows = { colour = 1 } }",
         "unknown field"
     )]
-    #[case::planned_form("{ toggle = [\"shade\"] }", "not available in vaht yet")]
+    #[case::toggle_of_nothing("{ toggle = [] }", "needs a command")]
     #[case::unwanted_arguments("\"close now\"", "takes no arguments")]
     #[case::missing_command_line("\"exec\"", "needs a command line")]
     #[case::empty_sequence("[]", "does nothing")]

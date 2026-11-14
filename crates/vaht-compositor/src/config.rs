@@ -34,7 +34,7 @@ pub(crate) use self::bindings::{
     Bindings, KeyChord, Modifiers, MouseButton, MouseContext, SwitchFlip, SwitchKind,
 };
 pub(crate) use self::command::{
-    Action, Command, CycleOrder, MenuRequest, ResizeFrom, WindowCycle, WindowManagerAction,
+    Action, Command, CycleOrder, Delay, MenuRequest, ResizeFrom, WindowCycle, WindowManagerAction,
 };
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};

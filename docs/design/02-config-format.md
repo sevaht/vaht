@@ -513,8 +513,12 @@ lid-close = "exec swaylock"
   modifiers), and resizing by dragging a border when the border has no
   binding for that button.
 - Actions of §4 that vaht does not have yet are rejected by name ("not
-  available in vaht yet"), as are key chains, key modes and the structured
-  forms other than `repeat` and `action`. A file that uses them fails
+  available in vaht yet"), as are key chains and key modes. The structured
+  forms are built: a `toggle` runs its commands in turn, one per run (a
+  reload starts it over); `if` asks its condition of the window the
+  command is about (none never matches); `for_each` runs its command on
+  each placed window matching, as the command's window; and `delay_ms`
+  runs its command that long later, put off again if run again first. A file that uses them fails
   `vaht check` instead of half-working.
 - `focus-direction <left|right|up|down>` focuses and raises the nearest
   shown window whose middle lies that way, within 45 degrees, from the

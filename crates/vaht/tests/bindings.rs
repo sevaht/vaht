@@ -167,3 +167,88 @@ fn the_exit_action_stops_vaht_cleanly() {
     let report = vaht.wait_for_exit();
     assert_eq!(report.live_count("window"), 0);
 }
+
+/// Starts vaht with Super+T bound to `command` (a TOML value), and a client
+/// with one window; returns them.
+fn bound(command: &str) -> (HeadlessVaht, TestClient) {
+    let bindings = format!("[keys]\n\"Super+T\" = {command}\n");
+    let vaht =
+        HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("bindings.toml", &bindings)]);
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    (vaht, client)
+}
+
+#[test]
+fn a_toggle_runs_its_commands_in_turn() {
+    let files = WrittenFiles::new();
+    let log = files.path("log");
+    let (vaht, mut client) = bound(&format!(
+        "{{ toggle = [\"exec echo first >> '{0}'\", \"exec echo second >> '{0}'\"] }}",
+        log.display()
+    ));
+    for presses in 1..=3 {
+        client.type_chord(&SUPER_T);
+        let _ = wait_for_file(&log, |text| text.lines().count() == presses);
+    }
+    assert_eq!(files.wait_for("log"), "first\nsecond\nfirst\n");
+    drop(vaht);
+}
+
+#[test]
+fn if_runs_what_the_windows_match_says() {
+    let files = WrittenFiles::new();
+    let (_vaht, mut client) = bound(&format!(
+        "{{ if = {{ not = {{ app_id = \"vaht.test\" }} }}, then = \"exec echo no > '{0}'\", \
+         else = \"exec echo test window > '{0}'\" }}",
+        files.path("which").display()
+    ));
+    client.type_chord(&SUPER_T);
+    assert_eq!(files.wait_for("which"), "test window\n");
+}
+
+#[test]
+fn for_each_runs_on_every_window_matching() {
+    let files = WrittenFiles::new();
+    let (vaht, mut client) = bound(&format!(
+        "[{{ for_each = {{ app_id = \"vaht.test\" }}, do = \"minimize\" }}, \
+         \"exec echo done > '{}'\"]",
+        files.path("done").display()
+    ));
+    client.open_windows(1);
+    client.type_chord(&SUPER_T);
+    // The program starts after every window was minimized.
+    let _ = files.wait_for("done");
+    let output = std::process::Command::new(EXECUTABLE)
+        .args(["msg", "--json", "windows"])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .output()
+        .expect("vaht msg runs");
+    let windows = String::from_utf8(output.stdout).expect("JSON");
+    assert_eq!(
+        windows.matches("\"is_minimized\":true").count(),
+        2,
+        "{windows}"
+    );
+}
+
+#[test]
+fn a_delay_run_again_before_its_time_runs_once() {
+    let files = WrittenFiles::new();
+    let log = files.path("log");
+    // Super+F1 writes a marker later than the delay could run a second
+    // time, so once the marker is there, every run has happened.
+    let bindings = format!(
+        "[keys]\n\"Super+T\" = {{ delay_ms = 200, do = \"exec echo ran >> '{0}'\" }}\n\
+         \"Super+F1\" = {{ delay_ms = 600, do = \"exec echo marker >> '{0}'\" }}\n",
+        log.display()
+    );
+    let vaht =
+        HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("bindings.toml", &bindings)]);
+    let mut client = TestClient::connect(vaht.socket());
+    client.type_chord(&SUPER_T);
+    client.type_chord(&SUPER_T);
+    client.type_chord(&[keys::LEFT_SUPER, keys::F1]);
+    let written = wait_for_file(&log, |text| text.contains("marker"));
+    assert_eq!(written, "ran\nmarker\n");
+}

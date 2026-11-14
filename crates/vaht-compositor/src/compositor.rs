@@ -67,12 +67,12 @@ use crate::buffer_fences::FenceWaits;
 use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::{
-    Action, Command, Config, ConfigSource, FocusModel, KeyChord, MenuGenerator, MenuRequest, Menus,
-    Modifiers, ResizeFrom, SettingOverrides, ThemeFile, WindowManagerAction,
+    Action, Command, Config, ConfigSource, Delay, FocusModel, KeyChord, MenuGenerator, MenuRequest,
+    Menus, Modifiers, ResizeFrom, SettingOverrides, ThemeFile, WindowManagerAction,
 };
 use crate::config::{FocusStealing, SwitchFlip, SwitchKind};
 use crate::cursor::Cursor;
-use crate::event_source::EventSource;
+use crate::event_source::{EventSource, Timer};
 use crate::execution::{ExecutionContext, Press};
 use crate::focus_target::FocusTarget;
 use crate::frame_pacing::FramePacing;
@@ -142,6 +142,8 @@ pub struct Compositor {
     pub(crate) fence_waits: FenceWaits,
     /// Whether the activation environment is told of the session.
     exports_activation_environment: bool,
+    /// Delayed commands waiting to run.
+    delays: Vec<(Delay, Timer<Self>)>,
     /// The EIS server X programs emulate input through, with Xwayland.
     input_emulation: Option<InputEmulation>,
     /// The windows as programs outside vaht see them listed.
@@ -331,6 +333,7 @@ impl Compositor {
             frame_pacing: FramePacing::default(),
             fence_waits: FenceWaits::default(),
             exports_activation_environment: false,
+            delays: Vec::new(),
             input_emulation: None,
             toplevel_list: ToplevelList::default(),
             window_manager,
@@ -1489,6 +1492,55 @@ impl Compositor {
             }
             // The key handling repeats it; here it runs once.
             Command::Repeat { command, .. } => self.execute(command, context),
+            Command::Toggle(toggle) => self.execute(toggle.next(), context),
+            Command::If {
+                condition,
+                then,
+                otherwise,
+            } => {
+                let window = context.window.and_then(|id| self.window_manager.window(id));
+                let current = self.window_manager.current_workspace();
+                if condition.holds(window, current) {
+                    self.execute(then, context);
+                } else if let Some(otherwise) = otherwise {
+                    self.execute(otherwise, context);
+                }
+            }
+            Command::ForEach { windows, command } => {
+                let current = self.window_manager.current_workspace();
+                let matching: Vec<WindowId> = self
+                    .window_manager
+                    .windows_top_down()
+                    .filter(|window| window.is_placed() && windows.matches(window, current))
+                    .map(Window::id)
+                    .collect();
+                for window in matching {
+                    self.execute(command, &mut ExecutionContext::for_window(Some(window)));
+                }
+            }
+            Command::Delay(delay) => self.run_later(delay, context.window),
+        }
+    }
+
+    /// Runs `delay`'s command for `window` once its time is up; running it
+    /// again before then puts it off.
+    fn run_later(&mut self, delay: &Delay, window: Option<WindowId>) {
+        // Never inside a delay's own callback: that runs only its command.
+        self.delays
+            .retain(|(pending, timer)| !pending.is(delay) && !timer.has_fired());
+        let command = delay.command.clone();
+        let timer = Timer::once(
+            &self.loop_handle,
+            &self.ledger,
+            delay.wait,
+            move |compositor| {
+                compositor.execute(&command, &mut ExecutionContext::for_window(window));
+                compositor.schedule_render();
+            },
+        );
+        match timer {
+            Ok(timer) => self.delays.push((delay.clone(), timer)),
+            Err(error) => tracing::warn!(%error, "a delayed command could not wait"),
         }
     }
 

@@ -184,7 +184,7 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
                 let label = match (file.label, &command) {
                     (Some(label), _) => label,
                     (None, Command::Run(action)) => action.to_string(),
-                    (None, Command::Sequence(_) | Command::Repeat { .. }) => {
+                    (None, _) => {
                         return Err(de::Error::custom(
                             "an item running several actions needs a label",
                         ));
