@@ -33,6 +33,8 @@ pub(crate) struct WindowMatcher {
     minimized: Option<StateSelector>,
     /// Whether it is on every workspace.
     sticky: Option<StateSelector>,
+    /// Whether it is a dialog of another window (Fluxbox's `[transient]`).
+    transient: Option<StateSelector>,
     /// What it must not match.
     not: Option<Box<WindowMatcher>>,
 }
@@ -65,6 +67,9 @@ impl WindowMatcher {
             && self
                 .sticky
                 .is_none_or(|selector| selector.matches(state.is_sticky))
+            && self
+                .transient
+                .is_none_or(|selector| selector.matches(window.parent().is_some()))
             && self
                 .not
                 .as_ref()

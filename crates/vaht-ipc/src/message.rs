@@ -159,6 +159,9 @@ pub struct WindowInfo {
     pub is_minimized: bool,
     /// Whether it is rolled up into its titlebar.
     pub is_shaded: bool,
+    /// The id of the window it is a dialog of, if any.
+    #[serde(default)]
+    pub parent: Option<u64>,
 }
 
 /// One workspace, as IPC describes it.

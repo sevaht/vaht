@@ -206,6 +206,7 @@ mod tests {
                 is_focused: true,
                 is_minimized: false,
                 is_shaded: true,
+                parent: None,
             }],
         };
         assert_eq!(readable(&reply), "7\t*\tf-s\tkitty\t~/scm\n");

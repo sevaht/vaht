@@ -334,6 +334,21 @@ removed, and the group can make one at the end, named; requests wait for
 the commit. The test `a_pager_outside_vaht_sees_and_switches_the_workspaces`
 switches, makes and removes workspaces through it.
 
+### 8.11 Dialogs
+
+A window names the window it is a dialog of (xdg-shell `set_parent`, X11
+`WM_TRANSIENT_FOR`), and may be modal (`xdg_wm_dialog_v1`'s `set_modal`,
+X11 `_NET_WM_STATE_MODAL`). The toplevel reads both (`Toplevel::family`),
+the compositor maps the parent to its window, and the window manager keeps
+the family (`window_manager/family.rs`), as fluxland did: a dialog opens
+centered over its parent unless a rule places it, a window and its dialogs
+are raised, lowered, minimized and restored together with the dialogs on
+top, and a shown modal dialog takes the focus whenever its parent would. A
+dialog outlives its parent as a window of its own, and a family never
+loops. Rules and other matchers tell dialogs apart with `transient`, which
+`vaht import` writes for Fluxbox's `[app]` (`false`) and `[transient]`
+(`true`) blocks; IPC gives each window's `parent`.
+
 
 ## 9. The DRM backend (built; not yet run on hardware)
 

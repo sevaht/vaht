@@ -383,6 +383,36 @@ impl TestClient {
         self.roundtrip();
     }
 
+    /// Opens a dialog of window `parent` (in opening order), modal if
+    /// `is_modal`, titled `test dialog`, and waits until it has been shown
+    /// once. It counts as a window after the others.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, or the connection to vaht fails.
+    pub fn open_dialog(&mut self, parent: usize, is_modal: bool) {
+        let handle = self.queue.handle();
+        let surface = self.state.compositor.create_surface(&handle);
+        let window =
+            self.state
+                .xdg_shell
+                .create_window(surface, WindowDecorations::RequestServer, &handle);
+        window.set_title("test dialog");
+        window.set_app_id("vaht.test");
+        window.set_parent(Some(&self.state.windows[parent]));
+        if is_modal {
+            self.state
+                .dialogs
+                .get_xdg_dialog(window.xdg_toplevel(), &handle, NoEvents)
+                .set_modal();
+        }
+        window.commit();
+        self.state.windows.push(window);
+        let expected = self.state.first_draws + 1;
+        self.dispatch_until(|state| state.first_draws >= expected);
+        self.roundtrip();
+    }
+
     /// Redraws window `index` (in opening order) fully transparent, and
     /// waits until vaht has the commit: what is beneath it shows through.
     ///

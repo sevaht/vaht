@@ -1,6 +1,9 @@
 //! Converting Fluxbox's `apps` file to `rules.toml` (02 §7).
 //!
-//! Each `[app] (pattern) ... [end]` block becomes a `[[rule]]`. Fluxbox
+//! Each `[app] (pattern) ... [end]` block becomes a `[[rule]]`, as does
+//! each `[transient]` block. Fluxbox applies `[app]` blocks to windows of
+//! their own and `[transient]` blocks to dialogs alone, so each rule's
+//! matcher says which (`transient = false` or `true`). Fluxbox
 //! counts workspaces from 0 in `apps`, vaht from 1. Settings vaht does not
 //! have yet are reported, and a block left with nothing to do is dropped.
 
@@ -152,7 +155,10 @@ impl<'text> AppsFile<'text> {
             let (keyword, rest) = Self::keyword(line);
             match (keyword.to_ascii_lowercase().as_str(), block.as_mut()) {
                 ("app", _) => {
-                    block = Some(self.open(number, rest, report));
+                    block = Some(self.open(number, rest, false, report));
+                }
+                ("transient", _) => {
+                    block = Some(self.open(number, rest, true, report));
                 }
                 ("group", _) => {
                     report.note(
@@ -194,9 +200,11 @@ impl<'text> AppsFile<'text> {
             .map_or(("", line), |(keyword, rest)| (keyword.trim(), rest.trim()))
     }
 
-    /// Opens a block for `[app] patterns` on line `line`.
-    fn open(self, line: usize, patterns: &str, report: &mut Report) -> Block {
-        let (matcher, losses) = ClientPattern::new(patterns).matcher();
+    /// Opens a block for `[app] patterns` on line `line`, or for
+    /// `[transient] patterns` if `is_transient`.
+    fn open(self, line: usize, patterns: &str, is_transient: bool, report: &mut Report) -> Block {
+        let (mut matcher, losses) = ClientPattern::new(patterns).matcher();
+        matcher.insert("transient", Value::from(is_transient));
         let is_unmatchable = !losses.is_empty();
         for (reason, lost) in losses {
             report.note(self.path, line, reason, lost);
@@ -329,7 +337,7 @@ impl<'text> AppsFile<'text> {
 mod tests {
     use super::*;
 
-    /// My fluxland `apps`, and one block of each other kind.
+    /// My fluxland `apps`, and a `[transient]` block.
     const APPS: &str = "\
 [app] (class=kitty)
   [PseudoTransparent] {yes}
@@ -341,6 +349,9 @@ mod tests {
   [FocusProtection] {Gain}
   [Workspace] {1}
 [end]
+[transient] (title=Save.*)
+  [Layer] {AboveDock}
+[end]
 ";
 
     #[test]
@@ -349,9 +360,13 @@ mod tests {
         let document = AppsFile::new(Path::new("apps"), APPS).convert(&mut report);
         assert_eq!(
             document.to_string(),
-            "[[rule]]\nmatch = { app_id = \"kitty\" }\npseudo_transparent = true\n\n\
-             [[rule]]\nmatch = { app_id = \"vaht-run\" }\nposition = { anchor = \"center\" }\n\n\
-             [[rule]]\nmatch = { app_id = \"steam\" }\nfocus_stealing = \"allow\"\nworkspace = 2\n"
+            "[[rule]]\nmatch = { app_id = \"kitty\", transient = false }\npseudo_transparent = true\n\n\
+             [[rule]]\nmatch = { app_id = \"vaht-run\", transient = false }\n\
+             position = { anchor = \"center\" }\n\n\
+             [[rule]]\nmatch = { app_id = \"steam\", transient = false }\n\
+             focus_stealing = \"allow\"\nworkspace = 2\n\n\
+             [[rule]]\nmatch = { title = { regex = \"Save.*\" }, transient = true }\n\
+             layer = \"above-dock\"\n"
         );
         assert!(report.notes().is_empty(), "{report}");
     }

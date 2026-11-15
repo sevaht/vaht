@@ -36,6 +36,8 @@ use smithay_client_toolkit::reexports::protocols::wp::commit_timing::v1::client:
 use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation_feedback::{self, WpPresentationFeedback};
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1;
+use smithay_client_toolkit::reexports::protocols::xdg::dialog::v1::client::xdg_dialog_v1::XdgDialogV1;
+use smithay_client_toolkit::reexports::protocols::xdg::dialog::v1::client::xdg_wm_dialog_v1::XdgWmDialogV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1};
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1};
@@ -85,6 +87,8 @@ pub(super) struct ClientState {
     pub(super) capture: ExtImageCopyCaptureManagerV1,
     /// Gives windows icons.
     pub(super) toplevel_icons: XdgToplevelIconManagerV1,
+    /// Makes dialogs modal.
+    pub(super) dialogs: XdgWmDialogV1,
     /// The buffers of icons the client drew, kept while vaht may read them.
     pub(super) icon_buffers: Vec<smithay_client_toolkit::shm::slot::Buffer>,
     /// Shared-memory buffers.
@@ -168,6 +172,7 @@ impl ClientState {
             ),
             capture: bind(globals, handle, "ext_image_copy_capture_manager_v1"),
             toplevel_icons: bind(globals, handle, "xdg_toplevel_icon_manager_v1"),
+            dialogs: bind(globals, handle, "xdg_wm_dialog_v1"),
             icon_buffers: Vec::new(),
             pool: SlotPool::new(pool_size, &shm).expect("a shared-memory pool"),
             shm,
@@ -303,6 +308,8 @@ ignore_events!(
     ExtImageCopyCaptureManagerV1,
     XdgToplevelIconManagerV1,
     XdgToplevelIconV1,
+    XdgWmDialogV1,
+    XdgDialogV1,
 );
 
 /// User data of the seat's keyboard: records where keyboard focus is.

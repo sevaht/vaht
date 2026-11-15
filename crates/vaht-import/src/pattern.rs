@@ -72,6 +72,8 @@ impl<'text> ClientPattern<'text> {
             ("name", text) => Some(("app_id", Self::any_case(text))),
             ("minimized", "yes") => Some(("minimized", Value::from(true))),
             ("minimized", "no") => Some(("minimized", Value::from(false))),
+            ("transient", "yes") => Some(("transient", Value::from(true))),
+            ("transient", "no") => Some(("transient", Value::from(false))),
             _ => None,
         };
         let Some((key, value)) = vaht else {

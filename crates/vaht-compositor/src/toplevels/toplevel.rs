@@ -26,6 +26,7 @@ use smithay::reexports::wayland_server::{DisplayHandle, Resource as _};
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus as _;
+use smithay::wayland::shell::xdg::dialog::ToplevelDialogHint;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
 use smithay::wayland::xdg_toplevel_icon::ToplevelIconCachedState;
 use smithay::xwayland::X11Surface;
@@ -35,6 +36,15 @@ use crate::outputs::Outputs;
 use crate::window_manager::{
     Axes, ClientIcon, CommittedState, Ending, PlacementKind, RequestedState, SizeLimits,
 };
+
+/// How a client names the window another is a dialog of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ParentLink {
+    /// A Wayland toplevel, by its surface.
+    Wayland(WlSurface),
+    /// An X11 window, by its id.
+    X11(u32),
+}
 
 /// The client's side of a window.
 #[derive(Debug)]
@@ -444,6 +454,33 @@ impl Toplevel {
         match self.window.underlying_surface() {
             WindowSurface::Wayland(toplevel) => Some(toplevel),
             WindowSurface::X11(_) => None,
+        }
+    }
+
+    /// Returns the window the client says this one is a dialog of, and
+    /// whether it is modal: an xdg toplevel's parent and xdg-dialog hint,
+    /// or an X11 window's `WM_TRANSIENT_FOR` and modal state.
+    pub(crate) fn family(&self) -> (Option<ParentLink>, bool) {
+        if let Some(surface) = self.x11() {
+            return (
+                surface.is_transient_for().map(ParentLink::X11),
+                surface.is_modal(),
+            );
+        }
+        let Some(toplevel) = self.xdg() else {
+            return (None, false);
+        };
+        let is_modal = self
+            .with_attributes(|attributes| attributes.dialog_hint == ToplevelDialogHint::Modal)
+            .unwrap_or(false);
+        (toplevel.parent().map(ParentLink::Wayland), is_modal)
+    }
+
+    /// Returns whether `link` names this window.
+    pub(crate) fn is_named_by(&self, link: &ParentLink) -> bool {
+        match link {
+            ParentLink::Wayland(surface) => self.has_surface(surface),
+            ParentLink::X11(id) => self.x11().is_some_and(|surface| surface.window_id() == *id),
         }
     }
 

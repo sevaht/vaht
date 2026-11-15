@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::xwayland::X11Surface;
 
-pub(crate) use self::toplevel::Toplevel;
+pub(crate) use self::toplevel::{ParentLink, Toplevel};
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 use crate::window_manager::WindowId;
 
@@ -42,6 +42,14 @@ impl Toplevels {
         self.by_window
             .iter()
             .find(|(_, (toplevel, _))| toplevel.has_surface(surface))
+            .map(|(window, _)| *window)
+    }
+
+    /// Returns the window `link` names, if vaht manages it.
+    pub(crate) fn window_named(&self, link: &ParentLink) -> Option<WindowId> {
+        self.by_window
+            .iter()
+            .find(|(_, (toplevel, _))| toplevel.is_named_by(link))
             .map(|(window, _)| *window)
     }
 

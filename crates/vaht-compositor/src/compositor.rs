@@ -2547,14 +2547,33 @@ impl Compositor {
         }
     }
 
+    /// Tells the window manager which window the window whose root
+    /// surface is `root` is a dialog of, as its client says now.
+    pub(crate) fn follow_family(&mut self, root: &WlSurface) {
+        let Some(window) = self.toplevels.window_of(root) else {
+            return;
+        };
+        let Some(toplevel) = self.toplevels.get(window) else {
+            return;
+        };
+        let (parent, is_modal) = toplevel.family();
+        let parent = parent.and_then(|link| self.toplevels.window_named(&link));
+        self.window_manager.set_family(window, parent, is_modal);
+        self.settle();
+    }
+
     /// Tells the window manager what `window`'s client committed, and
     /// carries out what it decides.
     fn commit_toplevel(&mut self, window: WindowId) {
         let Some(toplevel) = self.toplevels.get_mut(window) else {
             return;
         };
+        let (parent, is_modal) = toplevel.family();
         let backend = &mut self.backend;
         let committed = toplevel.committed_state(|buffer| backend.read_icon(buffer));
+        // Before the commit, so a new dialog is placed over its parent.
+        let parent = parent.and_then(|link| self.toplevels.window_named(&link));
+        self.window_manager.set_family(window, parent, is_modal);
         let pointer = self.pointer_location().to_i32_round();
         self.window_manager
             .commit(window, committed, &self.config, pointer);

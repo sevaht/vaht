@@ -162,8 +162,21 @@ pub(crate) struct Window {
     title: Option<String>,
     /// Whether it may come forward when its program asks, as a rule says.
     focus_stealing: FocusStealing,
+    /// What window it is a dialog of, if it is one.
+    dialog: Option<Dialog>,
     /// Counts the window while it exists.
     _tracked: Tracked,
+}
+
+/// What makes a window a dialog: the window it belongs to, and whether it
+/// keeps the focus from that one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Dialog {
+    /// The window it is a dialog of (its transient parent).
+    pub(crate) parent: WindowId,
+    /// Whether it keeps the focus from its parent while shown (a modal
+    /// dialog).
+    pub(crate) is_modal: bool,
 }
 
 impl Window {
@@ -192,6 +205,7 @@ impl Window {
             alpha: None,
             title: None,
             focus_stealing: FocusStealing::Default,
+            dialog: None,
             _tracked: ledger.track(ResourceKind::Window),
         }
     }
@@ -492,6 +506,26 @@ impl Window {
     /// translucent, or the windows below it too.
     pub(crate) const fn set_pseudo_transparent(&mut self, is_pseudo_transparent: bool) {
         self.is_pseudo_transparent = is_pseudo_transparent;
+    }
+
+    /// Returns the window it is a dialog of, if any.
+    pub(crate) fn parent(&self) -> Option<WindowId> {
+        self.dialog.map(|dialog| dialog.parent)
+    }
+
+    /// Returns whether it is a modal dialog of its parent.
+    pub(crate) fn is_modal(&self) -> bool {
+        self.dialog.is_some_and(|dialog| dialog.is_modal)
+    }
+
+    /// Returns what window it is a dialog of, if it is one.
+    pub(crate) const fn dialog(&self) -> Option<Dialog> {
+        self.dialog
+    }
+
+    /// Makes the window `dialog`, or with `None` a window of its own.
+    pub(crate) const fn set_dialog(&mut self, dialog: Option<Dialog>) {
+        self.dialog = dialog;
     }
 
     /// Rolls the window up into its titlebar, or down again.

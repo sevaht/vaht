@@ -15,6 +15,7 @@
 
 mod arrange;
 mod direction;
+mod family;
 mod focus;
 mod output_areas;
 mod placement_strategy;
@@ -330,6 +331,7 @@ impl WindowManager {
         }
         self.endings.retain(|(ending, _)| *ending != id);
         self.marks.retain(|(_, marked)| *marked != id);
+        self.orphan_dialogs_of(id);
         if was_focused {
             self.focus_most_recent();
         }
@@ -358,6 +360,8 @@ impl WindowManager {
     /// Gives keyboard focus to `window`, or with `None` to nothing. A
     /// window out of sight cannot have it, so focus stays where it is.
     pub(crate) fn focus(&mut self, window: Option<WindowId>) {
+        // A modal dialog keeps the focus from the window it belongs to.
+        let window = window.map(|id| self.focus_for(id));
         let current = self.workspaces.current();
         let is_focusable = window.is_none_or(|id| {
             self.windows
@@ -380,13 +384,17 @@ impl WindowManager {
         self.focus.set(window);
     }
 
-    /// Brings `window` into view and gives it focus: restores it if it is
-    /// minimized, shows its workspace, and raises it.
+    /// Brings `window` into view and gives it focus: restores it, with its
+    /// dialogs, if it is minimized, shows its workspace, and raises it.
     pub(crate) fn activate(&mut self, window: WindowId) {
-        let Some(target) = self.window_mut(window) else {
+        for member in self.family_bottom_up(window) {
+            if let Some(member) = self.window_mut(member) {
+                member.set_minimized(false);
+            }
+        }
+        let Some(target) = self.windows.get(window) else {
             return;
         };
-        target.set_minimized(false);
         let (workspace, is_sticky) = (target.workspace(), target.state().is_sticky);
         if !is_sticky {
             self.show(workspace);
@@ -412,14 +420,18 @@ impl WindowManager {
         }
     }
 
-    /// Moves `window` above all others.
+    /// Moves `window` above all others, its dialogs above it.
     pub(crate) fn raise(&mut self, window: WindowId) {
-        self.is_redraw_needed |= self.windows.raise(window);
+        for member in self.family_bottom_up(window) {
+            self.is_redraw_needed |= self.windows.raise(member);
+        }
     }
 
-    /// Moves `window` below all others.
+    /// Moves `window` below all others, its dialogs still above it.
     pub(crate) fn lower(&mut self, window: WindowId) {
-        self.is_redraw_needed |= self.windows.lower(window);
+        for member in self.family_bottom_up(window).into_iter().rev() {
+            self.is_redraw_needed |= self.windows.lower(member);
+        }
     }
 
     /// Runs `action` on `window`: the one clicked for a mouse binding, the
@@ -975,10 +987,12 @@ impl WindowManager {
         };
         let rule = config.rules.for_window(window, current);
         let size = rule.size().unwrap_or(window.outer_area(metrics).size);
-        let corner = rule.position.map_or_else(
-            || config.settings.placement.place(size, &room),
-            |position| position.corner(room.usable, size),
-        );
+        // A dialog opens over its parent, unless a rule places it.
+        let corner = match (rule.position, self.dialog_area(id, size)) {
+            (Some(position), _) => position.corner(room.usable, size),
+            (None, Some(over_parent)) => over_parent.loc,
+            (None, None) => config.settings.placement.place(size, &room),
+        };
         let outer = Rectangle::new(corner, size);
         let workspace = rule
             .workspace
@@ -1083,7 +1097,11 @@ impl WindowManager {
 
     /// Minimizes `window`; focus goes to the window that had it before.
     fn minimize(&mut self, window: Option<WindowId>) {
-        self.change_window(window, |target, _| target.set_minimized(true));
+        if let Some(window) = window {
+            for member in self.family_bottom_up(window) {
+                self.change_window(Some(member), |target, _| target.set_minimized(true));
+            }
+        }
         self.focus_most_recent();
     }
 
@@ -1376,6 +1394,25 @@ mod tests {
             self.open_app("app", (400, 300))
         }
 
+        /// Opens a dialog of `parent`, modal if `is_modal`, of 200 × 100
+        /// content.
+        fn open_dialog(&mut self, parent: WindowId, is_modal: bool) -> WindowId {
+            let window = self.manager.add_window(&self.config.settings, &self.ledger);
+            // As the compositor does: the family before the first commit.
+            self.manager.set_family(window, Some(parent), is_modal);
+            let committed = CommittedState {
+                title: format!("dialog {window}"),
+                app_id: "app".to_owned(),
+                icon: None,
+                geometry: Rectangle::from_size((200, 100).into()),
+                size_limits: SizeLimits::default(),
+                is_self_decorated: false,
+            };
+            self.commit(window, committed);
+            self.settle();
+            window
+        }
+
         /// Closes `window`, as its client does.
         fn close(&mut self, window: WindowId) {
             self.committed.remove(&window);
@@ -1444,6 +1481,76 @@ mod tests {
             Ok(Action::WindowManager(action)) => action,
             other => panic!("`{text}` is a window-management action, not {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_dialog_opens_centered_over_its_parent() {
+        let mut desk = Desk::new();
+        desk.open();
+        let parent = desk.open();
+        let dialog = desk.open_dialog(parent, false);
+        let (over, placed) = (desk.outer(parent), desk.outer(dialog));
+        let middle = |area: Area| area.loc + area.size.downscale(2).to_point();
+        assert!(
+            (middle(over) - middle(placed)).x.abs() <= 1
+                && (middle(over) - middle(placed)).y.abs() <= 1,
+            "{placed:?} is centered over {over:?}"
+        );
+    }
+
+    #[test]
+    fn a_modal_dialog_keeps_the_focus_from_its_parent() {
+        let mut desk = Desk::new();
+        let parent = desk.open();
+        let other = desk.open();
+        let dialog = desk.open_dialog(parent, true);
+        desk.manager.focus(Some(other));
+        desk.manager.focus(Some(parent));
+        assert_eq!(desk.manager.focused(), Some(dialog));
+        let free = desk.open_dialog(other, false);
+        desk.manager.focus(Some(other));
+        assert_eq!(
+            desk.manager.focused(),
+            Some(other),
+            "a dialog that is not modal leaves the focus be"
+        );
+        desk.close(dialog);
+        desk.manager.focus(Some(parent));
+        assert_eq!(desk.manager.focused(), Some(parent), "once it closes");
+        assert!(desk.manager.window(free).is_some());
+    }
+
+    #[test]
+    fn a_window_and_its_dialogs_are_raised_lowered_and_minimized_together() {
+        let mut desk = Desk::new();
+        let parent = desk.open();
+        let dialog = desk.open_dialog(parent, false);
+        let inner = desk.open_dialog(dialog, false);
+        let other = desk.open();
+        desk.manager.raise(parent);
+        assert_eq!(desk.shown(), [inner, dialog, parent, other]);
+        desk.manager.lower(parent);
+        assert_eq!(desk.shown(), [other, inner, dialog, parent]);
+        desk.run_on(&action("minimize"), Some(parent));
+        assert_eq!(desk.shown(), [other], "the dialogs go with it");
+        desk.manager.activate(parent);
+        assert_eq!(
+            desk.shown(),
+            [inner, dialog, parent, other],
+            "and come back"
+        );
+    }
+
+    #[test]
+    fn a_family_has_no_loops_and_outlives_its_parent() {
+        let mut desk = Desk::new();
+        let parent = desk.open();
+        let dialog = desk.open_dialog(parent, true);
+        desk.manager.set_family(parent, Some(dialog), false);
+        assert_eq!(desk.window(parent).parent(), None, "a loop is ignored");
+        desk.close(parent);
+        assert_eq!(desk.window(dialog).parent(), None);
+        assert!(!desk.window(dialog).is_modal());
     }
 
     #[test]

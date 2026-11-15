@@ -108,6 +108,7 @@ impl Compositor {
                     is_focused: focused == Some(window.id()),
                     is_minimized: state.is_minimized,
                     is_shaded: state.is_shaded,
+                    parent: window.parent().map(WindowId::get),
                 }
             })
             .collect()

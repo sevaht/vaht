@@ -263,3 +263,36 @@ fn a_subscriber_hears_each_list_at_once_and_whenever_it_changes() {
     follower.kill().expect("stopped");
     let _ = follower.wait();
 }
+
+#[test]
+fn a_modal_dialog_is_listed_with_its_parent_and_keeps_the_focus() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(2);
+    client.open_dialog(0, true);
+    let id_of = |title: &str| {
+        windows(&vaht)
+            .into_iter()
+            .find(|window| window.title == title)
+            .unwrap_or_else(|| panic!("{title} is listed"))
+            .id
+    };
+    let (parent, other, dialog) = (
+        id_of("test window 1"),
+        id_of("test window 2"),
+        id_of("test dialog"),
+    );
+    let listed = windows(&vaht);
+    assert_eq!(listed[0].id, dialog, "the new dialog is on top: {listed:?}");
+    assert_eq!(listed[0].parent, Some(parent));
+    let focus = |window: u64| {
+        let output = message(&vaht, &["run", "--window", &window.to_string(), "focus"]);
+        assert!(output.status.success(), "{output:?}");
+        windows(&vaht)
+            .into_iter()
+            .find(|window| window.is_focused)
+            .map(|window| window.id)
+    };
+    assert_eq!(focus(other), Some(other));
+    assert_eq!(focus(parent), Some(dialog), "the modal dialog keeps it");
+}

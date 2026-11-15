@@ -5,6 +5,7 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::utils::Serial;
+use smithay::wayland::shell::xdg::dialog::{ToplevelDialogHint, XdgDialogHandler};
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
@@ -74,6 +75,10 @@ impl XdgShellHandler for Compositor {
         self.honor_client_request(&surface, ClientRequest::Minimize);
     }
 
+    fn parent_changed(&mut self, surface: ToplevelSurface) {
+        self.follow_family(surface.wl_surface());
+    }
+
     fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
         self.start_requested_drag(&surface, &seat, serial, WindowDrag::Move);
     }
@@ -109,6 +114,14 @@ const fn resize_edges(edge: xdg_toplevel::ResizeEdge) -> Option<ResizeEdges> {
         horizontal,
         vertical,
     })
+}
+
+/// A dialog's modal hint (`xdg_wm_dialog_v1`) decides whether it keeps the
+/// focus from its parent.
+impl XdgDialogHandler for Compositor {
+    fn dialog_hint_changed(&mut self, toplevel: ToplevelSurface, _hint: ToplevelDialogHint) {
+        self.follow_family(toplevel.wl_surface());
+    }
 }
 
 /// A window's icon is part of its next commit, where the window's
