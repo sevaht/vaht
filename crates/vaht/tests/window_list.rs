@@ -1,11 +1,13 @@
 //! The windows as docks and window switchers see them listed
 //! (`ext_foreign_toplevel_list_v1`), and as taskbars outside vaht see and
-//! work them (`zwlr_foreign_toplevel_manager_v1`).
+//! work them (`zwlr_foreign_toplevel_manager_v1`), and one window shared
+//! alone (`ext_foreign_toplevel_image_capture_source_manager_v1`).
 
 use std::path::Path;
 
 use vaht_test_support::{
-    HeadlessVaht, ManagedWindow, PagedWorkspace, Pager, TestClient, ToplevelManager, WindowList,
+    HeadlessVaht, ManagedWindow, PagedWorkspace, Pager, TestClient, ToplevelManager, WINDOW_COLOR,
+    WINDOW_SIZE, WindowCapturer, WindowList,
 };
 
 /// The executable cargo built for these tests.
@@ -105,5 +107,26 @@ fn a_pager_outside_vaht_sees_and_switches_the_workspaces() {
         names,
         ["Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4"],
         "only the last can be removed"
+    );
+}
+
+#[test]
+fn one_window_is_captured_alone() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(2);
+    let mut capturer = WindowCapturer::connect(vaht.socket());
+    // The first window's own content is shared, whatever else is shown.
+    let first = capturer.capture("test window 1");
+    assert_eq!((first.width(), first.height()), WINDOW_SIZE);
+    assert_eq!(
+        first.bounds_of(WINDOW_COLOR).map(|bounds| (
+            bounds.left,
+            bounds.top,
+            bounds.right,
+            bounds.bottom
+        )),
+        Some((0, 0, WINDOW_SIZE.0 - 1, WINDOW_SIZE.1 - 1)),
+        "the window's content, without its frame"
     );
 }

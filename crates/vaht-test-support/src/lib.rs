@@ -24,6 +24,7 @@ mod sandbox;
 mod screenshot;
 mod toplevel_manager;
 mod wait;
+mod window_capture;
 mod window_list;
 mod x11_client;
 
@@ -46,5 +47,6 @@ pub use sandbox::Sandbox;
 pub use screenshot::{Bounds, Screenshot};
 pub use toplevel_manager::{ManagedWindow, ToplevelManager};
 pub use wait::{monotonic_now, wait_for_file};
+pub use window_capture::WindowCapturer;
 pub use window_list::{ListedWindow, WindowList};
 pub use x11_client::X11Client;

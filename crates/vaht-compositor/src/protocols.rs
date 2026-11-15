@@ -41,7 +41,9 @@ use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
 use smithay::wayland::idle_notify::IdleNotifierState;
-use smithay::wayland::image_capture_source::OutputCaptureSourceState;
+use smithay::wayland::image_capture_source::{
+    OutputCaptureSourceState, ToplevelCaptureSourceState,
+};
 use smithay::wayland::image_copy_capture::ImageCopyCaptureState;
 use smithay::wayland::input_method::InputMethodManagerState;
 use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState;
@@ -184,6 +186,9 @@ pub(crate) struct ProtocolStates {
     /// `ext_output_image_capture_source_manager_v1`: outputs as things to
     /// capture.
     pub(crate) output_capture_source: OutputCaptureSourceState,
+    /// `ext_foreign_toplevel_image_capture_source_manager_v1`: windows as
+    /// things to capture, for sharing one window.
+    pub(crate) toplevel_capture_source: ToplevelCaptureSourceState,
     /// `ext_image_copy_capture_manager_v1`: screenshots and recording.
     pub(crate) image_copy_capture: ImageCopyCaptureState,
     /// Input from programs: `zwlr_virtual_pointer_manager_v1`,
@@ -308,6 +313,10 @@ impl ProtocolStates {
                 TabletManagerState::new::<Compositor>(display),
             ),
             output_capture_source: OutputCaptureSourceState::new_with_filter::<Compositor, _>(
+                display,
+                ClientState::is_unrestricted,
+            ),
+            toplevel_capture_source: ToplevelCaptureSourceState::new_with_filter::<Compositor, _>(
                 display,
                 ClientState::is_unrestricted,
             ),

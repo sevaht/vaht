@@ -20,10 +20,11 @@ use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::{Bind, ExportMem, ImportAll, ImportMem, Offscreen, Renderer};
 use smithay::output::{Output, WeakOutput};
 use smithay::reexports::wayland_server::protocol::wl_shm::Format;
-use smithay::utils::{Rectangle, Size, Transform};
+use smithay::utils::{Physical, Rectangle, Size, Transform};
+use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::image_capture_source::{
     ImageCaptureSource, ImageCaptureSourceHandler, OutputCaptureSourceHandler,
-    OutputCaptureSourceState,
+    OutputCaptureSourceState, ToplevelCaptureSourceHandler, ToplevelCaptureSourceState,
 };
 use smithay::wayland::image_copy_capture::{
     BufferConstraints, CaptureFailureReason, Frame, ImageCopyCaptureHandler, ImageCopyCaptureState,
@@ -33,8 +34,9 @@ use smithay::wayland::image_copy_capture::{
 use crate::Compositor;
 use crate::layers::LayerMaps;
 use crate::resources::{ResourceKind, Tracked};
-use crate::scene::{self, Drawn, Scene};
+use crate::scene::{self, Drawn, OutputElement, Scene};
 use crate::shared_memory::{self, SharedMemoryError};
+use crate::window_manager::WindowId;
 
 /// The open capture sessions.
 #[derive(Default)]
@@ -42,6 +44,71 @@ pub(crate) struct ScreenCapture {
     /// Open capture sessions. Smithay stops a session when its `Session`
     /// is dropped, so each is kept until its client destroys it.
     sessions: Vec<(Session, Tracked)>,
+}
+
+/// What a capture source is for: an output, or one window.
+#[derive(Debug, Clone)]
+pub(crate) enum CaptureTarget {
+    /// An output, while it lasts.
+    Output(WeakOutput),
+    /// A window's content.
+    Window(WindowId),
+}
+
+/// What one capture draws: an output as it shows, or a window's content
+/// alone, `size` pixels at `scale`.
+#[derive(Debug, Clone)]
+pub(crate) enum CaptureView {
+    /// An output, at its mode's size, turned as it is.
+    Output(Output),
+    /// A window's content.
+    Window {
+        /// The window.
+        window: WindowId,
+        /// How large the image is.
+        size: Size<i32, Physical>,
+        /// How much larger than its logical size it is drawn.
+        scale: f64,
+    },
+}
+
+impl CaptureView {
+    /// Returns how large the image is; none for an output with no mode.
+    pub(crate) fn size(&self) -> Option<Size<i32, Physical>> {
+        match self {
+            Self::Output(output) => output.current_mode().map(|mode| mode.size),
+            Self::Window { size, .. } => Some(*size),
+        }
+    }
+
+    /// Returns how the image is turned from upright: as the output is,
+    /// or not at all for a window.
+    pub(crate) fn transform(&self) -> Transform {
+        match self {
+            Self::Output(output) => output.current_transform(),
+            Self::Window { .. } => Transform::Normal,
+        }
+    }
+
+    /// Returns how much larger than logical sizes it is drawn.
+    fn scale(&self) -> smithay::utils::Scale<f64> {
+        match self {
+            Self::Output(output) => output.current_scale().fractional_scale().into(),
+            Self::Window { scale, .. } => (*scale).into(),
+        }
+    }
+
+    /// Returns what `scene` shows of this, drawn with `renderer`.
+    fn elements<R>(&self, scene: &Scene<'_>, renderer: &mut R) -> Vec<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        match self {
+            Self::Output(output) => scene.output_elements(renderer, output),
+            Self::Window { window, .. } => scene.window_elements(renderer, *window, self.scale()),
+        }
+    }
 }
 
 /// What a capture drew: packed 32-bit rows, ARGB8888 in memory (blue,
@@ -66,27 +133,24 @@ pub(crate) struct CapturedImage {
 pub(crate) fn draw_capture<R, Target>(
     renderer: &mut R,
     scene: &Scene<'_>,
-    output: &Output,
+    view: &CaptureView,
 ) -> Result<CapturedImage, CaptureError>
 where
     R: Renderer + ImportAll + ImportMem + Offscreen<Target> + Bind<Target> + ExportMem,
     R::TextureId: Send + Clone + 'static,
     R::Error: Send + Sync + 'static,
 {
-    let size = output
-        .current_mode()
-        .map(|mode| mode.size)
-        .ok_or(CaptureError::EmptyOutput)?;
+    let size = view.size().ok_or(CaptureError::EmptyOutput)?;
     let width = usize::try_from(size.w).map_err(|_negative| CaptureError::EmptyOutput)?;
     let height = usize::try_from(size.h).map_err(|_negative| CaptureError::EmptyOutput)?;
     let buffer_size: Size<i32, smithay::utils::Buffer> = (size.w, size.h).into();
     let mut target = renderer
         .create_buffer(Fourcc::Argb8888, buffer_size)
         .map_err(CaptureError::renderer)?;
-    let elements = scene.output_elements(renderer, output);
+    let elements = view.elements(scene, renderer);
     let mut framebuffer = renderer.bind(&mut target).map_err(CaptureError::renderer)?;
     // Reading the frame back below waits for the GPU to finish it.
-    let _drawn = render_output(renderer, &mut framebuffer, &elements, output)?;
+    let _drawn = render_view(renderer, &mut framebuffer, &elements, view)?;
     let region = Rectangle::from_size((size.w, size.h).into());
     let mapping = renderer
         .copy_framebuffer(&framebuffer, region, Fourcc::Argb8888)
@@ -114,7 +178,7 @@ where
 pub(crate) fn draw_capture_into<R, Target>(
     renderer: &mut R,
     scene: &Scene<'_>,
-    output: &Output,
+    view: &CaptureView,
     target: &mut Target,
 ) -> Result<(), CaptureError>
 where
@@ -122,31 +186,27 @@ where
     R::TextureId: Send + Clone + 'static,
     R::Error: Send + Sync + 'static,
 {
-    let elements = scene.output_elements(renderer, output);
+    let elements = view.elements(scene, renderer);
     let mut framebuffer = renderer.bind(target).map_err(CaptureError::renderer)?;
-    let sync = render_output(renderer, &mut framebuffer, &elements, output)?;
+    let sync = render_view(renderer, &mut framebuffer, &elements, view)?;
     sync.wait()
         .map_err(|_interrupted| CaptureError::Draw("the GPU did not finish".to_owned()))
 }
 
-/// Draws `elements` of `output` into `framebuffer` as the output shows
-/// them, turned as it is; returns when the GPU will be done.
-fn render_output<R, Element>(
+/// Draws `elements` of `view` into `framebuffer`, turned as it is;
+/// returns when the GPU will be done.
+fn render_view<R, Element>(
     renderer: &mut R,
     framebuffer: &mut R::Framebuffer<'_>,
     elements: &[Element],
-    output: &Output,
+    view: &CaptureView,
 ) -> Result<SyncPoint, CaptureError>
 where
     R: Renderer,
     Element: RenderElement<R>,
 {
-    let size = output
-        .current_mode()
-        .map(|mode| mode.size)
-        .ok_or(CaptureError::EmptyOutput)?;
-    let scale: smithay::utils::Scale<f64> = output.current_scale().fractional_scale().into();
-    let mut tracker = OutputDamageTracker::new(size, scale, output.current_transform());
+    let size = view.size().ok_or(CaptureError::EmptyOutput)?;
+    let mut tracker = OutputDamageTracker::new(size, view.scale(), view.transform());
     let result = tracker
         .render_output(renderer, framebuffer, 0, elements, scene::BACKGROUND_COLOR)
         .map_err(|error| CaptureError::Draw(error.to_string()))?;
@@ -206,7 +266,30 @@ impl OutputCaptureSourceHandler for Compositor {
     }
 
     fn output_source_created(&mut self, source: ImageCaptureSource, output: &Output) {
-        source.user_data().insert_if_missing(|| output.downgrade());
+        source
+            .user_data()
+            .insert_if_missing(|| CaptureTarget::Output(output.downgrade()));
+    }
+}
+
+impl ToplevelCaptureSourceHandler for Compositor {
+    fn toplevel_capture_source_state(&mut self) -> &mut ToplevelCaptureSourceState {
+        &mut self.protocols.toplevel_capture_source
+    }
+
+    fn toplevel_source_created(
+        &mut self,
+        source: ImageCaptureSource,
+        toplevel: ForeignToplevelHandle,
+    ) {
+        if let Some(window) = self
+            .toplevel_list
+            .window_where(|handle| handle.matches(&toplevel))
+        {
+            source
+                .user_data()
+                .insert_if_missing(|| CaptureTarget::Window(window));
+        }
     }
 }
 
@@ -216,10 +299,9 @@ impl ImageCopyCaptureHandler for Compositor {
     }
 
     fn capture_constraints(&mut self, source: &ImageCaptureSource) -> Option<BufferConstraints> {
-        let output = source.user_data().get::<WeakOutput>()?.upgrade()?;
-        let mode = output.current_mode()?;
+        let size = self.capture_view(source)?.size()?;
         Some(BufferConstraints {
-            size: mode.size.to_logical(1).to_buffer(1, Transform::Normal),
+            size: (size.w, size.h).into(),
             shm: vec![Format::Argb8888, Format::Xrgb8888],
             // On the hardware, captures are drawn straight into GPU buffers
             // too, as screen sharing and OBS ask for.
@@ -238,12 +320,7 @@ impl ImageCopyCaptureHandler for Compositor {
     }
 
     fn frame(&mut self, session: &SessionRef, frame: Frame) {
-        let Some(output) = session
-            .source()
-            .user_data()
-            .get::<WeakOutput>()
-            .and_then(WeakOutput::upgrade)
-        else {
+        let Some(view) = self.capture_view(&session.source()) else {
             frame.fail(CaptureFailureReason::Stopped);
             return;
         };
@@ -270,14 +347,39 @@ impl ImageCopyCaptureHandler for Compositor {
         } else {
             scene
         };
-        let (transform, time) = (output.current_transform(), self.start_time.elapsed());
+        let (transform, time) = (view.transform(), self.start_time.elapsed());
         if let Ok(dmabuf) = smithay::wayland::dmabuf::get_dmabuf(&frame.buffer()) {
             let mut dmabuf = dmabuf.clone();
-            let drawn = self.backend.capture_into(&scene, &output, &mut dmabuf);
+            let drawn = self.backend.capture_into(&scene, &view, &mut dmabuf);
             ScreenCapture::finish(frame, drawn, transform, time);
         } else {
-            let image = self.backend.capture(&scene, &output);
+            let image = self.backend.capture(&scene, &view);
             ScreenCapture::fill(frame, image, transform, time);
+        }
+    }
+}
+
+impl Compositor {
+    /// Returns what a capture of `source` draws now: its output, or its
+    /// window's content at the scale of the output showing most of it;
+    /// none once the output or window is gone, or a window is not placed.
+    fn capture_view(&self, source: &ImageCaptureSource) -> Option<CaptureView> {
+        match source.user_data().get::<CaptureTarget>()? {
+            CaptureTarget::Output(output) => output.upgrade().map(CaptureView::Output),
+            CaptureTarget::Window(id) => {
+                let area = self.window_manager.window(*id)?.content_area();
+                let scale = self
+                    .outputs
+                    .most_overlapping(area)
+                    .map_or(1.0, |output| output.current_scale().fractional_scale());
+                let size: Size<i32, Physical> =
+                    area.size.to_f64().to_physical(scale).to_i32_round();
+                (size.w > 0 && size.h > 0).then_some(CaptureView::Window {
+                    window: *id,
+                    size,
+                    scale,
+                })
+            }
         }
     }
 }

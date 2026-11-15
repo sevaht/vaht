@@ -11,12 +11,13 @@ use vaht_test_support::{HeadlessVaht, Sandbox};
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 
 /// What only unrestricted programs are offered.
-const PRIVILEGED: [&str; 16] = [
+const PRIVILEGED: [&str; 17] = [
     "ext_data_control_manager_v1",
     "zwlr_data_control_manager_v1",
     "ext_foreign_toplevel_list_v1",
     "ext_session_lock_manager_v1",
     "ext_output_image_capture_source_manager_v1",
+    "ext_foreign_toplevel_image_capture_source_manager_v1",
     "ext_image_copy_capture_manager_v1",
     "zwlr_virtual_pointer_manager_v1",
     "zwp_virtual_keyboard_manager_v1",

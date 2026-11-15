@@ -92,6 +92,16 @@ impl<Key: Ord + Copy, Handle> ToplevelList<Key, Handle> {
     }
 }
 
+impl<Key: Copy, Handle> ToplevelList<Key, Handle> {
+    /// Returns the window whose handle `is_it`, if it is still listed.
+    pub(crate) fn window_where(&self, is_it: impl Fn(&Handle) -> bool) -> Option<Key> {
+        self.listed
+            .iter()
+            .find(|listed| is_it(&listed.handle))
+            .map(|listed| listed.key)
+    }
+}
+
 /// Announces windows through Smithay's `ext_foreign_toplevel_list_v1`.
 #[derive(Debug)]
 pub(crate) struct ForeignToplevels<'state> {

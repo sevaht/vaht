@@ -54,7 +54,7 @@ use self::device::{DeviceContext, GpuDevice, GpuOutputManager};
 use self::plan::{GpuQuirks, TopWindow};
 use super::{BackendError, OutputEvent, RenderError};
 use crate::Compositor;
-use crate::capture::{self, CaptureError, CapturedImage};
+use crate::capture::{self, CaptureError, CaptureView, CapturedImage};
 use crate::config::{InputSettings, OutputMode, Vrr};
 use crate::event_source::{EventSource, Timer};
 use crate::gamma::GammaRamps;
@@ -781,13 +781,13 @@ impl DrmBackend {
     pub(crate) fn capture_into(
         &mut self,
         scene: &Scene<'_>,
-        output: &Output,
+        view: &CaptureView,
         dmabuf: &mut Dmabuf,
     ) -> Result<(), CaptureError> {
         let mut renderer = self
             .renderer()
             .map_err(|error| CaptureError::Draw(error.to_string()))?;
-        capture::draw_capture_into(&mut renderer, scene, output, dmabuf)
+        capture::draw_capture_into(&mut renderer, scene, view, dmabuf)
     }
 
     /// Draws `scene` as `output` shows it, for a screenshot.
@@ -798,7 +798,7 @@ impl DrmBackend {
     pub(crate) fn capture(
         &mut self,
         scene: &Scene<'_>,
-        output: &Output,
+        view: &CaptureView,
     ) -> Result<CapturedImage, CaptureError> {
         let mut renderer = self
             .renderer()
@@ -806,7 +806,7 @@ impl DrmBackend {
         capture::draw_capture::<_, smithay::backend::renderer::gles::GlesTexture>(
             &mut renderer,
             scene,
-            output,
+            view,
         )
     }
 }

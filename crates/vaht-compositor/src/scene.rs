@@ -489,6 +489,43 @@ impl<'state> Scene<'state> {
             .collect()
     }
 
+    /// Returns what window `id` draws itself, at `scale`, with the corner
+    /// of its content at the origin: no frame, nor anything over it, as a
+    /// window shared to a stream shows. None for a window not there.
+    pub(crate) fn window_elements<R>(
+        &self,
+        renderer: &mut R,
+        id: WindowId,
+        scale: Scale<f64>,
+    ) -> Vec<OutputElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let (Some(window), Some(toplevel)) =
+            (self.window_manager.window(id), self.toplevels.get(id))
+        else {
+            return Vec::new();
+        };
+        let offset = window.surface_origin() - window.content_area().loc;
+        toplevel
+            .render_elements(
+                renderer,
+                offset.to_physical_precise_round(scale),
+                scale,
+                1.0,
+            )
+            .into_iter()
+            .map(|element| {
+                RelocateRenderElement::from_element(
+                    SceneElement::Surface(element),
+                    Point::default(),
+                    Relocate::Relative,
+                )
+            })
+            .collect()
+    }
+
     /// Returns what `output` (whose corner is at `corner`) shows while the
     /// session is locked: the pointer and the locker's surface; black
     /// until the locker gives one.

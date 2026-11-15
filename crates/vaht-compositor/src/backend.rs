@@ -28,7 +28,7 @@ pub(crate) use self::drm::plan::{TopWindow, virtual_terminal};
 pub(crate) use self::headless::HeadlessBackend;
 pub(crate) use self::winit::WinitBackend;
 use crate::Compositor;
-use crate::capture::{self, CaptureError, CapturedImage};
+use crate::capture::{self, CaptureError, CaptureView, CapturedImage};
 use crate::config::OutputMode;
 use crate::gamma::GammaRamps;
 use crate::outputs::{OutputControl, Outputs};
@@ -229,18 +229,16 @@ impl Backend {
     pub(crate) fn capture(
         &mut self,
         scene: &Scene<'_>,
-        output: &Output,
+        view: &CaptureView,
     ) -> Result<CapturedImage, CaptureError> {
         match self {
             Self::Winit(backend) => {
-                capture::draw_capture::<_, GlesTexture>(backend.renderer(), scene, output)
+                capture::draw_capture::<_, GlesTexture>(backend.renderer(), scene, view)
             }
-            Self::Headless(backend) => capture::draw_capture::<_, Image<'static, 'static>>(
-                backend.renderer(),
-                scene,
-                output,
-            ),
-            Self::Drm(backend) => backend.capture(scene, output),
+            Self::Headless(backend) => {
+                capture::draw_capture::<_, Image<'static, 'static>>(backend.renderer(), scene, view)
+            }
+            Self::Drm(backend) => backend.capture(scene, view),
         }
     }
 
@@ -274,11 +272,11 @@ impl Backend {
     pub(crate) fn capture_into(
         &mut self,
         scene: &Scene<'_>,
-        output: &Output,
+        view: &CaptureView,
         dmabuf: &mut Dmabuf,
     ) -> Result<(), CaptureError> {
         match self {
-            Self::Drm(backend) => backend.capture_into(scene, output, dmabuf),
+            Self::Drm(backend) => backend.capture_into(scene, view, dmabuf),
             Self::Winit(_) | Self::Headless(_) => Err(CaptureError::Draw(
                 "GPU buffers are offered on the DRM backend alone".to_owned(),
             )),

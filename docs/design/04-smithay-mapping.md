@@ -42,7 +42,7 @@ re-renders its buffer only when its content changes.
 | presentation-time, content-type, fractional-scale | `presentation.c` | `wayland::*` |
 | **fifo-v1, commit-timing-v1** | `frame_pacing.c` (736 lines, hand-written) | `wayland::{fifo, commit_timing}` |
 | linux-drm-syncobj (explicit sync), drm-lease | `drm_syncobj.c`, `drm_lease.c` | `wayland::{drm_syncobj, drm_lease}` |
-| ext-image-copy-capture, image-capture-source | `screencopy.c` | `wayland::{image_copy_capture, image_capture_source}`; vaht draws the output again (`capture.rs`): on the DRM backend straight into the client's GPU buffer (dmabuf, allocated on the primary GPU's render node in a format its renderer draws into), waiting for the GPU before the frame is ready, so screen sharing and OBS copy nothing through the CPU; else into shared memory. A turned output is drawn as its monitor shows it, the frame saying the transform for grim and the portal to undo |
+| ext-image-copy-capture, image-capture-source | `screencopy.c` | `wayland::{image_copy_capture, image_capture_source}`; vaht draws the output again (`capture.rs`): on the DRM backend straight into the client's GPU buffer (dmabuf, allocated on the primary GPU's render node in a format its renderer draws into), waiting for the GPU before the frame is ready, so screen sharing and OBS copy nothing through the CPU; else into shared memory. A turned output is drawn as its monitor shows it, the frame saying the transform for grim and the portal to undo. A single window is captured too (`ext_foreign_toplevel_image_capture_source_manager_v1`, from its `ext_foreign_toplevel_list_v1` handle): its content alone, without frame or what covers it, at the scale of the output showing most of it, sharing the same GPU and shared-memory paths |
 | ext-foreign-toplevel-list | `foreign_toplevel.c` | `wayland::foreign_toplevel_list` |
 | **libei / EIS** (emulated input from X11 programs, Steam Input) | `eis.c` (959 lines, hand-written) | `backend::libei` |
 | **Xwayland keyboard grab**, xwayland-shell | `xwayland_grab.c` | `wayland::{xwayland_keyboard_grab, xwayland_shell}` |
@@ -259,7 +259,7 @@ listener end), and marks each client accepted there as sandboxed
 (`ClientState::is_unrestricted`). Sandboxed programs are not offered the
 globals that reach beyond their own windows: data control (every
 selection), the toplevel list and toplevel management, input methods,
-output management, power and gamma, workspaces, session lock, screen capture, virtual
+output management, power and gamma, workspaces, session lock, screen and window capture, virtual
 pointer and keyboard, layer shell, and security contexts themselves. The
 test `a_sandboxed_program_is_offered_windows_but_not_the_privileged_globals`
 drives a sandbox engine's socket and lists what each side is offered.

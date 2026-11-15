@@ -163,7 +163,7 @@ pub struct Compositor {
     /// The EIS server X programs emulate input through, with Xwayland.
     input_emulation: Option<InputEmulation>,
     /// The windows as programs outside vaht see them listed.
-    toplevel_list: ToplevelList<WindowId, ForeignToplevelHandle>,
+    pub(crate) toplevel_list: ToplevelList<WindowId, ForeignToplevelHandle>,
     /// The windows as `zwlr_foreign_toplevel_manager_v1` tells them.
     pub(crate) toplevel_management: ToplevelManagement,
     /// What programs outside vaht do to the outputs: arrange them, turn
