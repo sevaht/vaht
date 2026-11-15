@@ -26,8 +26,8 @@
 use smithay::utils::{Logical, Point, Rectangle};
 use vaht_ui::theme::Metrics;
 use vaht_ui::{
-    Corner, CornerRadii, Glyph, Panel, PanelContent, SizePolicy, Theme, ThemeElement, Typesetter,
-    Widget, WidgetState,
+    Corner, CornerRadii, Glyph, Icon, IconEmphasis, Panel, PanelContent, SizePolicy, Theme,
+    ThemeElement, Typesetter, Widget, WidgetIcon, WidgetState,
 };
 
 use super::placement::Axes;
@@ -428,6 +428,7 @@ impl Frame {
             titlebar: Panel::new(
                 Titlebar {
                     title: String::new(),
+                    icon: None,
                     is_focused: false,
                     buttons,
                 },
@@ -492,6 +493,13 @@ impl Frame {
         }
     }
 
+    /// Shows `icon` left of the title, or none.
+    pub(crate) fn set_icon(&mut self, icon: Option<Icon>) {
+        if self.titlebar.content().icon != icon {
+            self.titlebar.update(|content| content.icon = icon);
+        }
+    }
+
     /// Lays the titlebar's buttons out as `buttons`.
     pub(crate) fn set_buttons(&mut self, buttons: &TitlebarLayout) {
         if &self.titlebar.content().buttons != buttons {
@@ -549,6 +557,8 @@ impl Frame {
 pub(crate) struct Titlebar {
     /// The window's title.
     title: String,
+    /// The window's icon, shown left of the title.
+    icon: Option<Icon>,
     /// Whether the window has keyboard focus.
     is_focused: bool,
     /// The buttons either side of the title.
@@ -566,6 +576,13 @@ impl PanelContent for Titlebar {
         let label = Widget::text(ThemeElement::Label, self.title.clone())
             .with_size(SizePolicy::Fill { weight: 1 })
             .with_hit(TitlebarHit::Label);
+        let label = match &self.icon {
+            Some(icon) => label.with_icon(WidgetIcon {
+                icon: icon.clone(),
+                emphasis: IconEmphasis::Full,
+            }),
+            None => label,
+        };
         let children = self
             .buttons
             .left
@@ -873,6 +890,7 @@ mod tests {
     fn the_titlebar_reports_its_buttons() {
         let titlebar = Titlebar {
             title: "a window".to_owned(),
+            icon: None,
             is_focused: true,
             buttons: TitlebarLayout {
                 left: vec![TitlebarButton::Stick],

@@ -1551,7 +1551,7 @@ impl Compositor {
     /// the same as the screen would.
     pub(crate) fn prepare_frames(&mut self) {
         self.window_manager
-            .paint_frames(&self.config.theme, &mut self.typesetter);
+            .paint_frames(&self.config.theme, (&mut self.typesetter, &mut self.icons));
         self.frame_textures
             .update(&self.window_manager, &self.config.theme, &self.ledger);
         self.sync_taskbars();

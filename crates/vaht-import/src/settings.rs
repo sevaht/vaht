@@ -583,6 +583,7 @@ impl InitFile {
             self.set(&["windows", "frame", key], Value::Array(buttons));
         }
         self.convert_decoration(report);
+        self.convert_titlebar_icon();
     }
 
     /// `defaultDeco`: whether frames have a handle. Frames without a
@@ -610,6 +611,27 @@ impl InitFile {
             &["windows", "frame", "handle"],
             Value::from(decoration.has_handle),
         );
+    }
+
+    /// Whether titlebars show the window's icon: Fluxbox shows it when
+    /// tabs are in the titlebar (`tabs.intitlebar`) and tabs show icons
+    /// (`tabs.usePixmap`), as both are by default. Tabs themselves are gone.
+    fn convert_titlebar_icon(&mut self) {
+        let is_on =
+            |value: Option<&str>| value.is_none_or(|value| value.eq_ignore_ascii_case("true"));
+        let in_titlebar = self
+            .resources
+            .value(&format!("{SCREEN}tabs.intitlebar"))
+            .map(str::to_owned);
+        let with_icons = self
+            .resources
+            .value(&format!("{SCREEN}tabs.usePixmap"))
+            .map(str::to_owned);
+        if in_titlebar.is_none() && with_icons.is_none() {
+            return;
+        }
+        let shows_icon = is_on(in_titlebar.as_deref()) && is_on(with_icons.as_deref());
+        self.set(&["windows", "frame", "icon"], Value::from(shows_icon));
     }
 
     /// The `[workspaces]` section: Fluxbox's count, with its names (a
@@ -1074,9 +1096,27 @@ session.screen0.toolbar.widthPercent:\t80
             .collect();
         assert_eq!(
             reasons,
-            [(7, Reason::Dropped), (8, Reason::Dropped)],
-            "the tabs and the opaque alpha"
+            [(8, Reason::Dropped)],
+            "the opaque alpha; tabs showing icons converted to vaht's default"
         );
+    }
+
+    #[test]
+    fn tabs_in_the_titlebar_with_icons_give_the_titlebar_its_icon() {
+        let (settings, notes) = converted_iconbar(
+            "session.screen0.tabs.intitlebar:\ttrue\n\
+             session.screen0.tabs.usePixmap:\ttrue\n",
+        );
+        assert_eq!(settings, "", "the icon is vaht's default");
+        assert_eq!(notes, Vec::<String>::new());
+    }
+
+    #[rstest::rstest]
+    #[case::no_icons("session.screen0.tabs.usePixmap:\tfalse\n")]
+    #[case::tabs_outside("session.screen0.tabs.intitlebar:\tfalse\n")]
+    fn tabs_without_icons_or_outside_the_titlebar_leave_it_without(#[case] init: &str) {
+        let (settings, _) = converted_iconbar(init);
+        assert_eq!(settings, "[windows.frame]\nicon = false\n");
     }
 
     #[test]

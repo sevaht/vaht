@@ -140,6 +140,35 @@ fn a_window_is_shown_at_its_size_with_a_titlebar_and_border() {
     );
 }
 
+/// The color of the icon the window draws.
+const ICON_COLOR: [u8; 3] = [0xff, 0xff, 0x00];
+
+/// Opens a window with `settings`, has it draw a solid icon, and returns
+/// the color at the titlebar's left end, where the icon goes.
+fn titlebar_left_with_an_icon(settings: &str) -> [u8; 3] {
+    let mut window = OneWindow::open_with_settings(settings);
+    window.client.draw_window_icons(16, ICON_COLOR);
+    let titlebar = window.titlebar();
+    let point = (
+        titlebar.left + BUILT_IN_METRICS.titlebar_height / 2,
+        OneWindow::middle(titlebar).1,
+    );
+    window.client.screenshot().rgb(point.0, point.1)
+}
+
+#[test]
+fn the_titlebar_shows_the_windows_icon_left_of_its_title() {
+    assert_eq!(titlebar_left_with_an_icon(""), ICON_COLOR);
+}
+
+#[test]
+fn a_titlebar_without_icons_shows_none() {
+    assert_ne!(
+        titlebar_left_with_an_icon("[windows.frame]\nicon = false\n"),
+        ICON_COLOR
+    );
+}
+
 #[test]
 fn clicking_the_close_button_asks_the_window_to_close() {
     let mut window = OneWindow::open();

@@ -26,7 +26,7 @@ mod workspaces;
 
 use smithay::utils::{Logical, Point, Rectangle};
 use vaht_ui::theme::Metrics;
-use vaht_ui::{Theme, Typesetter};
+use vaht_ui::{IconStore, Theme, Typesetter, WidgetIcon};
 
 pub(crate) use self::arrange::ArrangeStyle;
 pub(crate) use self::focus::CycleDirection;
@@ -922,9 +922,16 @@ impl WindowManager {
     }
 
     /// Paints every window's frame that changed.
-    pub(crate) fn paint_frames(&mut self, theme: &Theme, typesetter: &mut Typesetter) {
+    pub(crate) fn paint_frames(
+        &mut self,
+        theme: &Theme,
+        (typesetter, icons): (&mut Typesetter, &mut IconStore),
+    ) {
         let metrics = self.metrics;
+        let icon_size = WidgetIcon::side(metrics.titlebar_height);
+        let shows_icons = self.frame.icon && icon_size > 0;
         for window in self.windows.iter_mut() {
+            window.show_frame_icon(shows_icons.then_some(&mut *icons), icon_size);
             window.paint_frame(metrics, theme, typesetter);
         }
     }

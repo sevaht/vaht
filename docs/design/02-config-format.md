@@ -105,6 +105,7 @@ tooltip_delay_ms = 500
 titlebar_left = []
 titlebar_right = ["shade", "minimize", "maximize", "close"]
 handle = false                  # defaultDeco 0x3fd = everything except the handle
+icon = true                     # tabs.intitlebar and tabs.usePixmap
 
 [windows.maximize]
 ignore_size_increments = true   # maxIgnoreIncrement
@@ -202,7 +203,9 @@ rest by name, so a setting never silently does nothing:
   bottom with a grip at each end, 20 pixels wide as Fluxbox's; dragging
   it resizes the bottom edge, and a grip its corner, unless the `handle`
   and `grip-*` mouse contexts bind something). `vaht import` reads it from
-  `defaultDeco`'s preset or mask.
+  `defaultDeco`'s preset or mask. `icon` shows the window's icon left of
+  its title (the one the taskbar shows); Fluxbox showed it where tabs were
+  in the titlebar and showed icons (`tabs.intitlebar`, `tabs.usePixmap`).
 - `[workspaces]`: `names`, at least one.
 - `[session]`: `autostart`, and `update_activation_environment` (from
   fluxland's `session.updateActivationEnvironment`): `auto` (when vaht

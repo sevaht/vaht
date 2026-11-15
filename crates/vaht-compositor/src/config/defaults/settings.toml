@@ -72,6 +72,9 @@ titlebar_right = ["minimize", "maximize", "close"]
 # A strip along the bottom, with a resize grip at each end; the theme's
 # window.handle height sets how tall.
 handle = false
+# Whether the titlebar shows the window's icon left of its title: the one
+# the window names or draws, else its application's.
+icon = true
 
 [workspaces]
 names = ["Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4"]

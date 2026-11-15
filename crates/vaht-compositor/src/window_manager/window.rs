@@ -440,6 +440,13 @@ impl Window {
         self.frame.paint(&geometry, theme, typesetter);
     }
 
+    /// Shows its icon at `size` pixels, looked up in `store`, on its
+    /// titlebar; or none (`store` is none, or no icon is found).
+    pub(crate) fn show_frame_icon(&mut self, store: Option<&mut vaht_ui::IconStore>, size: u32) {
+        let icon = store.and_then(|store| self.icon_in(store, size));
+        self.frame.set_icon(icon);
+    }
+
     /// Holds down the titlebar button at global `location`, if there is one
     /// there with frames sized by `metrics`; returns whether there was.
     pub(crate) fn press_titlebar_button(

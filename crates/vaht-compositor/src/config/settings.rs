@@ -314,6 +314,8 @@ pub(crate) struct FrameSettings {
     /// Whether frames have a handle along the bottom, with grips, as tall
     /// as the theme's `window.handle` height.
     pub(crate) handle: bool,
+    /// Whether the titlebar shows the window's icon left of its title.
+    pub(crate) icon: bool,
 }
 
 impl FrameSettings {
@@ -349,6 +351,7 @@ impl Default for FrameSettings {
                 TitlebarButton::Close,
             ],
             handle: false,
+            icon: true,
         }
     }
 }
