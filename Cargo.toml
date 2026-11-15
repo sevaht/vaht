@@ -78,8 +78,27 @@ vaht-ui = { path = "crates/vaht-ui" }
 vaht-test-support = { path = "crates/vaht-test-support" }
 xdg = "3"
 
+# Dev builds keep only file and line tables for vaht's own crates, and no
+# debug info for dependencies: enough for backtraces, and it keeps each
+# test binary, which links all of Smithay, small.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Full debug info, for a debugger (variables, types, every crate):
+# `cargo build --profile debugging` (or `cargo test --profile debugging`),
+# built in target/debugging/.
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+[profile.debugging.package."*"]
+debug = true
+
 [profile.release]
-lto = true          # optimize across crate boundaries
+lto = true         # optimize across crate boundaries
 codegen-units = 1   # optimize the crate as one unit
 
 [workspace.lints.rust]

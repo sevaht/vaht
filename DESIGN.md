@@ -37,15 +37,15 @@ client: it opens solid-colored windows, moves and clicks a virtual pointer
 `ext-image-copy-capture`, the protocol `grim` uses. Nothing reaches the
 developer's session, so tests can drag and click freely.
 
-- `crates/vaht/tests/headless.rs`: leak tests. After clients come and go, vaht
+- `crates/vaht/tests/e2e/headless.rs`: leak tests. After clients come and go, vaht
   is stopped with SIGTERM and its exit report must show no windows, frames,
   clients or capture sessions, and as many open descriptors as at startup.
   They found two real leaks: clipboard focus keeping a gone client alive, and
   Smithay's capture session list, which grows unless pruned.
-- `crates/vaht/tests/bindings.rs`: key and mouse bindings, with their own
+- `crates/vaht/tests/e2e/bindings.rs`: key and mouse bindings, with their own
   `bindings.toml`; the bound programs write files the tests read. They found
   that programs inherited vaht's blocked signals.
-- `crates/vaht/tests/ui.rs`: UI tests. Positions come from the screenshot
+- `crates/vaht/tests/e2e/ui.rs`: UI tests. Positions come from the screenshot
   (the window's fill color), clicks go through the virtual pointer, and
   results are checked in pixels.
 
