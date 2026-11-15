@@ -189,6 +189,7 @@ impl Taskbars {
         let (handle, ledger) = event_loop;
         let hooks = TrayHooks {
             on_change: Compositor::schedule_render,
+            on_menu: Compositor::show_tray_menu,
             find: Self::tray_of,
         };
         match Tray::start(handle, ledger, Bus::Session, hooks) {
@@ -206,6 +207,13 @@ impl Taskbars {
     ) {
         if let Some(tray) = &self.tray {
             tray.act(key, action, at.to_i32_round());
+        }
+    }
+
+    /// Tells the tray item `key` that the entry `id` of its menu was chosen.
+    pub(crate) fn choose_tray_menu_entry(&self, key: TrayItemKey, id: i32) {
+        if let Some(tray) = &self.tray {
+            tray.choose_menu_entry(key, id);
         }
     }
 

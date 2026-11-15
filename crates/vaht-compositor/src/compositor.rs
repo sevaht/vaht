@@ -114,7 +114,7 @@ use crate::toplevel_management::{
 };
 use crate::toplevels::{Toplevel, Toplevels};
 use crate::touch;
-use crate::tray::TrayAction;
+use crate::tray::{TrayAction, TrayMenu};
 use crate::window_manager::{
     Axes, ClientIcon, ClientRequest, FramePart, OutputArea, OutputAreas, Placement, PlacementKind,
     Window, WindowDrag, WindowId, WindowManager, WorkspaceTarget,
@@ -2998,6 +2998,24 @@ impl Compositor {
         self.schedule_render();
     }
 
+    /// Shows `menu`, a tray item's, where the click that opened it was,
+    /// kept clear of the taskbar.
+    pub(crate) fn show_tray_menu(&mut self, menu: &TrayMenu) {
+        if menu.entries.is_empty() {
+            tracing::debug!("a tray item's menu is empty");
+            return;
+        }
+        let model = MenuModel::of_tray_menu(menu);
+        let bounds = self.output_areas().at(menu.at).usable;
+        self.menus.open(
+            model,
+            menu.at,
+            bounds,
+            (&self.config.theme, &mut self.typesetter),
+        );
+        self.schedule_render();
+    }
+
     /// Does what the menu item chosen does.
     fn choose_from_menu(&mut self, choice: MenuChoice) {
         tracing::debug!(?choice, "menu item chosen");
@@ -3006,6 +3024,9 @@ impl Compositor {
                 self.execute(&command, &mut ExecutionContext::for_window(window));
             }
             MenuChoice::Activate(window) => self.window_manager.activate(window),
+            MenuChoice::TrayMenuEntry { item, id } => {
+                self.taskbars.choose_tray_menu_entry(item, id);
+            }
             MenuChoice::AnswerInputEmulation {
                 client,
                 is_allowed,

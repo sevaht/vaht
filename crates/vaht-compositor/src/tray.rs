@@ -7,10 +7,13 @@
 //! registering (from the watcher), an item's properties read, an item
 //! announcing a new icon, title or tooltip, a connection leaving the bus.
 //! Nothing is polled. Each item is a [`TrayItem`] value, read anew whenever
-//! it announces a change. Clicking one calls it ([`TrayAction`]); its
-//! dbusmenu menu waits for vaht's menus.
+//! it announces a change. Clicking one calls it ([`TrayAction`]); its menu,
+//! served over dbusmenu ([`menu`]), is read and shown with vaht's menus:
+//! on a right click, and on a left click when the item is only a menu or
+//! has no action of its own, as fluxland did.
 
 mod item;
+mod menu;
 mod watcher;
 
 use std::collections::HashMap;
@@ -30,6 +33,8 @@ use zbus::{Connection, MatchRule, MessageStream};
 
 use self::item::ItemAddress;
 pub(crate) use self::item::{ItemIcon, TrayItem, TrayItemKey};
+use self::menu::DbusMenuProxy;
+pub(crate) use self::menu::{TrayMenu, TrayMenuEntry};
 use self::watcher::{
     StatusNotifierItemProxy, StatusNotifierWatcherProxy, WATCHER_NAME, WATCHER_PATH, Watcher,
 };
@@ -45,6 +50,8 @@ const ITEM_INTERFACE: &str = "org.kde.StatusNotifierItem";
 pub(crate) struct TrayHooks<State: 'static> {
     /// Called when the items shown changed.
     pub(crate) on_change: fn(&mut State),
+    /// Called with an item's menu, read, to show.
+    pub(crate) on_menu: fn(&mut State, &TrayMenu),
     /// Finds the tray in the state, while it exists.
     pub(crate) find: fn(&mut State) -> Option<&mut Tray<State>>,
 }
@@ -134,6 +141,8 @@ pub(crate) enum TrayEvent {
     },
     /// A call to an item, or to the watcher, failed.
     CallFailed(String),
+    /// An item's menu was read, to show.
+    MenuRead(TrayMenu),
     /// Something done, with nothing to tell.
     Done,
 }
@@ -267,7 +276,9 @@ impl<State: 'static> Tray<State> {
             .and_then(|item| item.pid)
     }
 
-    /// Asks the item `key` for `action`, the pointer at global `at`.
+    /// Asks the item `key` for `action`, the pointer at global `at`. A
+    /// right click shows the item's menu where it has one; a left click
+    /// shows it when the item is only a menu, or when its action fails.
     pub(crate) fn act(&self, key: TrayItemKey, action: TrayAction, at: Point<i32, Logical>) {
         let (Some(item), Some(connection)) = (
             self.items.iter().find(|item| item.key == key),
@@ -276,19 +287,87 @@ impl<State: 'static> Tray<State> {
             return;
         };
         let address = item.address.clone();
+        let menu = item.menu.clone().map(|path| (address.bus.clone(), path));
+        let shows_menu = match action {
+            TrayAction::ContextMenu => menu.is_some(),
+            TrayAction::Activate => item.is_menu && menu.is_some(),
+            TrayAction::SecondaryActivate | TrayAction::Scroll(_) => false,
+        };
         let call = async move {
+            if shows_menu && let Some(menu) = &menu {
+                return Self::read_menu(&connection, menu, key, at).await;
+            }
             let proxy = StatusNotifierItemProxy::builder(&connection)
                 .destination(address.bus.as_str())
                 .path(address.path.as_str())
                 .cache_properties(zbus::proxy::CacheProperties::No)
                 .build()
                 .await?;
-            match action {
+            let called = match action {
                 TrayAction::Activate => proxy.activate(at.x, at.y).await,
                 TrayAction::SecondaryActivate => proxy.secondary_activate(at.x, at.y).await,
                 TrayAction::ContextMenu => proxy.context_menu(at.x, at.y).await,
                 TrayAction::Scroll(notches) => proxy.scroll(notches, "vertical").await,
+            };
+            match (called, action, &menu) {
+                // No action of its own: its menu, as fluxland showed it.
+                (Err(error), TrayAction::Activate, Some(menu)) => {
+                    tracing::debug!(%error, "a tray item has no action; showing its menu");
+                    Self::read_menu(&connection, menu, key, at).await
+                }
+                (called, ..) => called.map(|()| TrayEvent::Done),
             }
+        };
+        self.schedule(async move {
+            call.await
+                .unwrap_or_else(|error: zbus::Error| TrayEvent::CallFailed(error.to_string()))
+        });
+    }
+
+    /// Reads the menu of the item `key` at `menu` (its connection and its
+    /// menu's object), opened by a click at `at`.
+    async fn read_menu(
+        connection: &Connection,
+        (bus, path): &(String, String),
+        key: TrayItemKey,
+        at: Point<i32, Logical>,
+    ) -> zbus::Result<TrayEvent> {
+        let proxy = DbusMenuProxy::builder(connection)
+            .destination(bus.as_str())
+            .path(path.as_str())
+            .cache_properties(zbus::proxy::CacheProperties::No)
+            .build()
+            .await?;
+        // Some items fill their menu in only as it opens.
+        if let Err(error) = proxy.about_to_show(0).await {
+            tracing::debug!(%error, "a tray menu was not told it opens");
+        }
+        let (_, layout) = proxy.get_layout(0, -1, &[]).await?;
+        Ok(TrayEvent::MenuRead(TrayMenu::from_layout(key, at, layout)))
+    }
+
+    /// Tells the item `key` that the entry `id` of its menu was chosen.
+    pub(crate) fn choose_menu_entry(&self, key: TrayItemKey, id: i32) {
+        let (Some(item), Some(connection)) = (
+            self.items.iter().find(|item| item.key == key),
+            self.connection.clone(),
+        ) else {
+            return;
+        };
+        let Some(path) = item.menu.clone() else {
+            return;
+        };
+        let bus = item.address.bus.clone();
+        let call = async move {
+            let proxy = DbusMenuProxy::builder(&connection)
+                .destination(bus.as_str())
+                .path(path.as_str())
+                .cache_properties(zbus::proxy::CacheProperties::No)
+                .build()
+                .await?;
+            proxy
+                .event(id, "clicked", &zbus::Variant::from(0_i32), 0)
+                .await
         };
         self.schedule(async move {
             call.await.map_or_else(
@@ -301,6 +380,10 @@ impl<State: 'static> Tray<State> {
     /// Hands `event` to the tray in `state`, and tells the owner if what it
     /// shows changed.
     fn deliver(state: &mut State, event: TrayEvent, hooks: TrayHooks<State>) {
+        if let TrayEvent::MenuRead(menu) = event {
+            (hooks.on_menu)(state, &menu);
+            return;
+        }
         let changed = (hooks.find)(state).is_some_and(|tray| tray.hear(event));
         if changed {
             (hooks.on_change)(state);
@@ -348,7 +431,8 @@ impl<State: 'static> Tray<State> {
                 tracing::debug!(%error, "a tray call failed");
                 false
             }
-            TrayEvent::Done => false,
+            // Menus go to the owner (`deliver`); nothing here changes.
+            TrayEvent::MenuRead(_) | TrayEvent::Done => false,
         }
     }
 
@@ -644,6 +728,8 @@ mod tests {
         tray: Option<Tray<Probe>>,
         /// The connection serving the test's item, once connected.
         item: Option<Connection>,
+        /// The menus the tray read, to show.
+        menus: Vec<TrayMenu>,
     }
 
     /// How long one dispatch waits for events.
@@ -655,15 +741,81 @@ mod tests {
     /// The hooks that find the probe's tray.
     const HOOKS: TrayHooks<Probe> = TrayHooks {
         on_change: |_| {},
+        on_menu: |probe, menu| probe.menus.push(menu.clone()),
         find: |probe| probe.tray.as_mut(),
     };
+
+    /// Where the test's item serves its menu.
+    const MENU_PATH: &str = "/menu";
 
     /// An item a test serves, recording the calls it gets.
     struct TestItem {
         /// Its title.
         title: String,
+        /// What it can do.
+        abilities: Abilities,
         /// The calls it got.
         calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    /// What a test's item can do.
+    #[derive(Debug, Clone, Copy)]
+    struct Abilities {
+        /// Whether it has an action of its own, which a left click asks.
+        has_action: bool,
+        /// Whether it serves a menu, at [`MENU_PATH`].
+        has_menu: bool,
+    }
+
+    /// The menu a test's item serves, recording what it is told: an
+    /// "Open" entry (1) and a "Quit" entry (2).
+    struct TestMenu {
+        /// What it was told.
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[zbus::interface(name = "com.canonical.dbusmenu")]
+    impl TestMenu {
+        fn get_layout(
+            &self,
+            parent_id: i32,
+            recursion_depth: i32,
+            property_names: &[&str],
+        ) -> (u32, menu::Layout) {
+            self.calls.lock().expect("not poisoned").push(format!(
+                "layout {parent_id} {recursion_depth} {property_names:?}"
+            ));
+            let entry = |id: i32, label: &str| {
+                let label = zbus::Variant::from(label)
+                    .try_to_owned()
+                    .expect("a plain value");
+                let layout: menu::Layout =
+                    (id, HashMap::from([("label".to_owned(), label)]), Vec::new());
+                zbus::Variant::from(layout)
+                    .try_to_owned()
+                    .expect("a plain value")
+            };
+            (
+                1,
+                (0, HashMap::new(), vec![entry(1, "_Open"), entry(2, "Quit")]),
+            )
+        }
+
+        fn about_to_show(&self, id: i32) -> bool {
+            self.calls
+                .lock()
+                .expect("not poisoned")
+                .push(format!("about-to-show {id}"));
+            false
+        }
+
+        fn event(&self, id: i32, event_id: &str, data: &zbus::Variant<'_>, timestamp: u32) {
+            let data = i32::try_from(data).map_or_else(|_| "?".to_owned(), |data| data.to_string());
+            self.calls
+                .lock()
+                .expect("not poisoned")
+                .push(format!("{event_id} {id} {data} {timestamp}"));
+        }
     }
 
     #[zbus::interface(name = "org.kde.StatusNotifierItem")]
@@ -691,11 +843,25 @@ mod tests {
             "test-icon".to_owned()
         }
 
-        fn activate(&self, x: i32, y: i32) {
+        #[zbus(property)]
+        fn menu(&self) -> zbus::OwnedObjectPath {
+            let path = if self.abilities.has_menu {
+                MENU_PATH
+            } else {
+                "/"
+            };
+            zbus::OwnedObjectPath::try_from(path).expect("a valid path")
+        }
+
+        fn activate(&self, x: i32, y: i32) -> zbus::fdo::Result<()> {
+            if !self.abilities.has_action {
+                return Err(zbus::fdo::Error::NotSupported("no action".to_owned()));
+            }
             self.calls
                 .lock()
                 .expect("not poisoned")
                 .push(format!("activate {x} {y}"));
+            Ok(())
         }
 
         #[zbus(signal)]
@@ -778,11 +944,28 @@ mod tests {
             self.probe.tray.as_ref().and_then(|tray| tray.role)
         }
 
-        /// Serves the test's item titled `title`, and registers it.
+        /// Serves the test's item titled `title`, with an action and no
+        /// menu, and registers it.
         fn start_item(&mut self, title: &str) {
+            self.start_item_with(
+                title,
+                Abilities {
+                    has_action: true,
+                    has_menu: false,
+                },
+            );
+        }
+
+        /// Serves the test's item titled `title`, able to do what
+        /// `abilities` say, and registers it.
+        fn start_item_with(&mut self, title: &str, abilities: Abilities) {
             let bus = self.bus.clone();
             let item = TestItem {
                 title: title.to_owned(),
+                abilities,
+                calls: Arc::clone(&self.calls),
+            };
+            let menu = TestMenu {
                 calls: Arc::clone(&self.calls),
             };
             self.scheduler
@@ -790,6 +973,7 @@ mod tests {
                     let connection = bus
                         .builder()
                         .serve_at(ItemAddress::DEFAULT_PATH, item)
+                        .serve_at(MENU_PATH, menu)
                         .build()
                         .await
                         .expect("connected");
@@ -889,6 +1073,76 @@ mod tests {
             World::titles(&world.probe).is_empty(),
             "gone with its connection"
         );
+    }
+
+    /// Starts a tray and an item with a menu, with an action of its own if
+    /// `has_action`; returns the world and the item's key.
+    fn world_with_a_menu_item(has_action: bool) -> (World, TrayItemKey) {
+        let mut world = World::new();
+        world.start_tray();
+        world.start_item_with(
+            "Music",
+            Abilities {
+                has_action,
+                has_menu: true,
+            },
+        );
+        world.dispatch_until(|probe| World::titles(probe) == ["Music"]);
+        let tray = world.probe.tray.as_ref().expect("started");
+        let key = tray.ordered(&[], &[])[0].key;
+        (world, key)
+    }
+
+    #[test]
+    fn a_right_click_reads_the_menu_and_a_choice_is_reported() {
+        let (mut world, key) = world_with_a_menu_item(true);
+        let tray = world.probe.tray.as_ref().expect("started");
+        tray.act(key, TrayAction::ContextMenu, (5, 7).into());
+        world.dispatch_until(|probe| !probe.menus.is_empty());
+        let menu = world.probe.menus.first().expect("the menu was read");
+        assert_eq!(menu.item, key);
+        assert_eq!(menu.at, (5, 7).into(), "shown where the click was");
+        let labels: Vec<_> = menu
+            .entries
+            .iter()
+            .map(|entry| match entry {
+                TrayMenuEntry::Choice { id, label, .. } => (*id, label.clone()),
+                other @ (TrayMenuEntry::Submenu { .. } | TrayMenuEntry::Separator) => {
+                    panic!("not a choice: {other:?}")
+                }
+            })
+            .collect();
+        assert_eq!(labels, [(1, "Open".to_owned()), (2, "Quit".to_owned())]);
+
+        let tray = world.probe.tray.as_ref().expect("started");
+        tray.choose_menu_entry(key, 2);
+        let calls = Arc::clone(&world.calls);
+        world.dispatch_until(|_| calls.lock().expect("not poisoned").len() >= 3);
+        assert_eq!(
+            *world.calls.lock().expect("not poisoned"),
+            ["about-to-show 0", "layout 0 -1 []", "clicked 2 0 0"],
+            "told it opens, asked for the whole menu, then told what was chosen"
+        );
+    }
+
+    #[test]
+    fn a_left_click_on_an_item_without_an_action_shows_its_menu() {
+        let (mut world, key) = world_with_a_menu_item(false);
+        let tray = world.probe.tray.as_ref().expect("started");
+        tray.act(key, TrayAction::Activate, (5, 7).into());
+        world.dispatch_until(|probe| !probe.menus.is_empty());
+        assert_eq!(world.probe.menus.len(), 1, "its menu, as fluxland showed");
+    }
+
+    #[test]
+    fn a_left_click_on_an_item_with_an_action_does_it_and_shows_no_menu() {
+        let (mut world, key) = world_with_a_menu_item(true);
+        let tray = world.probe.tray.as_ref().expect("started");
+        tray.act(key, TrayAction::Activate, (5, 7).into());
+        let calls = Arc::clone(&world.calls);
+        world.dispatch_until(|_| !calls.lock().expect("not poisoned").is_empty());
+        assert_eq!(*world.calls.lock().expect("not poisoned"), ["activate 5 7"]);
+        assert_eq!(world.probe.menus, Vec::<TrayMenu>::new());
     }
 
     #[test]

@@ -306,9 +306,12 @@ rest by name, so a setting never silently does nothing:
   StatusNotifierItems: it serves the watcher on the session bus, or hosts
   for another program's; it learns of items and their changes only from
   the bus's signals; a left, middle or right click asks the item to
-  activate, act otherwise or show its menu, and the wheel scrolls it. Not
-  yet: dbusmenu menus (with vaht's menus), tooltips, and
-  `activation_grace_ms`. The taskbar spans the output; clicking an arrow shows the
+  activate, act otherwise or show its menu, and the wheel scrolls it. A
+  menu the item serves over dbusmenu is shown with vaht's menus, told it
+  opens (`AboutToShow`) and told what is chosen: on a right click, and on
+  a left click when the item is only a menu (`ItemIsMenu`) or has no action
+  of its own (its `Activate` fails), as fluxland did; an item without one is
+  asked to show its own. The taskbar spans the output; clicking an arrow shows the
   workspace before or after, clicking an entry brings its window forward
   or, if it has focus, minimizes it, and the `taskbar` and
   `window-list-entry` mouse bindings take every other press. A fullscreen

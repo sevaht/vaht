@@ -14,6 +14,7 @@ use crate::config::{
     Action, Command, MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowManagerAction,
     WindowToggle,
 };
+use crate::tray::{TrayItemKey, TrayMenu, TrayMenuEntry};
 use crate::window_manager::{AlphaChange, StackLayer, WindowId, WindowManager, WorkspaceTarget};
 
 /// A menu: its title and items.
@@ -60,6 +61,54 @@ pub(crate) enum MenuItem {
     Separator,
 }
 
+impl MenuModel {
+    /// Returns the tray item's `menu` as a model: an entry that cannot be
+    /// chosen is inert text.
+    pub(crate) fn of_tray_menu(menu: &TrayMenu) -> Self {
+        Self {
+            title: None,
+            items: Self::tray_items(menu.item, &menu.entries),
+        }
+    }
+
+    /// Returns `entries`, of the tray item `item`'s menu, as items.
+    fn tray_items(item: TrayItemKey, entries: &[TrayMenuEntry]) -> Vec<MenuItem> {
+        entries
+            .iter()
+            .map(|entry| match entry {
+                TrayMenuEntry::Choice {
+                    id,
+                    label,
+                    is_enabled: true,
+                    mark,
+                } => MenuItem::Choice {
+                    label: label.clone(),
+                    choice: MenuChoice::TrayMenuEntry { item, id: *id },
+                    mark: *mark,
+                    icon: None,
+                },
+                TrayMenuEntry::Choice {
+                    label,
+                    is_enabled: false,
+                    ..
+                } => MenuItem::Inert {
+                    label: label.clone(),
+                },
+                TrayMenuEntry::Submenu { label, entries } => MenuItem::Submenu {
+                    label: label.clone(),
+                    menu: Self {
+                        title: None,
+                        items: Self::tray_items(item, entries),
+                    },
+                    icon: None,
+                    pipe: None,
+                },
+                TrayMenuEntry::Separator => MenuItem::Separator,
+            })
+            .collect()
+    }
+}
+
 impl MenuItem {
     /// Returns what the item says; nothing for a separator.
     pub(crate) fn label(&self) -> Option<&str> {
@@ -98,6 +147,13 @@ pub(crate) enum MenuChoice {
     /// Brings a window forward: shows its workspace, restores it, focuses
     /// and raises it.
     Activate(WindowId),
+    /// Tells a tray item that an entry of its menu was chosen.
+    TrayMenuEntry {
+        /// The tray item.
+        item: TrayItemKey,
+        /// The item's id for the entry.
+        id: i32,
+    },
     /// Answers whether an X program (its emulating client `client`) may
     /// emulate input.
     AnswerInputEmulation {
@@ -497,5 +553,61 @@ impl<'state> MenuBuilder<'state> {
                 })
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use smithay::utils::Point;
+
+    use super::*;
+
+    #[test]
+    fn a_tray_menu_becomes_choices_inert_text_and_submenus() {
+        let item = TrayItemKey(3);
+        let choice = |id, is_enabled| TrayMenuEntry::Choice {
+            id,
+            label: format!("entry {id}"),
+            is_enabled,
+            mark: (id == 1).then_some(true),
+        };
+        let menu = TrayMenu {
+            item,
+            at: Point::from((0, 0)),
+            entries: vec![
+                choice(1, true),
+                choice(2, false),
+                TrayMenuEntry::Separator,
+                TrayMenuEntry::Submenu {
+                    label: "More".to_owned(),
+                    entries: vec![choice(4, true)],
+                },
+            ],
+        };
+        let entry = |id, mark| MenuItem::Choice {
+            label: format!("entry {id}"),
+            choice: MenuChoice::TrayMenuEntry { item, id },
+            mark,
+            icon: None,
+        };
+        assert_eq!(
+            MenuModel::of_tray_menu(&menu).items,
+            [
+                entry(1, Some(true)),
+                MenuItem::Inert {
+                    label: "entry 2".to_owned()
+                },
+                MenuItem::Separator,
+                MenuItem::Submenu {
+                    label: "More".to_owned(),
+                    menu: MenuModel {
+                        title: None,
+                        items: vec![entry(4, None)],
+                    },
+                    icon: None,
+                    pipe: None,
+                },
+            ]
+        );
     }
 }
