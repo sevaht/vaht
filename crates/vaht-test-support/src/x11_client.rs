@@ -210,6 +210,27 @@ impl X11Client {
         self.connection.flush().expect("the request is sent");
     }
 
+    /// Paints `window` all `color` anew, as a program drawing new content
+    /// does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server refuses the request.
+    pub fn repaint(&mut self, window: Window, color: [u8; 3]) {
+        let [red, green, blue] = color;
+        let pixel = u32::from_be_bytes([0, red, green, blue]);
+        self.connection
+            .change_window_attributes(
+                window,
+                &x11rb::protocol::xproto::ChangeWindowAttributesAux::new().background_pixel(pixel),
+            )
+            .expect("the request is sent");
+        self.connection
+            .clear_area(false, window, 0, 0, 0, 0)
+            .expect("the request is sent");
+        self.connection.flush().expect("the request is sent");
+    }
+
     /// Gives `window` an icon (`_NET_WM_ICON`): a `side` × `side` square
     /// all `color`, opaque.
     ///

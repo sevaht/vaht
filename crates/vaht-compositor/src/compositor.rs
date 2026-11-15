@@ -1449,6 +1449,20 @@ impl Compositor {
                 Some(output.clone())
             });
         }
+        // An X program's menus and tooltips too: Xwayland sends a window's
+        // next picture only once its last one showed.
+        for window in self.xwayland.iter().flat_map(XwaylandServer::unmanaged) {
+            let Some(surface) = window.wl_surface() else {
+                continue;
+            };
+            let shown_on = self
+                .outputs
+                .most_overlapping(window.last_configure())
+                .unwrap_or_else(|| self.outputs.primary());
+            send_frames_surface_tree(&surface, shown_on, time, Some(Duration::ZERO), |_, _| {
+                Some(shown_on.clone())
+            });
+        }
         // What shows changed, and with it whether idle is inhibited.
         self.refresh_idle_inhibition();
         // A frame showing nothing of the session went out: the locker

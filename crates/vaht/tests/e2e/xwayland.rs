@@ -166,6 +166,21 @@ fn an_x11_menu_shows_over_the_windows() {
 }
 
 #[test]
+fn an_x11_menu_shows_what_it_draws_after_it_appears() {
+    const REDRAWN: [u8; 3] = [0x30, 0x60, 0xd0];
+    const REDRAWN_AGAIN: [u8; 3] = [0xd0, 0x30, 0x90];
+    let mut desktop = XDesktop::new();
+    let menu = desktop.x11.open_menu(((50, 50), (60, 40)), MENU_COLOR);
+    desktop.wait_for_color(MENU_COLOR);
+    // Xwayland sends a window's next picture only once told its last one
+    // showed (a frame callback): Steam's menus showed their first, black.
+    desktop.x11.repaint(menu, REDRAWN);
+    desktop.wait_for_color(REDRAWN);
+    desktop.x11.repaint(menu, REDRAWN_AGAIN);
+    desktop.wait_for_color(REDRAWN_AGAIN);
+}
+
+#[test]
 fn keys_typed_reach_the_focused_x11_window() {
     let mut desktop = XDesktop::new();
     let window = desktop.open_window();
