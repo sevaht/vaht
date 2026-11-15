@@ -107,7 +107,8 @@ pub(super) struct DeviceContext<'context, 'renderer> {
     pub(super) display: &'context DisplayHandle,
     /// A renderer for this device.
     pub(super) renderer: &'context mut DrmRenderer<'renderer>,
-    /// The primary GPU, and the one rendering for this device.
+    /// The render nodes of the primary GPU and of the one rendering for
+    /// this device.
     pub(super) nodes: (DrmNode, DrmNode),
     /// The formats the primary GPU's renderer reads.
     pub(super) primary_formats: &'context FormatSet,

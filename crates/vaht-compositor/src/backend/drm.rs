@@ -89,8 +89,12 @@ const COLOR_FORMATS: [Fourcc; 4] = [
 pub(crate) struct DrmBackend {
     /// The right to the devices, from logind or seatd.
     session: LibSeatSession,
-    /// The GPU that composes.
+    /// The GPU that composes, by its primary node: the key of its display
+    /// side in `devices`.
     primary_gpu: DrmNode,
+    /// The same GPU by its render node: the key of its renderer in `gpus`,
+    /// which knows GPUs only by the nodes they render with.
+    primary_render_node: DrmNode,
     /// Every GPU's renderer.
     gpus: GpuRenderers,
     /// Every GPU's display side.
@@ -142,7 +146,8 @@ impl DrmBackend {
             LibSeatSession::new().map_err(|error| BackendError::Seat(error.to_string()))?;
         let seat = session.seat();
         let primary_gpu = Self::find_primary_gpu(&seat)?;
-        tracing::info!(seat, gpu = %primary_gpu, "running on the seat");
+        let primary_render_node = Self::render_node_of(primary_gpu);
+        tracing::info!(seat, gpu = %primary_gpu, render_node = %primary_render_node, "running on the seat");
         // Smithay makes each GPU's EGL display and renderer itself, so vaht
         // needs no unsafe code for them (R-X3).
         let gpus = GpuManager::new(GbmGlesBackend::with_context_priority(ContextPriority::High))
@@ -163,6 +168,7 @@ impl DrmBackend {
         let mut backend = Self {
             session,
             primary_gpu,
+            primary_render_node,
             gpus,
             devices: HashMap::new(),
             leases: Leases::new(),
@@ -188,6 +194,13 @@ impl DrmBackend {
         }
         if backend.devices.is_empty() {
             return Err(BackendError::Gpu("no GPU could be opened".to_owned()));
+        }
+        // Without the primary GPU's renderer no frame is ever drawn: fail
+        // plainly rather than show a black screen.
+        if let Err(error) = backend.renderer() {
+            return Err(BackendError::Gpu(format!(
+                "the primary GPU ({primary_gpu}) has no renderer: {error}"
+            )));
         }
         Ok(backend)
     }
@@ -224,6 +237,14 @@ impl DrmBackend {
             .node_with_type(NodeType::Primary)
             .and_then(Result::ok)
             .unwrap_or(primary))
+    }
+
+    /// Returns `node`'s render node, which its renderer is kept under; a
+    /// GPU without one (display only) is kept under `node` itself.
+    fn render_node_of(node: DrmNode) -> DrmNode {
+        node.node_with_type(NodeType::Render)
+            .and_then(Result::ok)
+            .unwrap_or(node)
     }
 
     /// Registers udev's, the session's and libinput's events.
@@ -314,7 +335,7 @@ impl DrmBackend {
         let exporter = GbmFramebufferExporter::new(gbm.clone(), render_node.into());
         let render_formats: FormatSet = self
             .gpus
-            .single_renderer(&render_node.unwrap_or(self.primary_gpu))
+            .single_renderer(&render_node.unwrap_or(self.primary_render_node))
             .map_err(|error| format!("no renderer: {error}"))?
             .as_mut()
             .egl_context()
@@ -381,7 +402,7 @@ impl DrmBackend {
 
     /// Scans the GPU `node`'s connectors; returns what changed.
     fn scan(&mut self, node: DrmNode) -> Vec<OutputEvent> {
-        let primary = self.primary_gpu;
+        let primary = self.primary_render_node;
         let Some(device) = self.devices.get_mut(&node) else {
             return Vec::new();
         };
@@ -635,7 +656,7 @@ impl DrmBackend {
         if !self.is_active {
             return Ok(());
         }
-        let primary = self.primary_gpu;
+        let primary = self.primary_render_node;
         let mut result = Ok(());
         let nodes: Vec<DrmNode> = self.devices.keys().copied().collect();
         for node in nodes {
@@ -732,14 +753,14 @@ impl DrmBackend {
     /// Returns the primary GPU's renderer.
     pub(crate) fn renderer(&mut self) -> Result<DrmRenderer<'_>, RenderError> {
         self.gpus
-            .single_renderer(&self.primary_gpu)
+            .single_renderer(&self.primary_render_node)
             .map_err(|error| RenderError::Hardware(error.to_string()))
     }
 
     /// Returns the `linux-dmabuf` feedback every client starts from: the
     /// primary GPU, and the formats its renderer reads.
     pub(crate) fn dmabuf_default_feedback(&mut self) -> Option<DmabufFeedback> {
-        let primary = self.primary_gpu;
+        let primary = self.primary_render_node;
         let formats = self.renderer().ok()?.dmabuf_formats();
         DmabufFeedbackBuilder::new(primary.dev_id(), formats)
             .build()
@@ -773,11 +794,7 @@ impl DrmBackend {
     /// the primary GPU's render node, in a format and modifier its
     /// renderer draws into.
     pub(crate) fn capture_dmabuf_constraints(&mut self) -> Option<DmabufConstraints> {
-        let node = self
-            .primary_gpu
-            .node_with_type(NodeType::Render)
-            .and_then(Result::ok)
-            .unwrap_or(self.primary_gpu);
+        let node = self.primary_render_node;
         let renderer = self.renderer().ok()?;
         let formats = Bind::<Dmabuf>::supported_formats(&renderer)?;
         let mut grouped: Vec<(Fourcc, Vec<Modifier>)> = Vec::new();
@@ -848,7 +865,7 @@ impl OutputControl for DrmBackend {
     }
 
     fn set_mode(&mut self, output: &Output, mode: Option<OutputMode>) {
-        let primary = self.primary_gpu;
+        let primary = self.primary_render_node;
         for device in self.devices.values_mut() {
             let render_node = device.render_node.unwrap_or(primary);
             if let Some(screen) = device.screen_mut(output)
@@ -870,6 +887,7 @@ impl std::fmt::Debug for DrmBackend {
         formatter
             .debug_struct("DrmBackend")
             .field("primary_gpu", &self.primary_gpu)
+            .field("primary_render_node", &self.primary_render_node)
             .field("devices", &self.devices.len())
             .field("is_active", &self.is_active)
             .finish_non_exhaustive()
