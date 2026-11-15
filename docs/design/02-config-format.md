@@ -546,8 +546,10 @@ lid-close = "exec swaylock"
   or a convertible's tablet mode flips (on the DRM backend, which hears
   switches from libinput).
 - Built into the frame, not bindings: titlebar buttons (pressed without
-  modifiers), and resizing by dragging a border when the border has no
-  binding for that button.
+  modifiers), and, for a button the part has no binding for, dragging a
+  border moves the window, as Fluxbox's does (`ignoreBorder` off), and
+  dragging the handle or a grip resizes it. A `[mouse.border]` binding of
+  `start-resizing nearest-corner` makes borders resize.
 - Every action of §4 is built. The structured forms: a `toggle` runs its
   commands in turn, one per run (a reload starts it over); `if` asks its
   condition of the window the command is about (none never matches);

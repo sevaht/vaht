@@ -32,7 +32,7 @@ use crate::scene::{PointerTarget, WindowTarget};
 use crate::taskbar::TaskbarHit;
 use crate::touch::TouchRoutes;
 use crate::tray::{TrayAction, TrayItemKey};
-use crate::window_manager::{FramePart, ResizeEdges, WindowId};
+use crate::window_manager::{FramePart, WindowDrag, WindowId};
 
 /// Scroll distance per wheel notch, in the 120ths that high-resolution
 /// wheels report: a notch is 120, and libinput maps it to 15 units.
@@ -138,8 +138,10 @@ pub(crate) enum AfterClick {
         /// Run once the press becomes a drag.
         drag: Option<Box<Command>>,
     },
-    /// An unbound press on this window's border resizes it by `edges`.
-    ResizeBorder(WindowId, ResizeEdges),
+    /// An unbound press on this part of the window's frame drags the
+    /// window as the part does: a border moves it, the handle or a grip
+    /// resizes it.
+    DragFrame(WindowId, WindowDrag),
     /// Nothing of vaht's: the client under the pointer gets the press.
     PassToClient,
 }
@@ -375,9 +377,9 @@ impl Input {
         }
         match press.target {
             Some(PointerTarget::Window(WindowTarget::Frame { window, part })) => part
-                .resize_edges()
-                .map_or(AfterClick::PassToClient, |edges| {
-                    AfterClick::ResizeBorder(*window, edges)
+                .default_drag()
+                .map_or(AfterClick::PassToClient, |drag| {
+                    AfterClick::DragFrame(*window, drag)
                 }),
             Some(
                 PointerTarget::Window(WindowTarget::Surface { .. })
@@ -439,7 +441,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::window_manager::{HorizontalEdge, VerticalEdge};
+    use crate::window_manager::{HorizontalEdge, ResizeEdges, VerticalEdge};
 
     /// The left button's Linux input code.
     const LEFT: u32 = 0x110;
@@ -577,7 +579,11 @@ mod tests {
         runs("start-moving")
     )]
     #[case::unbound_titlebar(Under::Titlebar, false, AfterClick::PassToClient)]
-    #[case::unbound_border(Under::Border, false, AfterClick::ResizeBorder(window(), right_edge()))]
+    #[case::unbound_border(
+        Under::Border,
+        false,
+        AfterClick::DragFrame(window(), WindowDrag::Move)
+    )]
     #[case::bound_border(Under::Border, true, runs("start-moving"))]
     #[case::unbound_desktop(Under::Desktop, false, AfterClick::PassToClient)]
     #[case::taskbar_entry(Under::TaskbarEntry, false, AfterClick::HoldTaskbarButton)]

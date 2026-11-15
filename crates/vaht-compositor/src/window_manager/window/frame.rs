@@ -30,6 +30,7 @@ use vaht_ui::{
     ThemeElement, Typesetter, Widget, WidgetIcon, WidgetState,
 };
 
+use super::WindowDrag;
 use super::placement::Axes;
 use super::resize::{HorizontalEdge, ResizeEdges, VerticalEdge};
 use crate::config::WindowManagerAction;
@@ -107,17 +108,20 @@ pub(crate) enum FramePart {
 }
 
 impl FramePart {
-    /// Returns the edges dragging the part resizes, unless a binding says
-    /// otherwise: a border's own, the bottom for the handle, and a bottom
-    /// corner for a grip. The titlebar resizes nothing.
-    pub(crate) fn resize_edges(self) -> Option<ResizeEdges> {
-        let bottom = |horizontal| ResizeEdges {
-            horizontal,
-            vertical: VerticalEdge::Bottom,
+    /// Returns what dragging the part does unless a binding says
+    /// otherwise: a border moves the window, as Fluxbox's does; the handle
+    /// resizes the bottom edge and a grip its corner. The titlebar does
+    /// nothing of its own (its bindings move the window).
+    pub(crate) fn default_drag(self) -> Option<WindowDrag> {
+        let bottom = |horizontal| WindowDrag::Resize {
+            edges: ResizeEdges {
+                horizontal,
+                vertical: VerticalEdge::Bottom,
+            },
         };
         match self {
             Self::Titlebar(_) => None,
-            Self::Border(edges) => Some(edges),
+            Self::Border(_) => Some(WindowDrag::Move),
             Self::Handle => Some(bottom(HorizontalEdge::None)),
             Self::Grip(GripSide::Left) => Some(bottom(HorizontalEdge::Left)),
             Self::Grip(GripSide::Right) => Some(bottom(HorizontalEdge::Right)),
@@ -863,25 +867,37 @@ mod tests {
     }
 
     #[test]
-    fn dragging_the_handle_or_a_grip_resizes_the_bottom() {
-        let bottom = |horizontal| ResizeEdges {
-            horizontal,
-            vertical: VerticalEdge::Bottom,
+    fn dragging_a_border_moves_and_the_handle_or_a_grip_resizes_the_bottom() {
+        let bottom = |horizontal| {
+            Some(WindowDrag::Resize {
+                edges: ResizeEdges {
+                    horizontal,
+                    vertical: VerticalEdge::Bottom,
+                },
+            })
+        };
+        let top = ResizeEdges {
+            horizontal: HorizontalEdge::None,
+            vertical: VerticalEdge::Top,
         };
         assert_eq!(
-            FramePart::Handle.resize_edges(),
-            Some(bottom(HorizontalEdge::None))
+            FramePart::Border(top).default_drag(),
+            Some(WindowDrag::Move)
         );
         assert_eq!(
-            FramePart::Grip(GripSide::Left).resize_edges(),
-            Some(bottom(HorizontalEdge::Left))
+            FramePart::Handle.default_drag(),
+            bottom(HorizontalEdge::None)
         );
         assert_eq!(
-            FramePart::Grip(GripSide::Right).resize_edges(),
-            Some(bottom(HorizontalEdge::Right))
+            FramePart::Grip(GripSide::Left).default_drag(),
+            bottom(HorizontalEdge::Left)
         );
         assert_eq!(
-            FramePart::Titlebar(vaht_ui::Point::new(0, 0)).resize_edges(),
+            FramePart::Grip(GripSide::Right).default_drag(),
+            bottom(HorizontalEdge::Right)
+        );
+        assert_eq!(
+            FramePart::Titlebar(vaht_ui::Point::new(0, 0)).default_drag(),
             None
         );
     }

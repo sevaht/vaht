@@ -38,9 +38,22 @@ impl OneWindow {
     /// Starts vaht with `settings` added to its own and opens a window, as
     /// [`Self::open`] does.
     fn open_with_settings(settings: &str) -> Self {
+        Self::open_with(settings, None)
+    }
+
+    /// Starts vaht with `bindings` as its bindings.toml and opens a window,
+    /// as [`Self::open`] does.
+    fn open_with_bindings(bindings: &str) -> Self {
+        Self::open_with("", Some(bindings))
+    }
+
+    /// Starts vaht with `settings` added to its own and `bindings` as its
+    /// bindings.toml, if given, and opens a window, as [`Self::open`] does.
+    fn open_with(settings: &str, bindings: Option<&str>) -> Self {
         let settings = format!("{settings}\n[placement]\nstrategy = \"cascade\"\n");
-        let vaht =
-            HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("settings.toml", &settings)]);
+        let mut files = vec![("settings.toml", settings.as_str())];
+        files.extend(bindings.map(|bindings| ("bindings.toml", bindings)));
+        let vaht = HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &files);
         let mut client = TestClient::connect(vaht.socket());
         client.open_windows(1);
         let content = client
@@ -249,10 +262,37 @@ fn alt_dragging_anywhere_on_the_window_moves_it() {
 }
 
 #[test]
-fn dragging_the_bottom_right_corner_resizes_and_keeps_the_top_left() {
+fn dragging_a_border_corner_moves_the_window_as_fluxbox_does() {
     let mut window = OneWindow::open();
     let content = window.content;
     // The bottom border's right end: one pixel below and right of the content.
+    let corner = (content.right + 1, content.bottom + 1);
+    window
+        .client
+        .drag(corner, (corner.0 + 40, corner.1 + 30), BUTTON_LEFT);
+    assert_eq!(window.find_content(), shifted(content, 40, 30));
+}
+
+#[test]
+fn dragging_the_left_border_moves_the_window() {
+    let mut window = OneWindow::open();
+    let content = window.content;
+    let (_, middle_y) = OneWindow::middle(content);
+    let border = (content.left - 1, middle_y);
+    window
+        .client
+        .drag(border, (border.0 + 25, border.1), BUTTON_LEFT);
+    assert_eq!(window.find_content(), shifted(content, 25, 0));
+}
+
+/// Bindings that make dragging a border resize the window from the
+/// nearest corner, as it does not by default.
+const BORDER_RESIZES: &str = "[mouse.border]\n\"Drag+Left\" = \"start-resizing nearest-corner\"\n";
+
+#[test]
+fn a_border_bound_to_resizing_still_resizes() {
+    let mut window = OneWindow::open_with_bindings(BORDER_RESIZES);
+    let content = window.content;
     let corner = (content.right + 1, content.bottom + 1);
     window
         .client
@@ -262,24 +302,6 @@ fn dragging_the_bottom_right_corner_resizes_and_keeps_the_top_left() {
         Bounds {
             right: content.right + 40,
             bottom: content.bottom + 30,
-            ..content
-        }
-    );
-}
-
-#[test]
-fn dragging_the_left_border_resizes_and_keeps_the_right_edge() {
-    let mut window = OneWindow::open();
-    let content = window.content;
-    let (_, middle_y) = OneWindow::middle(content);
-    let border = (content.left - 1, middle_y);
-    window
-        .client
-        .drag(border, (border.0 - 25, border.1), BUTTON_LEFT);
-    assert_eq!(
-        window.find_content(),
-        Bounds {
-            left: content.left - 25,
             ..content
         }
     );
@@ -308,7 +330,7 @@ fn alt_right_dragging_resizes_from_the_nearest_corner() {
 
 #[test]
 fn dragging_an_edge_past_the_opposite_one_stops_at_the_smallest_size() {
-    let mut window = OneWindow::open();
+    let mut window = OneWindow::open_with_bindings(BORDER_RESIZES);
     let content = window.content;
     let (_, middle_y) = OneWindow::middle(content);
     let border = (content.right + 1, middle_y);
@@ -509,7 +531,8 @@ corners = [\"top-left\", \"top-right\"]
 
 #[test]
 fn an_outline_resize_shows_the_size_and_resizes_on_release() {
-    let mut window = OneWindow::open_with_settings("[windows]\nopaque_resize = false\n");
+    let mut window =
+        OneWindow::open_with("[windows]\nopaque_resize = false\n", Some(BORDER_RESIZES));
     let content = window.content;
     let corner = (content.right + 1, content.bottom + 1);
     let target = (corner.0 + 40, corner.1 + 30);

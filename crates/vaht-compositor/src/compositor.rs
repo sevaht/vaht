@@ -3498,8 +3498,8 @@ impl Compositor {
                     self.set_grab(WindowGrab::hold(window, drag.map(|drag| *drag), start));
                 }
             }
-            AfterClick::ResizeBorder(resized, edges) => {
-                self.start_window_grab(resized, WindowDrag::Resize { edges }, start.start, serial);
+            AfterClick::DragFrame(dragged, drag) => {
+                self.start_window_grab(dragged, drag, start.start, serial);
             }
             AfterClick::PassToClient => {}
         }

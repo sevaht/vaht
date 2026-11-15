@@ -95,6 +95,25 @@ fn snap_step_up_maximizes_and_down_restores() {
 }
 
 #[test]
+fn dragging_a_maximized_window_by_its_top_pixel_drags_it_rather_than_resizing() {
+    let mut desktop = Desktop::with_windows(1);
+    let floating = desktop.content().expect("the window is shown");
+    desktop.type_chord(&[keys::LEFT_SUPER, keys::UP]);
+    let maximized = desktop.content().expect("the window is shown");
+    // The frame's top border line, at the output's top edge.
+    let top = (maximized.left + (maximized.right - maximized.left) / 2, 0);
+    desktop.client.drag(top, (top.0, top.1 + 120), BUTTON_LEFT);
+    let dragged = desktop.content().expect("the window is shown");
+    let size = |bounds: Bounds| (bounds.right - bounds.left, bounds.bottom - bounds.top);
+    assert_eq!(
+        size(dragged),
+        size(floating),
+        "restored to its own size to be moved, not resized"
+    );
+    assert!(dragged.top > maximized.top, "moved down: {dragged:?}");
+}
+
+#[test]
 fn snap_step_left_fills_the_left_half_and_right_undoes_it() {
     let mut desktop = Desktop::with_windows(1);
     let floating = desktop.content().expect("the window is shown");

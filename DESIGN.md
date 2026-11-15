@@ -96,7 +96,8 @@ result), `Workspaces` and `Focus` (focus history and Alt+Tab cycling) are
 entities, `PlacementStrategy` and `EdgeSnap` are pure. Elsewhere, `Input`
 decides whose a key is and what a button press does (a `PressOutcome`:
 the panel's click, or focus and raise, then a titlebar button, a binding,
-a border resize or the client's press), and `Bindings` what a wheel turn
+a frame drag (a border moves, the handle and grips resize) or the
+client's press), and `Bindings` what a wheel turn
 runs, both tested without a seat; `MouseContext` knows where a press looks
 for bindings, `Scene` composes
 what an output shows and hit-tests it, and `ConfigSource` reads and watches
