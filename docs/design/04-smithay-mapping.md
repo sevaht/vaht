@@ -31,7 +31,7 @@ re-renders its buffer only when its content changes.
 | Protocol / facility | fluxland file | Smithay module |
 |---|---|---|
 | compositor, subcompositor, shm, dmabuf, viewporter, single-pixel-buffer, alpha-modifier, fixes | `protocols.c` | `wayland::{compositor, shm, dmabuf, viewporter, single_pixel_buffer, alpha_modifier, fixes}` |
-| xdg-shell, xdg-decoration, KDE server-decoration, xdg-dialog | `view_xdg.c`, `decoration.c` | `wayland::shell::{xdg, xdg::decoration, xdg::dialog, kde}` |
+| xdg-shell, xdg-decoration, KDE server-decoration, xdg-dialog | `view_xdg.c`, `decoration.c` | `wayland::shell::{xdg, xdg::decoration, xdg::dialog, kde}`; both decoration protocols are always answered with server-side frames (`protocols/decoration.rs`); dialogs: §8.11 |
 | layer-shell | `layer_shell.c` | `wayland::shell::wlr_layer` |
 | xdg-output | | `wayland::output::xdg` |
 | seat, data-device, primary selection, wlr and ext data-control | | `wayland::{seat, selection::*}` |

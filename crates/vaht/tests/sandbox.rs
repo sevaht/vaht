@@ -50,6 +50,8 @@ fn a_sandboxed_program_is_offered_windows_but_not_the_privileged_globals() {
         "wl_shm",
         "zwp_tablet_manager_v2",
         "zwp_text_input_manager_v3",
+        "xdg_wm_dialog_v1",
+        "org_kde_kwin_server_decoration_manager",
     ] {
         assert!(
             sandboxed.iter().any(|global| global == name),

@@ -61,7 +61,9 @@ use smithay::wayland::session_lock::SessionLockManagerState;
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
+use smithay::wayland::shell::kde::decoration::KdeDecorationState;
 use smithay::wayland::shell::xdg::dialog::XdgDialogState;
+use smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as KdeMode;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::tablet_manager::TabletManagerState;
@@ -184,6 +186,9 @@ pub(crate) struct ProtocolStates {
     /// `zxdg_decoration_manager_v1`: vaht draws every frame. Held only to
     /// keep the global alive.
     _xdg_decoration: XdgDecorationState,
+    /// `org_kde_kwin_server_decoration_manager`: vaht draws every frame,
+    /// for programs that ask KDE's way.
+    pub(crate) kde_decoration: KdeDecorationState,
     /// `xdg_wm_dialog_v1`: which windows are modal dialogs.
     _xdg_dialog: XdgDialogState,
     /// `ext_output_image_capture_source_manager_v1`: outputs as things to
@@ -299,6 +304,7 @@ impl ProtocolStates {
             ),
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
             _xdg_dialog: XdgDialogState::new::<Compositor>(display),
+            kde_decoration: KdeDecorationState::new::<Compositor>(display, KdeMode::Server),
             _cursor_shape: CursorShapeManagerState::new::<Compositor>(display),
             xwayland_shell: XWaylandShellState::new::<Compositor>(display),
             _xwayland_keyboard_grab: XWaylandKeyboardGrabState::new::<Compositor>(display),
