@@ -2029,6 +2029,12 @@ impl Compositor {
             area_of(self.outputs.primary()),
             self.outputs.others().map(area_of).collect(),
         )
+        .named(
+            std::iter::once(self.outputs.primary())
+                .chain(self.outputs.others())
+                .map(Output::name)
+                .collect(),
+        )
     }
 
     /// Puts a taskbar on each output that has one by the settings, for the

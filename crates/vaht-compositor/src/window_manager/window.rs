@@ -16,6 +16,7 @@
 mod alpha;
 mod client;
 mod edge_snap;
+mod exemptions;
 mod frame;
 mod placement;
 mod resize;
@@ -29,6 +30,7 @@ use vaht_ui::{Theme, Typesetter};
 pub(crate) use alpha::{AlphaChange, WindowAlpha};
 pub(crate) use client::{ClientIcon, CommittedState, Ending, PlacementKind, RequestedState};
 pub(crate) use edge_snap::EdgeSnap;
+pub(crate) use exemptions::{Exemption, Exemptions};
 pub(crate) use frame::{
     Frame, FrameGeometry, FramePart, FrameShape, GripSide, TitlebarButton, TitlebarLayout,
 };
@@ -164,6 +166,8 @@ pub(crate) struct Window {
     focus_stealing: FocusStealing,
     /// What window it is a dialog of, if it is one.
     dialog: Option<Dialog>,
+    /// What rules exempt it from.
+    exemptions: Exemptions,
     /// Counts the window while it exists.
     _tracked: Tracked,
 }
@@ -206,6 +210,7 @@ impl Window {
             title: None,
             focus_stealing: FocusStealing::Default,
             dialog: None,
+            exemptions: Exemptions::default(),
             _tracked: ledger.track(ResourceKind::Window),
         }
     }
@@ -528,6 +533,44 @@ impl Window {
         self.dialog = dialog;
     }
 
+    /// Returns whether a rule exempts it from `exemption`.
+    pub(crate) const fn is_exempt(&self, exemption: Exemption) -> bool {
+        self.exemptions.has(exemption)
+    }
+
+    /// Exempts it from `exemption` if `is_exempt`, or not.
+    pub(crate) const fn set_exempt(&mut self, exemption: Exemption, is_exempt: bool) {
+        self.exemptions = self.exemptions.with(exemption, is_exempt);
+    }
+
+    /// Gives it the opacities `alpha`, as a rule says.
+    pub(crate) const fn set_alpha(&mut self, alpha: WindowAlpha) {
+        self.alpha = Some(alpha);
+    }
+
+    /// Frames the window, or with `false` not, whatever it was before.
+    pub(crate) fn set_framed(&mut self, is_framed: bool) {
+        let choice = if is_framed {
+            FrameChoice::Framed
+        } else {
+            FrameChoice::Frameless
+        };
+        if self.frame_choice != choice {
+            self.frame_choice = choice;
+            self.invalidate_frame();
+        }
+    }
+
+    /// Returns the content sizes its resizing by hand is held to: its
+    /// client's, unless a rule exempts it.
+    fn size_limits(&self) -> SizeLimits {
+        if self.is_exempt(Exemption::SizeHints) {
+            SizeLimits::default()
+        } else {
+            self.committed.size_limits
+        }
+    }
+
     /// Rolls the window up into its titlebar, or down again.
     pub(crate) const fn set_shaded(&mut self, is_shaded: bool) {
         self.state.is_shaded = is_shaded;
@@ -632,11 +675,11 @@ impl Window {
                 self.location = moved + (snap.snap(moved_outer) - moved_outer.loc);
             }
             Some(DragProgress::Resize(anchor)) if !anchor.is_finishing => {
-                let limits = self.committed.size_limits;
+                let limits = self.size_limits();
                 self.request_size(anchor.edges.resize(anchor.initial.size, delta, limits));
             }
             Some(DragProgress::Outline { anchor, .. }) => {
-                let limits = self.committed.size_limits;
+                let limits = self.size_limits();
                 let size = anchor.edges.resize(anchor.initial.size, delta, limits);
                 self.drag = Some(DragProgress::Outline { anchor, size });
             }

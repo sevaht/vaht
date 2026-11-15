@@ -35,6 +35,7 @@ pub(crate) use self::output_areas::{OutputAreas, OutputTarget};
 pub(crate) use self::placement_strategy::{ColumnDirection, PlacementStrategy, Room, RowDirection};
 use self::snap_zones::{LayoutPicker, SnapTarget};
 pub(crate) use self::window::AlphaChange;
+pub(crate) use self::window::Exemption;
 pub use self::window::WindowId;
 pub(crate) use self::window::{
     Area, Axes, ClientIcon, CommittedState, Direction, EdgeSnap, Ending, Frame, FrameGeometry,
@@ -47,8 +48,8 @@ use self::windows::Windows;
 use self::workspaces::Workspaces;
 pub(crate) use self::workspaces::{Workspace, WorkspaceTarget};
 use crate::config::{
-    Config, CycleOrder, FocusStealing, FrameSettings, Settings, SnapSettings, WindowCycle,
-    WindowManagerAction,
+    Config, CycleOrder, FocusStealing, FrameSettings, RuleFrame, RuleOutput, RuleSettings,
+    Settings, SnapSettings, WindowCycle, WindowManagerAction,
 };
 use crate::resources::ResourceLedger;
 
@@ -654,6 +655,19 @@ impl WindowManager {
         let Some(placement) = self.windows.get(window).map(Window::placement) else {
             return false;
         };
+        let Some(target) = self.windows.get(window) else {
+            return false;
+        };
+        let is_refused = match request {
+            ClientRequest::Maximize => target.is_exempt(Exemption::ClientMaximize),
+            ClientRequest::Fullscreen => target.is_exempt(Exemption::ClientFullscreen),
+            ClientRequest::Unmaximize | ClientRequest::Unfullscreen | ClientRequest::Minimize => {
+                false
+            }
+        };
+        if is_refused {
+            return false;
+        }
         let applies = match request {
             ClientRequest::Maximize => !placement.is_fully_maximized(),
             ClientRequest::Unmaximize => placement.is_fully_maximized(),
@@ -967,11 +981,22 @@ impl WindowManager {
     /// settings and rules, among the windows already shown, on the output
     /// the `pointer` is on.
     fn place_new_window(&mut self, id: WindowId, config: &Config, pointer: Point<i32, Logical>) {
-        let (metrics, output, current) = (
-            self.metrics,
-            self.outputs.at(pointer),
-            self.workspaces.current(),
-        );
+        let (metrics, current) = (self.metrics, self.workspaces.current());
+        let Some(window) = self.windows.get(id) else {
+            return;
+        };
+        let rule = config.rules.for_window(window, current);
+        let ruled_output = rule.output.as_ref().and_then(|output| match output {
+            RuleOutput::Head(number) => self.outputs.head(*number),
+            RuleOutput::Named(name) => self.outputs.by_name(name),
+        });
+        let output = ruled_output.unwrap_or_else(|| self.outputs.at(pointer));
+        // Before its size is read: the frame is part of it.
+        if let Some(frame) = rule.frame
+            && let Some(window) = self.window_mut(id)
+        {
+            window.set_framed(frame == RuleFrame::Full);
+        }
         let room = Room {
             usable: output.usable,
             occupied: self
@@ -985,23 +1010,47 @@ impl WindowManager {
         let Some(window) = self.windows.get(id) else {
             return;
         };
-        let rule = config.rules.for_window(window, current);
         let size = rule.size().unwrap_or(window.outer_area(metrics).size);
         // A dialog opens over its parent, unless a rule places it.
-        let corner = match (rule.position, self.dialog_area(id, size)) {
+        let over_parent = ruled_output
+            .is_none()
+            .then(|| self.dialog_area(id, size))
+            .flatten();
+        let corner = match (rule.position, over_parent) {
             (Some(position), _) => position.corner(room.usable, size),
             (None, Some(over_parent)) => over_parent.loc,
             (None, None) => config.settings.placement.place(size, &room),
         };
         let outer = Rectangle::new(corner, size);
+        if let Some(window) = self.window_mut(id) {
+            window.place_initially(outer, metrics);
+        }
+        self.apply_rule(id, &rule, outer, output);
+        // Its first focus too: Fluxbox's [FocusProtection] {Gain} and
+        // {Refuse} decide it over focusNewWindows.
+        match rule.focus_stealing {
+            Some(FocusStealing::Allow) => self.focus(Some(id)),
+            Some(FocusStealing::Deny) => self.give_focus_back(id),
+            Some(FocusStealing::Default) | None => {}
+        }
+        // A rule may have sent the new window out of sight.
+        self.focus_most_recent();
+    }
+
+    /// Gives the window `id`, just placed at `outer` on `output`, the
+    /// states and traits `rule` says.
+    fn apply_rule(&mut self, id: WindowId, rule: &RuleSettings, outer: Area, output: OutputArea) {
+        let metrics = self.metrics;
         let workspace = rule
             .workspace
             .map(Workspace::numbered)
             .filter(|workspace| self.workspaces.contains(*workspace));
+        if let Some(layer) = rule.layer {
+            self.windows.set_layer(id, layer);
+        }
         let Some(window) = self.window_mut(id) else {
             return;
         };
-        window.place_initially(outer, metrics);
         if let Some(workspace) = workspace {
             window.move_to_workspace(workspace);
         }
@@ -1017,23 +1066,18 @@ impl WindowManager {
         if let Some(is_pseudo_transparent) = rule.pseudo_transparent {
             window.set_pseudo_transparent(is_pseudo_transparent);
         }
-        if let Some(layer) = rule.layer {
-            self.windows.set_layer(id, layer);
+        if let Some(is_shaded) = rule.shaded {
+            window.set_shaded(is_shaded);
         }
-        if let Some(focus_stealing) = rule.focus_stealing
-            && let Some(window) = self.window_mut(id)
-        {
+        if let Some(alpha) = rule.alpha {
+            window.set_alpha(alpha.alpha());
+        }
+        for (exemption, is_exempt) in &rule.exemptions {
+            window.set_exempt(*exemption, *is_exempt);
+        }
+        if let Some(focus_stealing) = rule.focus_stealing {
             window.set_focus_stealing(focus_stealing);
         }
-        // Its first focus too: Fluxbox's [FocusProtection] {Gain} and
-        // {Refuse} decide it over focusNewWindows.
-        match rule.focus_stealing {
-            Some(FocusStealing::Allow) => self.focus(Some(id)),
-            Some(FocusStealing::Deny) => self.give_focus_back(id),
-            Some(FocusStealing::Default) | None => {}
-        }
-        // A rule may have sent the new window out of sight.
-        self.focus_most_recent();
     }
 
     /// Applies `change` to `window`, given the theme's metrics.
@@ -1166,6 +1210,7 @@ impl WindowManager {
             .top_down()
             .filter(|window| {
                 (windows.admits_minimized() || !window.state().is_minimized)
+                    && !window.is_exempt(Exemption::Cycling)
                     && windows.matches(window, current)
             })
             .map(Window::id)
@@ -2008,6 +2053,51 @@ mod tests {
             Rectangle::new((560, 240).into(), Size::from((800, 600))),
             "centered at the size the rule sets"
         );
+    }
+
+    #[test]
+    fn rules_choose_the_output_frame_and_state_and_what_a_window_is_spared() {
+        let mut config = Config::built_in();
+        config.rules = toml::from_str::<Rules>(
+            "[[rule]]\nmatch = { app_id = \"player\" }\noutput = \"RIGHT\"\n\
+             frame = \"none\"\nshaded = true\nalpha = 128\nhidden_from_cycling = true\n\
+             refuse_fullscreen = true\nhidden_from_window_list = true\n",
+        )
+        .expect("valid rules");
+        let mut desk = Desk::with_config(config);
+        let right = OutputArea {
+            whole: Rectangle::new((1920, 0).into(), (1920, 1080).into()),
+            usable: Rectangle::new((1920, 0).into(), (1920, 1080).into()),
+        };
+        desk.manager.set_output_areas(
+            OutputAreas::new(output(0), vec![right])
+                .named(vec!["LEFT".to_owned(), "RIGHT".to_owned()]),
+        );
+        let other = desk.open();
+        let player = desk.open_app("player", (300, 200));
+        let window = desk.window(player);
+        assert!(
+            right.whole.contains(desk.outer(player).loc),
+            "on the output named"
+        );
+        assert!(!window.has_frame());
+        assert!(window.state().is_shaded);
+        assert!(window.is_exempt(Exemption::WindowList));
+        assert!(
+            (window.opacity(WindowAlpha {
+                focused: 255,
+                unfocused: 255
+            }) - 128.0 / 255.0)
+                .abs()
+                < 0.01
+        );
+        assert!(
+            !desk.manager.honor(player, ClientRequest::Fullscreen),
+            "its program may not make it fullscreen"
+        );
+        desk.manager.focus(Some(other));
+        desk.run(&action("next-window"));
+        assert_eq!(desk.manager.focused(), Some(other), "cycling skips it");
     }
 
     #[test]

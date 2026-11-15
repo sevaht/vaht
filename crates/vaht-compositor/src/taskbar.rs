@@ -44,7 +44,7 @@ use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
 use crate::scene::{PanelTexture, SceneElement};
 use crate::tray::{ItemIcon, Tray, TrayItem, TrayItemKey};
-use crate::window_manager::{Area, Window, WindowId, WindowManager};
+use crate::window_manager::{Area, Exemption, Window, WindowId, WindowManager};
 
 /// What clicking the taskbar can report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -617,6 +617,7 @@ impl TaskbarContent {
             .windows_top_down()
             .filter(|window| {
                 window.is_placed()
+                    && !window.is_exempt(Exemption::WindowList)
                     && settings.window_list.show.matches(window, current)
                     && is_on_own_output(window)
             })

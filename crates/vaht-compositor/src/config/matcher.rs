@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use regex::Regex;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 
-use crate::window_manager::{Window, Workspace};
+use crate::window_manager::{Exemption, Window, Workspace};
 
 /// Which windows something is about.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
@@ -35,6 +35,8 @@ pub(crate) struct WindowMatcher {
     sticky: Option<StateSelector>,
     /// Whether it is a dialog of another window (Fluxbox's `[transient]`).
     transient: Option<StateSelector>,
+    /// Whether a rule leaves it off the taskbar.
+    hidden_from_window_list: Option<StateSelector>,
     /// What it must not match.
     not: Option<Box<WindowMatcher>>,
 }
@@ -70,6 +72,9 @@ impl WindowMatcher {
             && self
                 .transient
                 .is_none_or(|selector| selector.matches(window.parent().is_some()))
+            && self
+                .hidden_from_window_list
+                .is_none_or(|selector| selector.matches(window.is_exempt(Exemption::WindowList)))
             && self
                 .not
                 .as_ref()

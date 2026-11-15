@@ -413,8 +413,9 @@ list:
   regex matched in any letter case (`(?i)^(?:xterm)$`): WM_CLASS's instance
   is most often its class in other letters, and vaht keeps only the class.
 - Built so far: `app_id`, `title`, `workspace`, `minimized`, `sticky`,
-  `transient` (whether it is a dialog of another window) and `not`. The X11 keys, `layer`, `output` and `hidden_from_window_list` come
-  with the features they describe.
+  `transient` (whether it is a dialog of another window),
+  `hidden_from_window_list` and `not`. The X11 keys, `layer` and `output`
+  come with the features they describe.
 
 ---
 
@@ -660,9 +661,17 @@ focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
   asking; `default`: when the focused program made the token, recently.
   It decides a new window's first focus too: `allow` takes it even when
   `focus_new_windows` is off, `deny` gives it back to the window that had
-  it). They apply
-  when the window first
-  gets its place. The other keys are refused until their features exist.
+  it), `output` (a head number, from 1 left to right as Fluxbox's
+  `[Head]`, or a connector's name), `shaded`, `frame` (`full` or `none`;
+  `titlebar-only` and `border-only` are refused until frames can be
+  drawn so), `alpha` (one opacity, or `[focused, unfocused]`, 0 to 255),
+  `hidden_from_window_list` (left off the taskbar, `[IconHidden]`),
+  `hidden_from_cycling` (`[FocusHidden]`; Fluxbox's `[Hidden]` sets
+  both), `ignore_size_hints` (resizing by hand is not held to the sizes
+  the program accepts) and `refuse_maximize` / `refuse_fullscreen` (the
+  program's asking is refused; the user can still do either). They apply
+  when the window first gets its place, an `output` before its position.
+  The other keys are refused until their features exist.
   `vaht import fluxbox` converts `apps` (workspaces counted from 0 there)
   and reports the rest.
 

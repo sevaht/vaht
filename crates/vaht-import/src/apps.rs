@@ -52,10 +52,14 @@ struct Block {
 impl<'text> AppsFile<'text> {
     /// Fluxbox's yes-or-no settings (lowercase) and the rule keys vaht
     /// writes them as.
-    const FLAGS: [(&str, &str); 3] = [
+    const FLAGS: [(&str, &str); 7] = [
         ("sticky", "sticky"),
         ("minimized", "minimized"),
         ("pseudotransparent", "pseudo_transparent"),
+        ("shaded", "shaded"),
+        ("iconhidden", "hidden_from_window_list"),
+        ("focushidden", "hidden_from_cycling"),
+        ("ignoresizehints", "ignore_size_hints"),
     ];
 
     /// Fluxbox's settings (lowercase) whose value is a name vaht writes in
@@ -228,32 +232,59 @@ impl<'text> AppsFile<'text> {
             .first()
             .copied()
             .unwrap_or_default();
-        let is_yes = value.eq_ignore_ascii_case("yes");
-        let mut not_yet = || {
+        let lowered = name.to_ascii_lowercase();
+        if lowered == "tab" {
             report.note(
+                self.path,
+                line,
+                Reason::Dropped,
+                format!("[{name}] {rest} (tabs are gone)"),
+            );
+            return;
+        }
+        match Self::keys_for(&lowered, argument, value) {
+            Some(keys) => {
+                for (key, value) in keys {
+                    block.rule.insert(key, Item::Value(value));
+                }
+            }
+            None => report.note(
                 self.path,
                 line,
                 Reason::NotYetInVaht,
                 format!("[{name}] {rest}"),
-            );
-        };
-        match name.to_ascii_lowercase().as_str() {
-            "workspace" => match value.parse::<i64>() {
-                Ok(zero_based) => {
-                    block
-                        .rule
-                        .insert("workspace", Item::Value(Value::from(zero_based + 1)));
-                }
-                Err(_) => not_yet(),
-            },
+            ),
+        }
+    }
+
+    /// Returns the rule keys the setting `name` (lowercase), with
+    /// `argument` and `value`, becomes; none if vaht cannot say it.
+    fn keys_for(name: &str, argument: &str, value: &str) -> Option<Vec<(&'static str, Value)>> {
+        let is_yes = value.eq_ignore_ascii_case("yes");
+        let one = |key: &'static str, value: Value| Some(vec![(key, value)]);
+        match name {
+            "workspace" => {
+                let zero_based = value.trim().parse::<i64>().ok()?;
+                one("workspace", Value::from(zero_based + 1))
+            }
             flag if let Some((_, key)) = Self::FLAGS.iter().find(|(name, _)| *name == flag) => {
-                block.rule.insert(key, Item::Value(Value::from(is_yes)));
+                one(key, Value::from(is_yes))
             }
-            "fullscreen" if is_yes => {
-                block
-                    .rule
-                    .insert("placement", Item::Value(Value::from("fullscreen")));
+            "hidden" => Some(vec![
+                ("hidden_from_window_list", Value::from(is_yes)),
+                ("hidden_from_cycling", Value::from(is_yes)),
+            ]),
+            "head" => {
+                let head = value.trim().parse::<i64>().ok().filter(|head| *head >= 1)?;
+                one("output", Value::from(head))
             }
+            "deco" => match value.trim().to_ascii_lowercase().as_str() {
+                "normal" | "full" => one("frame", Value::from("full")),
+                "none" => one("frame", Value::from("none")),
+                _ => None,
+            },
+            "alpha" => one("alpha", Self::alpha(value)?),
+            "fullscreen" if is_yes => one("placement", Value::from("fullscreen")),
             "maximized" => {
                 let placement = match value.to_ascii_lowercase().as_str() {
                     "yes" => Some("maximized"),
@@ -261,46 +292,27 @@ impl<'text> AppsFile<'text> {
                     "vert" | "vertical" => Some("maximized vertical"),
                     _ => None,
                 };
-                if let Some(placement) = placement {
-                    block
-                        .rule
-                        .insert("placement", Item::Value(Value::from(placement)));
-                }
+                Some(
+                    placement
+                        .map(|placement| ("placement", Value::from(placement)))
+                        .into_iter()
+                        .collect(),
+                )
             }
-            "position" => match Self::position(argument, value) {
-                Some(position) => {
-                    block.rule.insert("position", Item::Value(position));
-                }
-                None => not_yet(),
-            },
+            "position" => one("position", Self::position(argument, value)?),
             named
                 if let Some((_, key, translate)) = Self::NAMED_VALUES
                     .iter()
                     .find(|(name, _, _)| *name == named) =>
             {
-                match translate(value) {
-                    Some(vaht) => {
-                        block.rule.insert(key, Item::Value(Value::from(vaht)));
-                    }
-                    None => not_yet(),
-                }
+                one(key, Value::from(translate(value)?))
             }
-            "dimensions" => match Self::pair(value) {
-                Some((width, height)) if width > 0 && height > 0 => {
-                    block.rule.insert(
-                        "size",
-                        Item::Value(Value::Array([width, height].into_iter().collect())),
-                    );
-                }
-                _ => not_yet(),
-            },
-            "tab" => report.note(
-                self.path,
-                line,
-                Reason::Dropped,
-                format!("[{name}] {rest} (tabs are gone)"),
-            ),
-            _ => not_yet(),
+            "dimensions" => {
+                let (width, height) =
+                    Self::pair(value).filter(|(width, height)| *width > 0 && *height > 0)?;
+                one("size", Value::Array([width, height].into_iter().collect()))
+            }
+            _ => None,
         }
     }
 
@@ -323,6 +335,24 @@ impl<'text> AppsFile<'text> {
         rules.push(rule);
     }
 
+    /// Returns the `alpha` `[Alpha] {focused [unfocused]}` gives, each
+    /// clamped to 0 to 255: one number for both, else both.
+    fn alpha(value: &str) -> Option<Value> {
+        let numbers: Vec<i64> = value
+            .split_whitespace()
+            .map(|word| word.parse::<i64>().map(|alpha| alpha.clamp(0, 255)))
+            .collect::<Result<_, _>>()
+            .ok()?;
+        match numbers.as_slice() {
+            [both] => Some(Value::from(*both)),
+            [focused, unfocused] if focused == unfocused => Some(Value::from(*focused)),
+            [focused, unfocused] => {
+                Some(Value::Array([*focused, *unfocused].into_iter().collect()))
+            }
+            _ => None,
+        }
+    }
+
     /// Reads `x y` as two whole numbers; percentages are not read.
     fn pair(value: &str) -> Option<(i64, i64)> {
         let mut numbers = value.split_whitespace().map(str::parse::<i64>);
@@ -337,7 +367,8 @@ impl<'text> AppsFile<'text> {
 mod tests {
     use super::*;
 
-    /// My fluxland `apps`, and a `[transient]` block.
+    /// My fluxland `apps`, a `[transient]` block and one of every other
+    /// setting.
     const APPS: &str = "\
 [app] (class=kitty)
   [PseudoTransparent] {yes}
@@ -351,6 +382,14 @@ mod tests {
 [end]
 [transient] (title=Save.*)
   [Layer] {AboveDock}
+[end]
+[app] (class=mpv)
+  [Head] {2}
+  [Deco] {NONE}
+  [Alpha] {255 200}
+  [Hidden] {yes}
+  [Shaded] {no}
+  [IgnoreSizeHints] {yes}
 [end]
 ";
 
@@ -366,7 +405,10 @@ mod tests {
              [[rule]]\nmatch = { app_id = \"steam\", transient = false }\n\
              focus_stealing = \"allow\"\nworkspace = 2\n\n\
              [[rule]]\nmatch = { title = { regex = \"Save.*\" }, transient = true }\n\
-             layer = \"above-dock\"\n"
+             layer = \"above-dock\"\n\n\
+             [[rule]]\nmatch = { app_id = \"mpv\", transient = false }\noutput = 2\n\
+             frame = \"none\"\nalpha = [255, 200]\nhidden_from_window_list = true\n\
+             hidden_from_cycling = true\nshaded = false\nignore_size_hints = true\n"
         );
         assert!(report.notes().is_empty(), "{report}");
     }

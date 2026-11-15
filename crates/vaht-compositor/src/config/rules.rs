@@ -19,7 +19,9 @@ use std::num::NonZeroUsize;
 use smithay::utils::{Logical, Point, Rectangle, Size};
 
 use super::matcher::WindowMatcher;
-use crate::window_manager::{Axes, Placement, StackLayer, TileCell, Window, Workspace};
+use crate::window_manager::{
+    Axes, Exemption, Placement, StackLayer, TileCell, Window, WindowAlpha, Workspace,
+};
 
 /// Every rule, in order.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
@@ -72,6 +74,70 @@ struct Rule {
     layer: Option<StackLayer>,
     /// Whether they may come forward when their program asks.
     focus_stealing: Option<FocusStealing>,
+    /// The output they open on: a head number, from 1 left to right, or
+    /// a connector's name.
+    output: Option<RuleOutput>,
+    /// Whether they open rolled up into their titlebar.
+    shaded: Option<bool>,
+    /// Whether vaht frames them.
+    frame: Option<RuleFrame>,
+    /// Their opacity: one for both, or `[focused, unfocused]`.
+    alpha: Option<RuleAlpha>,
+    /// Whether the taskbar leaves them out.
+    hidden_from_window_list: Option<bool>,
+    /// Whether window cycling skips them.
+    hidden_from_cycling: Option<bool>,
+    /// Whether resizing them by hand ignores the sizes their program
+    /// accepts.
+    ignore_size_hints: Option<bool>,
+    /// Whether their program's asking to maximize them is refused.
+    refuse_maximize: Option<bool>,
+    /// Whether their program's asking to make them fullscreen is refused.
+    refuse_fullscreen: Option<bool>,
+}
+
+/// The output a rule opens a window on.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(untagged)]
+pub(crate) enum RuleOutput {
+    /// The head with this number, from 1, left to right then top to
+    /// bottom (Fluxbox's `[Head]`).
+    Head(NonZeroUsize),
+    /// The output on the connector of this name, such as `DP-1`.
+    Named(String),
+}
+
+/// Whether a rule has vaht frame a window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum RuleFrame {
+    /// Framed, unless fullscreen or drawing its own.
+    Full,
+    /// Never framed.
+    None,
+}
+
+/// A rule's opacity for a window: 0 invisible to 255 opaque.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(untagged)]
+pub(crate) enum RuleAlpha {
+    /// The same whether focused or not.
+    Both(u8),
+    /// `[focused, unfocused]`.
+    Each([u8; 2]),
+}
+
+impl RuleAlpha {
+    /// Returns the opacities.
+    pub(crate) const fn alpha(self) -> WindowAlpha {
+        match self {
+            Self::Both(alpha) => WindowAlpha {
+                focused: alpha,
+                unfocused: alpha,
+            },
+            Self::Each([focused, unfocused]) => WindowAlpha { focused, unfocused },
+        }
+    }
 }
 
 /// Whether a window may come forward, with focus, when its program asks
@@ -114,8 +180,22 @@ fn deserialize_layer<'de, D: serde::Deserializer<'de>>(
 
 impl Rule {
     /// Returns the rule's settings.
-    const fn settings(&self) -> RuleSettings {
+    fn settings(&self) -> RuleSettings {
         RuleSettings {
+            output: self.output.clone(),
+            shaded: self.shaded,
+            frame: self.frame,
+            alpha: self.alpha,
+            exemptions: [
+                (Exemption::WindowList, self.hidden_from_window_list),
+                (Exemption::Cycling, self.hidden_from_cycling),
+                (Exemption::SizeHints, self.ignore_size_hints),
+                (Exemption::ClientMaximize, self.refuse_maximize),
+                (Exemption::ClientFullscreen, self.refuse_fullscreen),
+            ]
+            .into_iter()
+            .filter_map(|(exemption, is_exempt)| Some((exemption, is_exempt?)))
+            .collect(),
             workspace: self.workspace,
             sticky: self.sticky,
             minimized: self.minimized,
@@ -130,8 +210,18 @@ impl Rule {
 }
 
 /// What rules say about a window; `None` where they say nothing.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct RuleSettings {
+    /// The output it opens on.
+    pub(crate) output: Option<RuleOutput>,
+    /// Whether it opens rolled up.
+    pub(crate) shaded: Option<bool>,
+    /// Whether vaht frames it.
+    pub(crate) frame: Option<RuleFrame>,
+    /// Its opacity.
+    pub(crate) alpha: Option<RuleAlpha>,
+    /// What it is exempt from, or not, where a rule says.
+    pub(crate) exemptions: Vec<(Exemption, bool)>,
     /// The workspace it opens on, from 1.
     pub(crate) workspace: Option<NonZeroUsize>,
     /// Whether it shows on every workspace.
@@ -162,7 +252,16 @@ impl RuleSettings {
     /// Returns these settings with `later`'s keys replacing theirs.
     #[must_use]
     fn overridden_by(self, later: &Self) -> Self {
+        let mut exemptions = self.exemptions;
+        exemptions
+            .retain(|(exemption, _)| !later.exemptions.iter().any(|(said, _)| said == exemption));
+        exemptions.extend(later.exemptions.iter().copied());
         Self {
+            output: later.output.clone().or(self.output),
+            shaded: later.shaded.or(self.shaded),
+            frame: later.frame.or(self.frame),
+            alpha: later.alpha.or(self.alpha),
+            exemptions,
             workspace: later.workspace.or(self.workspace),
             sticky: later.sticky.or(self.sticky),
             minimized: later.minimized.or(self.minimized),
@@ -361,12 +460,40 @@ mod tests {
 
     #[rstest]
     #[case::no_match("[[rule]]\nworkspace = 2\n", "missing field `match`")]
-    #[case::not_yet("[[rule]]\nmatch = {}\noutput = 2\n", "unknown field")]
+    #[case::not_yet("[[rule]]\nmatch = {}\ntag = \"x\"\n", "unknown field")]
+    #[case::frame("[[rule]]\nmatch = {}\nframe = \"tiny\"\n", "unknown variant")]
     #[case::bad_placement("[[rule]]\nmatch = {}\nplacement = \"huge\"\n", "placement is")]
     #[case::workspace_zero("[[rule]]\nmatch = {}\nworkspace = 0\n", "nonzero")]
     fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {
         let error = rules(text).expect_err(text);
         assert!(error.contains(expected), "{error}");
+    }
+
+    #[test]
+    fn every_rule_key_reads_and_later_exemptions_override_earlier_ones() {
+        let rules: Rules = toml::from_str(
+            "[[rule]]\nmatch = {}\noutput = 2\nshaded = true\nframe = \"none\"\nalpha = 200\n\
+             hidden_from_window_list = true\nhidden_from_cycling = true\n\
+             ignore_size_hints = true\nrefuse_maximize = true\nrefuse_fullscreen = true\n\
+             [[rule]]\nmatch = {}\noutput = \"DP-1\"\nalpha = [255, 128]\n\
+             hidden_from_cycling = false\n",
+        )
+        .expect("valid");
+        let merged = rules.rule[0]
+            .settings()
+            .overridden_by(&rules.rule[1].settings());
+        assert_eq!(merged.output, Some(RuleOutput::Named("DP-1".to_owned())));
+        assert_eq!(merged.frame, Some(RuleFrame::None));
+        assert_eq!(
+            merged.alpha.map(RuleAlpha::alpha),
+            Some(WindowAlpha {
+                focused: 255,
+                unfocused: 128
+            })
+        );
+        assert!(merged.exemptions.contains(&(Exemption::Cycling, false)));
+        assert!(merged.exemptions.contains(&(Exemption::WindowList, true)));
+        assert_eq!(merged.exemptions.len(), 5);
     }
 
     #[test]

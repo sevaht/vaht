@@ -44,7 +44,7 @@ pub(crate) use self::outputs::{
     OutputSettings, OutputTransform, Vrr,
 };
 pub(crate) use self::overrides::{SettingChange, SettingOverrides};
-pub(crate) use self::rules::{FocusStealing, Rules};
+pub(crate) use self::rules::{FocusStealing, RuleFrame, RuleOutput, RuleSettings, Rules};
 pub(crate) use self::settings::{
     AccelProfile, AccelSpeed, ClickMethod, DeviceSettings, FocusModel, FrameSettings,
     InputSettings, MenuSearch, ScrollMethod, SendEvents, Settings, SnapSettings, TapButtonMap,

@@ -32,12 +32,43 @@ pub(crate) struct OutputAreas {
     primary: OutputArea,
     /// The rest.
     others: Vec<OutputArea>,
+    /// Each output's connector name, the primary output's first, when
+    /// known.
+    names: Vec<String>,
 }
 
 impl OutputAreas {
     /// The areas of the primary output, `primary`, and of the `others`.
     pub(crate) const fn new(primary: OutputArea, others: Vec<OutputArea>) -> Self {
-        Self { primary, others }
+        Self {
+            primary,
+            others,
+            names: Vec::new(),
+        }
+    }
+
+    /// Names the outputs: `names` are their connectors', the primary
+    /// output's first.
+    #[must_use]
+    pub(crate) fn named(mut self, names: Vec<String>) -> Self {
+        self.names = names;
+        self
+    }
+
+    /// Returns the areas of the output on the connector `name`, if there
+    /// is one.
+    pub(crate) fn by_name(&self, name: &str) -> Option<OutputArea> {
+        self.names
+            .iter()
+            .position(|known| known == name)
+            .and_then(|index| self.iter().nth(index))
+            .copied()
+    }
+
+    /// Returns the areas of head `number`, from 1 left to right and then
+    /// top to bottom, if there is one.
+    pub(crate) fn head(&self, number: NonZeroUsize) -> Option<OutputArea> {
+        self.heads().get(number.get() - 1).copied()
     }
 
     /// Returns the primary output's areas.
