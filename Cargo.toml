@@ -101,6 +101,13 @@ debug = true
 lto = true         # optimize across crate boundaries
 codegen-units = 1   # optimize the crate as one unit
 
+# A release build with full debug info, for testing on hardware: as fast
+# as a release, with readable backtraces and a debugger's view.
+# `cargo build --profile profiling`, built in target/profiling/.
+[profile.profiling]
+inherits = "release"
+debug = true
+
 [workspace.lints.rust]
 missing_docs = "warn"
 # deny, not forbid: one documented site, the shared-memory copy in
