@@ -314,6 +314,26 @@ fn an_x11_window_moving_itself_sees_the_pointer_where_it_is() {
 }
 
 #[test]
+fn autostart_programs_find_xwayland_in_display() {
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let seen = files.path().join("display");
+    let settings = format!(
+        "[session]\nautostart = [\"printf %s \\\"$DISPLAY\\\" > '{0}.part'; mv '{0}.part' '{0}'\"]\n",
+        seen.display()
+    );
+    let vaht = HeadlessVaht::start_with_xwayland(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", settings.as_bytes())],
+    );
+    let display = vaht_test_support::wait_for_file(&seen, |_| true);
+    assert_eq!(
+        display,
+        vaht.x_display(),
+        "an X program in the startup script finds X"
+    );
+}
+
+#[test]
 fn x_resources_named_in_the_settings_are_loaded_for_x_programs() {
     let vaht = HeadlessVaht::start_with_xwayland(
         Path::new(EXECUTABLE),

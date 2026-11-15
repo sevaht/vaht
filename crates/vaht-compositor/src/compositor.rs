@@ -124,6 +124,16 @@ use crate::xwayland::XwaylandServer;
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::xwayland::{X11Surface, X11Wm};
 
+/// Where the autostart programs are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Autostart {
+    /// Held until Xwayland is ready, so that X programs among them find it
+    /// in `DISPLAY`.
+    WaitingForXwayland,
+    /// Started, or never held.
+    Started,
+}
+
 /// The running compositor.
 pub struct Compositor {
     /// Issues ids, creates globals and inserts clients.
@@ -156,6 +166,8 @@ pub struct Compositor {
     pub(crate) fence_waits: FenceWaits,
     /// Whether the activation environment is told of the session.
     exports_activation_environment: bool,
+    /// Where the autostart programs are.
+    autostart: Autostart,
     /// Delayed commands waiting to run.
     delays: Vec<(Delay, Timer<Self>)>,
     /// Where windows were on outputs that left, to go back to them.
@@ -356,6 +368,7 @@ impl Compositor {
             frame_pacing: FramePacing::default(),
             fence_waits: FenceWaits::default(),
             exports_activation_environment: false,
+            autostart: Autostart::Started,
             delays: Vec::new(),
             output_memory: OutputMemory::default(),
             input_emulation: None,
@@ -400,8 +413,9 @@ impl Compositor {
 
     /// Starts what runs alongside the compositor once it is made: the
     /// configuration's watch, the taskbar's services, input devices'
-    /// settings, Xwayland (if `allows_xwayland`), the autostart programs,
-    /// and the outputs' `output_changes`.
+    /// settings, Xwayland (if `allows_xwayland`), the autostart programs
+    /// (once Xwayland is ready, if it is starting), and the outputs'
+    /// `output_changes`.
     fn start(&mut self, allows_xwayland: bool, output_changes: &OutputChanges) {
         self.config_source.watch(&self.loop_handle, &self.ledger);
         self.start_taskbar_services();
@@ -416,6 +430,20 @@ impl Compositor {
             .session
             .update_activation_environment
             .applies(owns_seat);
+        if self.xwayland.is_some() {
+            self.autostart = Autostart::WaitingForXwayland;
+            // Wayland services find the session meanwhile.
+            self.update_activation_environment(false);
+        } else {
+            self.run_autostart();
+        }
+        self.follow_output_changes(output_changes);
+    }
+
+    /// Tells the activation environment of the session, then runs the
+    /// autostart programs, which may need the services it starts.
+    fn run_autostart(&mut self) {
+        self.autostart = Autostart::Started;
         let autostart = &self.config.settings.session.autostart;
         if let Some(command) = self.activation_update(false) {
             self.launcher.run_in_order(&command, autostart);
@@ -424,7 +452,23 @@ impl Compositor {
                 self.launcher.run(command_line);
             }
         }
-        self.follow_output_changes(output_changes);
+    }
+
+    /// Runs the autostart programs held for Xwayland, if they still wait;
+    /// else tells the activation environment what changed.
+    fn finish_xwayland_start(&mut self) {
+        if self.autostart == Autostart::WaitingForXwayland {
+            self.run_autostart();
+        } else {
+            self.update_activation_environment(false);
+        }
+    }
+
+    /// Hears that Xwayland stopped before it was ready: the autostart
+    /// programs run without it.
+    pub(crate) fn xwayland_failed(&mut self) {
+        tracing::warn!("Xwayland stopped before it was ready; autostart runs without X");
+        self.finish_xwayland_start();
     }
 
     /// Offers `linux-dmabuf` with what `backend` reads: with feedback on
@@ -913,7 +957,7 @@ impl Compositor {
 
     /// Becomes the window manager of Xwayland, ready on `socket` for
     /// `display_number`, whose Wayland client is `client`; programs started
-    /// from now on find it in `DISPLAY`.
+    /// from now on, the autostart programs first, find it in `DISPLAY`.
     pub(crate) fn xwayland_ready(
         &mut self,
         socket: std::os::unix::net::UnixStream,
@@ -929,6 +973,7 @@ impl Compositor {
             Ok(wm) => wm,
             Err(error) => {
                 tracing::warn!(%error, "could not become Xwayland's window manager");
+                self.finish_xwayland_start();
                 return;
             }
         };
@@ -948,8 +993,8 @@ impl Compositor {
                 self.launcher.set_environment("DISPLAY".to_owned(), name);
             }
         }
-        // Services started from now on find X too.
-        self.update_activation_environment(false);
+        // Services and programs started from now on find X too.
+        self.finish_xwayland_start();
     }
 
     /// Tells the D-Bus and systemd activation environment of the session,

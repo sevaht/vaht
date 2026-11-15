@@ -100,7 +100,7 @@ impl XwaylandServer {
                         x11_socket,
                         display_number,
                     } => compositor.xwayland_ready(x11_socket, display_number, client.clone()),
-                    XWaylandEvent::Error => tracing::warn!("Xwayland stopped before it was ready"),
+                    XWaylandEvent::Error => compositor.xwayland_failed(),
                 },
             )
             .map_err(|error| format!("Xwayland's events cannot be registered: {}", error.error))?;
