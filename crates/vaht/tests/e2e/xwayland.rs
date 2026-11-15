@@ -314,6 +314,24 @@ fn an_x11_window_moving_itself_sees_the_pointer_where_it_is() {
 }
 
 #[test]
+fn an_x11_window_shows_the_icon_it_sets_on_its_titlebar() {
+    const ICON: [u8; 3] = [0xff, 0xff, 0x00];
+    let mut desktop = XDesktop::new();
+    let window = desktop.open_window();
+    let content = desktop.wait_for_color(X_COLOR);
+    desktop.x11.set_icon(window, 32, ICON);
+    let metrics = vaht_test_support::BUILT_IN_METRICS;
+    let point = (
+        content.left + metrics.titlebar_height / 2,
+        content.top - metrics.border_width - metrics.titlebar_height / 2,
+    );
+    assert!(
+        desktop.wait_for_color_at(point, ICON),
+        "the icon shows left of the title"
+    );
+}
+
+#[test]
 fn autostart_programs_find_xwayland_in_display() {
     let files = tempfile::tempdir().expect("a temporary directory");
     let seen = files.path().join("display");

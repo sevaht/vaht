@@ -210,6 +210,33 @@ impl X11Client {
         self.connection.flush().expect("the request is sent");
     }
 
+    /// Gives `window` an icon (`_NET_WM_ICON`): a `side` × `side` square
+    /// all `color`, opaque.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server refuses the request.
+    pub fn set_icon(&mut self, window: Window, side: u32, color: [u8; 3]) {
+        let [red, green, blue] = color.map(u32::from);
+        let pixel = 0xff00_0000 | red << 16 | green << 8 | blue;
+        let count = usize::try_from(side * side).expect("a small icon");
+        let values: Vec<u32> = [side, side]
+            .into_iter()
+            .chain(std::iter::repeat_n(pixel, count))
+            .collect();
+        let net_wm_icon = self.atom(b"_NET_WM_ICON");
+        self.connection
+            .change_property32(
+                PropMode::REPLACE,
+                window,
+                net_wm_icon,
+                AtomEnum::CARDINAL,
+                &values,
+            )
+            .expect("the request is sent");
+        self.connection.flush().expect("the request is sent");
+    }
+
     /// Opens and maps an override-redirect window (a menu) covering `area`
     /// (`(x, y)` and `(width, height)` on the X screen), all `color`.
     ///

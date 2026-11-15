@@ -116,8 +116,8 @@ use crate::toplevels::{Toplevel, Toplevels};
 use crate::touch;
 use crate::tray::TrayAction;
 use crate::window_manager::{
-    Axes, ClientRequest, FramePart, OutputArea, OutputAreas, Placement, PlacementKind, Window,
-    WindowDrag, WindowId, WindowManager, WorkspaceTarget,
+    Axes, ClientIcon, ClientRequest, FramePart, OutputArea, OutputAreas, Placement, PlacementKind,
+    Window, WindowDrag, WindowId, WindowManager, WorkspaceTarget,
 };
 use crate::workspace_pager::{WorkspaceFacts, WorkspaceRequest};
 use crate::xwayland::XwaylandServer;
@@ -1069,12 +1069,37 @@ impl Compositor {
         }
         if let Some(server) = &mut self.xwayland {
             server.untrack_shape(surface);
+            server.untrack_icon(surface);
         }
         if let Some(window) = self.toplevels.remove_x11(surface) {
             self.window_manager.remove_window(window);
             self.settle();
             self.schedule_render();
         }
+    }
+
+    /// Reads the X11 windows' icons that changed, and shows them.
+    pub(crate) fn xwayland_icons_changed(&mut self) {
+        let Some(server) = &mut self.xwayland else {
+            return;
+        };
+        let changed = server.follow_icons();
+        let toplevels = &self.toplevels;
+        let windows: Vec<WindowId> = self
+            .window_manager
+            .windows_top_down()
+            .map(Window::id)
+            .filter(|&window| {
+                toplevels
+                    .get(window)
+                    .and_then(Toplevel::x11)
+                    .is_some_and(|surface| changed.contains(&surface.window_id()))
+            })
+            .collect();
+        for window in windows {
+            self.commit_toplevel(window);
+        }
+        self.schedule_render();
     }
 
     /// Reads the X11 windows' shapes that changed, and draws again if any
@@ -2621,7 +2646,17 @@ impl Compositor {
         };
         let (parent, is_modal) = toplevel.family();
         let backend = &mut self.backend;
-        let committed = toplevel.committed_state(|buffer| backend.read_icon(buffer));
+        let mut committed = toplevel.committed_state(|buffer| backend.read_icon(buffer));
+        // An X program's icon is a property of its window, which vaht
+        // reads over its own connection.
+        if let Some(surface) = toplevel.x11()
+            && let Some(icon) = self
+                .xwayland
+                .as_ref()
+                .and_then(|server| server.icon_of(surface))
+        {
+            committed.icon = Some(ClientIcon::Pixels(icon.clone()));
+        }
         // Before the commit, so a new dialog is placed over its parent.
         let parent = parent.and_then(|link| self.toplevels.window_named(&link));
         self.window_manager.set_family(window, parent, is_modal);

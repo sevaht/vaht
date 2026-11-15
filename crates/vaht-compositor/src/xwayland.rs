@@ -9,6 +9,7 @@
 //! ([`XwaylandServer::unmanaged`]). The clipboard and primary selection
 //! pass both ways between X and Wayland programs.
 
+mod icon;
 mod shape;
 
 use std::os::fd::OwnedFd;
@@ -36,6 +37,7 @@ use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
 use x11rb::wrapper::ConnectionExt as _;
 
+use self::icon::IconTracker;
 use self::shape::ShapeTracker;
 pub(crate) use self::shape::WindowShape;
 use crate::Compositor;
@@ -55,6 +57,8 @@ pub(crate) struct XwaylandServer {
     unmanaged: Vec<X11Surface>,
     /// Every window's shape, once Xwayland is ready.
     shapes: Option<ShapeTracker>,
+    /// Every managed window's icon, once Xwayland is ready.
+    icons: Option<IconTracker>,
     /// Xwayland's readiness, registered while the server lives.
     _source: EventSource<Compositor>,
 }
@@ -109,12 +113,14 @@ impl XwaylandServer {
             display_number: None,
             unmanaged: Vec::new(),
             shapes: None,
+            icons: None,
             _source: source,
         })
     }
 
     /// Becomes the window manager of the ready server on `display_number`,
-    /// and follows its windows' shapes over a connection of vaht's own.
+    /// and follows its windows' shapes and icons over connections of
+    /// vaht's own.
     pub(crate) fn manage(
         &mut self,
         wm: X11Wm,
@@ -132,6 +138,9 @@ impl XwaylandServer {
                 );
             })
             .ok();
+        self.icons = IconTracker::connect(&display, handle, ledger)
+            .inspect_err(|error| tracing::warn!(error, "X11 windows' icons are not read"))
+            .ok();
         tracing::info!(display = display_number, "Xwayland is ready");
     }
 
@@ -140,6 +149,33 @@ impl XwaylandServer {
         if let Some(shapes) = &mut self.shapes {
             shapes.untrack(window.window_id());
         }
+    }
+
+    /// Starts following the icon of `window`, a managed window just mapped.
+    fn track_icon(&mut self, window: &X11Surface) {
+        if let Some(icons) = &mut self.icons {
+            icons.track(window.window_id());
+        }
+    }
+
+    /// Stops following the icon of `window`, unmapped or gone.
+    pub(crate) fn untrack_icon(&mut self, window: &X11Surface) {
+        if let Some(icons) = &mut self.icons {
+            icons.untrack(window.window_id());
+        }
+    }
+
+    /// Returns the icon `window` set (`_NET_WM_ICON`), if it set one.
+    pub(crate) fn icon_of(&self, window: &X11Surface) -> Option<&vaht_ui::Icon> {
+        self.icons.as_ref()?.icon_of(window.window_id())
+    }
+
+    /// Reads the icons that changed; returns the ids of the X windows whose
+    /// icon did.
+    pub(crate) fn follow_icons(&mut self) -> Vec<u32> {
+        self.icons
+            .as_mut()
+            .map_or_else(Vec::new, IconTracker::follow_changes)
     }
 
     /// Loads the X resources `resources` (an `.Xresources` file's text)
@@ -303,6 +339,7 @@ impl XwmHandler for Compositor {
         }
         if let Some(server) = &mut self.xwayland {
             server.track_shape(&window);
+            server.track_icon(&window);
         }
         self.add_x11_window(window);
     }
