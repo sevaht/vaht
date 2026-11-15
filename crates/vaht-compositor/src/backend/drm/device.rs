@@ -9,7 +9,7 @@
 //! them out.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::gbm::GbmAllocator;
@@ -91,6 +91,9 @@ pub(super) struct Screen {
     pub(super) frames: FrameState,
     /// The wait after a frame that changed nothing.
     pub(super) throttle: Option<Timer<Compositor>>,
+    /// When the frame on its way went to the monitor, for the trace of
+    /// how long the monitor took to show it.
+    queued_at: Option<Instant>,
     /// Whether its monitor is awake (`zwlr_output_power_v1`).
     is_powered: bool,
     /// The colors a night-light tool set, if one did.
@@ -286,6 +289,7 @@ impl GpuDevice {
                 global: Some(global),
                 frames: FrameState::Due,
                 throttle: None,
+                queued_at: None,
                 is_powered: true,
                 gamma: None,
                 dmabuf_feedback,
@@ -523,6 +527,13 @@ impl GpuDevice {
             Ok(None) => {}
             Err(error) => tracing::debug!(?error, "a frame was not shown"),
         }
+        if let Some(queued_at) = screen.queued_at.take() {
+            tracing::trace!(
+                output = screen.output.name(),
+                after = ?queued_at.elapsed(),
+                "frame shown"
+            );
+        }
         screen.frames.finished()
     }
 }
@@ -688,7 +699,9 @@ impl Screen {
         renderer: &mut DrmRenderer<'_>,
         scene: &Scene<'_>,
     ) -> Result<bool, RenderError> {
+        let started = Instant::now();
         let elements = scene.output_elements(renderer, &self.output);
+        let gathered = started.elapsed();
         let result = self
             .drm_output
             .render_frame(
@@ -699,6 +712,7 @@ impl Screen {
             )
             .map_err(|error| RenderError::Hardware(error.to_string()))?;
         let is_changed = !result.is_empty;
+        let drawn = started.elapsed();
         if let Some(dmabuf_feedback) = &self.dmabuf_feedback {
             scene.send_dmabuf_feedback(&self.output, dmabuf_feedback, &result.states);
         }
@@ -707,7 +721,17 @@ impl Screen {
             self.drm_output
                 .queue_frame(feedback)
                 .map_err(|error| RenderError::Hardware(error.to_string()))?;
+            self.queued_at = Some(Instant::now());
         }
+        tracing::trace!(
+            output = self.output.name(),
+            elements = elements.len(),
+            ?gathered,
+            ?drawn,
+            total = ?started.elapsed(),
+            is_changed,
+            "frame composed"
+        );
         self.frames.drawn(is_changed);
         Ok(is_changed)
     }

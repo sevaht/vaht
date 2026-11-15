@@ -3242,6 +3242,7 @@ impl Compositor {
         }
         // Over a frame, no client has the pointer: the frame is vaht's.
         let under = target.as_ref().and_then(PointerTarget::client_surface);
+        let moved_from = pointer.current_location();
         pointer.motion(
             self,
             under,
@@ -3252,6 +3253,11 @@ impl Compositor {
             },
         );
         pointer.frame(self);
+        // Where vaht draws the pointer itself (on the hardware), it shows
+        // where it went only in a new frame; elsewhere the host draws it.
+        if self.backend.draws_pointer() && moved_from != location {
+            self.schedule_render();
+        }
     }
 
     /// With sloppy focus, focuses `window`, which the pointer is over, and

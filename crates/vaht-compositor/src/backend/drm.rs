@@ -555,7 +555,10 @@ impl DrmBackend {
             Duration::ZERO,
             Compositor::render,
         ) {
-            Ok(timer) => self.render_soon = Some(timer),
+            Ok(timer) => {
+                tracing::trace!("frame arranged");
+                self.render_soon = Some(timer);
+            }
             Err(error) => tracing::warn!(%error, "could not arrange a frame"),
         }
     }
