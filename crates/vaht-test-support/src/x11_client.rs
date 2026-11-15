@@ -376,6 +376,39 @@ impl X11Client {
         }
     }
 
+    /// Returns how big the X server has `window`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server does not answer.
+    #[must_use]
+    pub fn size_of(&self, window: Window) -> (u16, u16) {
+        let reply = self
+            .connection
+            .get_geometry(window)
+            .expect("the request is sent")
+            .reply()
+            .expect("the X server answers");
+        (reply.width, reply.height)
+    }
+
+    /// Waits until the X server has `window` at `size`, as vaht told it;
+    /// returns how big it is in the end.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server does not answer.
+    pub fn wait_for_size(&mut self, window: Window, size: (u16, u16)) -> (u16, u16) {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let now = self.size_of(window);
+            if now == size || Instant::now() >= deadline {
+                return now;
+            }
+            self.wait_for_events(deadline.saturating_duration_since(Instant::now()), None);
+        }
+    }
+
     /// Waits until vaht asks `window` to close (`WM_DELETE_WINDOW`);
     /// returns whether it did in time.
     pub fn wait_for_close_request(&mut self, window: Window) -> bool {

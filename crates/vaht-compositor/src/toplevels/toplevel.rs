@@ -286,8 +286,41 @@ impl Toplevel {
         if self.told_area == Some(area) || area.size.w <= 0 || area.size.h <= 0 {
             return;
         }
+        tracing::debug!(
+            x_window = surface.window_id(),
+            ?area,
+            "an X11 window told where it is"
+        );
         if let Err(error) = surface.configure(area) {
             tracing::debug!(%error, "an X11 window could not be told where it is");
+            return;
+        }
+        self.told_area = Some(area);
+    }
+
+    /// Tells an X11 window that its content is now at `location` (global
+    /// coordinates), as big as it was last told, or as it is if it was never
+    /// told: its size is changed only by asking ([`Self::request`]) and by
+    /// answering its own asking ([`Self::answer`]).
+    pub(crate) fn move_to(&mut self, location: Point<i32, Logical>) {
+        let Some(surface) = self.x11() else {
+            return;
+        };
+        let size = self
+            .told_area
+            .map_or_else(|| surface.geometry().size, |told| told.size);
+        self.place(Rectangle::new(location, size));
+    }
+
+    /// Answers an X11 window that asked to cover an area: its content now
+    /// covers `area`. X expects an answer even when nothing changes, so it
+    /// is sent even if the window was told so last.
+    pub(crate) fn answer(&mut self, area: Rectangle<i32, Logical>) {
+        let Some(surface) = self.x11() else {
+            return;
+        };
+        if let Err(error) = surface.configure(area) {
+            tracing::debug!(%error, "an X11 window could not be configured");
             return;
         }
         self.told_area = Some(area);

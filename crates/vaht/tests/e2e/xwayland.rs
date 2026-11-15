@@ -314,6 +314,43 @@ fn an_x11_window_moving_itself_sees_the_pointer_where_it_is() {
 }
 
 #[test]
+fn an_x11_window_asking_twice_to_be_moved_is_still_moved() {
+    let mut desktop = XDesktop::new();
+    let window = desktop.open_window();
+    let shown = desktop.wait_for_color(X_COLOR);
+    let grip = (shown.left + 20, shown.top + 20);
+    let to_x = |value: u32| i16::try_from(value).expect("small");
+    desktop.wayland.move_pointer_to(grip.0, grip.1);
+    desktop.wayland.press(BUTTON_LEFT);
+    // Steam asks twice for each drag of its title bar.
+    let started = desktop.vaht.logged_count("drag started");
+    for _ in 0..2 {
+        desktop
+            .x11
+            .request_move(window, (to_x(grip.0), to_x(grip.1)));
+    }
+    desktop.vaht.wait_for_logged("drag started", started + 2);
+    desktop.wayland.move_pointer_to(grip.0 + 150, grip.1 + 40);
+    let corner = (to_x(shown.left + 150), to_x(shown.top + 40));
+    assert_eq!(desktop.x11.wait_for_position(window, corner), corner);
+    desktop.wayland.release(BUTTON_LEFT);
+}
+
+#[test]
+fn an_x11_window_resized_by_vaht_keeps_the_new_size() {
+    let mut desktop = XDesktop::new();
+    let window = desktop.open_window();
+    desktop.wait_for_color(X_COLOR);
+    desktop.run(&["resize-to", "300", "200"]);
+    assert_eq!(desktop.x11.wait_for_size(window, (300, 200)), (300, 200));
+    // Focus moving to another window settles every window again: this
+    // one keeps its size rather than flickering back to the old one.
+    desktop.wayland.open_windows(1);
+    desktop.vaht.wait_for_logged("placed first", 2);
+    assert_eq!(desktop.x11.wait_for_size(window, (300, 200)), (300, 200));
+}
+
+#[test]
 fn an_x11_window_shows_the_icon_it_sets_on_its_titlebar() {
     const ICON: [u8; 3] = [0xff, 0xff, 0x00];
     let mut desktop = XDesktop::new();

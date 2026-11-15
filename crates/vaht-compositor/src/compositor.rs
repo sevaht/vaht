@@ -1157,9 +1157,15 @@ impl Compositor {
         } else {
             managed.content_area()
         };
+        tracing::debug!(
+            x_window = surface.window_id(),
+            ?asked,
+            answer = ?area,
+            "an X11 window asks to be moved or resized"
+        );
         // X expects an answer, even one that changes nothing.
-        if let Err(error) = surface.configure(area) {
-            tracing::debug!(%error, "an X11 window could not be configured");
+        if let Some(toplevel) = self.toplevels.get_mut(window) {
+            toplevel.answer(area);
         }
     }
 
@@ -1226,13 +1232,17 @@ impl Compositor {
     /// Starts `drag` on the X11 window `surface`, as its program asks (its
     /// own title bar dragged), while a button pressed on it is held.
     pub(crate) fn start_x11_drag(&mut self, surface: &X11Surface, drag: WindowDrag) {
+        let x_window = surface.window_id();
+        tracing::debug!(x_window, ?drag, "an X11 window asks to be dragged");
         let Some(window) = self.toplevels.window_of_x11(surface) else {
+            tracing::debug!(x_window, "not dragged: vaht does not manage it");
             return;
         };
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
         let Some(start) = pointer.grab_start_data() else {
+            tracing::debug!(x_window, "not dragged: no button is held");
             return;
         };
         let is_on_window = start.focus.as_ref().is_some_and(|(focus, _)| {
@@ -1242,6 +1252,11 @@ impl Compositor {
         });
         if is_on_window {
             self.start_window_grab(window, drag, start, SERIAL_COUNTER.next_serial());
+        } else {
+            tracing::debug!(
+                x_window,
+                "not dragged: the button held was pressed elsewhere"
+            );
         }
     }
 
@@ -2002,9 +2017,14 @@ impl Compositor {
         start: GrabStartData<Self>,
         serial: Serial,
     ) {
-        if self.window_manager.begin_drag(window, drag, start.location) {
-            self.set_grab(WindowGrab::drag(window, drag, start, serial));
+        if self.window_manager.window(window).is_none() {
+            return;
         }
+        // The grab first: setting it ends any drag under way, as when a
+        // program asks twice (Steam does), which must not end this one.
+        let location = start.location;
+        self.set_grab(WindowGrab::drag(window, drag, start, serial));
+        self.window_manager.begin_drag(window, drag, location);
     }
 
     /// Passes a client's `request` for the window of `surface` on to the
@@ -2504,10 +2524,12 @@ impl Compositor {
                 toplevel.request(requested, location);
             }
         }
-        // An X11 window is told where it is whenever it moves.
+        // An X11 window is told where it is whenever it moves. Its size
+        // is what it was last asked for, until it commits that size: the
+        // one it has now would undo the asking.
         for window in self.window_manager.windows_top_down() {
             if let Some(toplevel) = self.toplevels.get_mut(window.id()) {
-                toplevel.place(window.content_area());
+                toplevel.move_to(window.content_area().loc);
             }
         }
         for (window, ending) in updates.endings {
