@@ -13,6 +13,7 @@
 
 mod device;
 mod input_device;
+mod lease;
 pub(crate) mod plan;
 
 use std::collections::HashMap;
@@ -51,6 +52,7 @@ use smithay::wayland::drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd};
 use smithay::wayland::image_copy_capture::DmabufConstraints;
 
 use self::device::{DeviceContext, GpuDevice, GpuOutputManager};
+use self::lease::{Leases, Leasing};
 use self::plan::{GpuQuirks, TopWindow};
 use super::{BackendError, OutputEvent, RenderError};
 use crate::Compositor;
@@ -93,6 +95,8 @@ pub(crate) struct DrmBackend {
     gpus: GpuRenderers,
     /// Every GPU's display side.
     devices: HashMap<DrmNode, GpuDevice>,
+    /// Every GPU's headsets offered for lease, kept while vaht runs.
+    leases: Leases,
     /// The input devices.
     libinput: Libinput,
     /// Where outputs' globals are advertised.
@@ -161,6 +165,7 @@ impl DrmBackend {
             primary_gpu,
             gpus,
             devices: HashMap::new(),
+            leases: Leases::new(),
             libinput,
             display: display.clone(),
             loop_handle: handle.clone(),
@@ -351,6 +356,10 @@ impl DrmBackend {
             node,
             GpuDevice::new(node, render_node, manager, quirks, events),
         );
+        // A GPU seen before gets a new global; its old one was hidden.
+        if let Some(leasing) = Leasing::new(&self.display, node) {
+            self.leases.insert(node, leasing);
+        }
         Ok(())
     }
 
@@ -392,6 +401,9 @@ impl DrmBackend {
             primary_formats: &primary_formats,
         };
         let events = device.scan(&mut context);
+        if let Some(leasing) = self.leases.get_mut(&node) {
+            leasing.follow(&device.headsets);
+        }
         self.schedule_render();
         events
     }
@@ -413,6 +425,9 @@ impl DrmBackend {
                 };
                 if let Some(render_node) = device.render_node {
                     self.gpus.as_mut().remove_node(&render_node);
+                }
+                if let Some(leasing) = self.leases.get_mut(&node) {
+                    leasing.retire();
                 }
                 tracing::info!(gpu = %node, "GPU removed");
                 device.drain(&self.display)
@@ -441,6 +456,9 @@ impl DrmBackend {
         tracing::info!("another terminal is shown; pausing");
         self.is_active = false;
         self.libinput.suspend();
+        for leasing in self.leases.values_mut() {
+            leasing.suspend();
+        }
         for device in self.devices.values_mut() {
             device.manager.pause();
             for screen in device.screens.values_mut() {
@@ -469,6 +487,9 @@ impl DrmBackend {
             events.extend(self.scan(node));
             if let Some(device) = self.devices.get_mut(&node) {
                 device.reapply_gamma();
+            }
+            if let Some(leasing) = self.leases.get_mut(&node) {
+                leasing.resume();
             }
         }
         self.schedule_render();

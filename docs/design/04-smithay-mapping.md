@@ -377,7 +377,13 @@ rest only carries the decisions out.
   size asked at the refresh rate nearest the one asked (within half a hertz
   counts as exact), the fastest of that size without one, the monitor's
   preferred mode when it lacks the size. Colour is 10 bits per channel
-  where possible. VR headsets (`non-desktop`) are left alone.
+  where possible. VR headsets (`non-desktop`) get no output: each GPU
+  offers its headsets for lease (`wp_drm_lease_device_v1`,
+  `backend/drm/lease.rs`), so SteamVR and Monado drive them directly with
+  the headset's connector, CRTC and planes. Leases end when the program
+  lets go, the headset is unplugged, or vaht gives the GPUs up for another
+  terminal; each GPU's lease state lasts as long as vaht, since Smithay
+  looks it up whenever a client names the GPU.
 - **Frames.** Each output's `FrameState` (idle, due, queued, throttled)
   follows its vertical blank: a frame asked for while one is on its way
   waits for it, and a frame that changed nothing waits one refresh before
@@ -419,8 +425,7 @@ rest only carries the decisions out.
   no copy; the rest are told what the renderer reads. The scan-out
   tranche lists only formats the renderer reads too, so a buffer that
   cannot go on a plane is drawn instead.
-- **Not yet:** DRM leasing for headsets;
-  tearing (not in this Smithay).
+- **Not yet:** tearing (not in this Smithay).
 - **First run on hardware**, from a free terminal: `vaht` (log in
   `~/.local/state/vaht/vaht.log`); Ctrl+Alt+F<n> back to the old terminal
   at any time.

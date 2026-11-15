@@ -29,6 +29,7 @@ use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use super::DrmRenderer;
+use super::lease::Headset;
 use super::plan::{self, ConnectorMode, FrameState, GpuQuirks, ModeFit, TopWindow};
 use crate::Compositor;
 use crate::backend::{OutputEvent, RenderError};
@@ -70,6 +71,8 @@ pub(super) struct GpuDevice {
     quirks: GpuQuirks,
     /// Each monitor's output, by the CRTC driving it.
     pub(super) screens: HashMap<crtc::Handle, Screen>,
+    /// The headsets plugged in, left dark for programs to lease.
+    pub(super) headsets: Vec<Headset>,
     /// Its vertical blank events, registered while it lives.
     pub(super) _events: EventSource<Compositor>,
 }
@@ -126,6 +129,7 @@ impl GpuDevice {
             scanner: DrmScanner::new(),
             quirks,
             screens: HashMap::new(),
+            headsets: Vec::new(),
             _events: events,
         }
     }
@@ -154,6 +158,7 @@ impl GpuDevice {
                 DrmScanEvent::Disconnected {
                     crtc: Some(crtc), ..
                 } => {
+                    self.headsets.retain(|headset| headset.crtc != crtc);
                     if let Some(mut screen) = self.screens.remove(&crtc) {
                         if let Some(global) = screen.global.take() {
                             context.display.remove_global::<Compositor>(global);
@@ -208,10 +213,7 @@ impl GpuDevice {
     ) -> Option<Output> {
         let name = Screen::connector_name(&connector);
         if self.is_non_desktop(connector.handle()) {
-            tracing::info!(
-                connector = name,
-                "not a desktop monitor (a headset); left alone"
-            );
+            self.add_headset(&connector, crtc, name);
             return None;
         }
         let modes = Screen::modes_of(&connector);
@@ -366,6 +368,34 @@ impl GpuDevice {
                 None
             }
         }
+    }
+
+    /// Leaves the headset on `connector` dark, driven by `crtc` once a
+    /// program leases it.
+    fn add_headset(&mut self, connector: &connector::Info, crtc: crtc::Handle, name: String) {
+        tracing::info!(
+            connector = name,
+            "not a desktop monitor (a headset); left for leasing"
+        );
+        let description = display_info::for_connector(self.manager.device(), connector.handle())
+            .map(|info| {
+                format!(
+                    "{} {}",
+                    info.make().unwrap_or_default(),
+                    info.model().unwrap_or_default()
+                )
+                .trim()
+                .to_owned()
+            })
+            .unwrap_or_default();
+        self.headsets
+            .retain(|headset| headset.connector != connector.handle());
+        self.headsets.push(Headset {
+            connector: connector.handle(),
+            crtc,
+            name,
+            description,
+        });
     }
 
     /// Returns whether the connector `handle` says its monitor is not for
