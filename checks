@@ -73,6 +73,21 @@ check_coverage() {
     echo "Line-by-line report: target/llvm-cov/html/index.html"
 }
 
+# Cargo never deletes build files it no longer uses, so target/ grows with
+# every dependency or flag change. cargo-sweep deletes those not used for
+# a few days and keeps the rest, so nothing current is rebuilt.
+sweep_stale_builds() {
+    if ! cargo sweep --version >/dev/null 2>&1; then
+        echo "cargo-sweep is not installed; stale build files are kept."
+        echo "(cargo install cargo-sweep --locked)"
+        echo
+        return
+    fi
+    run_check "removing build files unused for 3 days" \
+        cargo sweep --time 3
+}
+
+sweep_stale_builds
 case ${1:-} in
     "") check_code ;;
     --docs) check_documentation ;;
