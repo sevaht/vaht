@@ -63,6 +63,15 @@ pub(crate) struct Launcher {
     ledger: ResourceLedger,
 }
 
+/// Where a program's output and errors go: a pipe vaht reads, or nowhere.
+#[derive(Debug, Clone, Copy, Default)]
+struct Streams<'fd> {
+    /// Its standard output's.
+    output: Option<&'fd std::os::fd::OwnedFd>,
+    /// Its error output's.
+    errors: Option<&'fd std::os::fd::OwnedFd>,
+}
+
 impl Launcher {
     /// The shell that runs command lines.
     const SHELL: &str = "/bin/sh";
@@ -129,7 +138,12 @@ impl Launcher {
     /// Starts `command_line` with the shell.
     pub(crate) fn run(&mut self, command_line: &str) {
         let arguments = ["sh", "-c", command_line].map(OsStr::new);
-        if let Err(error) = self.start(Path::new(Self::SHELL), &arguments, command_line, None) {
+        if let Err(error) = self.start(
+            Path::new(Self::SHELL),
+            &arguments,
+            command_line,
+            Streams::default(),
+        ) {
             Self::warn_not_started(&error, command_line);
         }
     }
@@ -144,9 +158,34 @@ impl Launcher {
             .chain(then.iter().map(String::as_str))
             .map(OsStr::new)
             .collect();
-        if let Err(error) = self.start(Path::new(Self::SHELL), &arguments, first, None) {
+        if let Err(error) = self.start(
+            Path::new(Self::SHELL),
+            &arguments,
+            first,
+            Streams::default(),
+        ) {
             Self::warn_not_started(&error, first);
         }
+    }
+
+    /// Starts `command_line` with the shell, its output going to the pipe
+    /// returned, for vaht to read (a pipe menu's command).
+    ///
+    /// # Errors
+    ///
+    /// Returns why it could not be started.
+    pub(crate) fn run_reading(&mut self, command_line: &str) -> Result<File, SpawnError> {
+        let (reader, writer) = std::io::pipe().map_err(SpawnError::Pipe)?;
+        // vaht's end of the writing side closes on return, so the pipe ends
+        // when the program does.
+        let writer = std::os::fd::OwnedFd::from(writer);
+        let arguments = ["sh", "-c", command_line].map(OsStr::new);
+        let streams = Streams {
+            output: Some(&writer),
+            errors: None,
+        };
+        self.start(Path::new(Self::SHELL), &arguments, command_line, streams)?;
+        Ok(File::from(std::os::fd::OwnedFd::from(reader)))
     }
 
     /// Starts `command_line` with the shell, given `argument` as its
@@ -154,7 +193,12 @@ impl Launcher {
     pub(crate) fn run_hook(&mut self, command_line: &str, argument: &str) {
         let script = format!("{command_line} \"$1\"");
         let arguments = ["sh", "-c", &script, "sh", argument].map(OsStr::new);
-        if let Err(error) = self.start(Path::new(Self::SHELL), &arguments, command_line, None) {
+        if let Err(error) = self.start(
+            Path::new(Self::SHELL),
+            &arguments,
+            command_line,
+            Streams::default(),
+        ) {
             Self::warn_not_started(&error, command_line);
         }
     }
@@ -213,7 +257,11 @@ impl Launcher {
                 // vaht's end of the writing side closes once the dialog has
                 // its own, so the pipe ends when the dialog does.
                 let writer = std::os::fd::OwnedFd::from(writer);
-                let pid = self.start(&executable, &arguments, &what, Some(&writer))?;
+                let streams = Streams {
+                    output: None,
+                    errors: Some(&writer),
+                };
+                let pid = self.start(&executable, &arguments, &what, streams)?;
                 Ok((pid, reader))
             });
         match started {
@@ -318,9 +366,9 @@ impl Launcher {
         program: &Path,
         arguments: &[&OsStr],
         what: &str,
-        errors: Option<&std::os::fd::OwnedFd>,
+        streams: Streams<'_>,
     ) -> Result<Pid, SpawnError> {
-        let pid = self.spawn(program, arguments, errors)?;
+        let pid = self.spawn(program, arguments, streams)?;
         tracing::debug!(%pid, what, "program started");
         self.running
             .push((pid, self.ledger.track(ResourceKind::Program)));
@@ -333,7 +381,7 @@ impl Launcher {
         &self,
         program: &Path,
         arguments: &[&OsStr],
-        errors: Option<&std::os::fd::OwnedFd>,
+        streams: Streams<'_>,
     ) -> Result<Pid, SpawnError> {
         let arguments = arguments
             .iter()
@@ -368,9 +416,10 @@ impl Launcher {
             .map_err(SpawnError::OpenNull)?;
         let mut file_actions = PosixSpawnFileActions::init().map_err(SpawnError::Prepare)?;
         for standard in 0..=2 {
-            let target = match errors {
-                Some(errors) if standard == 2 => errors.as_raw_fd(),
-                Some(_) | None => null.as_raw_fd(),
+            let target = match (standard, streams.output, streams.errors) {
+                (1, Some(output), _) => output.as_raw_fd(),
+                (2, _, Some(errors)) => errors.as_raw_fd(),
+                _ => null.as_raw_fd(),
             };
             file_actions
                 .add_dup2(target, standard)
@@ -406,7 +455,7 @@ impl Launcher {
 
 /// Why a program could not be started.
 #[derive(Debug, thiserror::Error)]
-enum SpawnError {
+pub(crate) enum SpawnError {
     /// An argument contains a NUL character.
     #[error("an argument contains a NUL character")]
     Nul(#[source] std::ffi::NulError),

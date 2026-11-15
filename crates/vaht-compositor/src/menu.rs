@@ -16,6 +16,7 @@
 
 mod content;
 mod model;
+mod pipe;
 
 use std::time::Duration;
 
@@ -27,12 +28,13 @@ use vaht_ui::{Panel, Theme, Typesetter};
 
 pub(crate) use self::content::{MenuContent, MenuGeometry};
 pub(crate) use self::model::{MenuBuilder, MenuChoice, MenuItem, MenuModel, OutputChoices};
+pub(crate) use self::pipe::{PipeRead, parse_printed};
 use crate::Compositor;
 use crate::config::{MenuRequest, MenuSearch};
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
 use crate::scene::{MenuTexture, SceneElement};
-use crate::window_manager::Area;
+use crate::window_manager::{Area, WindowId};
 
 /// A key a menu acts on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,10 +93,33 @@ pub(crate) struct MenuStack {
     pressed: Option<(usize, usize)>,
     /// The action that opened the menus, if one did.
     opened_by: Option<MenuRequest>,
+    /// A pipe menu waiting for its command's output: its number, its
+    /// level, and its item in the menu before; and the command, until the
+    /// compositor takes it to run.
+    pipe: Option<PipeWait>,
+    /// Numbers pipe menus as they open.
+    pipe_count: u64,
+    /// The output of the pipe menu's command, as it is read.
+    pipe_read: Option<PipeRead>,
+    /// The window the menus are about, if any.
+    opened_for: Option<WindowId>,
     /// How typing finds an item.
     search_mode: MenuSearch,
     /// What was typed in the last menu, to find an item by.
     search: String,
+}
+
+/// A pipe menu open, waiting for what its command prints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PipeWait {
+    /// Which opening it is: a later one replaces it.
+    number: u64,
+    /// The menu's level in the stack.
+    level: usize,
+    /// Its item in the menu before.
+    item: usize,
+    /// The command line, until the compositor takes it to run.
+    command: Option<String>,
 }
 
 /// One open menu.
@@ -148,8 +173,32 @@ impl MenuStack {
     }
 
     /// Notes that `request` opened the menus.
-    pub(crate) fn mark_opened_by(&mut self, request: MenuRequest) {
+    pub(crate) fn mark_opened_by(&mut self, request: MenuRequest, window: Option<WindowId>) {
         self.opened_by = Some(request);
+        self.opened_for = window;
+    }
+
+    /// Returns the window the menus are about, if any.
+    pub(crate) const fn opened_for(&self) -> Option<WindowId> {
+        self.opened_for
+    }
+
+    /// Reads the pipe menu's command's output through `read`.
+    pub(crate) fn read_pipe(&mut self, read: PipeRead) {
+        self.pipe_read = Some(read);
+    }
+
+    /// Keeps `bytes`, more of pipe menu `number`'s output; returns whether
+    /// to read on.
+    pub(crate) fn pipe_output(&mut self, number: u64, bytes: &[u8]) -> bool {
+        self.pipe_read
+            .as_mut()
+            .is_some_and(|read| read.take_in(number, bytes))
+    }
+
+    /// Returns what pipe menu `number`'s command printed, once it ended.
+    pub(crate) fn take_pipe_output(&mut self, number: u64) -> Option<Result<Vec<u8>, String>> {
+        self.pipe_read.as_mut()?.take_output(number)
     }
 
     /// Returns whether the menus open now were opened by `request`.
@@ -159,6 +208,8 @@ impl MenuStack {
 
     /// Closes every menu.
     pub(crate) fn close(&mut self) {
+        self.pipe = None;
+        self.pipe_read = None;
         self.opened_by = None;
         self.search.clear();
         self.menus.clear();
@@ -292,13 +343,66 @@ impl MenuStack {
         let Some(index) = last.panel.content().hovered() else {
             return;
         };
-        let Some(MenuItem::Submenu { menu, .. }) = last.panel.content().model().items.get(index)
+        let Some(MenuItem::Submenu { menu, pipe, .. }) =
+            last.panel.content().model().items.get(index)
         else {
             return;
         };
-        let model = menu.clone();
+        let (model, pipe) = (menu.clone(), pipe.clone());
         let level = self.menus.len() - 1;
+        self.pipe = None;
         self.push(model, Point::default(), Some((level, index)), style);
+        if let Some(command) = pipe {
+            self.pipe_count += 1;
+            self.pipe = Some(PipeWait {
+                number: self.pipe_count,
+                level: level + 1,
+                item: index,
+                command: Some(command),
+            });
+        }
+    }
+
+    /// Takes the command of the pipe menu just opened, to run, with the
+    /// number to fill the menu by.
+    pub(crate) fn take_pipe_command(&mut self) -> Option<(u64, String)> {
+        let pipe = self.pipe.as_mut()?;
+        Some((pipe.number, pipe.command.take()?))
+    }
+
+    /// Fills the pipe menu `number` with `model`, what its command
+    /// printed, if it is still open; returns whether it was.
+    pub(crate) fn fill_pipe(
+        &mut self,
+        number: u64,
+        model: MenuModel,
+        style: (&Theme, &mut Typesetter),
+    ) -> bool {
+        let Some(pipe) = self.pipe.take_if(|pipe| pipe.number == number) else {
+            return false;
+        };
+        let is_still_open = self.menus.len() > pipe.level
+            && self.menus[pipe.level - 1].panel.content().hovered() == Some(pipe.item)
+            && matches!(
+                self.menus[pipe.level - 1]
+                    .panel
+                    .content()
+                    .model()
+                    .items
+                    .get(pipe.item),
+                Some(MenuItem::Submenu { pipe: Some(_), .. })
+            );
+        if !is_still_open {
+            return false;
+        }
+        self.menus.truncate(pipe.level);
+        self.push(
+            model,
+            Point::default(),
+            Some((pipe.level - 1, pipe.item)),
+            style,
+        );
+        true
     }
 
     /// Paints every menu that changed, as `theme` styles menus.
@@ -510,6 +614,7 @@ mod tests {
                         items: vec![choice("Exit", Action::Exit)],
                     },
                     icon: None,
+                    pipe: None,
                 },
                 MenuItem::Inert {
                     label: "words".to_owned(),

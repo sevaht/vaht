@@ -72,8 +72,8 @@ use crate::config::{
     Menus, Modifiers, ResizeFrom, SettingChange, SettingOverrides, ThemeFile, WindowManagerAction,
 };
 use crate::config::{
-    FocusStealing, OutputEntry, OutputMode, OutputScale, OutputTransform, SwitchFlip, SwitchKind,
-    TaskbarAction, TaskbarOutput,
+    FocusStealing, MenuEntry, OutputEntry, OutputMode, OutputScale, OutputTransform, SwitchFlip,
+    SwitchKind, TaskbarAction, TaskbarOutput,
 };
 use crate::cursor::Cursor;
 use crate::event_source::{EndingSource, EventSource, Timer};
@@ -89,7 +89,8 @@ use crate::ipc::IpcServer;
 use crate::launcher::Launcher;
 use crate::layers::{LayerMaps, Layers, OutputLayers};
 use crate::menu::{
-    MenuBuilder, MenuChoice, MenuItem, MenuKey, MenuModel, MenuStack, OutputChoices,
+    MenuBuilder, MenuChoice, MenuItem, MenuKey, MenuModel, MenuStack, OutputChoices, PipeRead,
+    parse_printed,
 };
 use crate::output_management::{HeadRequest, HeadState};
 use crate::output_memory::OutputMemory;
@@ -2727,8 +2728,42 @@ impl Compositor {
             return;
         }
         let window = window.or_else(|| self.window_manager.focused());
+        let model = self.with_menu_builder(window, &[], |builder| match request {
+            MenuRequest::Root => builder.build(Menus::ROOT),
+            MenuRequest::Window => window.and_then(|_| builder.build(Menus::WINDOW)),
+            MenuRequest::Workspace => builder.build(Menus::WORKSPACE),
+            MenuRequest::WindowList => Some(builder.generated(MenuGenerator::WindowList, None)),
+            MenuRequest::Custom(name) => builder.build(name),
+        });
+        let Some(model) = model else {
+            tracing::warn!(?request, "no such menu, or no window for it");
+            return;
+        };
+        let at = self.pointer_location().to_i32_round();
+        // Off the taskbar, as fluxland keeps menus in the usable area of
+        // the output the pointer is on.
+        let bounds = self.output_areas().at(at).usable;
+        self.menus.open(
+            model,
+            at,
+            bounds,
+            (&self.config.theme, &mut self.typesetter),
+        );
+        self.menus.mark_opened_by(request.clone(), window);
+        self.schedule_render();
+    }
+
+    /// Runs `build` with a builder of menus about `window`, as the
+    /// configuration and vaht's state make them, with the icons
+    /// `menus.toml` and `extra_icons` name found.
+    fn with_menu_builder<T>(
+        &mut self,
+        window: Option<WindowId>,
+        extra_icons: &[&str],
+        build: impl FnOnce(&MenuBuilder<'_>) -> T,
+    ) -> T {
         let icons = self.window_icons_for_menus();
-        let named_icons = self.named_icons_for_menus();
+        let named_icons = self.named_icons_for_menus(extra_icons);
         let builder = MenuBuilder::new(&self.config.menus, &self.window_manager, window)
             .with_named_icons(named_icons)
             .with_themes(
@@ -2746,29 +2781,74 @@ impl Compositor {
                 profile: self.outputs.profile().map(str::to_owned),
                 outputs: self.outputs.iter().map(Output::name).collect(),
             });
-        let model = match request {
-            MenuRequest::Root => builder.build(Menus::ROOT),
-            MenuRequest::Window => window.and_then(|_| builder.build(Menus::WINDOW)),
-            MenuRequest::Workspace => builder.build(Menus::WORKSPACE),
-            MenuRequest::WindowList => Some(builder.generated(MenuGenerator::WindowList, None)),
-            MenuRequest::Custom(name) => builder.build(name),
-        };
-        let Some(model) = model else {
-            tracing::warn!(?request, "no such menu, or no window for it");
+        build(&builder)
+    }
+
+    /// Runs the command of the pipe menu just opened, if one did, reading
+    /// its output as it comes.
+    fn start_pipe_menu(&mut self) {
+        let Some((number, command)) = self.menus.take_pipe_command() else {
             return;
         };
-        let at = self.pointer_location().to_i32_round();
-        // Off the taskbar, as fluxland keeps menus in the usable area of
-        // the output the pointer is on.
-        let bounds = self.output_areas().at(at).usable;
-        self.menus.open(
-            model,
-            at,
-            bounds,
-            (&self.config.theme, &mut self.typesetter),
-        );
-        self.menus.mark_opened_by(request.clone());
-        self.schedule_render();
+        tracing::debug!(command, "pipe menu opened");
+        let started = self
+            .launcher
+            .run_reading(&command)
+            .map_err(|error| error.to_string())
+            .and_then(|reader| {
+                PipeRead::start(number, reader, (&self.loop_handle, &self.ledger))
+                    .map_err(|error| error.to_string())
+            });
+        match started {
+            Ok(read) => self.menus.read_pipe(read),
+            Err(error) => {
+                tracing::warn!(error, command, "a pipe menu's command could not start");
+                self.fill_pipe_menu(number, Err(error));
+            }
+        }
+    }
+
+    /// Fills pipe menu `number` with what its command printed, now that it
+    /// ended.
+    pub(crate) fn finish_pipe_menu(&mut self, number: u64) {
+        if let Some(output) = self.menus.take_pipe_output(number) {
+            self.fill_pipe_menu(number, output);
+        }
+    }
+
+    /// Fills pipe menu `number` with the menu `output` holds, or says why
+    /// there is none.
+    fn fill_pipe_menu(&mut self, number: u64, output: Result<Vec<u8>, String>) {
+        let printed = output.and_then(|output| parse_printed(&output));
+        let model = match printed {
+            Ok(definition) => {
+                let icons: Vec<String> = definition
+                    .items
+                    .iter()
+                    .filter_map(MenuEntry::icon)
+                    .map(str::to_owned)
+                    .collect();
+                let icons: Vec<&str> = icons.iter().map(String::as_str).collect();
+                let window = self.menus.opened_for();
+                self.with_menu_builder(window, &icons, |builder| builder.build_printed(&definition))
+            }
+            Err(error) => {
+                tracing::warn!(error, "a pipe menu's command printed no menu");
+                MenuModel {
+                    title: None,
+                    items: vec![MenuItem::Inert {
+                        label: "(no menu)".to_owned(),
+                    }],
+                }
+            }
+        };
+        if self
+            .menus
+            .fill_pipe(number, model, (&self.config.theme, &mut self.typesetter))
+        {
+            tracing::debug!(number, "pipe menu filled");
+            self.schedule_render();
+        }
     }
 
     /// Returns each placed window's icon at the size a menu item shows it;
@@ -2786,13 +2866,17 @@ impl Compositor {
 
     /// Returns the icons `menus.toml` names, by the name written, those
     /// found, sized for menu items.
-    fn named_icons_for_menus(&mut self) -> std::collections::HashMap<String, vaht_ui::Icon> {
+    fn named_icons_for_menus(
+        &mut self,
+        extra: &[&str],
+    ) -> std::collections::HashMap<String, vaht_ui::Icon> {
         let size = vaht_ui::WidgetIcon::side(self.config.theme.metrics().menu.item_height);
         let directory = self.config_source.directory();
         self.config
             .menus
             .icons()
             .into_iter()
+            .chain(extra.iter().copied())
             .filter_map(|icon| {
                 let lookup = Menus::icon_lookup(icon, directory)?;
                 Some((icon.to_owned(), self.icons.named(&lookup, size)?))
@@ -2805,6 +2889,7 @@ impl Compositor {
     pub(crate) fn open_highlighted_submenu(&mut self) {
         self.menus
             .open_highlighted_submenu((&self.config.theme, &mut self.typesetter));
+        self.start_pipe_menu();
         self.schedule_render();
     }
 
@@ -2922,6 +3007,7 @@ impl Compositor {
                 let chosen = self
                     .menus
                     .key(key, (&self.config.theme, &mut self.typesetter));
+                self.start_pipe_menu();
                 self.schedule_render();
                 if let Some(choice) = chosen {
                     self.choose_from_menu(choice);
@@ -3145,6 +3231,7 @@ impl Compositor {
                     let chosen = self
                         .menus
                         .release(location, (&self.config.theme, &mut self.typesetter));
+                    self.start_pipe_menu();
                     self.schedule_render();
                     if let Some(choice) = chosen {
                         self.choose_from_menu(choice);

@@ -38,6 +38,7 @@ impl Menus {
             menu.items.iter().filter_map(|entry| match entry {
                 MenuEntry::Command { command, .. } => Some(command),
                 MenuEntry::Submenu { .. }
+                | MenuEntry::Pipe { .. }
                 | MenuEntry::Toggle { .. }
                 | MenuEntry::Generate { .. }
                 | MenuEntry::Separator
@@ -53,9 +54,9 @@ impl Menus {
             .values()
             .flat_map(|menu| &menu.items)
             .filter_map(|entry| match entry {
-                MenuEntry::Command { icon, .. } | MenuEntry::Submenu { icon, .. } => {
-                    icon.as_deref()
-                }
+                MenuEntry::Command { icon, .. }
+                | MenuEntry::Submenu { icon, .. }
+                | MenuEntry::Pipe { icon, .. } => icon.as_deref(),
                 MenuEntry::Toggle { .. }
                 | MenuEntry::Generate { .. }
                 | MenuEntry::Separator
@@ -94,6 +95,7 @@ impl Menus {
                 }
                 MenuEntry::Submenu { .. }
                 | MenuEntry::Command { .. }
+                | MenuEntry::Pipe { .. }
                 | MenuEntry::Toggle { .. }
                 | MenuEntry::Generate { .. }
                 | MenuEntry::Separator
@@ -175,6 +177,16 @@ pub(crate) enum MenuEntry {
         /// in a submenu.
         is_inline: bool,
     },
+    /// A submenu whose items a command prints, as TOML items, each time it
+    /// opens (a pipe menu, as Openbox has them).
+    Pipe {
+        /// What the item says.
+        label: String,
+        /// The command line, run with the shell.
+        command: String,
+        /// The icon shown beside it, as a command's.
+        icon: Option<String>,
+    },
     /// A line between items.
     Separator,
     /// Text that does nothing, drawn disabled (Fluxbox's `[nop]`).
@@ -182,6 +194,20 @@ pub(crate) enum MenuEntry {
         /// The text.
         label: String,
     },
+}
+
+impl MenuEntry {
+    /// Returns the icon the item names, if it names one.
+    pub(crate) fn icon(&self) -> Option<&str> {
+        match self {
+            Self::Command { icon, .. } | Self::Submenu { icon, .. } | Self::Pipe { icon, .. } => {
+                icon.as_deref()
+            }
+            Self::Toggle { .. } | Self::Generate { .. } | Self::Separator | Self::Inert { .. } => {
+                None
+            }
+        }
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for MenuEntry {
@@ -200,6 +226,8 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
             toggle: Option<WindowToggle>,
             /// A generated list.
             generate: Option<MenuGenerator>,
+            /// A pipe menu's command line.
+            pipe: Option<String>,
             /// A separator.
             #[serde(default)]
             separator: bool,
@@ -213,6 +241,24 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
         let file = EntryFile::deserialize(deserializer)?;
         if file.inline && file.generate.is_none() {
             return Err(de::Error::custom("only a generated list can be inline"));
+        }
+        if let Some(command) = file.pipe {
+            let has_other_form = file.command.is_some()
+                || file.submenu.is_some()
+                || file.toggle.is_some()
+                || file.generate.is_some()
+                || file.separator;
+            return match (file.label, has_other_form) {
+                (_, true) => Err(de::Error::custom(
+                    "an item is one of command, submenu, pipe, toggle, generate and separator",
+                )),
+                (None, false) => Err(de::Error::custom("a pipe menu's item needs a label")),
+                (Some(label), false) => Ok(Self::Pipe {
+                    label,
+                    command,
+                    icon: file.icon,
+                }),
+            };
         }
         if file.icon.is_some() && file.command.is_none() && file.submenu.is_none() {
             return Err(de::Error::custom(

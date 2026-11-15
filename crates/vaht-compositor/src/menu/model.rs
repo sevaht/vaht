@@ -47,6 +47,9 @@ pub(crate) enum MenuItem {
         menu: MenuModel,
         /// Its icon, if it shows one.
         icon: Option<vaht_ui::Icon>,
+        /// For a pipe menu, the command line whose output fills it when it
+        /// opens; `menu` waits for it meanwhile.
+        pipe: Option<String>,
     },
     /// Text that does nothing.
     Inert {
@@ -219,6 +222,22 @@ impl<'state> MenuBuilder<'state> {
         }
     }
 
+    /// Returns what a pipe menu shows while its command runs.
+    pub(crate) fn waiting() -> MenuModel {
+        MenuModel {
+            title: None,
+            items: vec![MenuItem::Inert {
+                label: "…".to_owned(),
+            }],
+        }
+    }
+
+    /// Returns `definition`, which a pipe menu's command printed, as a
+    /// model.
+    pub(crate) fn build_printed(&self, definition: &MenuDefinition) -> MenuModel {
+        self.build_definition(definition, 0)
+    }
+
     /// Returns `definition` as a model, its submenus `depth` deep.
     fn build_definition(&self, definition: &MenuDefinition, depth: usize) -> MenuModel {
         let mut items = Vec::new();
@@ -251,9 +270,22 @@ impl<'state> MenuBuilder<'state> {
                             icon: icon
                                 .as_ref()
                                 .and_then(|name| self.named_icons.get(name).cloned()),
+                            pipe: None,
                         });
                     }
                 }
+                MenuEntry::Pipe {
+                    label,
+                    command,
+                    icon,
+                } => items.push(MenuItem::Submenu {
+                    label: label.clone(),
+                    menu: Self::waiting(),
+                    icon: icon
+                        .as_ref()
+                        .and_then(|name| self.named_icons.get(name).cloned()),
+                    pipe: Some(command.clone()),
+                }),
                 MenuEntry::Toggle { label, toggle } => {
                     // A toggle is about a window; without one it is left out.
                     if let Some(item) = self.toggle(*toggle, label.as_deref()) {
@@ -278,6 +310,7 @@ impl<'state> MenuBuilder<'state> {
                                 items: generated,
                             },
                             icon: None,
+                            pipe: None,
                         });
                     }
                 }

@@ -225,3 +225,41 @@ fn a_menu_item_shows_the_icon_it_names_or_the_image_it_points_to() {
     assert_eq!(icon_spot(2), MENU_BODY, "no icon");
     assert_eq!(icon_spot(3), green, "a submenu's");
 }
+
+#[test]
+fn a_pipe_menu_shows_what_its_command_prints() {
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let marker = files.path().join("chosen");
+    let script = files.path().join("recent");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho 'items = [{{ label = \"Touch\", command = \"exec touch {}\" }}]'\n",
+            marker.display()
+        ),
+    )
+    .expect("written");
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .expect("made runnable");
+    let menus = format!(
+        "[menu.root]\nitems = [{{ label = \"Recent\", pipe = \"{}\" }}]\n\
+         [menu.window]\nitems = []\n[menu.workspace]\nitems = []\n",
+        script.display()
+    );
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[
+            ("menus.toml", &menus),
+            ("bindings.toml", "[keys]\nF1 = \"root-menu\"\n"),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.move_pointer_to(OPENED_AT.0, OPENED_AT.1);
+    client.type_chord(&[keys::F1]);
+    client.type_chord(&[keys::DOWN]);
+    client.type_chord(&[keys::RIGHT]);
+    vaht.wait_for_logged("pipe menu filled", 1);
+    client.type_chord(&[keys::DOWN]);
+    client.type_chord(&[keys::ENTER]);
+    wait_for_file(&marker, |_| true);
+}

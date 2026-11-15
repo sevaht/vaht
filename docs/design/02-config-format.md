@@ -742,8 +742,14 @@ items = [
   or opening a submenu may show an `icon`: an icon theme's name for it
   (`firefox`), or an image file if it has a `/` in it (`~/` is the home
   directory, a relative path is from the configuration directory);
-  Fluxbox's `<icon>` on `[exec]` and `[submenu]` converts. Not yet: `pipe`
-  and the GTK presenter.
+  Fluxbox's `<icon>` on `[exec]` and `[submenu]` converts. A pipe menu,
+  `{ label = "Recent", pipe = "~/bin/recent" }`, runs its command with the
+  shell each time it opens and shows what it prints: TOML with `items` (as
+  a `[menu.<name>]` table holds them, `pipe` items too) and optionally a
+  `title`. It shows "…" while the command runs, read as it prints so a
+  slow one never stalls vaht; "(no menu)" if the output is not a menu or
+  passes 256 KiB; and nothing changes if the menu closed meanwhile. Not
+  yet: the GTK presenter.
 - **Dropped:**
   - Fluxbox's `[config]` editor menu: settings are reached through
     `set-setting`.
