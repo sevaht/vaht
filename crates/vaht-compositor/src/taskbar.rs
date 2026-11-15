@@ -148,7 +148,7 @@ impl Taskbar {
                     widgets: widgets.clone(),
                     workspace_name: String::new(),
                     entries: Vec::new(),
-                    entry_max_width: settings.window_list.entry_width.max,
+                    entry_max_width: settings.window_list.entry_width.max(),
                     clock: String::new(),
                     tray: Vec::new(),
                     tray_slot: 0,
@@ -591,7 +591,7 @@ impl TaskbarContent {
                         .flatten(),
                 })
                 .collect(),
-            entry_max_width: view.settings.window_list.entry_width.max,
+            entry_max_width: view.settings.window_list.entry_width.max(),
             clock: view.settings.clock.format.format(view.now),
             tray,
             tray_slot: WidgetIcon::span(height),

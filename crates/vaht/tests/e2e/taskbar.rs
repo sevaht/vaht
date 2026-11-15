@@ -15,7 +15,8 @@ const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 /// The taskbar's height in the test theme, in pixels.
 const HEIGHT: u32 = 20;
 
-/// The most an entry is wide, by default, in pixels.
+/// The most an entry is wide where the tests limit it, in pixels; well
+/// inside an entry however wide.
 const ENTRY_WIDTH: u32 = 128;
 
 /// The focused window's entry.
@@ -48,7 +49,15 @@ text_color = \"#0000ff\"
 /// Starts vaht with the test theme and a taskbar of `widgets`, and a
 /// client.
 fn start(widgets: &str) -> (HeadlessVaht, TestClient) {
-    let settings = format!("theme = \"test\"\n[taskbar]\nwidgets = {widgets}\n");
+    start_with(widgets, "")
+}
+
+/// Starts vaht with the test theme, a taskbar of `widgets`, and
+/// `window_list` settings.
+fn start_with(widgets: &str, window_list: &str) -> (HeadlessVaht, TestClient) {
+    let settings = format!(
+        "theme = \"test\"\n[taskbar]\nwidgets = {widgets}\n[taskbar.window_list]\n{window_list}"
+    );
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),
         &[("settings.toml", &settings), ("themes/test.toml", THEME)],
@@ -76,11 +85,26 @@ fn taskbar_runs(screenshot: &Screenshot) -> Vec<([u8; 3], u32)> {
 fn each_window_has_an_entry_and_the_focused_ones_stands_out() {
     let (_vaht, mut client) = start("[\"window-list\"]");
     client.open_windows(2);
+    let screenshot = client.screenshot();
+    let half = screenshot.width() / 2;
+    assert_eq!(
+        taskbar_runs(&screenshot),
+        [(UNFOCUSED, half), (FOCUSED, half)],
+        "in the order they opened, the second focused, sharing the whole list"
+    );
+}
+
+#[test]
+fn entries_limited_in_width_leave_the_rest_of_the_list_empty() {
+    let (_vaht, mut client) = start_with(
+        "[\"window-list\"]",
+        &format!("entry_width = {{ max = {ENTRY_WIDTH} }}\n"),
+    );
+    client.open_windows(2);
     let runs = taskbar_runs(&client.screenshot());
     assert_eq!(
         runs.iter().take(2).copied().collect::<Vec<_>>(),
         [(UNFOCUSED, ENTRY_WIDTH), (FOCUSED, ENTRY_WIDTH)],
-        "in the order they opened, the second focused"
     );
     assert_eq!(runs.get(2).map(|(color, _)| *color), Some(BACKGROUND));
 }

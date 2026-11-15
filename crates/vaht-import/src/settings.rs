@@ -864,7 +864,47 @@ impl InitFile {
                 Value::InlineTable(matcher),
             );
         }
-        if let Some(width) = self.number(&format!("{SCREEN}iconbar.iconWidth")) {
+        self.convert_entry_width(report);
+        self.convert_flag("iconbar.usePixmap", &["taskbar", "window_list", "icons"]);
+        // The theme's taskbar.window-list.entry padding is half of it each
+        // side; another value is reported, for the theme to change.
+        self.resources
+            .accept_default(&format!("{SCREEN}iconbar.iconTextPadding"), "10");
+    }
+
+    /// Converts how wide the window list's entries are. Fluxbox's
+    /// `Relative` alignment (its default) shares the whole list, as vaht's
+    /// default `"fill"` does, and ignores `iconWidth`; `Left` keeps
+    /// entries at most `iconWidth` wide, from the left. Others come as near
+    /// as vaht goes, and are reported.
+    fn convert_entry_width(&mut self, report: &mut Report) {
+        /// Fluxbox's `iconWidth` when `init` does not say.
+        const DEFAULT_ICON_WIDTH: i64 = 128;
+        let width = self
+            .number(&format!("{SCREEN}iconbar.iconWidth"))
+            .unwrap_or(DEFAULT_ICON_WIDTH);
+        let Some(alignment) = self
+            .resources
+            .get(&format!("{SCREEN}iconbar.alignment"))
+            .cloned()
+        else {
+            return;
+        };
+        let limited = match alignment.value.to_ascii_lowercase().as_str() {
+            "relative" => false,
+            "left" => true,
+            "right" => {
+                let what = "iconbar.alignment Right: entries start at the list's left".to_owned();
+                self.note(report, alignment.line, what);
+                true
+            }
+            other => {
+                let what = format!("iconbar.alignment {other}: entries share the list equally");
+                self.note(report, alignment.line, what);
+                false
+            }
+        };
+        if limited {
             let mut entry_width = toml_edit::InlineTable::new();
             entry_width.insert("max", Value::from(width));
             self.set(
@@ -872,13 +912,6 @@ impl InitFile {
                 Value::InlineTable(entry_width),
             );
         }
-        self.resources
-            .accept_default(&format!("{SCREEN}iconbar.alignment"), "Relative");
-        self.convert_flag("iconbar.usePixmap", &["taskbar", "window_list", "icons"]);
-        // The theme's taskbar.window-list.entry padding is half of it each
-        // side; another value is reported, for the theme to change.
-        self.resources
-            .accept_default(&format!("{SCREEN}iconbar.iconTextPadding"), "10");
     }
 
     /// Notes that what `init` says on line `line` is not in vaht yet.
@@ -1184,6 +1217,51 @@ session.screen0.toolbar.widthPercent:\t80
         assert_eq!(convert("sideways"), (String::new(), 1), "not a decoration");
     }
 
+    /// Converts the iconbar resources `init` gives; returns the settings
+    /// written and the notes.
+    fn converted_iconbar(init: &str) -> (String, Vec<String>) {
+        let mut report = Report::default();
+        let document = InitFile::new(Resources::parse(Path::new("init"), init))
+            .convert(&mut report)
+            .settings;
+        let notes = report.notes().iter().map(ToString::to_string).collect();
+        (document.to_string(), notes)
+    }
+
+    #[test]
+    fn a_relative_iconbar_fills_the_list_whatever_its_icon_width() {
+        let (settings, notes) = converted_iconbar(
+            "session.screen0.iconbar.alignment:\tRelative\n\
+             session.screen0.iconbar.iconWidth:\t128\n",
+        );
+        assert_eq!(settings, "", "fill is vaht's default");
+        assert_eq!(notes, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_left_iconbar_keeps_entries_at_most_its_icon_width() {
+        let (settings, notes) = converted_iconbar(
+            "session.screen0.iconbar.alignment:\tLeft\n\
+             session.screen0.iconbar.iconWidth:\t150\n",
+        );
+        assert_eq!(
+            settings,
+            "[taskbar.window_list]\nentry_width = { max = 150 }\n"
+        );
+        assert_eq!(notes, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_right_iconbar_keeps_its_icon_width_and_is_reported() {
+        let (settings, notes) = converted_iconbar("session.screen0.iconbar.alignment:\tRight\n");
+        assert_eq!(
+            settings,
+            "[taskbar.window_list]\nentry_width = { max = 128 }\n"
+        );
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("Right"), "{notes:?}");
+    }
+
     #[test]
     fn the_toolbar_becomes_the_taskbar() {
         let init = "session.screen0.toolbar.placement:\tTopLeft
@@ -1207,7 +1285,7 @@ session.screen0.systray.pinRight:\t
              widgets = [\"workspace-previous\", \"window-list\", \"tray\", \"clock\"]\n\n\
              [taskbar.clock]\nformat = \"%H:%M:%S\"\n\n\
              [taskbar.window_list]\nshow = { workspace = \"current\", minimized = false }\n\
-             entry_width = { max = 200 }\nicons = false\n\n\
+             icons = false\n\n\
              [taskbar.tray]\npin_left = [\"nm-applet\", \"Discord\"]\n"
         );
         let notes: Vec<String> = report.notes().iter().map(ToString::to_string).collect();

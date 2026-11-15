@@ -102,8 +102,9 @@ widgets = ["workspace-previous", "workspace-name", "workspace-next", "window-lis
 [taskbar.window_list]
 # Which windows have an entry: a window matcher, as bindings take one.
 show = { workspace = "current" }
-# Entries share the list equally, each at most this wide, in pixels.
-entry_width = { max = 128 }
+# How wide entries are: "fill" shares the whole list equally among them;
+# { max = <pixels> } shares it, each at most that wide.
+entry_width = "fill"
 # Whether entries show their application's icon: the one the window names,
 # else its desktop entry's, from the hicolor theme or pixmaps.
 icons = true

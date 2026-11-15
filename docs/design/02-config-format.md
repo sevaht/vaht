@@ -132,7 +132,7 @@ widgets = ["workspace-previous", "workspace-name", "workspace-next", "window-lis
 show = { workspace = "current" }    # a window matcher (§5); iconbar.mode (workspace)
 scope = "all-outputs"               # new: all-outputs | this-output
 order = "stable"                    # {static}: opening order, not focus order
-entry_width = { max = 128 }         # iconWidth with alignment Relative
+entry_width = "fill"                # alignment Relative; Left: { max = iconWidth }
 icons = true                        # usePixmap
 text_padding = 10                   # iconTextPadding
 
@@ -292,7 +292,8 @@ rest by name, so a setting never silently does nothing:
   `widgets` (`workspace-previous`, `workspace-name`, `workspace-next`,
   `window-list`, `tray`, `clock`),
   `[taskbar.window_list]` with `show` (a matcher),
-  `entry_width = { max }` and `icons` (each entry's icon: the one the
+  `entry_width` (`"fill"`, sharing the whole list, or `{ max }`, from
+  `iconbar.alignment` and `iconWidth`) and `icons` (each entry's icon: the one the
   window names or draws over xdg-toplevel-icon (a drawn one is read back
   through the renderer, with no `unsafe`), else its desktop entry's `Icon`,
   found in the `hicolor` theme or `pixmaps`; PNG and SVG; from

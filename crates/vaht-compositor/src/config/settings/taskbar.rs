@@ -294,18 +294,54 @@ pub(crate) enum WindowListScope {
     OwnOutput,
 }
 
-/// How wide a window list's entries are: equal shares of the list, up to
-/// `max`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct EntryWidth {
-    /// The most an entry is wide, in pixels.
-    pub(crate) max: u32,
+/// How wide a window list's entries are: equal shares of the whole list
+/// (`"fill"`, Fluxbox's `Relative` alignment), or of it up to a width
+/// (`{ max = <pixels> }`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum EntryWidth {
+    /// Equal shares of the whole list.
+    #[default]
+    Fill,
+    /// Equal shares, each at most this many pixels.
+    AtMost(u32),
 }
 
-impl Default for EntryWidth {
-    fn default() -> Self {
-        Self { max: 128 }
+impl EntryWidth {
+    /// Returns the most an entry is wide, in pixels: no limit when the
+    /// entries fill the list.
+    pub(crate) const fn max(self) -> u32 {
+        match self {
+            Self::Fill => u32::MAX,
+            Self::AtMost(max) => max,
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for EntryWidth {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// What `entry_width` may say.
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Given {
+            /// A keyword: `"fill"`.
+            Keyword(String),
+            /// A limit.
+            Limit(Limit),
+        }
+        /// `{ max = <pixels> }`.
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Limit {
+            /// The most an entry is wide, in pixels.
+            max: u32,
+        }
+        match Given::deserialize(deserializer) {
+            Ok(Given::Keyword(keyword)) if keyword == "fill" => Ok(Self::Fill),
+            Ok(Given::Limit(Limit { max })) => Ok(Self::AtMost(max)),
+            Ok(Given::Keyword(_)) | Err(_) => Err(de::Error::custom(
+                "entry_width is \"fill\" or { max = <pixels> }",
+            )),
+        }
     }
 }
 
@@ -378,6 +414,32 @@ mod tests {
     /// Parses a `[taskbar]` table.
     fn taskbar(text: &str) -> Result<TaskbarSettings, String> {
         toml::from_str(text).map_err(|error| error.message().to_owned())
+    }
+
+    #[rstest]
+    #[case::fill("\"fill\"", EntryWidth::Fill)]
+    #[case::limit("{ max = 200 }", EntryWidth::AtMost(200))]
+    fn an_entry_width_fills_the_list_or_stops_at_a_width(
+        #[case] given: &str,
+        #[case] expected: EntryWidth,
+    ) {
+        let parsed = taskbar(&format!("[window_list]\nentry_width = {given}\n")).expect("valid");
+        assert_eq!(parsed.window_list.entry_width, expected);
+    }
+
+    #[test]
+    fn entries_fill_the_list_unless_told_otherwise() {
+        let parsed = taskbar("").expect("valid");
+        assert_eq!(parsed.window_list.entry_width.max(), u32::MAX);
+    }
+
+    #[rstest]
+    #[case::other_keyword("\"relative\"")]
+    #[case::other_key("{ min = 20 }")]
+    fn an_entry_width_neither_fill_nor_a_limit_is_refused(#[case] given: &str) {
+        let error =
+            taskbar(&format!("[window_list]\nentry_width = {given}\n")).expect_err("refused");
+        assert!(error.contains("\"fill\" or { max = <pixels> }"), "{error}");
     }
 
     #[rstest]
