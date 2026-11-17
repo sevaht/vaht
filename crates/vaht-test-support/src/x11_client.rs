@@ -273,6 +273,82 @@ impl X11Client {
         window
     }
 
+    /// Opens and maps a 32-bit menu (an override-redirect window with an
+    /// alpha channel, as Chromium's are) covering `area`, all `rgba`, its
+    /// color not premultiplied.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the screen has no 32-bit visual or the X server refuses a
+    /// request.
+    pub fn open_translucent_menu(
+        &mut self,
+        area: ((i16, i16), (u16, u16)),
+        rgba: [u8; 4],
+    ) -> Window {
+        let screen = self
+            .connection
+            .setup()
+            .roots
+            .iter()
+            .find(|screen| screen.root == self.root)
+            .expect("the root's screen");
+        let visual = screen
+            .allowed_depths
+            .iter()
+            .filter(|depth| depth.depth == 32)
+            .flat_map(|depth| &depth.visuals)
+            .find(|visual| visual.class == x11rb::protocol::xproto::VisualClass::TRUE_COLOR)
+            .expect("a 32-bit visual")
+            .visual_id;
+        let colormap = self.connection.generate_id().expect("an id is free");
+        self.connection
+            .create_colormap(
+                x11rb::protocol::xproto::ColormapAlloc::NONE,
+                colormap,
+                self.root,
+                visual,
+            )
+            .expect("the request is sent");
+        let [red, green, blue, alpha] = rgba;
+        let premultiply = |channel: u8| {
+            u8::try_from(u16::from(channel) * u16::from(alpha) / 255).expect("at most 255")
+        };
+        let pixel = u32::from_be_bytes([
+            alpha,
+            premultiply(red),
+            premultiply(green),
+            premultiply(blue),
+        ]);
+        let ((x, y), (width, height)) = area;
+        let window = self.connection.generate_id().expect("an id is free");
+        let aux = CreateWindowAux::new()
+            .background_pixel(pixel)
+            .border_pixel(0)
+            .colormap(colormap)
+            .override_redirect(1);
+        self.connection
+            .create_window(
+                32,
+                window,
+                self.root,
+                x,
+                y,
+                width,
+                height,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                visual,
+                &aux,
+            )
+            .expect("the request is sent");
+        self.connection
+            .map_window(window)
+            .expect("the request is sent");
+        self.connection.flush().expect("the requests are sent");
+        window
+    }
+
     /// Asks the window manager to move `window` with the pointer, which is
     /// at `pointer` on the X screen with its left button held: what a
     /// frameless window's own title bar does (`_NET_WM_MOVERESIZE`).

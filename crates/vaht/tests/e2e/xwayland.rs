@@ -181,6 +181,27 @@ fn an_x11_menu_shows_what_it_draws_after_it_appears() {
 }
 
 #[test]
+fn a_transparent_x11_menu_shows_what_is_under_it() {
+    let mut desktop = XDesktop::new();
+    let _window = desktop.open_window();
+    let shown = desktop.wait_for_color(X_COLOR);
+    let corner = (
+        i16::try_from(shown.left + 10).expect("small"),
+        i16::try_from(shown.top + 10).expect("small"),
+    );
+    // Chromium's menus start out transparent: no black square.
+    let _menu = desktop
+        .x11
+        .open_translucent_menu((corner, (60, 40)), [0xff, 0xff, 0xff, 0]);
+    desktop.vaht.wait_for_logged("an X11 menu mapped", 1);
+    let middle = (shown.left + 40, shown.top + 30);
+    assert!(
+        desktop.wait_for_color_at(middle, X_COLOR),
+        "the window shows through the menu"
+    );
+}
+
+#[test]
 fn keys_typed_reach_the_focused_x11_window() {
     let mut desktop = XDesktop::new();
     let window = desktop.open_window();

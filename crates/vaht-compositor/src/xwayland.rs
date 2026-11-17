@@ -297,6 +297,9 @@ impl XwaylandServer {
     /// Forgets the override-redirect window `window`; returns whether it
     /// was one.
     pub(crate) fn forget_unmanaged(&mut self, window: &X11Surface) -> bool {
+        if self.unmanaged.contains(window) {
+            tracing::debug!(x_window = window.window_id(), "an X11 menu unmapped");
+        }
         self.untrack_shape(window);
         let count = self.unmanaged.len();
         self.unmanaged.retain(|known| known != window);
@@ -345,6 +348,11 @@ impl XwmHandler for Compositor {
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        tracing::debug!(
+            x_window = window.window_id(),
+            area = ?window.last_configure(),
+            "an X11 menu mapped"
+        );
         if let Some(server) = &mut self.xwayland {
             server.show_unmanaged(window);
         }
