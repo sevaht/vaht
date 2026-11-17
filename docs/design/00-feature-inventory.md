@@ -164,7 +164,7 @@ These are structural problems in fluxland that vaht's design should avoid.
 | Clock with strftime format | | keep ★ | `%k:%M` |
 | System tray: StatusNotifierWatcher, dbusmenu menus, tooltips, activation tokens, pinLeft and pinRight | `systray.c`, `systray_menu.c`, `tray_grant.c` | keep ★ | Pure-Rust D-Bus with `zbus` |
 | Tooltips (truncated titles, tray items) | `tooltip.c` | keep ★ | One `Tooltip` panel for everything |
-| **New:** several rows (tray and iconbar each wrap onto N rows; a taller clock gets its own layout) | none | later | Allow for it from the start: widgets lay out in a *grid area*, not a fixed strip |
+| **New:** several rows (tray and iconbar each wrap onto N rows; a taller clock gets its own layout) | none | **built**: `rows` (a number, or `"auto"` up to `max_rows`, by `min_entry_width`) | Allow for it from the start: widgets lay out in a *grid area*, not a fixed strip |
 | **New:** a taskbar on every output (optional) | none | later | The taskbar is per output from day one; config says which outputs |
 | **New:** iconbar shows all windows, or only those on its output | none | later | An iconbar filter is a client pattern plus an output scope |
 

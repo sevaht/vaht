@@ -123,7 +123,7 @@ edge = "bottom"                 # placement BottomCenter
 alignment = "center"
 width_percent = 100
 height = "theme"                # or pixels (height 0 = from the theme)
-rows = 1                        # new: several rows (00 §5)
+rows = 1                        # new: a number, or "auto" up to max_rows (00 §5)
 auto_hide = false
 reserve_space = true            # maxOver = false
 layer = "dock"
@@ -297,7 +297,15 @@ rest by name, so a setting never silently does nothing:
   auto-hides at its own edge), `[taskbar.window_list] windows` (`all`, the
   default, or `own-output`: each taskbar lists only the windows whose
   middle is on its output), `edge` (`top` or `bottom`), `width_percent`
-  (1 to 100) and `align` (`left`, `center`, `right`; from `placement`'s
+  (1 to 100), `rows` (new: a number of rows, each as tall as the theme's
+  taskbar, 1 by default; or `"auto"`: one, and another whenever the window
+  list's entries would be narrower than `[taskbar.window_list]
+  min_entry_width` (100 pixels), up to `max_rows` (3). The window list's
+  entries fill the rows in order, each as wide as the rest; the tray wraps
+  across the rows but never adds one; the arrows stay a row wide; the clock
+  and workspace name span the rows. Windows keep off every row, and
+  maximized ones resize as an `"auto"` taskbar grows or shrinks) and
+  `align` (`left`, `center`, `right`; from `placement`'s
   second half), `auto_hide` and `auto_hide_delay_ms` (hidden until the
   pointer touches the edge, hidden again that long after it leaves; an
   auto-hiding taskbar reserves nothing, and its clock rests while hidden),

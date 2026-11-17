@@ -1635,7 +1635,7 @@ impl Compositor {
             .update(&self.window_manager, &self.config.theme, &self.ledger);
         self.sync_taskbars();
         let outputs = &self.outputs;
-        self.taskbars.prepare(
+        let has_resized = self.taskbars.prepare(
             |name| {
                 outputs
                     .named(name)
@@ -1645,6 +1645,10 @@ impl Compositor {
             &self.config.theme,
             (&mut self.typesetter, &mut self.icons),
         );
+        if has_resized {
+            // A taskbar took or gave up a row: maximized windows follow.
+            self.refresh_output_area();
+        }
         self.menus.prepare(&self.config.theme, &mut self.typesetter);
         let output_areas: Vec<_> = self.outputs.iter().map(Outputs::geometry).collect();
         self.backdrop.prepare(&output_areas, &self.window_manager);

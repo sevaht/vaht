@@ -91,6 +91,13 @@ edge = "bottom"                     # or top
 # narrower: left, center or right.
 width_percent = 100
 align = "center"
+# How many rows tall it is, each as tall as the theme's taskbar: a number
+# (always that many), or "auto": one, and another whenever the window
+# list's entries would be narrower than window_list.min_entry_width, up to
+# max_rows. The window list and the tray wrap across the rows; the tray
+# never adds one.
+rows = 1
+max_rows = 3
 # Whether maximized and tiled windows leave the taskbar uncovered; an
 # auto-hiding taskbar never reserves its space.
 reserve_space = true
@@ -114,6 +121,9 @@ entry_width = "fill"
 icons = true
 # Whose windows each taskbar lists: "all" outputs', or its "own-output"'s.
 windows = "all"
+# With rows = "auto", the narrowest an entry gets, in pixels, before the
+# taskbar takes another row.
+min_entry_width = 100
 
 [taskbar.tray]
 # Programs' status icons named here (by their id, in any case) go first,

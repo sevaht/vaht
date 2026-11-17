@@ -129,6 +129,8 @@ pub(crate) struct Taskbar {
     output: String,
     /// Whether its window list lists only its own output's windows.
     lists_own_output: bool,
+    /// How many rows tall it is now.
+    rows: u32,
 }
 
 /// Whether the taskbar shows.
@@ -162,6 +164,8 @@ impl Taskbar {
                     clock: String::new(),
                     tray: Vec::new(),
                     tray_slot: 0,
+                    rows: settings.row_range().0,
+                    row_height: 0,
                 },
                 vaht_ui::Size::default(),
             ),
@@ -184,6 +188,7 @@ impl Taskbar {
             opacity: 1.0,
             output: output.to_owned(),
             lists_own_output: settings.window_list.windows == WindowListScope::OwnOutput,
+            rows: settings.row_range().0,
         })
     }
 
@@ -280,12 +285,13 @@ impl Taskbar {
     }
 
     /// Returns `usable` less the taskbar's area, if it reserves its space,
-    /// on an output covering `whole`.
-    pub(crate) fn reserve(&self, usable: Area, whole: Area, height: u32) -> Area {
+    /// on an output covering `whole`, each of its rows `row_height` pixels
+    /// tall.
+    pub(crate) fn reserve(&self, usable: Area, whole: Area, row_height: u32) -> Area {
         if !self.reserves_space || self.visibility == Visibility::Off {
             return usable;
         }
-        let taken = self.area_in(whole, height);
+        let taken = self.area_in(whole, self.height(row_height));
         let (top, bottom) = (usable.loc.y, usable.loc.y + usable.size.h);
         let (top, bottom) = match self.edge {
             TaskbarEdge::Top => (top.max(taken.loc.y + taken.size.h), bottom),
@@ -295,6 +301,11 @@ impl Taskbar {
             (usable.loc.x, top).into(),
             (usable.size.w, (bottom - top).max(0)).into(),
         )
+    }
+
+    /// Returns how tall the taskbar is, its rows `row_height` pixels tall.
+    const fn height(&self, row_height: u32) -> u32 {
+        self.rows.saturating_mul(row_height)
     }
 
     /// Returns whether the taskbar covers global `point`.
@@ -405,19 +416,21 @@ impl Taskbar {
 
     /// Brings what the taskbar shows up to date with `window_manager`,
     /// `settings` and the time `now`, and paints it to fill its edge of an
-    /// output covering `whole`, `height` pixels tall, as `theme` styles it.
+    /// output covering `whole`, as `theme` styles it, as many rows tall as
+    /// the settings say or its window list needs. Returns whether it
+    /// changed height, so windows keep off it anew.
     pub(crate) fn prepare(
         &mut self,
         view: TaskbarView<'_>,
         theme: &Theme,
         typesetter: &mut Typesetter,
         icons: &mut IconStore,
-    ) {
-        let height = theme.metrics().taskbar_height;
+    ) -> bool {
+        let row_height = theme.metrics().taskbar_height;
+        let old_height = self.area.size.h;
         self.opacity = theme
             .style(ThemeElement::Taskbar, WidgetState::Focused)
             .opacity();
-        self.area = self.area_in(view.whole, height);
         let shows_tray = self.panel.content().widgets.contains(&TaskbarWidget::Tray);
         let tray_items: Vec<&TrayItem> = view
             .tray
@@ -426,23 +439,35 @@ impl Taskbar {
                 tray.ordered(&view.settings.tray.pin_left, &view.settings.tray.pin_right)
             });
         let own = self.lists_own_output.then_some(view.whole);
-        let content = TaskbarContent::of(
+        let mut content = TaskbarContent::of(
             &view,
             own,
             &self.panel.content().widgets,
             &tray_items,
-            (icons, height),
+            (icons, row_height),
         );
+        content.rows = self.rows;
+        let width = u32::try_from(self.area_in(view.whole, row_height).size.w).unwrap_or(0);
+        if *self.panel.content() != content || self.panel.size().width != width {
+            let (fewest, most) = view.settings.row_range();
+            let min_entry_width = view.settings.window_list.min_entry_width;
+            self.rows = (fewest..most)
+                .find(|rows| {
+                    content.rows = *rows;
+                    content.entries_fit(width, min_entry_width, theme, typesetter)
+                })
+                .unwrap_or(most);
+            content.rows = self.rows;
+        }
+        self.area = self.area_in(view.whole, self.height(row_height));
         if *self.panel.content() != content {
             self.panel.update(|current| *current = content);
         }
-        let size = vaht_ui::Size::new(
-            u32::try_from(self.area.size.w).unwrap_or(0),
-            u32::try_from(self.area.size.h).unwrap_or(0),
-        );
+        let size = vaht_ui::Size::new(width, u32::try_from(self.area.size.h).unwrap_or(0));
         self.panel.resize(size);
         self.panel.paint(theme, typesetter);
         self.texture.upload(&self.panel);
+        self.area.size.h != old_height
     }
 
     /// Repaints the taskbar at the next prepare, as when the theme changed.
@@ -545,8 +570,12 @@ pub(crate) struct TaskbarContent {
     clock: String,
     /// The tray's items, in their order.
     tray: Vec<TrayEntry>,
-    /// How wide each tray item is: as tall as the taskbar.
+    /// How wide each tray item is: as tall as a row.
     tray_slot: u32,
+    /// How many rows the taskbar is.
+    rows: u32,
+    /// How tall each row is.
+    row_height: u32,
 }
 
 impl TaskbarContent {
@@ -607,6 +636,8 @@ impl TaskbarContent {
             clock: view.settings.clock.format.format(view.now),
             tray,
             tray_slot: WidgetIcon::span(height),
+            rows: 1,
+            row_height: height,
         }
     }
 
@@ -642,40 +673,101 @@ impl TaskbarContent {
     fn widget(&self, widget: TaskbarWidget) -> Widget<TaskbarHit> {
         match widget {
             TaskbarWidget::WorkspacePrevious => {
-                Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowLeft)
-                    .with_button(TaskbarHit::WorkspacePrevious)
+                self.arrow(Glyph::ArrowLeft, TaskbarHit::WorkspacePrevious)
             }
             TaskbarWidget::WorkspaceNext => {
-                Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowRight)
-                    .with_button(TaskbarHit::WorkspaceNext)
+                self.arrow(Glyph::ArrowRight, TaskbarHit::WorkspaceNext)
             }
             TaskbarWidget::WindowPrevious => {
-                Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowLeft)
-                    .with_button(TaskbarHit::WindowPrevious)
+                self.arrow(Glyph::ArrowLeft, TaskbarHit::WindowPrevious)
             }
-            TaskbarWidget::WindowNext => {
-                Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowRight)
-                    .with_button(TaskbarHit::WindowNext)
-            }
+            TaskbarWidget::WindowNext => self.arrow(Glyph::ArrowRight, TaskbarHit::WindowNext),
             TaskbarWidget::WorkspaceName => {
                 Widget::text(ThemeElement::TaskbarWorkspace, self.workspace_name.clone())
                     .with_hit(TaskbarHit::WorkspaceName)
             }
-            TaskbarWidget::WindowList => Widget::row(
-                ThemeElement::WindowListEmpty,
-                self.entries
-                    .iter()
-                    .map(|entry| entry.widget(self.entry_max_width))
-                    .collect(),
-            ),
+            TaskbarWidget::WindowList => self.window_list(),
             TaskbarWidget::Clock => Widget::text(ThemeElement::TaskbarClock, self.clock.clone())
                 .with_hit(TaskbarHit::Clock),
             TaskbarWidget::Tray => self.tray_widget(),
         }
     }
 
+    /// Returns an arrow button showing `glyph`, one row wide however many
+    /// rows the taskbar is.
+    fn arrow(&self, glyph: Glyph, hit: TaskbarHit) -> Widget<TaskbarHit> {
+        Widget::glyph(ThemeElement::TaskbarButton, glyph)
+            .with_size(SizePolicy::Fixed(self.row_height))
+            .with_button(hit)
+    }
+
+    /// Returns how many entries go on each of the taskbar's rows: the
+    /// rows fill in order, all but the last full.
+    fn per_row(&self, count: usize) -> usize {
+        let rows = usize::try_from(self.rows.max(1)).unwrap_or(1);
+        count.div_ceil(rows).max(1)
+    }
+
+    /// Returns the window list: its entries in order, wrapped across the
+    /// taskbar's rows, every entry as wide as the rest; a short last row
+    /// leaves the rest of it empty.
+    fn window_list(&self) -> Widget<TaskbarHit> {
+        let per_row = if self.rows <= 1 {
+            self.entries.len()
+        } else {
+            self.per_row(self.entries.len())
+        };
+        let entry_row = |entries: &[WindowListEntry]| {
+            let gap = Widget::fill(ThemeElement::WindowListEmpty).with_size(SizePolicy::Share {
+                max: self.entry_max_width,
+            });
+            let mut widgets: Vec<Widget<TaskbarHit>> = entries
+                .iter()
+                .map(|entry| entry.widget(self.entry_max_width))
+                .collect();
+            widgets.resize(per_row.max(widgets.len()), gap);
+            Widget::row(ThemeElement::WindowListEmpty, widgets)
+        };
+        if self.rows <= 1 {
+            return entry_row(&self.entries);
+        }
+        let mut rows: Vec<Widget<TaskbarHit>> =
+            self.entries.chunks(per_row).map(entry_row).collect();
+        let count = usize::try_from(self.rows).unwrap_or(usize::MAX);
+        rows.resize_with(count.max(rows.len()), || entry_row(&[]));
+        Widget::column(ThemeElement::WindowListEmpty, rows)
+    }
+
+    /// Returns whether the window list's entries are at least
+    /// `min_entry_width` wide with the taskbar as many rows as it is now,
+    /// `width` wide, as `theme` styles it.
+    fn entries_fit(
+        &self,
+        width: u32,
+        min_entry_width: u32,
+        theme: &Theme,
+        typesetter: &mut Typesetter,
+    ) -> bool {
+        if self.entries.is_empty() {
+            return true;
+        }
+        let size = vaht_ui::Size::new(width, self.rows.saturating_mul(self.row_height));
+        let layout = Panel::lay_out(self, size, theme, typesetter);
+        // The list is the first widget drawn on its background.
+        let Some(list) = layout
+            .placed()
+            .iter()
+            .find(|placed| placed.element == ThemeElement::WindowListEmpty)
+        else {
+            return true;
+        };
+        let per_row = u32::try_from(self.per_row(self.entries.len())).unwrap_or(u32::MAX);
+        list.rect.width / per_row >= min_entry_width
+    }
+
     /// Returns the tray: a slot per item, drawn on the taskbar's own
-    /// background, as wide as its items need.
+    /// background, as wide as its items need, wrapped across the taskbar's
+    /// rows.
     fn tray_widget(&self) -> Widget<TaskbarHit> {
         if self.tray.is_empty() {
             return Widget::fill(ThemeElement::Taskbar).with_size(SizePolicy::Fixed(0));
@@ -683,30 +775,47 @@ impl TaskbarContent {
         let margin = || {
             Widget::fill(ThemeElement::Taskbar).with_size(SizePolicy::Fixed(Self::TRAY_END_MARGIN))
         };
-        let slots = self.tray.iter().map(|entry| {
-            let slot = Widget::fill(ThemeElement::Taskbar)
-                .with_size(SizePolicy::Fixed(self.tray_slot))
-                .with_hit(TaskbarHit::TrayItem(entry.key));
-            match &entry.icon {
-                Some(icon) => slot.with_icon(WidgetIcon {
-                    icon: icon.clone(),
-                    emphasis: IconEmphasis::Full,
-                }),
-                None => slot,
-            }
-        });
-        let count = u32::try_from(self.tray.len()).unwrap_or(u32::MAX);
-        let width = count
+        let slots: Vec<Widget<TaskbarHit>> = self
+            .tray
+            .iter()
+            .map(|entry| {
+                let slot = Widget::fill(ThemeElement::Taskbar)
+                    .with_size(SizePolicy::Fixed(self.tray_slot))
+                    .with_hit(TaskbarHit::TrayItem(entry.key));
+                match &entry.icon {
+                    Some(icon) => slot.with_icon(WidgetIcon {
+                        icon: icon.clone(),
+                        emphasis: IconEmphasis::Full,
+                    }),
+                    None => slot,
+                }
+            })
+            .collect();
+        let per_row = self.per_row(slots.len());
+        let columns = u32::try_from(per_row).unwrap_or(u32::MAX);
+        let width = columns
             .saturating_mul(self.tray_slot)
             .saturating_add(2 * Self::TRAY_END_MARGIN);
-        Widget::row(
-            ThemeElement::Taskbar,
-            std::iter::once(margin())
-                .chain(slots)
-                .chain(std::iter::once(margin()))
-                .collect(),
-        )
-        .with_size(SizePolicy::Fixed(width))
+        let tray_row = |row: &[Widget<TaskbarHit>]| {
+            Widget::row(
+                ThemeElement::Taskbar,
+                std::iter::once(margin())
+                    .chain(row.iter().cloned())
+                    .chain(std::iter::once(Widget::fill(ThemeElement::Taskbar)))
+                    .collect(),
+            )
+        };
+        let rows: Vec<Widget<TaskbarHit>> = slots.chunks(per_row).map(tray_row).collect();
+        let tray = match <[_; 1]>::try_from(rows) {
+            Ok([row]) => row,
+            Err(rows) => {
+                let mut rows = rows;
+                let count = usize::try_from(self.rows).unwrap_or(usize::MAX);
+                rows.resize_with(count.max(rows.len()), || tray_row(&[]));
+                Widget::column(ThemeElement::Taskbar, rows)
+            }
+        };
+        tray.with_size(SizePolicy::Fixed(width))
     }
 }
 
@@ -908,43 +1017,98 @@ mod tests {
         assert!(Taskbar::new(&settings, "OUT", true).is_none());
     }
 
-    #[test]
-    fn the_tray_is_a_slot_per_item_with_a_pixel_at_each_end() {
-        let content = TaskbarContent {
-            widgets: vec![TaskbarWidget::Tray],
+    /// A taskbar's content, `rows` rows of 20 pixels, with a tray of
+    /// `items` items and a window list of `windows` windows.
+    fn content(rows: u32, items: u64, windows: u64) -> TaskbarContent {
+        TaskbarContent {
+            widgets: vec![TaskbarWidget::WindowList, TaskbarWidget::Tray],
             workspace_name: String::new(),
-            entries: Vec::new(),
+            entries: (1..=windows)
+                .map(|window| WindowListEntry {
+                    window: WindowId::new(window),
+                    title: format!("window {window}"),
+                    is_focused: false,
+                    is_minimized: false,
+                    icon: None,
+                })
+                .collect(),
             entry_max_width: 128,
             clock: String::new(),
-            tray: [1, 2]
+            tray: (1..=items)
                 .map(|key| TrayEntry {
                     key: TrayItemKey(key),
                     tooltip: None,
                     icon: None,
                 })
-                .to_vec(),
+                .collect(),
             tray_slot: 20,
+            rows,
+            row_height: 20,
+        }
+    }
+
+    /// Returns what clicking each child of `widget`, a row, reports.
+    fn hits_of(widget: &Widget<TaskbarHit>) -> Vec<Option<TaskbarHit>> {
+        let vaht_ui::widget::WidgetKind::Row(children) = &widget.kind else {
+            panic!("a row");
         };
-        let tray = content.tray_widget();
+        children.iter().map(|child| child.hit).collect()
+    }
+
+    /// Returns the children of `widget`, a column.
+    fn rows_of(widget: &Widget<TaskbarHit>) -> &[Widget<TaskbarHit>] {
+        let vaht_ui::widget::WidgetKind::Column(rows) = &widget.kind else {
+            panic!("a column");
+        };
+        rows
+    }
+
+    #[test]
+    fn the_tray_is_a_slot_per_item_with_a_pixel_at_each_end() {
+        let tray = content(1, 2, 0).tray_widget();
         assert_eq!(
             tray.size,
             SizePolicy::Fixed(42),
             "two 20-pixel slots and two 1-pixel ends"
         );
+        let item = |key| Some(TaskbarHit::TrayItem(TrayItemKey(key)));
+        assert_eq!(hits_of(&tray), [None, item(1), item(2), None]);
         let vaht_ui::widget::WidgetKind::Row(children) = tray.kind else {
             panic!("the tray is a row");
         };
-        let hits: Vec<_> = children.iter().map(|child| child.hit).collect();
-        assert_eq!(
-            hits,
-            [
-                None,
-                Some(TaskbarHit::TrayItem(TrayItemKey(1))),
-                Some(TaskbarHit::TrayItem(TrayItemKey(2))),
-                None
-            ]
-        );
         assert!(!children[1].is_button, "an item acts as it is pressed");
+    }
+
+    #[test]
+    fn a_taller_taskbar_wraps_its_tray_into_its_rows() {
+        let tray = content(2, 3, 0).tray_widget();
+        assert_eq!(
+            tray.size,
+            SizePolicy::Fixed(42),
+            "two columns of 20-pixel slots, and the ends"
+        );
+        let item = |key| Some(TaskbarHit::TrayItem(TrayItemKey(key)));
+        let rows = rows_of(&tray);
+        assert_eq!(hits_of(&rows[0]), [None, item(1), item(2), None]);
+        assert_eq!(hits_of(&rows[1]), [None, item(3), None], "the rest");
+    }
+
+    #[test]
+    fn a_taller_taskbar_wraps_its_window_list_and_keeps_empty_rows() {
+        let entry = |window| Some(TaskbarHit::Entry(WindowId::new(window)));
+        let list = content(2, 0, 3).window_list();
+        let rows = rows_of(&list);
+        assert_eq!(hits_of(&rows[0]), [entry(1), entry(2)]);
+        assert_eq!(hits_of(&rows[1]), [entry(3), None], "and room for one more");
+        let list = content(3, 0, 1).window_list();
+        assert_eq!(rows_of(&list).len(), 3, "a row per taskbar row");
+        assert_eq!(hits_of(&content(1, 0, 3).window_list()).len(), 3, "one row");
+    }
+
+    #[test]
+    fn arrows_stay_one_row_wide_on_a_taller_taskbar() {
+        let arrow = content(3, 0, 0).arrow(Glyph::ArrowLeft, TaskbarHit::WindowPrevious);
+        assert_eq!(arrow.size, SizePolicy::Fixed(20));
     }
 
     #[test]

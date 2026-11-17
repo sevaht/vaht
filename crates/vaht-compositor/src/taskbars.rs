@@ -100,18 +100,20 @@ impl Taskbars {
 
     /// Brings each taskbar up to date with `state` (the windows and the
     /// settings) and paints it, as `theme` styles it, on its output, whose
-    /// area `whole_of` gives by name.
+    /// area `whole_of` gives by name. Returns whether any changed height,
+    /// so windows keep off it anew.
     pub(crate) fn prepare(
         &mut self,
         whole_of: impl Fn(&str) -> Area,
         state: (&WindowManager, &TaskbarSettings),
         theme: &Theme,
         tools: (&mut Typesetter, &mut IconStore),
-    ) {
+    ) -> bool {
         let (window_manager, settings) = state;
         let (typesetter, icons) = tools;
         let now = Zoned::now();
         let Self { bars, tray, .. } = self;
+        let mut has_resized = false;
         for bar in bars {
             let view = TaskbarView {
                 window_manager,
@@ -120,8 +122,9 @@ impl Taskbars {
                 now: &now,
                 tray: tray.as_ref(),
             };
-            bar.prepare(view, theme, typesetter, icons);
+            has_resized |= bar.prepare(view, theme, typesetter, icons);
         }
+        has_resized
     }
 
     /// Returns the main taskbar, if there is one.

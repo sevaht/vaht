@@ -232,6 +232,90 @@ fn the_window_arrows_go_through_the_window_list_in_its_order() {
     );
 }
 
+/// Returns how tall the taskbar is: how far up from the screen's bottom
+/// its colors reach at its left end.
+fn taskbar_height(screenshot: &Screenshot) -> u32 {
+    let is_taskbar = |y| [FOCUSED, UNFOCUSED, BACKGROUND].contains(&screenshot.rgb(2, y));
+    (0..screenshot.height())
+        .take_while(|up| is_taskbar(screenshot.height() - 1 - up))
+        .count()
+        .try_into()
+        .expect("a height fits in u32")
+}
+
+/// Maximizes the focused window and returns the lowest row any window's
+/// content reaches: the maximized one's.
+fn maximize_and_find_bottom(client: &mut TestClient) -> u32 {
+    client.type_chord(&[
+        vaht_test_support::keys::LEFT_SUPER,
+        vaht_test_support::keys::UP,
+    ]);
+    lowest_window_row(client)
+}
+
+/// Returns the lowest row any window's content reaches.
+fn lowest_window_row(client: &mut TestClient) -> u32 {
+    client
+        .screenshot()
+        .bounds_of(WINDOW_COLOR)
+        .expect("a window shows")
+        .bottom
+}
+
+#[test]
+fn a_taskbar_of_two_rows_wraps_its_list_and_keeps_windows_off_both() {
+    let (_vaht, mut client) = start_with("[\"window-list\"]\nrows = 2", "");
+    client.open_windows(3);
+    let screenshot = client.screenshot();
+    assert_eq!(taskbar_height(&screenshot), 2 * HEIGHT);
+    // Two entries on the top row, the third, focused, below, as wide.
+    let half = screenshot.width() / 2;
+    let top_row = screenshot.height() - HEIGHT - HEIGHT / 2;
+    assert_eq!(screenshot.rgb(half / 2, top_row), UNFOCUSED);
+    assert_eq!(screenshot.rgb(half + half / 2, top_row), UNFOCUSED);
+    assert_eq!(
+        taskbar_runs(&screenshot),
+        [(FOCUSED, half), (BACKGROUND, half)]
+    );
+    let two_rows = maximize_and_find_bottom(&mut client);
+    let (_one_row_vaht, mut one_row_client) = start_with("[\"window-list\"]", "");
+    one_row_client.open_windows(3);
+    let one_row = maximize_and_find_bottom(&mut one_row_client);
+    assert_eq!(
+        two_rows,
+        one_row - HEIGHT,
+        "a maximized window stops above both rows"
+    );
+}
+
+#[test]
+fn an_auto_taskbar_takes_a_row_when_entries_get_too_narrow() {
+    // 1920 pixels wide: two entries of 960 fit, three of 640 do not.
+    let (_vaht, mut client) = start_with(
+        "[\"window-list\"]\nrows = \"auto\"",
+        "min_entry_width = 700",
+    );
+    client.open_windows(2);
+    assert_eq!(taskbar_height(&client.screenshot()), HEIGHT);
+    let one_row = maximize_and_find_bottom(&mut client);
+    client.open_windows(1);
+    let screenshot = client.screenshot();
+    assert_eq!(taskbar_height(&screenshot), 2 * HEIGHT, "a second row");
+    assert_eq!(
+        lowest_window_row(&mut client),
+        one_row - HEIGHT,
+        "the maximized window shrinks to keep off it"
+    );
+    client.close_windows();
+}
+
+#[test]
+fn a_taskbar_never_takes_a_row_for_its_tray() {
+    let (_vaht, mut client) = start_with("[\"window-list\", \"tray\"]\nrows = \"auto\"", "");
+    client.open_windows(1);
+    assert_eq!(taskbar_height(&client.screenshot()), HEIGHT);
+}
+
 #[test]
 fn without_a_taskbar_windows_maximize_over_the_whole_output() {
     let vaht = HeadlessVaht::start_with_config(

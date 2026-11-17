@@ -300,7 +300,7 @@ The bridge from `Canvas` to `MemoryRenderBuffer` sits in `vaht`
 
 | Feature | Mechanism |
 |---|---|
-| Several rows | The taskbar builds the window list and tray as `Grid { rows: n }`. Layout wraps entries row by row; nothing else changes |
+| Several rows | The taskbar builds the window list and tray as a `Column` of `Row`s, entries wrapped row by row, a short row padded so entries keep one width. For `rows = "auto"` it lays itself out with 1, 2, … rows (`Panel::lay_out`) and keeps the first whose entries are at least `min_entry_width` wide; a change of height makes the compositor work out the output areas again, so maximized windows follow. Nothing else changes |
 | Taller clock | `Clock` picks a `ClockFormat` by the height it was given (one line, or time over date). It is a `build()` decision |
 | Taskbar on all outputs | `taskbar.outputs = "primary" \| "all" \| [matches]` decides which `Output`s get a `Taskbar` |
 | Window list per output | `WindowListScope::{AllOutputs, ThisOutput}` plus a `WindowMatcher` filter |

@@ -171,14 +171,7 @@ impl<Content: PanelContent> Panel<Content> {
             return false;
         }
         self.is_dirty = false;
-        let root = self.content.build();
-        let mut fit_width = |text: &str, element| {
-            // The fitted width is the text's, plus the element's padding in
-            // the content's normal state.
-            let style = theme.style(element, self.content.state());
-            typesetter.text_width(text, &style.text.font) + style.padding.horizontal()
-        };
-        let layout = Layout::new(&root, Rect::from_size(self.size), &mut fit_width);
+        let layout = Self::lay_out(&self.content, self.size, theme, typesetter);
         self.pixels = Pixmap::new(self.size.width, self.size.height);
         if let Some(pixels) = &mut self.pixels {
             let base = self.content.state();
@@ -195,6 +188,25 @@ impl<Content: PanelContent> Panel<Content> {
         self.layout = Some(layout);
         self.generation += 1;
         true
+    }
+
+    /// Returns where each widget of `content` goes in a panel of `size`,
+    /// as `theme` styles it: what painting lays out, and what content can
+    /// try before settling on its shape.
+    pub fn lay_out(
+        content: &Content,
+        size: Size,
+        theme: &Theme,
+        typesetter: &mut Typesetter,
+    ) -> Layout<Content::Hit> {
+        let root = content.build();
+        let mut fit_width = |text: &str, element| {
+            // The fitted width is the text's, plus the element's padding in
+            // the content's normal state.
+            let style = theme.style(element, content.state());
+            typesetter.text_width(text, &style.text.font) + style.padding.horizontal()
+        };
+        Layout::new(&root, Rect::from_size(size), &mut fit_width)
     }
 
     /// Marks the panel for laying out and painting again.

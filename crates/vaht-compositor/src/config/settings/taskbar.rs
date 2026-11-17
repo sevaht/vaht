@@ -2,6 +2,7 @@
 //! what it shows (02 §3.1).
 
 use std::fmt;
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 use jiff::Zoned;
@@ -32,6 +33,10 @@ pub(crate) struct TaskbarSettings {
     pub(crate) edge: TaskbarEdge,
     /// How much of the edge it spans.
     pub(crate) width_percent: WidthPercent,
+    /// How many rows tall it is.
+    pub(crate) rows: TaskbarRows,
+    /// The most rows an `"auto"` taskbar grows to.
+    pub(crate) max_rows: NonZeroU32,
     /// Where along the edge it sits, when narrower than the edge.
     pub(crate) align: TaskbarAlign,
     /// Whether maximized and tiled windows leave it uncovered; an
@@ -61,6 +66,8 @@ impl Default for TaskbarSettings {
             on_every_output: false,
             edge: TaskbarEdge::Bottom,
             width_percent: WidthPercent::WHOLE,
+            rows: TaskbarRows::default(),
+            max_rows: NonZeroU32::new(3).expect("3 is not 0"),
             align: TaskbarAlign::Center,
             reserve_space: true,
             auto_hide: false,
@@ -82,6 +89,14 @@ impl Default for TaskbarSettings {
 }
 
 impl TaskbarSettings {
+    /// Returns the fewest and the most rows the taskbar is.
+    pub(crate) const fn row_range(&self) -> (u32, u32) {
+        match self.rows {
+            TaskbarRows::Fixed(rows) => (rows.get(), rows.get()),
+            TaskbarRows::Auto => (1, self.max_rows.get()),
+        }
+    }
+
     /// Returns how long the pointer rests before a tooltip shows; none
     /// when tooltips are off.
     pub(crate) const fn tooltip_delay(&self) -> Option<Duration> {
@@ -99,6 +114,51 @@ impl TaskbarSettings {
             Some(Duration::from_millis(self.auto_hide_delay_ms))
         } else {
             None
+        }
+    }
+}
+
+/// How many rows the taskbar is: always a number of them (`rows = 2`), or
+/// (`"auto"`) one, and another whenever the window list's entries would be
+/// narrower than its `min_entry_width`, up to `max_rows`. Each row is as
+/// tall as the theme's taskbar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum TaskbarRows {
+    /// Always this many.
+    Fixed(NonZeroU32),
+    /// As many as the window list needs.
+    Auto,
+}
+
+impl Default for TaskbarRows {
+    fn default() -> Self {
+        Self::Fixed(NonZeroU32::MIN)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TaskbarRows {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// What `rows` may say.
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Given {
+            /// A number of rows.
+            Count(i64),
+            /// A keyword: `"auto"`.
+            Keyword(String),
+        }
+        match Given::deserialize(deserializer)? {
+            Given::Count(count) => u32::try_from(count)
+                .ok()
+                .and_then(NonZeroU32::new)
+                .map(Self::Fixed)
+                .ok_or_else(|| {
+                    de::Error::custom(format!("{count} is no number of rows: at least 1"))
+                }),
+            Given::Keyword(keyword) if keyword == "auto" => Ok(Self::Auto),
+            Given::Keyword(other) => Err(de::Error::custom(format!(
+                "`rows` is a number of rows or \"auto\", not `{other}`"
+            ))),
         }
     }
 }
@@ -271,6 +331,9 @@ pub(crate) struct WindowListSettings {
     pub(crate) icons: bool,
     /// Whose windows a taskbar lists: every output's, or its own output's.
     pub(crate) windows: WindowListScope,
+    /// The narrowest an entry gets before an `"auto"` taskbar takes
+    /// another row, in pixels.
+    pub(crate) min_entry_width: u32,
 }
 
 impl Default for WindowListSettings {
@@ -280,6 +343,7 @@ impl Default for WindowListSettings {
             entry_width: EntryWidth::default(),
             icons: true,
             windows: WindowListScope::default(),
+            min_entry_width: 100,
         }
     }
 }
@@ -463,9 +527,20 @@ mod tests {
     }
 
     #[rstest]
+    #[case::one_by_default("", (1, 1))]
+    #[case::fixed("rows = 2\n", (2, 2))]
+    #[case::auto("rows = \"auto\"\n", (1, 3))]
+    #[case::auto_to_five("rows = \"auto\"\nmax_rows = 5\n", (1, 5))]
+    fn rows_are_fixed_or_grow_up_to_a_limit(#[case] text: &str, #[case] range: (u32, u32)) {
+        assert_eq!(taskbar(text).expect("valid").row_range(), range);
+    }
+
+    #[rstest]
     #[case::unknown_widget("widgets = [\"pager\"]\n", "no taskbar widget")]
     #[case::bad_format("[clock]\nformat = \"%k:%\"\n", "not valid")]
-    #[case::planned_key("rows = 2\n", "unknown field")]
+    #[case::no_rows("rows = 0\n", "at least 1")]
+    #[case::bad_rows("rows = \"many\"\n", "not `many`")]
+    #[case::no_max_rows("rows = \"auto\"\nmax_rows = 0\n", "nonzero")]
     fn mistakes_are_explained(#[case] text: &str, #[case] expected: &str) {
         let error = taskbar(text).expect_err(text);
         assert!(error.contains(expected), "{error}");

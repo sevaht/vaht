@@ -635,7 +635,7 @@ mod tests {
 
     #[test]
     fn settings_for_features_vaht_lacks_are_refused() {
-        let error = toml::from_str::<Settings>("[taskbar]\nrows = 2\n").expect_err("no rows");
+        let error = toml::from_str::<Settings>("[taskbar]\ncolumns = 2\n").expect_err("no columns");
         assert!(error.message().contains("unknown field"), "{error}");
     }
 }
