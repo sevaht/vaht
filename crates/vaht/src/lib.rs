@@ -34,6 +34,10 @@ pub fn run(
         "vaht starting"
     );
     tracing::debug!(?arguments, "command line");
-    vaht_compositor::Compositor::run(arguments.run_options(), signals)?;
+    let options = vaht_compositor::RunOptions {
+        log_rotation: logging.log_rotation(),
+        ..arguments.run_options()
+    };
+    vaht_compositor::Compositor::run(options, signals)?;
     Ok(())
 }

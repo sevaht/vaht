@@ -171,7 +171,7 @@ builds skip these checks.
 
 | Sink | Default | Notes |
 |---|---|---|
-| **File**: `$XDG_STATE_HOME/vaht/vaht.log` (normally `~/.local/state/vaht/`) | on | Size-based rotation of vaht's own (`RotatingFile` in `crates/vaht/src/logging.rs`; `file-rotate` and every other size-rotating crate pulled in the unmaintained `chrono`, and `tracing-appender` rotates by time alone). It rotates to `vaht.log.1`, `.2`, … at **10 MB per file, keeping 5**, so 50 MB at most. **Each start also rotates**, so `vaht.log` is always the current session and `vaht.log.1` the previous one, which is the one you want after a crash. Both numbers are settings |
+| **File**: `$XDG_STATE_HOME/vaht/vaht.log` (normally `~/.local/state/vaht/`) | on | Size-based rotation of vaht's own (`RotatingFile` in `crates/vaht/src/logging.rs`; `file-rotate` and every other size-rotating crate pulled in the unmaintained `chrono`, and `tracing-appender` rotates by time alone). It rotates to `vaht.log.1`, `.2`, … at **10 MB per file, keeping 5**, so 50 MB at most. **Each start also rotates**, so `vaht.log` is always the current session and `vaht.log.1` the previous one, which is the one you want after a crash. Both numbers are settings (`[logging]` `file_size_mb` and `files`), followed as they change |
 | **stderr** | on when stderr is a terminal | Started from a TTY, this is the VT behind the compositor: useful if vaht dies before its file sink opens |
 | **journald** | on when journald's socket exists | `tracing-journald` writes to `/run/systemd/journal/socket`. It works whether or not vaht itself is started as a systemd unit, and journald applies its own system-wide size limits. Structured fields become journal fields, so `journalctl -t vaht WINDOW=12` works. Read it with `journalctl -t vaht` |
 

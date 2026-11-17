@@ -164,6 +164,10 @@ input_emulation = { default = "ask", allow = ["steam"], deny = [] }
 [ipc]
 allow_commands = true           # allowRemoteActions
 
+[logging]
+file_size_mb = 10               # new: vaht.log starts anew past this
+files = 5                       # new: files kept, vaht.log included
+
 [session]
 autostart = ["~/.config/vaht/autostart"]
 ```
@@ -256,6 +260,15 @@ rest by name, so a setting never silently does nothing:
   (04 §8.1), the pointer an X11 window sees stays in step while it moves
   (04 §8.2), and a window whose Motif hints ask for no decorations gets no
   frame.
+- `[logging]`: `file_size_mb` (1 to 1024) and `files` (1 to 100), the
+  log file's limits (03 §4.3): `vaht.log` starts anew at each start and
+  once it passes the size, the files before it kept as `vaht.log.1` (the
+  newest), `.2`, …, so the logs take at most the size times the count.
+  Read before anything is logged, so the first file obeys them, and
+  followed as they change (a reload, `set-setting`); a lowered count
+  clears the extra files at the next rotation. There is no rotation by
+  time: a session's log stays one file, which is what is wanted after a
+  crash.
 - `[input]` (fluxland's `session.input.*`, which `vaht import` converts):
   libinput settings for pointing devices, in four scopes, the more specific
   winning: `[input.all]`, `[input.touchpad]` or `[input.pointer]` (mice,

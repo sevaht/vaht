@@ -202,3 +202,11 @@ deny = []
 #   [input.touchpad]
 #   tap = true
 #   natural_scroll = true
+
+[logging]
+# vaht.log starts anew at each start and once it passes file_size_mb
+# megabytes (1 to 1024); the files before it are kept as vaht.log.1 (the
+# newest), .2, …, files in all (1 to 100), so the logs take at most
+# file_size_mb × files on disk.
+file_size_mb = 10
+files = 5

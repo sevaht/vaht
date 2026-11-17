@@ -47,6 +47,8 @@ impl Arguments {
             // Found on PATH, if the running program cannot be.
             executable: std::env::current_exe().unwrap_or_else(|_| PathBuf::from(PROGRAM_NAME)),
             allows_xwayland: !self.no_xwayland,
+            // The log file's, which the logging set up holds.
+            log_rotation: None,
         }
     }
 

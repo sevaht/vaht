@@ -6,7 +6,8 @@
 //! (`vaht msg log-filter`). The destinations are:
 //!
 //! - **a log file** in the state directory, size-limited by a
-//!   [`RotationPolicy`] and rotated at every start, so `vaht.log` is always
+//!   [`LogRotation`] (`[logging]` in the settings) and rotated at every
+//!   start, so `vaht.log` is always
 //!   the current session and `vaht.log.1` the previous one. It is written by
 //!   a background thread, so vaht never waits on the disk; lines that arrive
 //!   faster than the disk takes them are dropped and counted
@@ -31,6 +32,7 @@ use tracing_appender::non_blocking::{ErrorCounter, NonBlockingBuilder, WorkerGua
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::{SubscriberInitExt as _, TryInitError};
 use tracing_subscriber::{EnvFilter, Registry, filter, reload};
+use vaht_compositor::LogRotation;
 
 /// The program's name, as journald and the state directory know it.
 pub(crate) const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
@@ -68,12 +70,14 @@ impl LoggingArguments {
     ///
     /// Returns an error if the filter directives are invalid, or if
     /// diagnostic output was already installed in this process.
-    pub fn install(&self) -> Result<Logging, LoggingError> {
+    /// The log file is held to `limits`, which the compositor keeps in line
+    /// with the settings as they change ([`Logging::log_rotation`]).
+    pub fn install(&self, limits: LogRotation) -> Result<Logging, LoggingError> {
         let directives = self.filter_directives();
         let (filter_layer, filter_handle) = reload::Layer::new(parse_filter(&directives)?);
 
         let (log_file, file_problem) = match self.log_directory() {
-            Some(directory) => match RotationPolicy::DEFAULT.open_in(&directory) {
+            Some(directory) => match RotatingFile::open_in(&directory, limits.clone()) {
                 Ok(log_file) => (Some(log_file), None),
                 Err(problem) => (None, Some(problem)),
             },
@@ -88,6 +92,7 @@ impl LoggingArguments {
                     .with_ansi(false);
                 let sink = FileSink {
                     path,
+                    limits,
                     dropped_lines,
                     _guard: guard,
                 };
@@ -185,30 +190,28 @@ impl Verbosity {
     }
 }
 
-/// How large the log file may grow, and how many files are kept.
-///
-/// The defaults bound the logs to 50 MB on disk (03 §4.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RotationPolicy {
-    /// The size at which the current file is rotated.
-    pub file_size_bytes: usize,
-    /// How many files exist at most, the current one included.
-    pub file_count: usize,
+/// A log file that starts anew once it passes its limits' size, keeping
+/// the files before it as `vaht.log.1` (the newest), `vaht.log.2`, …, the
+/// oldest removed, so the logs never take more than the limits' files.
+#[derive(Debug)]
+pub struct RotatingFile {
+    /// The current file's path; older files append `.1`, `.2`, ….
+    path: PathBuf,
+    /// The current file.
+    file: File,
+    /// How many bytes the current file holds.
+    written: u64,
+    /// How big it may get, and how many files are kept: the settings',
+    /// which may change as vaht runs.
+    limits: LogRotation,
 }
 
-impl RotationPolicy {
-    /// Ten files of 10 MB would hold days of debug output; five at 10 MB keep
-    /// the last few sessions at `info` while staying small.
-    pub const DEFAULT: Self = Self {
-        file_size_bytes: 10 * 1024 * 1024,
-        file_count: 5,
-    };
-
-    /// The current log file's name; rotated files append `.1`, `.2`, ….
+impl RotatingFile {
+    /// The current log file's name; older files append `.1`, `.2`, ….
     pub const FILE_NAME: &str = "vaht.log";
 
-    /// Opens the log file in `directory`, starting a new file for this
-    /// session if the previous one holds anything.
+    /// Opens the log file in `directory`, held to `limits`, starting a new
+    /// file for this session if the previous one holds anything.
     ///
     /// The directory and the files are private to the user (modes 0700 and
     /// 0600): logs at debug level contain window titles.
@@ -217,7 +220,7 @@ impl RotationPolicy {
     ///
     /// Returns an error if the directory cannot be created or the file
     /// cannot be opened or rotated.
-    pub fn open_in(self, directory: &Path) -> Result<(RotatingFile, PathBuf), LoggingError> {
+    pub fn open_in(directory: &Path, limits: LogRotation) -> Result<(Self, PathBuf), LoggingError> {
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -231,40 +234,23 @@ impl RotationPolicy {
             path: path.clone(),
             source,
         };
-        let mut file = RotatingFile::open(path.clone(), self).map_err(open_error)?;
+        let mut file = Self::open(path.clone(), limits).map_err(open_error)?;
         if file.written > 0 {
             file.rotate().map_err(open_error)?;
         }
         Ok((file, path))
     }
-}
 
-/// A log file that starts anew once it passes its policy's size, keeping
-/// the files before it as `vaht.log.1` (the newest), `vaht.log.2`, …, the
-/// oldest removed, so the logs never take more than the policy's files.
-#[derive(Debug)]
-pub struct RotatingFile {
-    /// The current file's path; older files append `.1`, `.2`, ….
-    path: PathBuf,
-    /// The current file.
-    file: File,
-    /// How many bytes the current file holds.
-    written: u64,
-    /// How big it may get, and how many files are kept.
-    policy: RotationPolicy,
-}
-
-impl RotatingFile {
     /// Opens the file at `path` to append to, private to the user (mode
-    /// 0600), under `policy`.
-    fn open(path: PathBuf, policy: RotationPolicy) -> io::Result<Self> {
+    /// 0600), held to `limits`.
+    fn open(path: PathBuf, limits: LogRotation) -> io::Result<Self> {
         let file = Self::open_file(&path)?;
         let written = file.metadata()?.len();
         Ok(Self {
             path,
             file,
             written,
-            policy,
+            limits,
         })
     }
 
@@ -285,17 +271,20 @@ impl RotatingFile {
         PathBuf::from(name)
     }
 
-    /// Moves every file one older, dropping the oldest, and starts the
-    /// current file anew.
+    /// Moves every file one older, dropping the oldest (and any beyond the
+    /// count, which a lowered count leaves), and starts the current file
+    /// anew.
     fn rotate(&mut self) -> io::Result<()> {
-        let older_count = self.policy.file_count.saturating_sub(1);
+        let older_count = self.limits.file_count().saturating_sub(1);
+        for number in older_count.max(1)..=LogRotation::MAX_FILE_COUNT {
+            Self::remove_if_there(&self.older(number))?;
+        }
         if older_count == 0 {
             // No older files are kept: the current one starts over.
             self.file.set_len(0)?;
             self.written = 0;
             return Ok(());
         }
-        Self::remove_if_there(&self.older(older_count))?;
         for number in (1..older_count).rev() {
             Self::rename_if_there(&self.older(number), &self.older(number + 1))?;
         }
@@ -331,8 +320,7 @@ impl Write for RotatingFile {
         reason = "the standard library names it buf; vaht spells names out (N1)"
     )]
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        let limit = u64::try_from(self.policy.file_size_bytes).unwrap_or(u64::MAX);
-        if self.written >= limit {
+        if self.written >= self.limits.file_size_bytes() {
             self.rotate()?;
         }
         let count = self.file.write(buffer)?;
@@ -361,6 +349,13 @@ impl Logging {
     #[must_use]
     pub const fn filter(&self) -> &LogFilter {
         &self.filter
+    }
+
+    /// Returns the log file's limits, for the compositor to keep in line
+    /// with the settings, or `None` without a log file.
+    #[must_use]
+    pub fn log_rotation(&self) -> Option<LogRotation> {
+        self.file.as_ref().map(|file| file.limits.clone())
     }
 
     /// Returns the current log file's path, if there is one.
@@ -468,6 +463,8 @@ pub enum LoggingError {
 struct FileSink {
     /// The current log file.
     path: PathBuf,
+    /// Its limits, which the settings keep in line.
+    limits: LogRotation,
     /// Lines lost because the writer thread fell behind.
     dropped_lines: ErrorCounter,
     /// Flushes and stops the writer thread when dropped.
@@ -496,8 +493,12 @@ fn install_panic_hook() {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
+
+    /// The limits vaht has when the settings set none.
+    fn defaults() -> LogRotation {
+        LogRotation::new(10 * 1024 * 1024, 5)
+    }
 
     #[test]
     fn verbosity_defaults_to_info() {
@@ -585,9 +586,8 @@ mod tests {
     fn each_start_begins_a_new_file_and_keeps_the_previous_one() {
         let directory = tempfile::tempdir().expect("a temporary directory");
         for session in ["first", "second"] {
-            let (mut file, _) = RotationPolicy::DEFAULT
-                .open_in(directory.path())
-                .expect("the log file opens");
+            let (mut file, _) =
+                RotatingFile::open_in(directory.path(), defaults()).expect("the log file opens");
             writeln!(file, "{session}").expect("the log file is writable");
         }
         assert_eq!(file_names(directory.path()), ["vaht.log", "vaht.log.1"]);
@@ -598,27 +598,16 @@ mod tests {
     #[test]
     fn an_empty_previous_file_is_reused_rather_than_rotated() {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        drop(
-            RotationPolicy::DEFAULT
-                .open_in(directory.path())
-                .expect("opens"),
-        );
-        drop(
-            RotationPolicy::DEFAULT
-                .open_in(directory.path())
-                .expect("opens"),
-        );
+        drop(RotatingFile::open_in(directory.path(), defaults()).expect("opens"));
+        drop(RotatingFile::open_in(directory.path(), defaults()).expect("opens"));
         assert_eq!(file_names(directory.path()), ["vaht.log"]);
     }
 
     #[test]
     fn rotation_keeps_at_most_file_count_files() {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let policy = RotationPolicy {
-            file_size_bytes: 16,
-            file_count: 3,
-        };
-        let (mut file, _) = policy.open_in(directory.path()).expect("opens");
+        let (mut file, _) =
+            RotatingFile::open_in(directory.path(), LogRotation::new(16, 3)).expect("opens");
         for line_number in 0..20 {
             writeln!(file, "line {line_number:04} of the log").expect("writable");
         }
@@ -631,11 +620,8 @@ mod tests {
     #[test]
     fn the_newest_older_file_is_dot_one_and_lines_are_never_split() {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let policy = RotationPolicy {
-            file_size_bytes: 10,
-            file_count: 3,
-        };
-        let (mut file, _) = policy.open_in(directory.path()).expect("opens");
+        let (mut file, _) =
+            RotatingFile::open_in(directory.path(), LogRotation::new(10, 3)).expect("opens");
         for line in ["first line\n", "second line\n", "third line\n"] {
             file.write_all(line.as_bytes()).expect("writable");
         }
@@ -648,11 +634,8 @@ mod tests {
     #[test]
     fn with_one_file_kept_the_file_starts_over() {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let policy = RotationPolicy {
-            file_size_bytes: 10,
-            file_count: 1,
-        };
-        let (mut file, _) = policy.open_in(directory.path()).expect("opens");
+        let (mut file, _) =
+            RotatingFile::open_in(directory.path(), LogRotation::new(10, 1)).expect("opens");
         for line in ["first line\n", "second line\n"] {
             file.write_all(line.as_bytes()).expect("writable");
         }
@@ -662,14 +645,29 @@ mod tests {
     }
 
     #[test]
+    fn a_count_lowered_while_running_clears_the_older_files_at_the_next_rotation() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let limits = LogRotation::new(10, 4);
+        let (mut file, _) = RotatingFile::open_in(directory.path(), limits.clone()).expect("opens");
+        for number in 0..5 {
+            writeln!(file, "line {number:04} of it").expect("writable");
+        }
+        assert_eq!(
+            file_names(directory.path()),
+            ["vaht.log", "vaht.log.1", "vaht.log.2", "vaht.log.3"]
+        );
+        limits.set(10, 2);
+        writeln!(file, "after the change").expect("writable");
+        assert_eq!(file_names(directory.path()), ["vaht.log", "vaht.log.1"]);
+    }
+
+    #[test]
     fn log_files_are_private_to_the_user() {
         use std::os::unix::fs::PermissionsExt as _;
 
         let directory = tempfile::tempdir().expect("a temporary directory");
         let log_directory = directory.path().join("logs");
-        let (_, path) = RotationPolicy::DEFAULT
-            .open_in(&log_directory)
-            .expect("opens");
+        let (_, path) = RotatingFile::open_in(&log_directory, defaults()).expect("opens");
         let mode = |path: &Path| fs::metadata(path).expect("exists").permissions().mode() & 0o777;
         assert_eq!(mode(&log_directory), 0o700);
         assert_eq!(mode(&path), 0o600);

@@ -88,6 +88,7 @@ use crate::input_emulation::{DeviceSetup, Emulated, InputEmulation};
 use crate::ipc::IpcServer;
 use crate::launcher::Launcher;
 use crate::layers::{LayerMaps, Layers, OutputLayers};
+use crate::log_rotation::LogRotation;
 use crate::menu::{
     MenuBuilder, MenuChoice, MenuItem, MenuKey, MenuModel, MenuStack, OutputChoices, PipeRead,
     parse_printed,
@@ -168,6 +169,9 @@ pub struct Compositor {
     exports_activation_environment: bool,
     /// Where the autostart programs are.
     autostart: Autostart,
+    /// The log file's limits, which `[logging]` sets; none without a log
+    /// file.
+    log_rotation: Option<LogRotation>,
     /// Delayed commands waiting to run.
     delays: Vec<(Delay, Timer<Self>)>,
     /// Where windows were on outputs that left, to go back to them.
@@ -330,6 +334,9 @@ impl Compositor {
             .map_err(RunError::WatchSignals)?;
         let config_source = ConfigSource::new(options.config_directory);
         let config = Self::first_config(&config_source);
+        if let Some(rotation) = &options.log_rotation {
+            rotation.follow(config.settings.logging);
+        }
 
         let mut outputs = backend.outputs();
         let mut output_changes = outputs.configure(&config.outputs, &mut backend);
@@ -369,6 +376,7 @@ impl Compositor {
             fence_waits: FenceWaits::default(),
             exports_activation_environment: false,
             autostart: Autostart::Started,
+            log_rotation: options.log_rotation,
             delays: Vec::new(),
             output_memory: OutputMemory::default(),
             input_emulation: None,
@@ -613,6 +621,9 @@ impl Compositor {
 
     /// Makes `config` the configuration in effect, changing what differs.
     fn apply_config(&mut self, config: Config) {
+        if let Some(rotation) = &self.log_rotation {
+            rotation.follow(config.settings.logging);
+        }
         // Menus are made from the configuration being replaced.
         self.menus.close();
         self.menus.set_search(config.settings.menus.search);
@@ -3599,6 +3610,9 @@ pub struct RunOptions {
     /// Whether Xwayland may start, if the settings want it; off for runs
     /// that need no X11 programs, such as most tests.
     pub allows_xwayland: bool,
+    /// The log file's limits, which `[logging]` sets as it changes; none
+    /// when there is no log file.
+    pub log_rotation: Option<LogRotation>,
 }
 
 /// Why vaht could not start or keep running.

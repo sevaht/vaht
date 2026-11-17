@@ -49,7 +49,9 @@ fn main() -> ExitCode {
         }
     };
     // Held until main returns: dropping it flushes the log file.
-    let logging = match arguments.logging.install() {
+    // The log file opens with the settings' limits ([logging]).
+    let limits = vaht_compositor::LogRotation::configured(&arguments.config_directory());
+    let logging = match arguments.logging.install(limits) {
         Ok(logging) => logging,
         Err(error) => {
             vaht::terminal::report_error(&error.into());

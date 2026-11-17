@@ -7,6 +7,7 @@
 //! setting never silently does nothing.
 
 mod input;
+mod logging;
 mod taskbar;
 
 use std::collections::BTreeMap;
@@ -22,6 +23,7 @@ pub(crate) use self::input::{
     AccelProfile, AccelSpeed, ClickMethod, DeviceSettings, InputSettings, ScrollMethod, SendEvents,
     TapButtonMap,
 };
+pub(crate) use self::logging::{FileCount, LoggingSettings};
 pub(crate) use self::taskbar::{
     TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WidthPercent, WindowListScope,
 };
@@ -60,6 +62,8 @@ pub(crate) struct Settings {
     pub(crate) xwayland: XwaylandSettings,
     /// How pointing devices behave.
     pub(crate) input: InputSettings,
+    /// How big the log file may grow, and how many are kept.
+    pub(crate) logging: LoggingSettings,
 }
 
 impl Settings {
