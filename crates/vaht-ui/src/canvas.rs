@@ -210,9 +210,14 @@ impl<'pixmap> Canvas<'pixmap> {
         // Fluxbox's bullet triangle is a third of the square, centered.
         let third = side / 3.0;
         let (middle_x, middle_y) = (left + side / 2.0, top + side / 2.0);
+        // Fluxbox's toolbar arrow (FbDrawable::drawTriangle at its default
+        // toolbar.button.scale, 250): as wide as tall, two fifths of the
+        // button, cut to an even number of pixels, centered; 8 in 20, as
+        // measured on Fluxbox itself.
+        let arrow = (side * 100.0 / 250.0 / 2.0).floor() * 2.0;
         let (tip, base, half_height) = match glyph {
-            Glyph::ArrowLeft => (left + side / 4.0, left + side * 3.0 / 4.0, side / 2.0),
-            Glyph::ArrowRight => (left + side * 3.0 / 4.0, left + side / 4.0, side / 2.0),
+            Glyph::ArrowLeft => (middle_x - arrow / 2.0, middle_x + arrow / 2.0, arrow / 2.0),
+            Glyph::ArrowRight => (middle_x + arrow / 2.0, middle_x - arrow / 2.0, arrow / 2.0),
             Glyph::BulletRight => (middle_x + third / 2.0, middle_x - third / 2.0, third / 2.0),
             Glyph::BulletLeft => (middle_x - third / 2.0, middle_x + third / 2.0, third / 2.0),
             Glyph::BulletDiamond => {

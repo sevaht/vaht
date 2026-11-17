@@ -285,7 +285,9 @@ impl Sources {
                     "toolbar.clock.textColor",
                     "toolbar.textColor",
                 ]),
-                padding: Some([5, 5, 5, 5]),
+                // The arrow is two fifths of the button (Fluxbox's
+                // toolbar.button.scale, 250), drawn in the whole button.
+                padding: Some([0, 0, 0, 0]),
                 ..Self::texture(&[])
             },
             ThemeElement::TaskbarWorkspace => Self {
@@ -298,7 +300,8 @@ impl Sources {
                     "toolbar.textColor",
                 ]),
                 justify: Some(&["toolbar.workspace.justify", "toolbar.justify"]),
-                padding: Some([0, 8, 0, 8]),
+                // Fluxbox's workspace name tool: the widest name plus 2.
+                padding: Some([0, 1, 0, 1]),
                 ..Self::texture(&[])
             },
             ThemeElement::TaskbarClock => Self {

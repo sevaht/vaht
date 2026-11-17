@@ -56,10 +56,12 @@ texture = { gradient = "vertical", from = "white", to = "grey60", bevel = "raise
 height = 20
 
 [taskbar.button]
-padding = [5, 5, 5, 5]
+# The arrow is two fifths of the button, as Fluxbox draws it: no padding.
+padding = [0, 0, 0, 0]
 
 [taskbar.workspace]
-padding = [0, 8, 0, 8]
+# The widest name plus 2, as Fluxbox's workspace name tool is.
+padding = [0, 1, 0, 1]
 
 [taskbar.clock]
 padding = [0, 8, 0, 8]

@@ -482,4 +482,42 @@ mod tests {
         assert!(red_at(10), "the check, in the left square");
         assert!(!red_at(90), "nothing at the right end");
     }
+
+    /// A taskbar arrow button, 20 pixels square.
+    struct Arrow;
+
+    impl PanelContent for Arrow {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowLeft)
+        }
+
+        fn state(&self) -> WidgetState {
+            WidgetState::Unfocused
+        }
+    }
+
+    #[test]
+    fn a_taskbar_arrow_is_two_fifths_of_its_button_as_fluxbox_draws_it() {
+        let layers = crate::theme::ThemeLayers::from_toml(
+            "[default]\ntexture = { solid = \"black\" }\nglyph_color = \"white\"\n",
+        )
+        .expect("a valid theme");
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(Arrow, Size::new(20, 20));
+        assert!(panel.paint(&Theme::resolve(&layers), &mut typesetter));
+        let pixels = panel.pixels().expect("painted");
+        // Any coverage at all: the arrow is smoothed at its edges.
+        let lit = |x, y| pixels.pixel(x, y).is_some_and(|pixel| pixel.red() > 0);
+        let columns: Vec<u32> = (0..20).filter(|&x| (0..20).any(|y| lit(x, y))).collect();
+        let rows: Vec<u32> = (0..20).filter(|&y| (0..20).any(|x| lit(x, y))).collect();
+        // Measured on Fluxbox: columns 6 to 13, eight rows, tip at the left.
+        assert_eq!(
+            columns,
+            (6..14).collect::<Vec<_>>(),
+            "eight wide from the tip"
+        );
+        assert_eq!(rows.len(), 8, "eight tall: {rows:?}");
+    }
 }
