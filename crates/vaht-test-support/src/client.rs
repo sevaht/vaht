@@ -362,14 +362,30 @@ impl TestClient {
     ///
     /// Panics if the connection to vaht fails.
     pub fn open_windows(&mut self, count: usize) {
+        self.open_windows_decorated(count, WindowDecorations::RequestServer);
+    }
+
+    /// Opens `count` windows that ask to draw their own decorations
+    /// (xdg-decoration's client side), as Chromium's do, and waits until
+    /// each has been shown once.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn open_self_decorated_windows(&mut self, count: usize) {
+        self.open_windows_decorated(count, WindowDecorations::RequestClient);
+    }
+
+    /// Opens `count` windows asking for `decorations`, and waits until each
+    /// has been shown once.
+    fn open_windows_decorated(&mut self, count: usize, decorations: WindowDecorations) {
         let handle = self.queue.handle();
         for number in 0..count {
             let surface = self.state.compositor.create_surface(&handle);
-            let window = self.state.xdg_shell.create_window(
-                surface,
-                WindowDecorations::RequestServer,
-                &handle,
-            );
+            let window = self
+                .state
+                .xdg_shell
+                .create_window(surface, decorations, &handle);
             window.set_title(format!("test window {}", number + 1));
             window.set_app_id("vaht.test");
             window.commit();

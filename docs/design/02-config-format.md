@@ -689,8 +689,12 @@ focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
   `focus_new_windows` is off, `deny` gives it back to the window that had
   it), `output` (a head number, from 1 left to right as Fluxbox's
   `[Head]`, or a connector's name), `shaded`, `frame` (`full` or `none`;
-  `titlebar-only` and `border-only` are refused until frames can be
-  drawn so), `alpha` (one opacity, or `[focused, unfocused]`, 0 to 255),
+  `full` frames even a window whose program draws its own, as Fluxbox's
+  `[Deco]` does, though the program's own stays too; without a rule, a
+  Wayland program asking to draw its own through xdg-decoration, as
+  Chromium and Firefox do, and an X program asking for no decorations,
+  get no frame; `titlebar-only` and `border-only` are refused until frames
+  can be drawn so), `alpha` (one opacity, or `[focused, unfocused]`, 0 to 255),
   `hidden_from_window_list` (left off the taskbar, `[IconHidden]`),
   `hidden_from_cycling` (`[FocusHidden]`; Fluxbox's `[Hidden]` sets
   both), `ignore_size_hints` (resizing by hand is not held to the sizes

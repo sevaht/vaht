@@ -119,6 +119,57 @@ fn is_grey(color: [u8; 3]) -> bool {
 }
 
 #[test]
+fn a_window_that_asks_to_draw_its_own_decorations_gets_no_frame() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    // Chromium asks so unless its "use system title bar" is on.
+    client.open_self_decorated_windows(1);
+    let screenshot = client.screenshot();
+    let content = screenshot
+        .bounds_of(WINDOW_COLOR)
+        .expect("the window's content is on screen");
+    let desktop = screenshot.rgb(2, 2);
+    assert_eq!(
+        screenshot.rgb(content.left + 40, content.top - 5),
+        desktop,
+        "no titlebar above it"
+    );
+    assert_eq!(
+        screenshot.rgb(content.left - 1, content.top + 10),
+        desktop,
+        "no border beside it"
+    );
+}
+
+#[test]
+fn a_frame_rule_frames_a_window_that_draws_its_own() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[
+            ("settings.toml", "[placement]\nstrategy = \"cascade\"\n"),
+            (
+                "rules.toml",
+                "[[rule]]\nmatch = { app_id = \"vaht.test\" }\nframe = \"full\"\n",
+            ),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_self_decorated_windows(1);
+    let screenshot = client.screenshot();
+    let content = screenshot
+        .bounds_of(WINDOW_COLOR)
+        .expect("the window's content is on screen");
+    assert_eq!(
+        screenshot.rgb(content.left - 1, content.top + 10),
+        BORDER_COLOR,
+        "the rule's frame: its border"
+    );
+}
+
+#[test]
 fn a_window_is_shown_at_its_size_with_a_titlebar_and_border() {
     let mut window = OneWindow::open();
     let content = window.content;

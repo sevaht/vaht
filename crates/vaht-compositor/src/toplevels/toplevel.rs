@@ -19,6 +19,7 @@ use smithay::backend::renderer::{ImportAll, Renderer};
 use smithay::desktop::space::SpaceElement as _;
 use smithay::desktop::{Window as SurfaceWindow, WindowSurface, WindowSurfaceType};
 use smithay::output::Output;
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -172,8 +173,14 @@ impl Toplevel {
             icon,
             geometry: self.window.geometry(),
             size_limits: self.size_limits(),
-            // vaht draws every Wayland window's frame (xdg-decoration).
-            is_self_decorated: false,
+            // A window that agreed with vaht to draw its own frame
+            // (xdg-decoration's client side) gets none from vaht.
+            is_self_decorated: self.xdg().is_some_and(|toplevel| {
+                toplevel.with_committed_state(|state| {
+                    state.and_then(|state| state.decoration_mode)
+                        == Some(zxdg_toplevel_decoration_v1::Mode::ClientSide)
+                })
+            }),
         }
     }
 

@@ -94,6 +94,9 @@ pub(crate) enum FrameChoice {
     /// Framed, unless fullscreen or drawing its own.
     #[default]
     Framed,
+    /// Framed even when it draws its own (a rule's `frame = "full"`, as
+    /// Fluxbox's `[Deco]` forces one), unless fullscreen.
+    Forced,
     /// Never framed.
     Frameless,
 }
@@ -337,8 +340,11 @@ impl Window {
     /// Returns whether it has a frame when placed as `placement`.
     const fn is_framed_when(&self, placement: &Placement) -> bool {
         !placement.is_fullscreen()
-            && !self.committed.is_self_decorated
-            && matches!(self.frame_choice, FrameChoice::Framed)
+            && match self.frame_choice {
+                FrameChoice::Forced => true,
+                FrameChoice::Framed => !self.committed.is_self_decorated,
+                FrameChoice::Frameless => false,
+            }
     }
 
     /// Returns where its content goes when its frame (if it has one when
@@ -555,10 +561,11 @@ impl Window {
         self.alpha = Some(alpha);
     }
 
-    /// Frames the window, or with `false` not, whatever it was before.
+    /// Frames the window, even if it draws its own, or with `false` not,
+    /// whatever it was before: as a rule says.
     pub(crate) fn set_framed(&mut self, is_framed: bool) {
         let choice = if is_framed {
-            FrameChoice::Framed
+            FrameChoice::Forced
         } else {
             FrameChoice::Frameless
         };
@@ -583,12 +590,13 @@ impl Window {
         self.state.is_shaded = is_shaded;
     }
 
-    /// Frames the window if it was not framed by choice, or not if it
-    /// was (`toggle-frame`).
+    /// Takes the window's frame away if it shows one, or gives it one,
+    /// even if it draws its own, if it shows none (`toggle-frame`).
     pub(crate) fn toggle_frame(&mut self) {
-        self.frame_choice = match self.frame_choice {
-            FrameChoice::Framed => FrameChoice::Frameless,
-            FrameChoice::Frameless => FrameChoice::Framed,
+        self.frame_choice = if self.is_framed_when(&Placement::Floating) {
+            FrameChoice::Frameless
+        } else {
+            FrameChoice::Forced
         };
         self.invalidate_frame();
     }
