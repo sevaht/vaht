@@ -54,6 +54,20 @@ impl IpcHandler for Compositor {
                 outputs: output_infos(&self.outputs),
                 profile: self.outputs.profile().map(str::to_owned),
             },
+            Request::LogFilter { directives, reset } => match &self.log_filter {
+                Some(filter) => match filter.change(directives.as_deref(), reset) {
+                    Ok(now) => {
+                        if reset || directives.is_some() {
+                            tracing::info!(directives = now, "log filter changed");
+                        }
+                        Reply::LogFilter { directives: now }
+                    }
+                    Err(message) => Reply::Error { message },
+                },
+                None => Reply::Error {
+                    message: "this vaht has no log filter to change".to_owned(),
+                },
+            },
             // A connection answers this itself.
             Request::Subscribe { .. } => Reply::Error {
                 message: "subscriptions are kept by the connection".to_owned(),

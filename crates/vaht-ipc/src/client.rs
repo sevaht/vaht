@@ -86,7 +86,8 @@ impl Client {
             other @ (Reply::Version { .. }
             | Reply::Windows { .. }
             | Reply::Workspaces { .. }
-            | Reply::Outputs { .. }) => Err(ClientError::Unexpected(format!("{other:?}"))),
+            | Reply::Outputs { .. }
+            | Reply::LogFilter { .. }) => Err(ClientError::Unexpected(format!("{other:?}"))),
         }
     }
 

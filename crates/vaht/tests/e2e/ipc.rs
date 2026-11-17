@@ -34,6 +34,7 @@ fn windows(vaht: &HeadlessVaht) -> Vec<WindowInfo> {
         | Reply::Done {}
         | Reply::Workspaces { .. }
         | Reply::Outputs { .. }
+        | Reply::LogFilter { .. }
         | Reply::Error { .. }) => panic!("not a window list: {other:?}"),
     }
 }
@@ -91,6 +92,42 @@ fn a_command_vaht_does_not_know_fails_with_its_reason() {
     let output = message(&vaht, &["run", "--window", "999", "close"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("no window 999"));
+}
+
+#[test]
+fn the_log_filter_is_told_changed_and_reset_while_vaht_runs() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let filter = |arguments: &[&str]| match ask(&vaht, &[&["log-filter"], arguments].concat()) {
+        Reply::LogFilter { directives } => directives,
+        other @ (Reply::Version { .. }
+        | Reply::Done { .. }
+        | Reply::Windows { .. }
+        | Reply::Workspaces { .. }
+        | Reply::Outputs { .. }
+        | Reply::Error { .. }) => panic!("not a filter: {other:?}"),
+    };
+    let started = filter(&[]);
+    // A single directive: tracing prints several in an order of its own.
+    assert_eq!(filter(&["vaht_compositor=trace"]), "vaht_compositor=trace");
+    assert_eq!(filter(&[]), "vaht_compositor=trace", "kept");
+    assert_eq!(
+        filter(&["reset"]),
+        started,
+        "back to the one it started with"
+    );
+}
+
+#[test]
+fn an_invalid_log_filter_is_refused_and_the_filter_kept() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let before = message(&vaht, &["log-filter"]);
+    let output = message(&vaht, &["log-filter", "vaht=nonsense"]);
+    assert!(!output.status.success(), "refused");
+    assert_eq!(
+        message(&vaht, &["log-filter"]).stdout,
+        before.stdout,
+        "unchanged"
+    );
 }
 
 #[test]

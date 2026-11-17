@@ -88,6 +88,7 @@ use crate::input_emulation::{DeviceSetup, Emulated, InputEmulation};
 use crate::ipc::IpcServer;
 use crate::launcher::Launcher;
 use crate::layers::{LayerMaps, Layers, OutputLayers};
+use crate::log_filter::LogFilterHandle;
 use crate::log_rotation::LogRotation;
 use crate::menu::{
     MenuBuilder, MenuChoice, MenuItem, MenuKey, MenuModel, MenuStack, OutputChoices, PipeRead,
@@ -172,6 +173,8 @@ pub struct Compositor {
     /// The log file's limits, which `[logging]` sets; none without a log
     /// file.
     log_rotation: Option<LogRotation>,
+    /// Which events are recorded, changed over IPC.
+    pub(crate) log_filter: Option<LogFilterHandle>,
     /// Delayed commands waiting to run.
     delays: Vec<(Delay, Timer<Self>)>,
     /// Where windows were on outputs that left, to go back to them.
@@ -377,6 +380,7 @@ impl Compositor {
             exports_activation_environment: false,
             autostart: Autostart::Started,
             log_rotation: options.log_rotation,
+            log_filter: options.log_filter,
             delays: Vec::new(),
             output_memory: OutputMemory::default(),
             input_emulation: None,
@@ -3615,6 +3619,9 @@ pub struct RunOptions {
     /// The log file's limits, which `[logging]` sets as it changes; none
     /// when there is no log file.
     pub log_rotation: Option<LogRotation>,
+    /// Which events are recorded, which `vaht msg log-filter` changes; none
+    /// when vaht runs without logging of its own (tests).
+    pub log_filter: Option<LogFilterHandle>,
 }
 
 /// Why vaht could not start or keep running.

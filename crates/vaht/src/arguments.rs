@@ -47,8 +47,9 @@ impl Arguments {
             // Found on PATH, if the running program cannot be.
             executable: std::env::current_exe().unwrap_or_else(|_| PathBuf::from(PROGRAM_NAME)),
             allows_xwayland: !self.no_xwayland,
-            // The log file's, which the logging set up holds.
+            // The logging's, which it hands over once set up.
             log_rotation: None,
+            log_filter: None,
         }
     }
 
@@ -153,6 +154,13 @@ pub enum MessageRequest {
         #[arg(required = true, value_enum)]
         events: Vec<EventList>,
     },
+    /// Prints which events vaht records, or changes it while vaht runs:
+    /// `vaht msg log-filter info,vaht_compositor::input=trace`, or `vaht
+    /// msg log-filter reset` for the filter vaht started with.
+    LogFilter {
+        /// Tracing filter directives, or `reset`; none prints the filter.
+        directives: Option<String>,
+    },
 }
 
 /// A list `vaht msg subscribe` follows.
@@ -194,6 +202,13 @@ impl MessageRequest {
             Self::Subscribe { events } => vaht_ipc::Request::Subscribe {
                 events: events.iter().map(|list| list.kind()).collect(),
             },
+            Self::LogFilter { directives } => {
+                let reset = directives.as_deref() == Some("reset");
+                vaht_ipc::Request::LogFilter {
+                    directives: directives.clone().filter(|_| !reset),
+                    reset,
+                }
+            }
         }
     }
 }

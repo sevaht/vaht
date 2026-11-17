@@ -36,6 +36,9 @@ pub fn run(
     tracing::debug!(?arguments, "command line");
     let options = vaht_compositor::RunOptions {
         log_rotation: logging.log_rotation(),
+        log_filter: Some(vaht_compositor::LogFilterHandle::new(
+            logging.filter().clone(),
+        )),
         ..arguments.run_options()
     };
     vaht_compositor::Compositor::run(options, signals)?;

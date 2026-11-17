@@ -103,6 +103,9 @@ fn readable(reply: &Reply) -> String {
             let _ = writeln!(text, "{version}");
         }
         Reply::Done {} => {}
+        Reply::LogFilter { directives } => {
+            let _ = writeln!(text, "{directives}");
+        }
         Reply::Windows { windows } => {
             for window in windows {
                 let workspace = window

@@ -54,7 +54,8 @@ impl Commander for IpcCommander {
             other @ (Reply::Version { .. }
             | Reply::Windows { .. }
             | Reply::Workspaces { .. }
-            | Reply::Outputs { .. }) => Err(CommandError::Unreachable(format!(
+            | Reply::Outputs { .. }
+            | Reply::LogFilter { .. }) => Err(CommandError::Unreachable(format!(
                 "vaht answered something else: {other:?}"
             ))),
         }

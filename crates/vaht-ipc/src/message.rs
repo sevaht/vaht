@@ -45,6 +45,17 @@ pub enum Request {
         /// The lists.
         events: Vec<EventKind>,
     },
+    /// Which events vaht records, as tracing filter directives: changed to
+    /// `directives` if given, back to the filter vaht started with if
+    /// `reset`, else just told. Answered with the filter in effect.
+    LogFilter {
+        /// The new filter, such as `info,vaht_compositor::input=trace`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        directives: Option<String>,
+        /// Whether to go back to the filter vaht started with.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reset: bool,
+    },
 }
 
 /// A list a client may subscribe to.
@@ -133,6 +144,11 @@ pub enum Reply {
         outputs: Vec<OutputInfo>,
         /// The display profile applied, if one is.
         profile: Option<String>,
+    },
+    /// The log filter in effect, for [`Request::LogFilter`].
+    LogFilter {
+        /// Its directives.
+        directives: String,
     },
     /// The request could not be carried out, or was not understood.
     Error {

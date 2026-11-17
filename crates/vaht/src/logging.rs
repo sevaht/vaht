@@ -406,7 +406,7 @@ impl Logging {
 }
 
 /// The filter deciding which events are recorded, replaceable at runtime.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LogFilter {
     /// Replaces the filter layer installed in the registry.
     handle: reload::Handle<EnvFilter, Registry>,
@@ -443,6 +443,20 @@ impl LogFilter {
     /// while the process exits.
     pub fn reset(&self) -> Result<(), LoggingError> {
         self.set(&self.startup_directives)
+    }
+}
+
+impl vaht_compositor::LogFilterControl for LogFilter {
+    fn directives(&self) -> String {
+        Self::directives(self)
+    }
+
+    fn set(&self, directives: &str) -> Result<(), String> {
+        Self::set(self, directives).map_err(|error| error.to_string())
+    }
+
+    fn reset(&self) -> Result<(), String> {
+        Self::reset(self).map_err(|error| error.to_string())
     }
 }
 
