@@ -9,12 +9,11 @@
 
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
-use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::utils::{Logical, Rectangle, Scale};
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect as SkiaRect, Stroke, Transform};
 use vaht_ui::CornerRadii;
 
-use super::{Outline, PanelTexture, SceneElement};
+use super::{Outline, PanelTexture, SceneElement, SceneRenderer};
 use crate::window_manager::{Area, ShownPicker, WindowId, WindowManager};
 
 /// The snap preview's and the layout picker's buffers.
@@ -87,7 +86,7 @@ impl SnapOverlay {
         scale: Scale<f64>,
     ) -> Vec<SceneElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         let Some((moved, area)) = self.preview else {
@@ -121,7 +120,7 @@ impl SnapOverlay {
         scale: Scale<f64>,
     ) -> Option<SceneElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         let (panel, _) = self.picker.as_ref()?;

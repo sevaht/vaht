@@ -8,11 +8,10 @@
 
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
-use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::utils::{Logical, Rectangle, Scale};
 use vaht_ui::{Corner, CornerArc, CornerRadii, Theme, ThemeElement, WidgetState};
 
-use super::{CornerTexture, SceneElement};
+use super::{CornerTexture, SceneElement, SceneRenderer};
 use crate::window_manager::Area;
 
 /// The outline's lines and arcs, as the renderer takes them.
@@ -167,7 +166,7 @@ impl Outline {
         opacity: f32,
     ) -> Vec<SceneElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         let Some(Outlined {

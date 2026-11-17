@@ -261,6 +261,16 @@ rest by name, so a setting never silently does nothing:
   (04 §8.1), the pointer an X11 window sees stays in step while it moves
   (04 §8.2), and a window whose Motif hints ask for no decorations gets no
   frame.
+- `[blur]` (new): `enabled` (on by default), `passes` (1 to 6, 3) and
+  `spread` (1 to 10 pixels, 3). A program asking for what is behind part
+  of a surface to be blurred (`ext-background-effect-v1`: foot's
+  `blur=yes`, panels) has it drawn as frosted glass, with a dual Kawase
+  blur: the background halved `passes` times and grown back, each step
+  averaging samples `spread` pixels apart (more passes blur wider, a
+  larger spread softer). Off, vaht tells programs it cannot blur, so they
+  draw something else; one that bound before it was turned off learns it
+  only when it binds again. Blurred again only when what is behind
+  changes. On the GPU only: the headless (software) backend blurs nothing.
 - `[logging]`: `file_size_mb` (1 to 1024) and `files` (1 to 100), the
   log file's limits (03 §4.3): `vaht.log` starts anew at each start and
   once it passes the size, the files before it kept as `vaht.log.1` (the

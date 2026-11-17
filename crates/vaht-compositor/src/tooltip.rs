@@ -10,7 +10,6 @@
 
 use std::time::Duration;
 
-use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::reexports::calloop::LoopHandle;
 use smithay::utils::{Logical, Point, Rectangle, Scale};
 use vaht_ui::{
@@ -20,7 +19,7 @@ use vaht_ui::{
 use crate::Compositor;
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
-use crate::scene::{Outline, PanelTexture, SceneElement};
+use crate::scene::{Outline, PanelTexture, SceneElement, SceneRenderer};
 use crate::window_manager::Area;
 
 /// The tooltip: what it is to say, and whether it shows.
@@ -190,7 +189,7 @@ impl Tooltip {
         scale: Scale<f64>,
     ) -> Vec<SceneElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         let Some(shown) = &self.shown else {

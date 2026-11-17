@@ -5,6 +5,7 @@
 //! vaht and Smithay; nextest still runs every test in a process of its own.
 
 mod bindings;
+mod blur;
 mod clipboard;
 mod command_line;
 mod cursor;

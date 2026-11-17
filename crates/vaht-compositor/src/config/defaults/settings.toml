@@ -214,6 +214,15 @@ deny = []
 #   tap = true
 #   natural_scroll = true
 
+[blur]
+# Whether programs that ask (foot's blur=yes, panels) have what is behind
+# them blurred, as frosted glass. Off, vaht tells them it cannot.
+enabled = true
+# How wide (passes, 1 to 6: each halves the background once more) and how
+# soft (spread, 1 to 10 pixels between samples) the blur is.
+passes = 3
+spread = 3
+
 [logging]
 # vaht.log starts anew at each start and once it passes file_size_mb
 # megabytes (1 to 1024); the files before it are kept as vaht.log.1 (the

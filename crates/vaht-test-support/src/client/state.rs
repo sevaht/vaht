@@ -68,6 +68,8 @@ use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client
 use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_v1::XdgToplevelDragV1;
 use smithay_client_toolkit::reexports::protocols_wlr::screencopy::v1::client::zwlr_screencopy_frame_v1::{self, ZwlrScreencopyFrameV1};
 use smithay_client_toolkit::reexports::protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
+use smithay_client_toolkit::reexports::protocols::ext::background_effect::v1::client::ext_background_effect_manager_v1::{self, ExtBackgroundEffectManagerV1};
+use smithay_client_toolkit::reexports::protocols::ext::background_effect::v1::client::ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1;
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
 use super::{BYTES_PER_PIXEL, Presentation, WINDOW_COLOR, WINDOW_SIZE};
@@ -144,6 +146,8 @@ pub(super) struct ClientState {
     pub(super) screencopy_described: bool,
     /// How the current wlr screen copy ended.
     pub(super) screencopy_result: Option<Result<(), ()>>,
+    /// Whether vaht said it blurs what is behind surfaces, once it said.
+    pub(super) blurs: Option<bool>,
     /// How the current capture's image is turned from the output's own
     /// orientation.
     pub(super) capture_transform: wl_output::Transform,
@@ -213,6 +217,7 @@ impl ClientState {
             screencopy_buffer: None,
             screencopy_described: false,
             screencopy_result: None,
+            blurs: None,
             drawn: Vec::new(),
             close_requests: 0,
             closed_layers: 0,
@@ -333,6 +338,7 @@ ignore_events!(
     XdgToplevelDragManagerV1,
     XdgToplevelDragV1,
     ZwlrScreencopyManagerV1,
+    ExtBackgroundEffectSurfaceV1,
     ZwpKeyboardShortcutsInhibitManagerV1,
     ZwpKeyboardShortcutsInhibitorV1,
     ZwpRelativePointerManagerV1,
@@ -444,6 +450,28 @@ impl Dispatch2<wl_pointer::WlPointer, ClientState> for PointerEvents {
                 ..
             } => state.last_button_serial = Some(serial),
             _ => {}
+        }
+    }
+}
+
+/// User data of the background effect manager: records whether vaht
+/// blurs.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct BackgroundEffectEvents;
+
+impl Dispatch2<ExtBackgroundEffectManagerV1, ClientState> for BackgroundEffectEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &ExtBackgroundEffectManagerV1,
+        event: ext_background_effect_manager_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        if let ext_background_effect_manager_v1::Event::Capabilities { flags } = event {
+            state.blurs = Some(flags.into_result().is_ok_and(|flags| {
+                flags.contains(ext_background_effect_manager_v1::Capability::Blur)
+            }));
         }
     }
 }

@@ -6,6 +6,7 @@
 //! Sections for features vaht does not have yet are not accepted, so a
 //! setting never silently does nothing.
 
+mod blur;
 mod input;
 mod logging;
 mod taskbar;
@@ -19,6 +20,7 @@ use smithay::utils::{Logical, Point, Size};
 use vaht_ui::WallpaperFit;
 use vaht_ui::theme::Metrics;
 
+pub(crate) use self::blur::BlurSettings;
 pub(crate) use self::input::{
     AccelProfile, AccelSpeed, ClickMethod, DeviceSettings, InputSettings, ScrollMethod, SendEvents,
     TapButtonMap,
@@ -64,6 +66,9 @@ pub(crate) struct Settings {
     pub(crate) input: InputSettings,
     /// How big the log file may grow, and how many are kept.
     pub(crate) logging: LoggingSettings,
+    /// Whether and how strongly what is behind windows asking for it is
+    /// blurred.
+    pub(crate) blur: BlurSettings,
 }
 
 impl Settings {

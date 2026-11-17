@@ -60,6 +60,9 @@ def main():
             pull = get(f"/pulls/{number}")
             state = "merged" if pull.get("merged_at") else pull.get("state", "?")
             states.append(f"#{number} {state}")
+        for number in waiting.get("issues", []):
+            issue = get(f"/issues/{number}")
+            states.append(f"issue #{number} {issue.get('state', '?')}")
         status = f"in Smithay (src/wayland/{found[0]})" if found else "not in Smithay"
         detail = f"; {', '.join(states)}" if states else ""
         print(f"  {waiting['feature']}: {status}{detail}")

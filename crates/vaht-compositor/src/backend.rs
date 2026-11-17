@@ -23,8 +23,8 @@ use smithay::utils::{Rectangle, Transform};
 use smithay::wayland::dmabuf::DmabufFeedback;
 use smithay::wayland::image_copy_capture::DmabufConstraints;
 
-pub(crate) use self::drm::DrmBackend;
 pub(crate) use self::drm::plan::{TopWindow, virtual_terminal};
+pub(crate) use self::drm::{DrmBackend, DrmRenderer};
 pub(crate) use self::headless::HeadlessBackend;
 pub(crate) use self::winit::WinitBackend;
 use crate::Compositor;

@@ -17,7 +17,7 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::RenderElement;
 use smithay::backend::renderer::sync::SyncPoint;
-use smithay::backend::renderer::{Bind, ExportMem, ImportAll, ImportMem, Offscreen, Renderer};
+use smithay::backend::renderer::{Bind, ExportMem, Offscreen, Renderer};
 use smithay::output::{Output, WeakOutput};
 use smithay::reexports::wayland_server::protocol::wl_shm::Format;
 use smithay::utils::{Physical, Rectangle, Size, Transform};
@@ -34,7 +34,7 @@ use smithay::wayland::image_copy_capture::{
 use crate::Compositor;
 use crate::layers::LayerMaps;
 use crate::resources::{ResourceKind, Tracked};
-use crate::scene::{self, Drawn, OutputElement, Scene};
+use crate::scene::{self, Drawn, OutputElement, Scene, SceneRenderer};
 use crate::shared_memory::{self, SharedMemoryError};
 use crate::window_manager::WindowId;
 
@@ -101,7 +101,7 @@ impl CaptureView {
     /// Returns what `scene` shows of this, drawn with `renderer`.
     fn elements<R>(&self, scene: &Scene<'_>, renderer: &mut R) -> Vec<OutputElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         match self {
@@ -136,7 +136,7 @@ pub(crate) fn draw_capture<R, Target>(
     view: &CaptureView,
 ) -> Result<CapturedImage, CaptureError>
 where
-    R: Renderer + ImportAll + ImportMem + Offscreen<Target> + Bind<Target> + ExportMem,
+    R: SceneRenderer + Offscreen<Target> + Bind<Target> + ExportMem,
     R::TextureId: Send + Clone + 'static,
     R::Error: Send + Sync + 'static,
 {
@@ -182,7 +182,7 @@ pub(crate) fn draw_capture_into<R, Target>(
     target: &mut Target,
 ) -> Result<(), CaptureError>
 where
-    R: Renderer + ImportAll + ImportMem + Bind<Target>,
+    R: SceneRenderer + Bind<Target>,
     R::TextureId: Send + Clone + 'static,
     R::Error: Send + Sync + 'static,
 {
@@ -362,6 +362,7 @@ impl Compositor {
                 snap: &self.snap_overlay,
                 xwayland: self.xwayland.as_ref(),
                 lock: &self.session_lock,
+                blur: self.config.settings.blur,
             },
             LayerMaps::new(&self.outputs),
         );

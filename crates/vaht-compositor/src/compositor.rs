@@ -558,6 +558,7 @@ impl Compositor {
                 snap: &self.snap_overlay,
                 xwayland: self.xwayland.as_ref(),
                 lock: &self.session_lock,
+                blur: self.config.settings.blur,
             },
             self.layer_maps(),
         )
@@ -1443,6 +1444,7 @@ impl Compositor {
                 snap: &self.snap_overlay,
                 xwayland: self.xwayland.as_ref(),
                 lock: &self.session_lock,
+                blur: self.config.settings.blur,
             },
             LayerMaps::new(&self.outputs),
         );

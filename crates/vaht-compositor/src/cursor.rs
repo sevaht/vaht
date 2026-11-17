@@ -20,13 +20,12 @@ use smithay::backend::renderer::element::memory::{
     MemoryRenderBuffer, MemoryRenderBufferRenderElement,
 };
 use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
-use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::input::pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus};
 use smithay::reexports::wayland_server::Resource as _;
 use smithay::utils::{Logical, Physical, Point, Scale, Transform};
 use smithay::wayland::compositor::with_states;
 
-use crate::scene::SceneElement;
+use crate::scene::{SceneElement, SceneRenderer};
 
 /// One picture of a cursor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -345,7 +344,7 @@ impl Cursor {
         scale: Scale<f64>,
     ) -> Vec<SceneElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         match &self.status {

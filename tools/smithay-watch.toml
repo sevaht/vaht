@@ -6,6 +6,7 @@
 # module: the name Smithay would give it under src/wayland (exact; a
 # protocol may have more than one candidate name).
 # prs: Smithay pull requests that would bring it.
+# issues: Smithay issues asking for it; closed may mean it came.
 # Smithay's own list of protocols: https://github.com/Smithay/smithay/issues/781
 
 [[own]]
@@ -42,6 +43,14 @@ modules = ["output_management", "wlr_output_management"]
 protocol = "wlr-output-power-management"
 vaht = "crates/vaht-compositor/src/protocols/output_power.rs"
 modules = ["output_power", "output_power_management", "wlr_output_power"]
+
+# Parts of features vaht built itself on what Smithay has, which Smithay
+# may one day do itself.
+
+[[waiting]]
+feature = "blur (vaht's own BlurElement in crates/vaht-compositor/src/scene/blur.rs)"
+modules = []
+issues = [1363]
 
 # Features vaht does not have, waiting on Smithay.
 

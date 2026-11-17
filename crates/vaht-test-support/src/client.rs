@@ -26,6 +26,7 @@ use smithay_client_toolkit::reexports::client::protocol::wl_data_device_manager:
 use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_manager_v1::XdgToplevelDragManagerV1;
 use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_v1::XdgToplevelDragV1;
 use smithay_client_toolkit::reexports::protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
+use smithay_client_toolkit::reexports::protocols::ext::background_effect::v1::client::ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1;
 use smithay_client_toolkit::data_device_manager::data_source::DragSource;
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
@@ -145,6 +146,8 @@ pub struct TestClient {
     toplevel_drags: XdgToplevelDragManagerV1,
     /// Copies the screen as older tools ask (`zwlr_screencopy_v1`).
     screencopy: ZwlrScreencopyManagerV1,
+    /// Asks for what is behind surfaces to be blurred.
+    background_effects: ExtBackgroundEffectManagerV1,
     /// The drag this client started, with the window it drags along,
     /// while it lasts.
     drag_source: Option<(DragSource, XdgToplevelDragV1)>,
@@ -226,6 +229,9 @@ impl TestClient {
         let screencopy: ZwlrScreencopyManagerV1 = globals
             .bind(&handle, 3..=3, NoEvents)
             .expect("vaht offers zwlr_screencopy_manager_v1");
+        let background_effects: ExtBackgroundEffectManagerV1 = globals
+            .bind(&handle, 1..=1, state::BackgroundEffectEvents)
+            .expect("vaht offers ext_background_effect_manager_v1");
         let session_locks: ExtSessionLockManagerV1 =
             bind(&globals, &handle, "ext_session_lock_manager_v1");
         let presentation: WpPresentation = globals
@@ -261,6 +267,7 @@ impl TestClient {
             toplevel_drags,
             drag_source: None,
             screencopy,
+            background_effects,
             session_locks,
             session_lock: None,
             presentation,
@@ -561,6 +568,40 @@ impl TestClient {
         let surface = self.state.windows[index].wl_surface().clone();
         self.state
             .fill_pixels(&surface, &handle, WINDOW_SIZE, [0; 4]);
+        self.roundtrip();
+    }
+
+    /// Returns whether vaht says it blurs what is behind surfaces that ask
+    /// (`ext-background-effect-v1`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if vaht never says, or the connection to vaht fails.
+    pub fn blurs(&mut self) -> bool {
+        self.roundtrip();
+        self.state
+            .blurs
+            .expect("vaht says what it can do on binding")
+    }
+
+    /// Has window `index` ask for all that is behind it to be blurred, and
+    /// waits until vaht has the commit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, or the connection to vaht fails.
+    pub fn blur_behind_window(&mut self, index: usize) {
+        let handle = self.queue.handle();
+        let window = &self.state.windows[index];
+        let effect =
+            self.background_effects
+                .get_background_effect(window.wl_surface(), &handle, NoEvents);
+        let region = smithay_client_toolkit::compositor::Region::new(&self.state.compositor)
+            .expect("vaht offers wl_compositor");
+        let signed = |length: u32| i32::try_from(length).expect("a window fits in i32");
+        region.add(0, 0, signed(WINDOW_SIZE.0), signed(WINDOW_SIZE.1));
+        effect.set_blur_region(Some(region.wl_region()));
+        window.commit();
         self.roundtrip();
     }
 

@@ -7,6 +7,7 @@
 //! on vaht's own types and decide nothing themselves.
 
 mod activation;
+mod background_effect;
 mod decoration;
 mod dmabuf;
 mod gamma;
@@ -33,6 +34,7 @@ mod xdg_shell;
 use smithay::input::SeatState;
 use smithay::reexports::wayland_server::DisplayHandle;
 use smithay::wayland::alpha_modifier::AlphaModifierState;
+use smithay::wayland::background_effect::BackgroundEffectState;
 use smithay::wayland::commit_timing::CommitTimingManagerState;
 use smithay::wayland::compositor::CompositorState;
 use smithay::wayland::content_type::ContentTypeState;
@@ -136,10 +138,11 @@ pub(crate) struct ProtocolStates {
     pub(crate) dmabuf_global: Option<DmabufGlobal>,
     /// `wp_viewporter`, `wp_fractional_scale_manager_v1`,
     /// `wp_single_pixel_buffer_manager_v1`, `wp_alpha_modifier_v1`,
-    /// `wp_content_type_manager_v1` and `wl_fixes`: surfaces scaled and
-    /// cropped, told their scale, filled with one color, made translucent,
-    /// saying what they show (video, a game), and registry objects
-    /// destroyed. Held only to keep the globals alive; Smithay applies them
+    /// `wp_content_type_manager_v1`, `wl_fixes` and
+    /// `ext_background_effect_manager_v1`: surfaces scaled and cropped,
+    /// told their scale, filled with one color, made translucent, saying
+    /// what they show (video, a game), registry objects destroyed, and
+    /// what is behind them blurred. Held only to keep the globals alive; Smithay applies them
     /// when drawing.
     _surface_extensions: (
         ViewporterState,
@@ -148,6 +151,7 @@ pub(crate) struct ProtocolStates {
         AlphaModifierState,
         ContentTypeState,
         FixesState,
+        BackgroundEffectState,
     ),
     /// `wp_presentation`: clients told when their frames showed, by the
     /// monotonic clock. Held only to keep the global alive.
@@ -299,6 +303,7 @@ impl ProtocolStates {
                 AlphaModifierState::new::<Compositor>(display),
                 ContentTypeState::new::<Compositor>(display),
                 FixesState::new::<Compositor>(display),
+                BackgroundEffectState::new::<Compositor>(display),
             ),
             _presentation: PresentationState::new::<Compositor>(
                 display,

@@ -46,10 +46,10 @@ pub(crate) use self::outputs::{
 pub(crate) use self::overrides::{SettingChange, SettingOverrides};
 pub(crate) use self::rules::{FocusStealing, RuleFrame, RuleOutput, RuleSettings, Rules};
 pub(crate) use self::settings::{
-    AccelProfile, AccelSpeed, ClickMethod, DeviceSettings, FileCount, FocusModel, FrameSettings,
-    InputSettings, LoggingSettings, MenuSearch, ScrollMethod, SendEvents, Settings, SnapSettings,
-    TapButtonMap, TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget, WallpaperSettings,
-    WidthPercent, WindowListScope,
+    AccelProfile, AccelSpeed, BlurSettings, ClickMethod, DeviceSettings, FileCount, FocusModel,
+    FrameSettings, InputSettings, LoggingSettings, MenuSearch, ScrollMethod, SendEvents, Settings,
+    SnapSettings, TapButtonMap, TaskbarAlign, TaskbarEdge, TaskbarSettings, TaskbarWidget,
+    WallpaperSettings, WidthPercent, WindowListScope,
 };
 pub(crate) use self::source::ConfigSource;
 pub(crate) use self::theme::ThemeFile;

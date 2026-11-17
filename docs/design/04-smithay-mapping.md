@@ -46,7 +46,7 @@ re-renders its buffer only when its content changes.
 | ext-foreign-toplevel-list | `foreign_toplevel.c` | `wayland::foreign_toplevel_list` |
 | **libei / EIS** (emulated input from X11 programs, Steam Input) | `eis.c` (959 lines, hand-written) | `backend::libei` |
 | **Xwayland keyboard grab**, xwayland-shell | `xwayland_grab.c` | `wayland::{xwayland_keyboard_grab, xwayland_shell}` |
-| background-effect (a client asks for blur behind it) | none | `wayland::background_effect`: new, optional |
+| background-effect (a client asks for blur behind it) | none | **built**: Smithay's `wayland::background_effect` serves the protocol and Smithay's framebuffer-effect hooks (#1910) tell an element when what is behind it changed; the blur itself is vaht's (`scene/blur.rs`: a dual Kawase blur in two OpenGL ES shaders, kept between frames), since Smithay has no blur element (Smithay#1363, open; cosmic-comp keeps its own). `tools/smithay-watch` watches for one |
 
 ### Not in Smithay; vaht implements them (niri and cosmic-comp are references)
 

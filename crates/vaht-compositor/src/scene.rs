@@ -14,6 +14,7 @@
 //! [`FrameTextures`] draws their frames, and the [`Taskbar`] itself.
 
 mod backdrop;
+mod blur;
 mod corner_texture;
 mod frame_textures;
 mod menu_texture;
@@ -49,6 +50,7 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::xwayland::X11Surface;
 
 pub(crate) use self::backdrop::Backdrop;
+pub(crate) use self::blur::{BlurElement, BlurRenderer};
 pub(crate) use self::corner_texture::CornerTexture;
 pub(crate) use self::frame_textures::FrameTextures;
 pub(crate) use self::menu_texture::MenuTexture;
@@ -56,6 +58,7 @@ pub(crate) use self::outline::Outline;
 pub(crate) use self::panel_texture::PanelTexture;
 pub(crate) use self::shaped_element::ShapedElement;
 pub(crate) use self::snap_overlay::SnapOverlay;
+use crate::config::BlurSettings;
 use crate::cursor::Cursor;
 use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, LayerMaps};
 use crate::menu::MenuStack;
@@ -74,7 +77,7 @@ pub(crate) const BACKGROUND_COLOR: [f32; 4] = [0.1, 0.1, 0.1, 1.0];
 
 smithay::backend::renderer::element::render_elements! {
     /// One drawable part of a frame.
-    pub(crate) SceneElement<R> where R: ImportAll + ImportMem;
+    pub(crate) SceneElement<R> where R: ImportAll + ImportMem + BlurRenderer;
     /// A client surface: a window, one of its subsurfaces, or a popup.
     Surface = WaylandSurfaceRenderElement<R>,
     /// A panel vaht drew itself, such as a titlebar.
@@ -84,7 +87,15 @@ smithay::backend::renderer::element::render_elements! {
     /// A client surface drawn only inside its window's shape (an X11
     /// window's X Shape).
     Shaped = ShapedElement<WaylandSurfaceRenderElement<R>>,
+    /// What is behind part of a surface, blurred, as its program asks.
+    Blur = BlurElement,
 }
+
+/// A renderer that draws scenes: it imports client and vaht's own
+/// buffers, and blurs.
+pub(crate) trait SceneRenderer: Renderer + ImportAll + ImportMem + BlurRenderer {}
+
+impl<R: Renderer + ImportAll + ImportMem + BlurRenderer> SceneRenderer for R {}
 
 /// One drawable part of a frame, moved from global coordinates to where
 /// it is on one output.
@@ -247,6 +258,8 @@ pub(crate) struct Drawn<'state> {
     pub(crate) xwayland: Option<&'state XwaylandServer>,
     /// The session lock: while locked, the outputs show only it.
     pub(crate) lock: &'state SessionLock,
+    /// How what is behind surfaces asking for it is blurred.
+    pub(crate) blur: BlurSettings,
     /// Where a moved window would snap, and the layout picker.
     pub(crate) snap: &'state SnapOverlay,
 }
@@ -429,7 +442,7 @@ impl<'state> Scene<'state> {
     /// tracking expects.
     fn elements<R>(&self, renderer: &mut R, scale: Scale<f64>) -> Vec<SceneElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         // The pointer is above everything; then the menus, above even the
@@ -480,7 +493,7 @@ impl<'state> Scene<'state> {
         output: &Output,
     ) -> Vec<OutputElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         let scale = output.current_scale().fractional_scale().into();
@@ -511,7 +524,7 @@ impl<'state> Scene<'state> {
         scale: Scale<f64>,
     ) -> Vec<OutputElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         let (Some(window), Some(toplevel)) =
@@ -549,7 +562,7 @@ impl<'state> Scene<'state> {
         scale: Scale<f64>,
     ) -> Vec<SceneElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         let mut elements = self
@@ -581,7 +594,7 @@ impl<'state> Scene<'state> {
         scale: Scale<f64>,
         is_above_dock: bool,
     ) where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         let metrics = self.window_manager.metrics();
@@ -602,6 +615,14 @@ impl<'state> Scene<'state> {
                     .zip(self.drawn.xwayland)
                     .and_then(|(surface, server)| server.shape_of(surface));
                 elements.extend(Self::clipped(surface_elements, shape, origin, scale));
+                elements.extend(
+                    toplevel
+                        .wl_surface()
+                        .and_then(|surface| {
+                            BlurElement::beneath(&surface, origin, scale, self.drawn.blur)
+                        })
+                        .map(SceneElement::Blur),
+                );
                 elements.extend(
                     self.drawn
                         .backdrop
@@ -632,7 +653,7 @@ impl<'state> Scene<'state> {
         scale: Scale<f64>,
     ) -> Vec<SceneElement<R>>
     where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         let Some(shape) = shape else {
@@ -776,17 +797,18 @@ impl<'state> Scene<'state> {
         layers: &[Layer],
         scale: Scale<f64>,
     ) where
-        R: Renderer + ImportAll + ImportMem,
+        R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
         self.layers.each(layers, |surface, origin| {
-            let surface_elements: Vec<WaylandSurfaceRenderElement<R>> = surface.render_elements(
-                renderer,
-                origin.to_physical_precise_round(scale),
-                scale,
-                1.0,
-            );
+            let origin = origin.to_physical_precise_round(scale);
+            let surface_elements: Vec<WaylandSurfaceRenderElement<R>> =
+                surface.render_elements(renderer, origin, scale, 1.0);
             elements.extend(surface_elements.into_iter().map(SceneElement::Surface));
+            elements.extend(
+                BlurElement::beneath(surface.wl_surface(), origin, scale, self.drawn.blur)
+                    .map(SceneElement::Blur),
+            );
         });
     }
 }
