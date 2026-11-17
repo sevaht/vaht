@@ -56,6 +56,7 @@ re-renders its buffer only when its content changes.
 | wlr-foreign-toplevel-management | Taskbars and docks outside the compositor | **built** (§8.6) |
 | ext-workspace | External pagers | **built** (§8.10) |
 | ~~wlr-screencopy~~ | | dropped: the installed xdg-desktop-portal-wlr 0.8.4 and grim 1.5 use ext-image-copy-capture |
+| xdg-toplevel-drag | Browsers dragging a tab out | **built**, by vaht (not in this Smithay): the window attached to a drag follows the pointer at its offset, is no drop target, and stays where dropped (`protocols/toplevel_drag.rs`) |
 | wlr-gamma-control | Night-light tools | **built** (§8.8) |
 | wlr-output-power-management | DPMS via `wlopm` | **built** (§8.7) |
 | **tearing-control** | Games | not built: needs async page flips, which Smithay lacks ([#1948](https://github.com/Smithay/smithay/pull/1948), §3 below) |

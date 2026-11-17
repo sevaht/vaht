@@ -22,6 +22,7 @@ mod selection;
 mod session_lock;
 mod surfaces;
 pub(crate) use self::surfaces::tell_output_scale;
+mod toplevel_drag;
 mod toplevel_management;
 mod virtual_input;
 mod window_hints;
@@ -107,6 +108,9 @@ pub(crate) struct ProtocolStates {
     pub(crate) seat: SeatState<Compositor>,
     /// `wl_data_device_manager`: the clipboard and drag and drop.
     pub(crate) data_device: DataDeviceState,
+    /// `xdg_toplevel_drag_manager_v1`: windows dragged along with a drag
+    /// and drop (a browser's tab dragged out).
+    pub(crate) toplevel_drags: toplevel_drag::ToplevelDrags,
     /// `zwp_primary_selection_device_manager_v1`: the middle-click paste.
     pub(crate) primary_selection: PrimarySelectionState,
     /// `ext_data_control_manager_v1` and `zwlr_data_control_manager_v1`:
@@ -260,6 +264,7 @@ impl ProtocolStates {
             _output_manager: OutputManagerState::new_with_xdg_output::<Compositor>(display),
             seat: SeatState::new(),
             data_device: DataDeviceState::new::<Compositor>(display),
+            toplevel_drags: toplevel_drag::ToplevelDrags::new(display),
             // Sandboxed programs may not read every selection, nor the rest
             // filtered so below.
             data_control: (

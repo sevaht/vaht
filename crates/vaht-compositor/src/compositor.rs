@@ -47,6 +47,7 @@ use smithay::input::pointer::{
 use smithay::input::{Seat, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::{EventLoop, LoopHandle};
+use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle, Resource as _};
@@ -158,6 +159,9 @@ pub struct Compositor {
     /// Where a game holding the pointer locked last said it is, on its
     /// surface: where the pointer goes when the lock ends.
     pub(crate) pointer_lock_hint: Option<(WlSurface, Point<f64, Logical>)>,
+    /// The data source of the drag and drop in progress, if a program's
+    /// (`wl_data_device`): a window attached to it follows the pointer.
+    pub(crate) dragged_source: Option<WlDataSource>,
     /// The surfaces asking that the session not go idle.
     pub(crate) idle_inhibitors: IdleInhibitors<WlSurface>,
     /// The session lock.
@@ -337,9 +341,6 @@ impl Compositor {
             .map_err(RunError::WatchSignals)?;
         let config_source = ConfigSource::new(options.config_directory);
         let config = Self::first_config(&config_source);
-        if let Some(rotation) = &options.log_rotation {
-            rotation.follow(config.settings.logging);
-        }
 
         let mut outputs = backend.outputs();
         let mut output_changes = outputs.configure(&config.outputs, &mut backend);
@@ -373,6 +374,7 @@ impl Compositor {
             cursor: Cursor::from_environment(),
             xwayland: None,
             pointer_lock_hint: None,
+            dragged_source: None,
             idle_inhibitors: IdleInhibitors::default(),
             session_lock: SessionLock::default(),
             frame_pacing: FramePacing::default(),
@@ -429,6 +431,9 @@ impl Compositor {
     /// (once Xwayland is ready, if it is starting), and the outputs'
     /// `output_changes`.
     fn start(&mut self, allows_xwayland: bool, output_changes: &OutputChanges) {
+        if let Some(rotation) = &self.log_rotation {
+            rotation.follow(self.config.settings.logging);
+        }
         self.config_source.watch(&self.loop_handle, &self.ledger);
         self.start_taskbar_services();
         if let Backend::Drm(backend) = &mut self.backend {
@@ -1662,6 +1667,30 @@ impl Compositor {
         }
     }
 
+    /// Returns the window attached to the drag and drop in progress
+    /// (`xdg_toplevel_drag_v1`), with where the pointer holds it, if one
+    /// is.
+    fn dragged_window(&self) -> Option<(WindowId, Point<i32, Logical>)> {
+        let source = self.dragged_source.as_ref()?;
+        let attached = self.protocols.toplevel_drags.attached_to(source)?;
+        let window = self.toplevels.window_of(&attached.surface)?;
+        Some((window, attached.offset))
+    }
+
+    /// Moves the window attached to the drag in progress, if there is one,
+    /// so the pointer holds it where its program said: as the pointer
+    /// moves, and as it maps.
+    pub(crate) fn follow_toplevel_drag(&mut self) {
+        let Some((window, offset)) = self.dragged_window() else {
+            return;
+        };
+        let corner = self.pointer_location().to_i32_round() - offset;
+        if self.window_manager.move_content_to(window, corner) {
+            self.settle();
+            self.schedule_render();
+        }
+    }
+
     /// Updates what is known of a surface after its client commits it.
     pub(crate) fn handle_commit(&mut self, surface: &WlSurface) {
         if !is_sync_subsurface(surface) {
@@ -2721,6 +2750,8 @@ impl Compositor {
         if let Some(toplevel) = self.toplevels.get(window) {
             toplevel.configure_if_unconfigured();
         }
+        // A window attached to a drag maps under the pointer.
+        self.follow_toplevel_drag();
     }
 
     /// Lets go of everything still referencing what clients released, if
@@ -3333,11 +3364,13 @@ impl Compositor {
         {
             self.schedule_render();
         }
-        // Over a menu, no client has the pointer.
+        // Over a menu, no client has the pointer; a window dragged along
+        // with a drag and drop is no drop target.
+        let dragged = self.dragged_window().map(|(window, _)| window);
         let target = if self.menus.covers(location) {
             None
         } else {
-            self.scene().target_at(location)
+            self.scene().passing_through(dragged).target_at(location)
         };
         let pointer = self
             .seat
@@ -3362,6 +3395,7 @@ impl Compositor {
             },
         );
         pointer.frame(self);
+        self.follow_toplevel_drag();
         // Where vaht draws the pointer itself (on the hardware), it shows
         // where it went only in a new frame; elsewhere the host draws it.
         if self.backend.draws_pointer() && moved_from != location {

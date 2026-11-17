@@ -1,7 +1,7 @@
 //! Input devices, the clipboard and drag and drop: `wl_seat` and
 //! `wl_data_device_manager`.
 
-use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
+use smithay::input::dnd::{DnDGrab, DndGrabHandler, DndTarget, GrabType, Source};
 use smithay::input::keyboard::LedState;
 use smithay::input::pointer::{CursorImageStatus, Focus};
 use smithay::input::tablet::TabletSeatHandler;
@@ -11,6 +11,7 @@ use crate::focus_target::FocusTarget;
 use smithay::input::pointer::PointerHandle;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::Resource as _;
+use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_pointer::WlPointer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Serial;
@@ -108,7 +109,22 @@ impl DataDeviceHandler for Compositor {
     }
 }
 
-impl DndGrabHandler for Compositor {}
+impl DndGrabHandler for Compositor {
+    /// The window dragged along, if one was, stays where it was let go.
+    fn dropped(
+        &mut self,
+        _target: Option<DndTarget<'_, Self>>,
+        _validated: bool,
+        _seat: Seat<Self>,
+        _location: Point<f64, Logical>,
+    ) {
+        self.dragged_source = None;
+    }
+
+    fn cancelled(&mut self, _seat: Seat<Self>, _location: Point<f64, Logical>) {
+        self.dragged_source = None;
+    }
+}
 
 impl WaylandDndGrabHandler for Compositor {
     fn dnd_requested<S: Source>(
@@ -128,6 +144,11 @@ impl WaylandDndGrabHandler for Compositor {
         };
         match pointer_grab {
             Some((start_data, pointer)) => {
+                // A program's own drag carries its wl_data_source, which a
+                // window may be attached to (a tab dragged out).
+                self.dragged_source = (&source as &dyn std::any::Any)
+                    .downcast_ref::<WlDataSource>()
+                    .cloned();
                 let grab = DnDGrab::new_pointer(&self.display_handle, start_data, source, seat);
                 pointer.set_grab(self, grab, serial, Focus::Keep);
             }

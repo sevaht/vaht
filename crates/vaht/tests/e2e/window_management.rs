@@ -114,6 +114,45 @@ fn dragging_a_maximized_window_by_its_top_pixel_drags_it_rather_than_resizing() 
 }
 
 #[test]
+fn a_window_dragged_along_with_a_drag_follows_the_pointer_and_stays_where_dropped() {
+    // A browser's tab dragged out: the new window rides the drag. The
+    // dragged window is the lower right of the two, so it sets the
+    // windows' bottom right corner.
+    let mut desktop = Desktop::with_windows(2);
+    let first = desktop.content().expect("the windows show");
+    let bottom_right = |desktop: &mut Desktop| {
+        let shown = desktop.content().expect("the windows show");
+        (shown.right, shown.bottom)
+    };
+    let (width, height) = WINDOW_SIZE;
+    let corner_at = |left: u32, top: u32| (left + width - 1, top + height - 1);
+    desktop.client.drag_window_along(
+        (0, 1),
+        (10, 10),
+        (first.left + 5, first.top + 5),
+        (400, 350),
+    );
+    assert_eq!(
+        bottom_right(&mut desktop),
+        corner_at(390, 340),
+        "held at its offset under the pointer"
+    );
+    desktop.client.move_pointer_to(500, 450);
+    assert_eq!(
+        bottom_right(&mut desktop),
+        corner_at(490, 440),
+        "following the pointer"
+    );
+    desktop.client.release(BUTTON_LEFT);
+    desktop.client.move_pointer_to(100, 100);
+    assert_eq!(
+        bottom_right(&mut desktop),
+        corner_at(490, 440),
+        "left where it was let go"
+    );
+}
+
+#[test]
 fn snap_step_left_fills_the_left_half_and_right_undoes_it() {
     let mut desktop = Desktop::with_windows(1);
     let floating = desktop.content().expect("the window is shown");

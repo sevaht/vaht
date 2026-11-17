@@ -20,6 +20,12 @@ use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_manager_v1::ExtSessionLockManagerV1;
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_v1::ExtSessionLockV1;
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
+use smithay_client_toolkit::data_device_manager::DataDeviceManagerState;
+use smithay_client_toolkit::data_device_manager::data_device::DataDevice;
+use smithay_client_toolkit::reexports::client::protocol::wl_data_device_manager::DndAction;
+use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_manager_v1::XdgToplevelDragManagerV1;
+use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_v1::XdgToplevelDragV1;
+use smithay_client_toolkit::data_device_manager::data_source::DragSource;
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
@@ -130,6 +136,15 @@ pub struct TestClient {
     idle_inhibitors: ZwpIdleInhibitManagerV1,
     /// Hears the fractional scale vaht prefers for a surface.
     fractional_scales: WpFractionalScaleManagerV1,
+    /// Makes drag sources.
+    data_devices: DataDeviceManagerState,
+    /// The seat's drag and drop.
+    data_device: DataDevice,
+    /// Attaches windows to drags.
+    toplevel_drags: XdgToplevelDragManagerV1,
+    /// The drag this client started, with the window it drags along,
+    /// while it lasts.
+    drag_source: Option<(DragSource, XdgToplevelDragV1)>,
     /// Locks the session.
     session_locks: ExtSessionLockManagerV1,
     /// The session lock the client holds, if it does.
@@ -200,6 +215,11 @@ impl TestClient {
             bind(&globals, &handle, "zwp_idle_inhibit_manager_v1");
         let fractional_scales: WpFractionalScaleManagerV1 =
             bind(&globals, &handle, "wp_fractional_scale_manager_v1");
+        let data_devices = DataDeviceManagerState::bind(&globals, &handle)
+            .expect("vaht offers wl_data_device_manager");
+        let toplevel_drags: XdgToplevelDragManagerV1 =
+            bind(&globals, &handle, "xdg_toplevel_drag_manager_v1");
+        let data_device = data_devices.get_data_device(&handle, &seat);
         let session_locks: ExtSessionLockManagerV1 =
             bind(&globals, &handle, "ext_session_lock_manager_v1");
         let presentation: WpPresentation = globals
@@ -230,6 +250,10 @@ impl TestClient {
             idle_notifier,
             idle_inhibitors,
             fractional_scales,
+            data_device,
+            data_devices,
+            toplevel_drags,
+            drag_source: None,
             session_locks,
             session_lock: None,
             presentation,
@@ -430,6 +454,52 @@ impl TestClient {
         self.state
             .fractional_scale
             .map(|scale| f64::from(scale) / 120.0)
+    }
+
+    /// Drags window `attached` (in opening order) along with a drag and
+    /// drop, as a browser drags a tab out: presses the left button at
+    /// `from` (on window `origin`), starts a drag there, attaches the
+    /// window with the pointer `offset` from its corner, and moves the
+    /// pointer to `to`. The button stays down; [`Self::release`] drops.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there are no such windows, or the connection fails.
+    pub fn drag_window_along(
+        &mut self,
+        (origin, attached): (usize, usize),
+        offset: (i32, i32),
+        from: (u32, u32),
+        to: (u32, u32),
+    ) {
+        let handle = self.queue.handle();
+        self.state.last_button_serial = None;
+        self.move_pointer_to(from.0, from.1);
+        self.press(BUTTON_LEFT);
+        self.dispatch_until(|state| state.last_button_serial.is_some());
+        let serial = self.state.last_button_serial.expect("pressed");
+        let source =
+            self.data_devices
+                .create_drag_and_drop_source(&handle, ["text/plain"], DndAction::Move);
+        source.start_drag(
+            &self.data_device,
+            self.state.windows[origin].wl_surface(),
+            None,
+            serial,
+        );
+        let drag = self
+            .toplevel_drags
+            .get_xdg_toplevel_drag(source.inner(), &handle, NoEvents);
+        drag.attach(
+            self.state.windows[attached].xdg_toplevel(),
+            offset.0,
+            offset.1,
+        );
+        self.roundtrip();
+        self.move_pointer_to(to.0, to.1);
+        self.roundtrip();
+        // Kept until the drop: the drag ends with its source.
+        self.drag_source = Some((source, drag));
     }
 
     /// Waits until vaht prefers a buffer scale of `scale` for a surface

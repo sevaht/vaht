@@ -212,6 +212,9 @@ pub(crate) struct Scene<'state> {
     /// The pointer and where it is, when vaht draws it (on outputs no
     /// host draws it on, and in screenshots that ask for it).
     pointer: Option<(&'state Cursor, Point<f64, Logical>)>,
+    /// A window the pointer passes through: one dragged along with a drag
+    /// and drop, which is no drop target itself.
+    passed_through: Option<WindowId>,
 }
 
 /// The `linux-dmabuf` feedback for a client surface on one output.
@@ -264,7 +267,16 @@ impl<'state> Scene<'state> {
             drawn,
             layers,
             pointer: None,
+            passed_through: None,
         }
+    }
+
+    /// Returns the scene with the pointer passing through `window`, if
+    /// given: it is found under no point.
+    #[must_use]
+    pub(crate) const fn passing_through(mut self, window: Option<WindowId>) -> Self {
+        self.passed_through = window;
+        self
     }
 
     /// Returns the scene with `cursor` drawn at `location` (global
@@ -674,9 +686,10 @@ impl<'state> Scene<'state> {
     /// else among the rest.
     fn window_at(&self, point: Point<f64, Logical>, is_above_dock: bool) -> Option<WindowTarget> {
         let metrics = self.window_manager.metrics();
-        let windows = self
-            .windows()
-            .filter(|(window, _)| self.window_manager.is_above_dock(window.id()) == is_above_dock);
+        let windows = self.windows().filter(|(window, _)| {
+            self.window_manager.is_above_dock(window.id()) == is_above_dock
+                && self.passed_through != Some(window.id())
+        });
         windows.into_iter().find_map(|(window, toplevel)| {
             let id = window.id();
             let surface_origin = window.surface_origin();

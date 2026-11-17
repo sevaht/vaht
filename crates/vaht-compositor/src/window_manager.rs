@@ -1089,6 +1089,26 @@ impl WindowManager {
         }
     }
 
+    /// Moves `window`, floating, so its content's corner is at `corner`;
+    /// returns whether it moved.
+    pub(crate) fn move_content_to(
+        &mut self,
+        window: WindowId,
+        corner: Point<i32, Logical>,
+    ) -> bool {
+        let metrics = self.metrics;
+        let Some(target) = self.window_mut(window) else {
+            return false;
+        };
+        let delta = corner - target.content_area().loc;
+        if delta == Point::default() {
+            return false;
+        }
+        target.move_by(delta, metrics);
+        self.is_redraw_needed = true;
+        true
+    }
+
     /// Applies `change` to `window`, given the theme's metrics.
     fn change_window(
         &mut self,

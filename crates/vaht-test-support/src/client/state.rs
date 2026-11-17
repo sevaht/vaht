@@ -57,6 +57,15 @@ use smithay_client_toolkit::shell::xdg::XdgShell;
 use smithay_client_toolkit::shell::xdg::window::{Window, WindowConfigure, WindowHandler};
 use smithay_client_toolkit::shm::slot::SlotPool;
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
+use smithay_client_toolkit::data_device_manager::WritePipe;
+use smithay_client_toolkit::data_device_manager::data_device::DataDeviceHandler;
+use smithay_client_toolkit::data_device_manager::data_offer::{DataOfferHandler, DragOffer};
+use smithay_client_toolkit::data_device_manager::data_source::DataSourceHandler;
+use smithay_client_toolkit::reexports::client::protocol::wl_data_device::WlDataDevice;
+use smithay_client_toolkit::reexports::client::protocol::wl_data_device_manager::DndAction;
+use smithay_client_toolkit::reexports::client::protocol::wl_data_source::WlDataSource;
+use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_manager_v1::XdgToplevelDragManagerV1;
+use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_v1::XdgToplevelDragV1;
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
 use super::{BYTES_PER_PIXEL, Presentation, WINDOW_COLOR, WINDOW_SIZE};
@@ -110,6 +119,9 @@ pub(super) struct ClientState {
     /// The buffer scale vaht last preferred for any surface
     /// (`wl_surface.preferred_buffer_scale`), if it said one.
     pub(super) preferred_scale: Option<i32>,
+    /// The serial of the last button press vaht sent this client, which
+    /// a drag it starts names.
+    pub(super) last_button_serial: Option<u32>,
     /// The fractional scale vaht last preferred, in 120ths
     /// (`wp_fractional_scale_v1.preferred_scale`), if it said one.
     pub(super) fractional_scale: Option<u32>,
@@ -188,6 +200,7 @@ impl ClientState {
             first_draws: 0,
             preferred_scale: None,
             fractional_scale: None,
+            last_button_serial: None,
             drawn: Vec::new(),
             close_requests: 0,
             closed_layers: 0,
@@ -305,6 +318,8 @@ ignore_events!(
     ZwpIdleInhibitManagerV1,
     ZwpIdleInhibitorV1,
     WpFractionalScaleManagerV1,
+    XdgToplevelDragManagerV1,
+    XdgToplevelDragV1,
     ZwpKeyboardShortcutsInhibitManagerV1,
     ZwpKeyboardShortcutsInhibitorV1,
     ZwpRelativePointerManagerV1,
@@ -389,7 +404,7 @@ impl Dispatch2<wl_pointer::WlPointer, ClientState> for PointerEvents {
     ) {
         #[expect(
             clippy::wildcard_enum_match_arm,
-            reason = "only where the pointer is matters to a test, not its buttons"
+            reason = "only where the pointer is matters to a test, and the serial of a press"
         )]
         match event {
             wl_pointer::Event::Enter {
@@ -410,6 +425,11 @@ impl Dispatch2<wl_pointer::WlPointer, ClientState> for PointerEvents {
                 state.pointer_entered = None;
                 state.pointer_position = None;
             }
+            wl_pointer::Event::Button {
+                serial,
+                state: WEnum::Value(wl_pointer::ButtonState::Pressed),
+                ..
+            } => state.last_button_serial = Some(serial),
             _ => {}
         }
     }
@@ -799,6 +819,78 @@ impl LayerShellHandler for ClientState {
         let (width, height) = configure.new_size;
         self.fill(&surface, handle, (width.max(1), height.max(1)), color);
     }
+}
+
+/// The client starts drags but takes no drops: what vaht offers is ignored.
+impl DataDeviceHandler for ClientState {
+    fn enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataDevice,
+        _: f64,
+        _: f64,
+        _: &wl_surface::WlSurface,
+    ) {
+    }
+
+    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+
+    fn motion(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64) {}
+
+    fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+
+    fn drop_performed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+}
+
+impl DataOfferHandler for ClientState {
+    fn source_actions(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: DndAction,
+    ) {
+    }
+
+    fn selected_action(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: DndAction,
+    ) {
+    }
+}
+
+/// What the client's drag sources hear; a test only watches windows move.
+impl DataSourceHandler for ClientState {
+    fn accept_mime(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataSource,
+        _: Option<String>,
+    ) {
+    }
+
+    fn send_request(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataSource,
+        _: String,
+        _: WritePipe,
+    ) {
+    }
+
+    fn cancelled(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+
+    fn dnd_dropped(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+
+    fn dnd_finished(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+
+    fn action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: DndAction) {}
 }
 
 delegate_registry!(ClientState);
