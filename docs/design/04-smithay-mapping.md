@@ -55,7 +55,7 @@ re-renders its buffer only when its content changes.
 | wlr-output-management | wlr-randr, kanshi, outside tools | **built** (§8.9), through the same output arrangement as `outputs.toml` and its profiles |
 | wlr-foreign-toplevel-management | Taskbars and docks outside the compositor | **built** (§8.6) |
 | ext-workspace | External pagers | **built** (§8.10) |
-| ~~wlr-screencopy~~ | | dropped: the installed xdg-desktop-portal-wlr 0.8.4 and grim 1.5 use ext-image-copy-capture |
+| wlr-screencopy | Older capture tools (wf-recorder, OBS's wlrobs, grim before 1.5) | **built**, by vaht (not in this Smithay): shared memory, and GPU buffers for a whole output; `copy_with_damage` waits for vaht's next frame; a region is cut from the output's image, shared memory only, not on a rotated output (`protocols/screencopy.rs`). The installed xdg-desktop-portal-wlr 0.8.4 and grim 1.5 use ext-image-copy-capture |
 | xdg-toplevel-drag | Browsers dragging a tab out | **built**, by vaht (not in this Smithay): the window attached to a drag follows the pointer at its offset, is no drop target, and stays where dropped (`protocols/toplevel_drag.rs`) |
 | wlr-gamma-control | Night-light tools | **built** (§8.8) |
 | wlr-output-power-management | DPMS via `wlopm` | **built** (§8.7) |

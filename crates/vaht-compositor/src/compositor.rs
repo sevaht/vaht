@@ -1509,6 +1509,8 @@ impl Compositor {
             }
         }
         self.follow_timed_frames();
+        // Screen copies waiting for vaht to draw.
+        self.copy_waiting_screens();
         // Windows opened, renamed or closed are announced as they show.
         let windows = self
             .window_manager

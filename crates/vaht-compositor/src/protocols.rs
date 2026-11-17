@@ -17,6 +17,7 @@ mod output;
 mod output_management;
 mod output_power;
 mod sandbox;
+mod screencopy;
 mod seat;
 mod selection;
 mod session_lock;
@@ -111,6 +112,8 @@ pub(crate) struct ProtocolStates {
     /// `xdg_toplevel_drag_manager_v1`: windows dragged along with a drag
     /// and drop (a browser's tab dragged out).
     pub(crate) toplevel_drags: toplevel_drag::ToplevelDrags,
+    /// `zwlr_screencopy_manager_v1`: screen capture as older tools ask.
+    pub(crate) screencopies: screencopy::Screencopies,
     /// `zwp_primary_selection_device_manager_v1`: the middle-click paste.
     pub(crate) primary_selection: PrimarySelectionState,
     /// `ext_data_control_manager_v1` and `zwlr_data_control_manager_v1`:
@@ -265,6 +268,7 @@ impl ProtocolStates {
             seat: SeatState::new(),
             data_device: DataDeviceState::new::<Compositor>(display),
             toplevel_drags: toplevel_drag::ToplevelDrags::new(display),
+            screencopies: screencopy::Screencopies::new(display),
             // Sandboxed programs may not read every selection, nor the rest
             // filtered so below.
             data_control: (

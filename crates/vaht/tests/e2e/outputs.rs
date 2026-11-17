@@ -57,6 +57,23 @@ fn with_files(settings: &str, outputs: &str) -> (HeadlessVaht, TestClient) {
 }
 
 #[test]
+fn older_tools_copy_the_screen_or_a_region_of_it() {
+    let (_vaht, mut client) = with_files("", "");
+    for waits_for_damage in [false, true] {
+        let whole = client
+            .wlr_screenshot(None, waits_for_damage)
+            .expect("the screen copies");
+        assert_eq!((whole.width(), whole.height()), (800, 600));
+        assert_eq!(whole.rgb(400, 300), SKY, "the wallpaper");
+        let part = client
+            .wlr_screenshot(Some((100, 50, 20, 10)), waits_for_damage)
+            .expect("the region copies");
+        assert_eq!((part.width(), part.height()), (20, 10));
+        assert_eq!(part.rgb(10, 5), SKY);
+    }
+}
+
+#[test]
 fn a_window_is_told_the_scale_of_the_output_it_is_on() {
     let (_vaht, mut client) = with_files(
         "",

@@ -324,6 +324,30 @@ impl ImageCopyCaptureHandler for Compositor {
             frame.fail(CaptureFailureReason::Stopped);
             return;
         };
+        let (transform, time) = (view.transform(), self.start_time.elapsed());
+        if let Ok(dmabuf) = smithay::wayland::dmabuf::get_dmabuf(&frame.buffer()) {
+            let mut dmabuf = dmabuf.clone();
+            let drawn = self.with_capture_scene(session.draw_cursor(), |backend, scene| {
+                backend.capture_into(scene, &view, &mut dmabuf)
+            });
+            ScreenCapture::finish(frame, drawn, transform, time);
+        } else {
+            let image = self.with_capture_scene(session.draw_cursor(), |backend, scene| {
+                backend.capture(scene, &view)
+            });
+            ScreenCapture::fill(frame, image, transform, time);
+        }
+    }
+}
+
+impl Compositor {
+    /// Runs `draw` with the backend and the scene as it is now, the
+    /// pointer drawn in it if `draws_pointer`: what a capture shows.
+    pub(crate) fn with_capture_scene<T>(
+        &mut self,
+        draws_pointer: bool,
+        draw: impl FnOnce(&mut crate::backend::Backend, &Scene<'_>) -> T,
+    ) -> T {
         self.prepare_frames();
         let scene = Scene::new(
             &self.window_manager,
@@ -342,24 +366,14 @@ impl ImageCopyCaptureHandler for Compositor {
             LayerMaps::new(&self.outputs),
         );
         let pointer = self.pointer_location();
-        let scene = if session.draw_cursor() {
+        let scene = if draws_pointer {
             scene.with_pointer(&self.cursor, pointer)
         } else {
             scene
         };
-        let (transform, time) = (view.transform(), self.start_time.elapsed());
-        if let Ok(dmabuf) = smithay::wayland::dmabuf::get_dmabuf(&frame.buffer()) {
-            let mut dmabuf = dmabuf.clone();
-            let drawn = self.backend.capture_into(&scene, &view, &mut dmabuf);
-            ScreenCapture::finish(frame, drawn, transform, time);
-        } else {
-            let image = self.backend.capture(&scene, &view);
-            ScreenCapture::fill(frame, image, transform, time);
-        }
+        draw(&mut self.backend, &scene)
     }
-}
 
-impl Compositor {
     /// Returns what a capture of `source` draws now: its output, or its
     /// window's content at the scale of the output showing most of it;
     /// none once the output or window is gone, or a window is not placed.

@@ -66,6 +66,8 @@ use smithay_client_toolkit::reexports::client::protocol::wl_data_device_manager:
 use smithay_client_toolkit::reexports::client::protocol::wl_data_source::WlDataSource;
 use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_manager_v1::XdgToplevelDragManagerV1;
 use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_v1::XdgToplevelDragV1;
+use smithay_client_toolkit::reexports::protocols_wlr::screencopy::v1::client::zwlr_screencopy_frame_v1::{self, ZwlrScreencopyFrameV1};
+use smithay_client_toolkit::reexports::protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
 use super::{BYTES_PER_PIXEL, Presentation, WINDOW_COLOR, WINDOW_SIZE};
@@ -135,6 +137,13 @@ pub(super) struct ClientState {
     pub(super) capture_size: Option<(u32, u32)>,
     /// How the current capture ended.
     pub(super) capture_result: Option<Result<(), String>>,
+    /// The shared-memory buffer the current wlr screen copy asked for:
+    /// width, height and stride.
+    pub(super) screencopy_buffer: Option<(u32, u32, u32)>,
+    /// Whether the current wlr screen copy described all its buffers.
+    pub(super) screencopy_described: bool,
+    /// How the current wlr screen copy ended.
+    pub(super) screencopy_result: Option<Result<(), ()>>,
     /// How the current capture's image is turned from the output's own
     /// orientation.
     pub(super) capture_transform: wl_output::Transform,
@@ -201,6 +210,9 @@ impl ClientState {
             preferred_scale: None,
             fractional_scale: None,
             last_button_serial: None,
+            screencopy_buffer: None,
+            screencopy_described: false,
+            screencopy_result: None,
             drawn: Vec::new(),
             close_requests: 0,
             closed_layers: 0,
@@ -320,6 +332,7 @@ ignore_events!(
     WpFractionalScaleManagerV1,
     XdgToplevelDragManagerV1,
     XdgToplevelDragV1,
+    ZwlrScreencopyManagerV1,
     ZwpKeyboardShortcutsInhibitManagerV1,
     ZwpKeyboardShortcutsInhibitorV1,
     ZwpRelativePointerManagerV1,
@@ -430,6 +443,38 @@ impl Dispatch2<wl_pointer::WlPointer, ClientState> for PointerEvents {
                 state: WEnum::Value(wl_pointer::ButtonState::Pressed),
                 ..
             } => state.last_button_serial = Some(serial),
+            _ => {}
+        }
+    }
+}
+
+/// User data of a wlr screen copy frame: records its buffer and outcome.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ScreencopyEvents;
+
+impl Dispatch2<ZwlrScreencopyFrameV1, ClientState> for ScreencopyEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &ZwlrScreencopyFrameV1,
+        event: zwlr_screencopy_frame_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "flags, damage and GPU buffers do not matter to a test"
+        )]
+        match event {
+            zwlr_screencopy_frame_v1::Event::Buffer {
+                width,
+                height,
+                stride,
+                ..
+            } => state.screencopy_buffer = Some((width, height, stride)),
+            zwlr_screencopy_frame_v1::Event::BufferDone => state.screencopy_described = true,
+            zwlr_screencopy_frame_v1::Event::Ready { .. } => state.screencopy_result = Some(Ok(())),
+            zwlr_screencopy_frame_v1::Event::Failed => state.screencopy_result = Some(Err(())),
             _ => {}
         }
     }

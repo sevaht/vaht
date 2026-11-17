@@ -25,6 +25,7 @@ use smithay_client_toolkit::data_device_manager::data_device::DataDevice;
 use smithay_client_toolkit::reexports::client::protocol::wl_data_device_manager::DndAction;
 use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_manager_v1::XdgToplevelDragManagerV1;
 use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_v1::XdgToplevelDragV1;
+use smithay_client_toolkit::reexports::protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 use smithay_client_toolkit::data_device_manager::data_source::DragSource;
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
@@ -142,6 +143,8 @@ pub struct TestClient {
     data_device: DataDevice,
     /// Attaches windows to drags.
     toplevel_drags: XdgToplevelDragManagerV1,
+    /// Copies the screen as older tools ask (`zwlr_screencopy_v1`).
+    screencopy: ZwlrScreencopyManagerV1,
     /// The drag this client started, with the window it drags along,
     /// while it lasts.
     drag_source: Option<(DragSource, XdgToplevelDragV1)>,
@@ -220,6 +223,9 @@ impl TestClient {
         let toplevel_drags: XdgToplevelDragManagerV1 =
             bind(&globals, &handle, "xdg_toplevel_drag_manager_v1");
         let data_device = data_devices.get_data_device(&handle, &seat);
+        let screencopy: ZwlrScreencopyManagerV1 = globals
+            .bind(&handle, 3..=3, NoEvents)
+            .expect("vaht offers zwlr_screencopy_manager_v1");
         let session_locks: ExtSessionLockManagerV1 =
             bind(&globals, &handle, "ext_session_lock_manager_v1");
         let presentation: WpPresentation = globals
@@ -254,6 +260,7 @@ impl TestClient {
             data_devices,
             toplevel_drags,
             drag_source: None,
+            screencopy,
             session_locks,
             session_lock: None,
             presentation,
@@ -1063,6 +1070,74 @@ impl TestClient {
     pub fn screenshot(&mut self) -> Screenshot {
         let output = self.output();
         self.capture(&output, Options::empty())
+    }
+
+    /// Captures the (first) output, or the part `region` (output-local
+    /// `x`, `y`, width and height) of it, as older tools do
+    /// (`zwlr_screencopy_v1`), waiting for vaht to draw if
+    /// `waits_for_damage`; none if vaht failed the copy.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn wlr_screenshot(
+        &mut self,
+        region: Option<(i32, i32, i32, i32)>,
+        waits_for_damage: bool,
+    ) -> Option<Screenshot> {
+        let handle = self.queue.handle();
+        let output = self.output();
+        self.state.screencopy_buffer = None;
+        self.state.screencopy_described = false;
+        self.state.screencopy_result = None;
+        let frame = match region {
+            Some((x, y, width, height)) => self.screencopy.capture_output_region(
+                0,
+                &output,
+                x,
+                y,
+                width,
+                height,
+                &handle,
+                state::ScreencopyEvents,
+            ),
+            None => self
+                .screencopy
+                .capture_output(0, &output, &handle, state::ScreencopyEvents),
+        };
+        self.dispatch_until(|state| {
+            state.screencopy_described || state.screencopy_result.is_some()
+        });
+        let Some((width, height, stride)) = self.state.screencopy_buffer else {
+            frame.destroy();
+            return None;
+        };
+        let signed = |value: u32| i32::try_from(value).expect("output sizes fit in i32");
+        let (buffer, _) = self
+            .state
+            .pool
+            .create_buffer(
+                signed(width),
+                signed(height),
+                signed(stride),
+                wl_shm::Format::Xrgb8888,
+            )
+            .expect("the pool grows to fit a screenshot");
+        if waits_for_damage {
+            frame.copy_with_damage(buffer.wl_buffer());
+        } else {
+            frame.copy(buffer.wl_buffer());
+        }
+        self.dispatch_until(|state| state.screencopy_result.is_some());
+        frame.destroy();
+        if self.state.screencopy_result != Some(Ok(())) {
+            return None;
+        }
+        let pixels = buffer
+            .canvas(&mut self.state.pool)
+            .expect("the buffer is still the pool's")
+            .to_vec();
+        Some(Screenshot::new(width, height, pixels))
     }
 
     /// Captures the (first) output as vaht shows it now, with the pointer
