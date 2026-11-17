@@ -75,7 +75,8 @@ impl Icon {
     }
 
     /// Returns the picture `side` pixels square: its own pixels at its own
-    /// size, else resized well ([`resample()`]), once per size; none for 0.
+    /// size, else resized with a Lanczos filter widened by the scale, once
+    /// per size; none for 0.
     #[must_use]
     pub fn pixels_at(&self, side: u32) -> Option<Arc<Pixmap>> {
         /// How many sizes are kept: icons are drawn at a few at most.
