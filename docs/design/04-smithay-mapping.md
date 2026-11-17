@@ -451,3 +451,15 @@ rest only carries the decisions out.
 - **First run on hardware**, from a free terminal: `vaht` (log in
   `~/.local/state/vaht/vaht.log`); Ctrl+Alt+F<n> back to the old terminal
   at any time.
+
+## Protocols vaht serves itself, until Smithay does
+
+Where Smithay has no protocol vaht needs, vaht implements it itself
+(`crates/vaht-compositor/src/protocols/`). `tools/smithay-watch.toml` lists
+each, with the module name Smithay would give it, and the Smithay work vaht
+waits for (tearing, HDR, session restore) with its pull requests; a test
+fails when a protocol vaht serves itself is missing from the list.
+`tools/smithay-watch` checks the list against Smithay's main branch, and says
+which of vaht's own implementations Smithay now has and how far behind main
+vaht's pinned Smithay is. Run it now and then, and before updating Smithay;
+it asks GitHub's API, so `./checks` does not run it.

@@ -385,3 +385,36 @@ impl OutputControls {
 }
 
 smithay::delegate_dispatch2!(Compositor);
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn every_protocol_vaht_serves_itself_is_on_the_smithay_watch_list() {
+        // tools/smithay-watch says when Smithay gains one of these, so vaht
+        // can move to it; a protocol missing from its list would be missed.
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let root = manifest.join("../..");
+        let watch = std::fs::read_to_string(root.join("tools/smithay-watch.toml"))
+            .expect("tools/smithay-watch.toml is readable");
+        let protocols = manifest.join("src/protocols");
+        let mut missing = Vec::new();
+        for entry in std::fs::read_dir(&protocols).expect("the protocols are readable") {
+            let path = entry.expect("an entry").path();
+            let source = std::fs::read_to_string(&path).unwrap_or_default();
+            if !source.contains("impl GlobalDispatch") {
+                continue;
+            }
+            let file = path.file_name().expect("a file").to_string_lossy();
+            let listed = format!("crates/vaht-compositor/src/protocols/{file}");
+            if !watch.contains(&format!("\"{listed}\"")) {
+                missing.push(listed);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "add these to tools/smithay-watch.toml: {missing:?}"
+        );
+    }
+}

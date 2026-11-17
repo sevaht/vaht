@@ -1,0 +1,59 @@
+# What vaht does itself because Smithay does not (yet), and what vaht waits
+# for Smithay to do. tools/smithay-watch checks each against Smithay's main
+# branch: when a protocol below gains a module there, or a pull request
+# below is merged, vaht can move to Smithay's version.
+#
+# module: the name Smithay would give it under src/wayland (exact; a
+# protocol may have more than one candidate name).
+# prs: Smithay pull requests that would bring it.
+# Smithay's own list of protocols: https://github.com/Smithay/smithay/issues/781
+
+[[own]]
+protocol = "xdg-toplevel-drag"
+vaht = "crates/vaht-compositor/src/protocols/toplevel_drag.rs"
+modules = ["xdg_toplevel_drag", "toplevel_drag"]
+
+[[own]]
+protocol = "wlr-screencopy"
+vaht = "crates/vaht-compositor/src/protocols/screencopy.rs"
+modules = ["screencopy", "wlr_screencopy"]
+
+[[own]]
+protocol = "ext-workspace"
+vaht = "crates/vaht-compositor/src/protocols/workspace_pager.rs"
+modules = ["workspace", "ext_workspace"]
+
+[[own]]
+protocol = "wlr-foreign-toplevel-management"
+vaht = "crates/vaht-compositor/src/protocols/toplevel_management.rs"
+modules = ["foreign_toplevel", "wlr_foreign_toplevel", "foreign_toplevel_management"]
+
+[[own]]
+protocol = "wlr-gamma-control"
+vaht = "crates/vaht-compositor/src/protocols/gamma.rs"
+modules = ["gamma_control", "wlr_gamma_control"]
+
+[[own]]
+protocol = "wlr-output-management"
+vaht = "crates/vaht-compositor/src/protocols/output_management.rs"
+modules = ["output_management", "wlr_output_management"]
+
+[[own]]
+protocol = "wlr-output-power-management"
+vaht = "crates/vaht-compositor/src/protocols/output_power.rs"
+modules = ["output_power", "output_power_management", "wlr_output_power"]
+
+# Features vaht does not have, waiting on Smithay.
+
+[[waiting]]
+feature = "tearing control (async page flips)"
+modules = ["tearing_control"]
+prs = [1948, 1325]
+
+[[waiting]]
+feature = "HDR and color management"
+modules = ["color_management", "color_representation"]
+
+[[waiting]]
+feature = "session restore (xdg-session-management)"
+modules = ["xdg_session_management", "session_management"]

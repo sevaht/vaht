@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Says which of vaht's own protocol implementations Smithay now has, and
+how the Smithay work vaht waits for stands (tools/smithay-watch.toml).
+
+Run it now and then, and before updating Smithay. It asks GitHub's API a
+few anonymous questions with a generic browser user agent; ./checks never
+runs it, so the checks stay offline.
+"""
+
+import json
+import pathlib
+import re
+import sys
+import tomllib
+import urllib.request
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+API = "https://api.github.com/repos/Smithay/smithay"
+USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+)
+
+
+def get(path):
+    request = urllib.request.Request(API + path, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.load(response)
+
+
+def pinned_revision():
+    lock = (ROOT / "Cargo.lock").read_text()
+    found = re.search(r"smithay\?rev=([0-9a-f]+)", lock)
+    return found.group(1) if found else None
+
+
+def main():
+    watch = tomllib.loads((ROOT / "tools/smithay-watch.toml").read_text())
+    modules = {entry["name"].removesuffix(".rs") for entry in get("/contents/src/wayland?ref=master")}
+    master = get("/commits/master")
+    print(f"Smithay main: {master['sha'][:10]} ({master['commit']['committer']['date'][:10]})")
+    pinned = pinned_revision()
+    if pinned:
+        compared = get(f"/compare/{pinned}...master")
+        print(f"vaht pins {pinned[:10]}: {compared.get('ahead_by', '?')} commits behind main")
+    swappable = 0
+    print("\nvaht's own implementations:")
+    for own in watch.get("own", []):
+        found = sorted(set(own["modules"]) & modules)
+        if found:
+            swappable += 1
+            print(f"  NOW IN SMITHAY  {own['protocol']}: src/wayland/{found[0]} (vaht's: {own['vaht']})")
+        else:
+            print(f"  still vaht's    {own['protocol']}")
+    print("\nWaiting on Smithay:")
+    for waiting in watch.get("waiting", []):
+        found = sorted(set(waiting.get("modules", [])) & modules)
+        states = []
+        for number in waiting.get("prs", []):
+            pull = get(f"/pulls/{number}")
+            state = "merged" if pull.get("merged_at") else pull.get("state", "?")
+            states.append(f"#{number} {state}")
+        status = f"in Smithay (src/wayland/{found[0]})" if found else "not in Smithay"
+        detail = f"; {', '.join(states)}" if states else ""
+        print(f"  {waiting['feature']}: {status}{detail}")
+    if swappable:
+        print(f"\n{swappable} of vaht's own implementations could move to Smithay's.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
