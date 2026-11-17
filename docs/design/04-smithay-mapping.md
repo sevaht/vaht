@@ -58,7 +58,7 @@ re-renders its buffer only when its content changes.
 | ~~wlr-screencopy~~ | | dropped: the installed xdg-desktop-portal-wlr 0.8.4 and grim 1.5 use ext-image-copy-capture |
 | wlr-gamma-control | Night-light tools | **built** (§8.8) |
 | wlr-output-power-management | DPMS via `wlopm` | **built** (§8.7) |
-| **tearing-control** | Games | Needs async page flips in the DRM compositor **(verify Smithay support)** |
+| **tearing-control** | Games | not built: needs async page flips, which Smithay lacks ([#1948](https://github.com/Smithay/smithay/pull/1948), §3 below) |
 | color-representation, color-management | HDR | later |
 | transient-seat, export-dmabuf | | drop: unused or deprecated |
 
@@ -134,7 +134,27 @@ gateway). They are mechanical work, not design work.
    lets cursor movement skip a frame so it does not disturb the refresh rate.
 3. **Tearing: not supported** by Smithay's DRM backend; there are no async page
    flips. That matches the decision. vaht does not advertise tearing-control,
-   and games get vsync plus VRR.
+   and games get vsync plus VRR. Tearing control only *allows* tearing: a
+   game asks for its frames to be shown at once rather than at the next
+   refresh, trading a torn image for less input latency; nothing tears
+   unless a program asks. Without it, vsync plus VRR keeps latency low on a
+   VRR monitor, and on others a frame waits at most one refresh. As of
+   November 2026 the work is open upstream, none of it merged:
+   - [Smithay#1948](https://github.com/Smithay/smithay/pull/1948), "Initial
+     support for DRM async page flip v2": the DRM backend side vaht needs
+     (active; supersedes
+     [#1335](https://github.com/Smithay/smithay/pull/1335); the attempts
+     [#2099](https://github.com/Smithay/smithay/pull/2099) and
+     [#2274](https://github.com/Smithay/smithay/pull/2274) were closed).
+   - [Smithay#1325](https://github.com/Smithay/smithay/pull/1325), "Implement
+     wayland side of tearing control": the protocol side.
+   - [Smithay#2276](https://github.com/Smithay/smithay/pull/2276): async flips
+     for `GbmBufferedSurface`, a path vaht does not use.
+
+   Once #1948 is in a Smithay vaht can take, tearing control can be built as
+   decided in `00-feature-inventory.md`: a setting, off by default, and only
+   for a fullscreen window that asks. Whether NVIDIA's driver takes async
+   flips in atomic commits must then be tried on the hardware.
 4. **Nested panel.** Smithay's `smallvil` example, extended with a taskbar-like
    `Panel`:
    - it draws with tiny-skia into a `MemoryRenderBuffer`;
@@ -425,7 +445,8 @@ rest only carries the decisions out.
   no copy; the rest are told what the renderer reads. The scan-out
   tranche lists only formats the renderer reads too, so a buffer that
   cannot go on a plane is drawn instead.
-- **Not yet:** tearing (not in this Smithay).
+- **Not yet:** tearing (not in this Smithay; the upstream work is listed in
+  "Tearing: not supported" above).
 - **First run on hardware**, from a free terminal: `vaht` (log in
   `~/.local/state/vaht/vaht.log`); Ctrl+Alt+F<n> back to the old terminal
   at any time.
