@@ -15,7 +15,6 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-file-rotate.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

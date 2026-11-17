@@ -21,14 +21,12 @@
 //! default `tracing-log` feature.
 
 use std::backtrace::Backtrace;
-use std::fs::{self, OpenOptions};
-use std::io::{self, IsTerminal as _};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, IsTerminal as _, Write};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::panic;
 use std::path::{Path, PathBuf};
 
-use file_rotate::suffix::AppendCount;
-use file_rotate::{ContentLimit, FileRotate};
 use tracing_appender::non_blocking::{ErrorCounter, NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::{SubscriberInitExt as _, TryInitError};
@@ -219,10 +217,7 @@ impl RotationPolicy {
     ///
     /// Returns an error if the directory cannot be created or the file
     /// cannot be opened or rotated.
-    pub fn open_in(
-        self,
-        directory: &Path,
-    ) -> Result<(FileRotate<AppendCount>, PathBuf), LoggingError> {
+    pub fn open_in(self, directory: &Path) -> Result<(RotatingFile, PathBuf), LoggingError> {
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -232,30 +227,121 @@ impl RotationPolicy {
                 source,
             })?;
         let path = directory.join(Self::FILE_NAME);
-        let mut open_options = OpenOptions::new();
-        open_options.create(true).append(true).mode(0o600);
-        // FileRotate swallows open failures; check first so they are reported.
-        let existing = open_options
-            .open(&path)
-            .and_then(|file| file.metadata())
-            .map_err(|source| LoggingError::OpenLogFile {
-                path: path.clone(),
-                source,
-            })?;
-        let mut file = FileRotate::new(
-            &path,
-            AppendCount::new(self.file_count.saturating_sub(1)),
-            ContentLimit::BytesSurpassed(self.file_size_bytes),
-            file_rotate::compression::Compression::None,
-            Some(open_options),
-        );
-        if existing.len() > 0 {
-            file.rotate().map_err(|source| LoggingError::OpenLogFile {
-                path: path.clone(),
-                source,
-            })?;
+        let open_error = |source| LoggingError::OpenLogFile {
+            path: path.clone(),
+            source,
+        };
+        let mut file = RotatingFile::open(path.clone(), self).map_err(open_error)?;
+        if file.written > 0 {
+            file.rotate().map_err(open_error)?;
         }
         Ok((file, path))
+    }
+}
+
+/// A log file that starts anew once it passes its policy's size, keeping
+/// the files before it as `vaht.log.1` (the newest), `vaht.log.2`, …, the
+/// oldest removed, so the logs never take more than the policy's files.
+#[derive(Debug)]
+pub struct RotatingFile {
+    /// The current file's path; older files append `.1`, `.2`, ….
+    path: PathBuf,
+    /// The current file.
+    file: File,
+    /// How many bytes the current file holds.
+    written: u64,
+    /// How big it may get, and how many files are kept.
+    policy: RotationPolicy,
+}
+
+impl RotatingFile {
+    /// Opens the file at `path` to append to, private to the user (mode
+    /// 0600), under `policy`.
+    fn open(path: PathBuf, policy: RotationPolicy) -> io::Result<Self> {
+        let file = Self::open_file(&path)?;
+        let written = file.metadata()?.len();
+        Ok(Self {
+            path,
+            file,
+            written,
+            policy,
+        })
+    }
+
+    /// Opens the file at `path` to append to, creating it private to the
+    /// user.
+    fn open_file(path: &Path) -> io::Result<File> {
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(path)
+    }
+
+    /// Returns the path of the `number`th older file.
+    fn older(&self, number: usize) -> PathBuf {
+        let mut name = self.path.clone().into_os_string();
+        name.push(format!(".{number}"));
+        PathBuf::from(name)
+    }
+
+    /// Moves every file one older, dropping the oldest, and starts the
+    /// current file anew.
+    fn rotate(&mut self) -> io::Result<()> {
+        let older_count = self.policy.file_count.saturating_sub(1);
+        if older_count == 0 {
+            // No older files are kept: the current one starts over.
+            self.file.set_len(0)?;
+            self.written = 0;
+            return Ok(());
+        }
+        Self::remove_if_there(&self.older(older_count))?;
+        for number in (1..older_count).rev() {
+            Self::rename_if_there(&self.older(number), &self.older(number + 1))?;
+        }
+        self.file.flush()?;
+        fs::rename(&self.path, self.older(1))?;
+        self.file = Self::open_file(&self.path)?;
+        self.written = 0;
+        Ok(())
+    }
+
+    /// Removes the file at `path`, if there is one.
+    fn remove_if_there(path: &Path) -> io::Result<()> {
+        match fs::remove_file(path) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+            Ok(()) | Err(_) => Ok(()),
+        }
+    }
+
+    /// Renames the file at `from` to `to`, if there is one.
+    fn rename_if_there(from: &Path, to: &Path) -> io::Result<()> {
+        match fs::rename(from, to) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+            Ok(()) | Err(_) => Ok(()),
+        }
+    }
+}
+
+impl Write for RotatingFile {
+    /// Writes `buffer`, after starting a new file if the current one has
+    /// passed the size: a line is never split between files.
+    #[expect(
+        clippy::renamed_function_params,
+        reason = "the standard library names it buf; vaht spells names out (N1)"
+    )]
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let limit = u64::try_from(self.policy.file_size_bytes).unwrap_or(u64::MAX);
+        if self.written >= limit {
+            self.rotate()?;
+        }
+        let count = self.file.write(buffer)?;
+        self.written += u64::try_from(count).unwrap_or(u64::MAX);
+        Ok(count)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
     }
 }
 
@@ -410,7 +496,6 @@ fn install_panic_hook() {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
 
     use super::*;
 
@@ -541,6 +626,39 @@ mod tests {
             file_names(directory.path()),
             ["vaht.log", "vaht.log.1", "vaht.log.2"]
         );
+    }
+
+    #[test]
+    fn the_newest_older_file_is_dot_one_and_lines_are_never_split() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let policy = RotationPolicy {
+            file_size_bytes: 10,
+            file_count: 3,
+        };
+        let (mut file, _) = policy.open_in(directory.path()).expect("opens");
+        for line in ["first line\n", "second line\n", "third line\n"] {
+            file.write_all(line.as_bytes()).expect("writable");
+        }
+        let read = |name: &str| fs::read_to_string(directory.path().join(name)).expect("readable");
+        assert_eq!(read("vaht.log"), "third line\n");
+        assert_eq!(read("vaht.log.1"), "second line\n", "the newest older file");
+        assert_eq!(read("vaht.log.2"), "first line\n");
+    }
+
+    #[test]
+    fn with_one_file_kept_the_file_starts_over() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let policy = RotationPolicy {
+            file_size_bytes: 10,
+            file_count: 1,
+        };
+        let (mut file, _) = policy.open_in(directory.path()).expect("opens");
+        for line in ["first line\n", "second line\n"] {
+            file.write_all(line.as_bytes()).expect("writable");
+        }
+        assert_eq!(file_names(directory.path()), ["vaht.log"]);
+        let current = fs::read_to_string(directory.path().join("vaht.log")).expect("readable");
+        assert_eq!(current, "second line\n");
     }
 
     #[test]

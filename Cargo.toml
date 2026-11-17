@@ -25,12 +25,11 @@ anyhow = "1"
 calloop = { version = "0.14.5", features = ["executor", "signals"] }
 clap = { version = "4", features = ["derive", "env"] }
 cosmic-text = "0.19"
-file-rotate = "0.8"
 # `StreamExt`, to read D-Bus signal streams; zbus already depends on it.
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 jiff = "0.2"
 nix = { version = "0.31", features = ["inotify", "poll", "process", "signal", "socket", "time"] }
-procfs = "0.18"
+procfs = { version = "0.18", default-features = false }
 proptest = "1"
 regex = "1"
 reis = { version = "0.7", features = ["calloop"] }
