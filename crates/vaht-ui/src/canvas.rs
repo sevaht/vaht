@@ -4,8 +4,8 @@
 //! through it.
 
 use tiny_skia::{
-    FilterQuality, GradientStop, LinearGradient, Paint, PathBuilder, Pixmap, PixmapPaint,
-    Rect as SkiaRect, Shader, SpreadMode, Stroke, Transform,
+    ColorU8, FilterQuality, Paint, PathBuilder, Pixmap, PixmapPaint, Rect as SkiaRect, Stroke,
+    Transform,
 };
 
 use crate::color::Color;
@@ -13,13 +13,10 @@ use crate::geometry::Rect;
 use crate::icon::WidgetIcon;
 use crate::layout::{Content, Layout, Placed};
 use crate::text::{TextStyle, Typesetter};
-use crate::texture::{Bevel, Fill, GradientDirection, Texture};
+use crate::texture::render::{self, GradientImage};
+use crate::texture::{Bevel, Fill, Texture};
 use crate::theme::{Theme, WidgetState};
 use crate::widget::{Glyph, MarkSide, TextField};
-
-/// The opacity of a bevel's light and dark edges: enough to read as relief
-/// on any fill without hiding it.
-const BEVEL_ALPHA: u8 = 96;
 
 /// A button picture's stroke width relative to its box: thin enough to stay
 /// crisp at titlebar sizes.
@@ -129,58 +126,63 @@ impl<'pixmap> Canvas<'pixmap> {
             .draw_pixmap(0, 0, source.as_ref(), &paint, transform, None);
     }
 
-    /// Fills `rect` with `texture`'s fill, then draws its bevel.
+    /// Fills `rect` with `texture`'s fill and bevel, as Fluxbox renders
+    /// textures ([`crate::texture::render`]).
     fn fill_texture(&mut self, texture: Texture, rect: Rect) {
-        let Some(area) = rect.to_skia() else {
-            return;
-        };
-        let shader = match texture.fill {
-            Fill::Parent => return,
-            Fill::Solid(color) => Shader::SolidColor(color.to_skia()),
+        match texture.fill {
+            Fill::Parent => {}
+            Fill::Solid(color) => {
+                if let Some(area) = rect.to_skia() {
+                    let mut paint = Paint::default();
+                    paint.set_color(color.to_skia());
+                    self.pixmap
+                        .fill_rect(area, &paint, Transform::identity(), None);
+                }
+                self.draw_solid_bevel(texture.bevel, color, rect);
+            }
             Fill::Gradient {
                 direction,
                 from,
                 to,
             } => {
-                let (start, end) = match direction {
-                    GradientDirection::Vertical => {
-                        ((area.left(), area.top()), (area.left(), area.bottom()))
-                    }
-                    GradientDirection::Horizontal => {
-                        ((area.left(), area.top()), (area.right(), area.top()))
-                    }
-                    GradientDirection::Diagonal => {
-                        ((area.left(), area.top()), (area.right(), area.bottom()))
-                    }
-                    GradientDirection::CrossDiagonal => {
-                        ((area.right(), area.top()), (area.left(), area.bottom()))
-                    }
-                };
-                LinearGradient::new(
-                    start.into(),
-                    end.into(),
-                    vec![GradientStop::new(0.0, from.to_skia()), GradientStop::new(1.0, to.to_skia())],
-                    SpreadMode::Pad,
-                    Transform::identity(),
-                )
-                // A gradient whose ends coincide (a one-pixel area) is one color.
-                .unwrap_or(Shader::SolidColor(from.to_skia()))
+                if rect.width == 0 || rect.height == 0 {
+                    return;
+                }
+                let image = GradientImage::render(
+                    direction,
+                    (from, to),
+                    texture.bevel,
+                    (rect.width, rect.height),
+                );
+                self.draw_image(&image, rect);
             }
-        };
-        let paint = Paint {
-            shader,
-            ..Paint::default()
-        };
-        self.pixmap
-            .fill_rect(area, &paint, Transform::identity(), None);
-        self.draw_bevel(texture.bevel, rect);
+        }
     }
 
-    /// Draws one-pixel light and dark edges that make `rect` look raised or
-    /// sunken.
-    fn draw_bevel(&mut self, bevel: Bevel, rect: Rect) {
-        let light = Color::rgba(255, 255, 255, BEVEL_ALPHA);
-        let dark = Color::rgba(0, 0, 0, BEVEL_ALPHA);
+    /// Draws `image` at `rect`'s top left corner.
+    fn draw_image(&mut self, image: &GradientImage, rect: Rect) {
+        let Some(mut pixmap) = Pixmap::new(image.width, image.height) else {
+            return;
+        };
+        for (target, color) in pixmap.pixels_mut().iter_mut().zip(&image.pixels) {
+            *target =
+                ColorU8::from_rgba(color.red, color.green, color.blue, color.alpha).premultiply();
+        }
+        self.pixmap.draw_pixmap(
+            rect.x,
+            rect.y,
+            pixmap.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+    }
+
+    /// Draws a solid area's bevel: its edges in `color` made lighter and
+    /// darker, as Fluxbox's `drawBevelRectangle` draws them, the bottom and
+    /// right first, then the top and left over their corners.
+    fn draw_solid_bevel(&mut self, bevel: Bevel, color: Color, rect: Rect) {
+        let (light, dark) = (render::lightened(color), render::darkened(color));
         let (top_left, bottom_right) = match bevel {
             Bevel::Flat => return,
             Bevel::Raised => (light, dark),
@@ -192,10 +194,10 @@ impl<'pixmap> Canvas<'pixmap> {
         let right = rect.x + i32::try_from(rect.width - 1).expect("panel widths fit in i32");
         let bottom = rect.y + i32::try_from(rect.height - 1).expect("panel heights fit in i32");
         let edges = [
-            (Rect::new(rect.x, rect.y, rect.width, 1), top_left),
-            (Rect::new(rect.x, rect.y, 1, rect.height), top_left),
             (Rect::new(rect.x, bottom, rect.width, 1), bottom_right),
             (Rect::new(right, rect.y, 1, rect.height), bottom_right),
+            (Rect::new(rect.x, rect.y, rect.width, 1), top_left),
+            (Rect::new(rect.x, rect.y, 1, rect.height), top_left),
         ];
         for (edge, color) in edges {
             if let Some(edge) = edge.to_skia() {

@@ -483,7 +483,7 @@ fn unplugging_the_primary_monitor_moves_the_taskbar() {
     assert_eq!(outputs_on(&desk.vaht), ["*RIGHT"]);
     let right = desk.client.screenshot_of("RIGHT");
     assert_ne!(
-        right.rgb(5, right.height() - 2),
+        right.rgb(5, right.height() - BUILT_IN_METRICS.taskbar_height / 2),
         right.rgb(5, 5),
         "the taskbar is on the right monitor now"
     );

@@ -4,6 +4,8 @@
 //! two-color gradient, optionally bevelled to look raised or sunken, or
 //! nothing at all, so what is behind shows (Fluxbox's `ParentRelative`).
 
+pub(crate) mod render;
+
 use crate::color::Color;
 
 /// A widget's background.
