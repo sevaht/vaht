@@ -187,6 +187,51 @@ fn the_next_workspace_button_shows_the_next_workspace() {
     );
 }
 
+/// Returns which of `count` entries, sharing the whole window list, is
+/// the focused one's, counted from the left.
+fn focused_entry(screenshot: &Screenshot, count: u32) -> u32 {
+    let mut x = 0;
+    let (mut list_start, mut list_end, mut focused) = (None, 0, None);
+    for (color, length) in taskbar_runs(screenshot) {
+        if color == FOCUSED || color == UNFOCUSED {
+            list_start.get_or_insert(x);
+            list_end = x + length;
+        }
+        if color == FOCUSED {
+            focused = Some(x);
+        }
+        x += length;
+    }
+    let start = list_start.expect("the list shows entries");
+    let focused = focused.expect("an entry is focused");
+    (focused - start) * count / (list_end - start)
+}
+
+#[test]
+fn the_window_arrows_go_through_the_window_list_in_its_order() {
+    let (_vaht, mut client) = start("[\"window-previous\", \"window-next\", \"window-list\"]");
+    client.open_windows(3);
+    let bottom = client.screenshot().height() - HEIGHT / 2;
+    assert_eq!(focused_entry(&client.screenshot(), 3), 2, "the last opened");
+    // The arrows are as wide as the taskbar is tall: previous, then next.
+    let (previous, next) = (HEIGHT / 2, HEIGHT + HEIGHT / 2);
+    client.click(next, bottom, BUTTON_LEFT);
+    assert_eq!(
+        focused_entry(&client.screenshot(), 3),
+        0,
+        "next wraps around"
+    );
+    client.click(next, bottom, BUTTON_LEFT);
+    assert_eq!(focused_entry(&client.screenshot(), 3), 1);
+    client.click(previous, bottom, BUTTON_LEFT);
+    client.click(previous, bottom, BUTTON_LEFT);
+    assert_eq!(
+        focused_entry(&client.screenshot(), 3),
+        2,
+        "previous wraps around"
+    );
+}
+
 #[test]
 fn without_a_taskbar_windows_maximize_over_the_whole_output() {
     let vaht = HeadlessVaht::start_with_config(

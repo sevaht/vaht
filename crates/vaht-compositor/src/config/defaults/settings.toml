@@ -99,7 +99,8 @@ reserve_space = true
 auto_hide = false
 auto_hide_delay_ms = 500
 # Left to right: workspace-previous, workspace-name, workspace-next,
-# window-list, tray and clock.
+# window-previous, window-next (focusing the window before or after in the
+# window list), window-list, tray and clock.
 widgets = ["workspace-previous", "workspace-name", "workspace-next", "window-list", "tray", "clock"]
 
 [taskbar.window_list]

@@ -725,6 +725,8 @@ impl InitFile {
                     "prevworkspace" => Some("workspace-previous"),
                     "workspacename" => Some("workspace-name"),
                     "nextworkspace" => Some("workspace-next"),
+                    "prevwindow" => Some("window-previous"),
+                    "nextwindow" => Some("window-next"),
                     "iconbar" => Some("window-list"),
                     "systemtray" => Some("tray"),
                     "clock" => Some("clock"),

@@ -310,7 +310,9 @@ rest by name, so a setting never silently does nothing:
   resting the pointer on an entry whose title does not fit shows the whole
   title, and on a tray item its tooltip, in the theme's `tooltip`),
   `widgets` (`workspace-previous`, `workspace-name`, `workspace-next`,
-  `window-list`, `tray`, `clock`),
+  `window-previous`, `window-next`, `window-list`, `tray`, `clock`; the
+  window arrows, Fluxbox's `prevwindow` and `nextwindow`, focus the window
+  before or after in the window list's order, among the windows it shows),
   `[taskbar.window_list]` with `show` (a matcher),
   `entry_width` (`"fill"`, sharing the whole list, or `{ max }`, from
   `iconbar.alignment` and `iconWidth`) and `icons` (each entry's icon: the one the

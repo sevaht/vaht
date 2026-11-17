@@ -72,6 +72,7 @@ use crate::config::{
     Action, Command, Config, ConfigSource, Delay, FocusModel, KeyChord, MenuGenerator, MenuRequest,
     Menus, Modifiers, ResizeFrom, SettingChange, SettingOverrides, ThemeFile, WindowManagerAction,
 };
+use crate::config::{CycleOrder, WindowCycle};
 use crate::config::{
     FocusStealing, MenuEntry, OutputEntry, OutputMode, OutputScale, OutputTransform, SwitchFlip,
     SwitchKind, TaskbarAction, TaskbarOutput,
@@ -2315,6 +2316,19 @@ impl Compositor {
             TaskbarHit::WorkspaceNext => self
                 .window_manager
                 .run(&WindowManagerAction::Workspace(WorkspaceTarget::Next), None),
+            TaskbarHit::WindowPrevious | TaskbarHit::WindowNext => {
+                // Through the windows the window list shows, in its order.
+                let cycle = WindowCycle {
+                    windows: self.config.settings.taskbar.window_list.show.clone(),
+                    order: CycleOrder::Opening,
+                };
+                let action = if clicked == TaskbarHit::WindowNext {
+                    WindowManagerAction::NextWindow(cycle)
+                } else {
+                    WindowManagerAction::PreviousWindow(cycle)
+                };
+                self.window_manager.run(&action, None);
+            }
             TaskbarHit::Entry(window) => self.window_manager.activate_or_minimize(window),
             // Never held down: neither is a button, and tray items act as
             // they are pressed.

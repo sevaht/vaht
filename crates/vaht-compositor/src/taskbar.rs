@@ -55,6 +55,10 @@ pub(crate) enum TaskbarHit {
     WorkspaceNext,
     /// The workspace's name.
     WorkspaceName,
+    /// The arrow to the window before in the window list.
+    WindowPrevious,
+    /// The arrow to the window after in the window list.
+    WindowNext,
     /// A window's entry in the window list.
     Entry(WindowId),
     /// The clock.
@@ -71,6 +75,8 @@ impl TaskbarHit {
             Self::WorkspacePrevious
             | Self::WorkspaceNext
             | Self::WorkspaceName
+            | Self::WindowPrevious
+            | Self::WindowNext
             | Self::Clock
             | Self::TrayItem(_) => None,
         }
@@ -80,7 +86,11 @@ impl TaskbarHit {
     /// a release on it.
     pub(crate) const fn is_button(self) -> bool {
         match self {
-            Self::WorkspacePrevious | Self::WorkspaceNext | Self::Entry(_) => true,
+            Self::WorkspacePrevious
+            | Self::WorkspaceNext
+            | Self::WindowPrevious
+            | Self::WindowNext
+            | Self::Entry(_) => true,
             Self::WorkspaceName | Self::Clock | Self::TrayItem(_) => false,
         }
     }
@@ -387,6 +397,8 @@ impl Taskbar {
             TaskbarHit::WorkspacePrevious
             | TaskbarHit::WorkspaceName
             | TaskbarHit::WorkspaceNext
+            | TaskbarHit::WindowPrevious
+            | TaskbarHit::WindowNext
             | TaskbarHit::Clock => None,
         }
     }
@@ -636,6 +648,14 @@ impl TaskbarContent {
             TaskbarWidget::WorkspaceNext => {
                 Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowRight)
                     .with_button(TaskbarHit::WorkspaceNext)
+            }
+            TaskbarWidget::WindowPrevious => {
+                Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowLeft)
+                    .with_button(TaskbarHit::WindowPrevious)
+            }
+            TaskbarWidget::WindowNext => {
+                Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowRight)
+                    .with_button(TaskbarHit::WindowNext)
             }
             TaskbarWidget::WorkspaceName => {
                 Widget::text(ThemeElement::TaskbarWorkspace, self.workspace_name.clone())

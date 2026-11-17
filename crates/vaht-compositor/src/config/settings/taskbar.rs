@@ -214,6 +214,12 @@ pub(crate) enum TaskbarWidget {
     WorkspaceName,
     /// A button showing the workspace after.
     WorkspaceNext,
+    /// A button focusing the window before in the window list (Fluxbox's
+    /// `prevwindow`).
+    WindowPrevious,
+    /// A button focusing the window after in the window list (Fluxbox's
+    /// `nextwindow`).
+    WindowNext,
     /// An entry per window.
     WindowList,
     /// The time.
@@ -224,27 +230,21 @@ pub(crate) enum TaskbarWidget {
 
 impl TaskbarWidget {
     /// The widgets by name.
-    const NAMES: [(&str, Self); 6] = [
+    const NAMES: [(&str, Self); 8] = [
         ("workspace-previous", Self::WorkspacePrevious),
         ("workspace-name", Self::WorkspaceName),
         ("workspace-next", Self::WorkspaceNext),
+        ("window-previous", Self::WindowPrevious),
+        ("window-next", Self::WindowNext),
         ("window-list", Self::WindowList),
         ("tray", Self::Tray),
         ("clock", Self::Clock),
     ];
-
-    /// Widgets of 02 §3.1 that vaht does not have yet.
-    const PLANNED: [&str; 2] = ["window-previous", "window-next"];
 }
 
 impl<'de> serde::Deserialize<'de> for TaskbarWidget {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let name = String::deserialize(deserializer)?;
-        if Self::PLANNED.contains(&name.as_str()) {
-            return Err(de::Error::custom(format!(
-                "the `{name}` widget is not available in vaht yet"
-            )));
-        }
         Self::NAMES
             .iter()
             .find(|(known, _)| *known == name)
@@ -252,7 +252,8 @@ impl<'de> serde::Deserialize<'de> for TaskbarWidget {
             .ok_or_else(|| {
                 de::Error::custom(format!(
                     "`{name}` is no taskbar widget; they are workspace-previous, \
-                     workspace-name, workspace-next, window-list, tray and clock"
+                     workspace-name, workspace-next, window-previous, window-next, \
+                     window-list, tray and clock"
                 ))
             })
     }
@@ -462,7 +463,6 @@ mod tests {
     }
 
     #[rstest]
-    #[case::planned_widget("widgets = [\"window-previous\"]\n", "not available in vaht yet")]
     #[case::unknown_widget("widgets = [\"pager\"]\n", "no taskbar widget")]
     #[case::bad_format("[clock]\nformat = \"%k:%\"\n", "not valid")]
     #[case::planned_key("rows = 2\n", "unknown field")]
