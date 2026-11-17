@@ -164,9 +164,10 @@ impl IconStore {
     }
 
     /// Returns the file of the icon `name` best for `size` in the themes
-    /// laid out as `hicolor` is (`NxN/<context>/` and `scalable/<context>/`):
-    /// a picture at least that big (the closest), then a scalable one,
-    /// then a smaller one (the closest).
+    /// laid out as `hicolor` is (`NxN/<context>/` and `scalable/<context>/`),
+    /// as the icon theme specification orders them: a picture exactly that
+    /// big, then a scalable one (drawn at the size, sharper than any picture
+    /// resized), then the closest picture bigger, then the closest smaller.
     fn best_in_themes(themes: &[PathBuf], name: &str, size: u32) -> Option<PathBuf> {
         let in_contexts = |directory: &Path, extension: &str| {
             Self::CONTEXTS
@@ -189,15 +190,17 @@ impl IconStore {
         });
         let (big_enough, too_small): (Vec<_>, Vec<_>) =
             sized.into_iter().partition(|(pixels, _)| *pixels >= size);
-        big_enough
-            .into_iter()
-            .map(|(_, file)| file)
-            .next()
+        let exact = big_enough
+            .first()
+            .filter(|(pixels, _)| *pixels == size)
+            .map(|(_, file)| file.clone());
+        exact
             .or_else(|| {
                 themes
                     .iter()
                     .find_map(|theme| in_contexts(&theme.join("scalable"), "svg"))
             })
+            .or_else(|| big_enough.into_iter().map(|(_, file)| file).next())
             .or_else(|| too_small.into_iter().map(|(_, file)| file).next())
     }
 
@@ -365,6 +368,32 @@ mod tests {
         assert_eq!(middle(&icon), (0, 255, 0), "32 is the closest above 18");
         let big = store.named("editor", 100).expect("found");
         assert_eq!(middle(&big), (0, 0, 255), "none is that big: the biggest");
+    }
+
+    #[test]
+    fn a_scalable_icon_beats_resizing_a_picture_but_not_an_exact_size() {
+        let data = DataDirectory::new();
+        data.picture(
+            "icons/hicolor/16x16/apps/editor.png",
+            16,
+            Color::rgb(255, 0, 0),
+        );
+        data.picture(
+            "icons/hicolor/256x256/apps/editor.png",
+            256,
+            Color::rgb(0, 255, 0),
+        );
+        data.file(
+            "icons/hicolor/scalable/apps/editor.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\">\
+             <rect width=\"10\" height=\"10\" fill=\"#0000ff\"/></svg>",
+        );
+        let mut store = data.store();
+        let drawn = store.named("editor", 18).expect("found");
+        assert_eq!(drawn.size(), 18);
+        assert_eq!(middle(&drawn), (0, 0, 255), "the SVG, drawn at 18");
+        let exact = store.named("editor", 16).expect("found");
+        assert_eq!(middle(&exact), (255, 0, 0), "a picture exactly 16");
     }
 
     #[test]

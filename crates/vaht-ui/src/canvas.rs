@@ -4,8 +4,7 @@
 //! through it.
 
 use tiny_skia::{
-    ColorU8, FilterQuality, Paint, PathBuilder, Pixmap, PixmapPaint, Rect as SkiaRect, Stroke,
-    Transform,
+    ColorU8, Paint, PathBuilder, Pixmap, PixmapPaint, Rect as SkiaRect, Stroke, Transform,
 };
 
 use crate::color::Color;
@@ -100,30 +99,24 @@ impl<'pixmap> Canvas<'pixmap> {
         }
     }
 
-    /// Draws `icon` scaled into `square`.
+    /// Draws `icon` into `square`, resized to it beforehand
+    /// ([`crate::Icon::pixels_at`]) rather than scaled as it is drawn.
     fn draw_icon(&mut self, icon: &WidgetIcon, square: Rect) {
-        let source = icon.icon.pixels();
-        if square.width == 0 || source.width() == 0 {
+        let Some(pixels) = icon.icon.pixels_at(square.width) else {
             return;
-        }
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "icon sizes are far below 2^24, where f32 stays exact"
-        )]
-        let scale = square.width as f32 / source.width() as f32;
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "panel coordinates are far below 2^24, where f32 stays exact"
-        )]
-        let transform =
-            Transform::from_row(scale, 0.0, 0.0, scale, square.x as f32, square.y as f32);
+        };
         let paint = PixmapPaint {
             opacity: icon.emphasis.opacity(),
-            quality: FilterQuality::Bicubic,
             ..PixmapPaint::default()
         };
-        self.pixmap
-            .draw_pixmap(0, 0, source.as_ref(), &paint, transform, None);
+        self.pixmap.draw_pixmap(
+            square.x,
+            square.y,
+            pixels.as_ref().as_ref(),
+            &paint,
+            Transform::identity(),
+            None,
+        );
     }
 
     /// Fills `rect` with `texture`'s fill and bevel, as Fluxbox renders

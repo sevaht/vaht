@@ -9,21 +9,30 @@
 //! directories (`store.rs`). A widget shows one beside its text
 //! ([`WidgetIcon`]).
 
+mod resample;
 mod store;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
-use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
+use tiny_skia::{Pixmap, PixmapPaint, Transform};
+
+use self::resample::resample;
 
 pub use self::store::IconStore;
+
+/// A picture at each size it was drawn at, each made once.
+type SizedPictures = Arc<Mutex<Vec<(u32, Arc<Pixmap>)>>>;
 
 /// A square picture, shared by every copy.
 #[derive(Clone)]
 pub struct Icon {
     /// The pixels, `size` × `size`.
     pixels: Arc<Pixmap>,
+    /// The picture resized to the sizes it was drawn at, each made once:
+    /// a big picture a program sent is drawn small again and again.
+    sized: SizedPictures,
 }
 
 impl Icon {
@@ -31,26 +40,59 @@ impl Icon {
     /// scaled down or up to fit, keeping its shape.
     #[must_use]
     pub fn fitted(pixmap: &Pixmap, size: u32) -> Option<Self> {
-        let mut square = Pixmap::new(size, size)?;
-        let (width, height) = (pixels(pixmap.width()), pixels(pixmap.height()));
-        let extent = pixels(size);
-        let scale = extent / width.max(height);
-        let transform = Transform::from_row(
-            scale,
-            0.0,
-            0.0,
-            scale,
-            (extent - width * scale) / 2.0,
-            (extent - height * scale) / 2.0,
-        );
-        let paint = PixmapPaint {
-            quality: FilterQuality::Bicubic,
-            ..PixmapPaint::default()
+        let (width, height) = (pixmap.width(), pixmap.height());
+        let longer = width.max(height);
+        if longer == 0 || size == 0 {
+            return None;
+        }
+        // The longer side becomes `size`; the shorter keeps the shape.
+        let scaled = |side: u32| {
+            let rounded =
+                (u64::from(side) * u64::from(size) + u64::from(longer) / 2) / u64::from(longer);
+            u32::try_from(rounded).unwrap_or(size).clamp(1, size)
         };
-        square.draw_pixmap(0, 0, pixmap.as_ref(), &paint, transform, None);
+        let (fitted_width, fitted_height) = (scaled(width), scaled(height));
+        let resized = resample(pixmap, fitted_width, fitted_height)?;
+        let square = if (fitted_width, fitted_height) == (size, size) {
+            resized
+        } else {
+            let mut square = Pixmap::new(size, size)?;
+            let offset = |fitted: u32| i32::try_from((size - fitted) / 2).unwrap_or(0);
+            square.draw_pixmap(
+                offset(fitted_width),
+                offset(fitted_height),
+                resized.as_ref(),
+                &PixmapPaint::default(),
+                Transform::identity(),
+                None,
+            );
+            square
+        };
         Some(Self {
             pixels: Arc::new(square),
+            sized: Arc::default(),
         })
+    }
+
+    /// Returns the picture `side` pixels square: its own pixels at its own
+    /// size, else resized well ([`resample`]), once per size; none for 0.
+    #[must_use]
+    pub fn pixels_at(&self, side: u32) -> Option<Arc<Pixmap>> {
+        /// How many sizes are kept: icons are drawn at a few at most.
+        const KEPT_SIZES: usize = 4;
+        if side == self.size() {
+            return Some(Arc::clone(&self.pixels));
+        }
+        let mut sized = self.sized.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((_, pixels)) = sized.iter().find(|(kept, _)| *kept == side) {
+            return Some(Arc::clone(pixels));
+        }
+        let pixels = Arc::new(resample(&self.pixels, side, side)?);
+        if sized.len() == KEPT_SIZES {
+            sized.remove(0);
+        }
+        sized.push((side, Arc::clone(&pixels)));
+        Some(pixels)
     }
 
     /// Returns the picture `width` by `height` whose pixels `bytes` holds,
@@ -324,6 +366,21 @@ mod tests {
         let icon = Icon::fitted(&red(4, 4), 4).expect("an icon");
         assert_eq!(icon.clone(), icon);
         assert_ne!(Icon::fitted(&red(4, 4), 4).expect("an icon"), icon);
+    }
+
+    #[test]
+    fn an_icon_is_resized_once_for_each_size_it_is_drawn_at() {
+        let icon = Icon::fitted(&red(64, 64), 64).expect("an icon");
+        let small = icon.pixels_at(18).expect("resized");
+        assert_eq!(small.width(), 18);
+        assert!(
+            Arc::ptr_eq(&small, &icon.pixels_at(18).expect("kept")),
+            "made once"
+        );
+        assert!(
+            Arc::ptr_eq(&icon.pixels_at(64).expect("its own"), &icon.pixels),
+            "its own size is its own pixels"
+        );
     }
 
     #[test]
