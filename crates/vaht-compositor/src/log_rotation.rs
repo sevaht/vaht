@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use crate::config::{FileCount, LoggingSettings};
 
@@ -20,6 +21,9 @@ struct Limits {
     file_size_bytes: AtomicU64,
     /// How many files are kept, the current one included.
     file_count: AtomicUsize,
+    /// After how many seconds without a write an older file is deleted;
+    /// 0 keeps them until rotation drops them.
+    delete_after_seconds: AtomicU64,
 }
 
 impl LogRotation {
@@ -27,12 +31,14 @@ impl LogRotation {
     /// when the count is lowered.
     pub const MAX_FILE_COUNT: usize = FileCount::MAX as usize;
 
-    /// Returns limits of `file_size_bytes` per file and `file_count` files.
+    /// Returns limits of `file_size_bytes` per file and `file_count` files,
+    /// no file deleted by age.
     #[must_use]
     pub fn new(file_size_bytes: u64, file_count: usize) -> Self {
         Self(Arc::new(Limits {
             file_size_bytes: AtomicU64::new(file_size_bytes),
             file_count: AtomicUsize::new(file_count),
+            delete_after_seconds: AtomicU64::new(0),
         }))
     }
 
@@ -64,6 +70,25 @@ impl LogRotation {
         self.0.file_count.load(Ordering::Relaxed)
     }
 
+    /// Returns how long an older file is kept after its last write, if
+    /// files are deleted by age.
+    #[must_use]
+    pub fn delete_after(&self) -> Option<Duration> {
+        match self.0.delete_after_seconds.load(Ordering::Relaxed) {
+            0 => None,
+            seconds => Some(Duration::from_secs(seconds)),
+        }
+    }
+
+    /// Deletes older files `after` their last write, or keeps them until
+    /// rotation drops them (none), for every copy.
+    pub fn set_delete_after(&self, after: Option<Duration>) {
+        let seconds = after.map_or(0, |after| after.as_secs().max(1));
+        self.0
+            .delete_after_seconds
+            .store(seconds, Ordering::Relaxed);
+    }
+
     /// Makes the limits `file_size_bytes` per file and `file_count` files,
     /// for every copy.
     pub fn set(&self, file_size_bytes: u64, file_count: usize) {
@@ -76,11 +101,14 @@ impl LogRotation {
     /// Takes the limits `settings` set, as they change.
     pub(crate) fn follow(&self, settings: LoggingSettings) {
         self.set(settings.file_size_bytes(), settings.file_count());
+        self.set_delete_after(settings.delete_after());
     }
 
     /// Returns the limits `settings` set.
     fn from_settings(settings: LoggingSettings) -> Self {
-        Self::new(settings.file_size_bytes(), settings.file_count())
+        let limits = Self::new(settings.file_size_bytes(), settings.file_count());
+        limits.set_delete_after(settings.delete_after());
+        limits
     }
 }
 

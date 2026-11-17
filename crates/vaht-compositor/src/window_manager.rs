@@ -379,7 +379,9 @@ impl WindowManager {
             }
             if let Some(focused) = window.and_then(|id| self.window_mut(id)) {
                 focused.set_focused(true);
-                tracing::debug!(window = %focused.id(), title = focused.title(), "focused");
+                // The application, not the title: titles name documents,
+                // pages and people, and the log keeps them on disk.
+                tracing::debug!(window = %focused.id(), app_id = focused.app_id(), "focused");
             }
         }
         self.focus.set(window);

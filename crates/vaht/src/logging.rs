@@ -27,6 +27,7 @@ use std::io::{self, IsTerminal as _, Write};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::panic;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime};
 
 use tracing_appender::non_blocking::{ErrorCounter, NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::layer::SubscriberExt as _;
@@ -204,6 +205,8 @@ pub struct RotatingFile {
     /// How big it may get, and how many files are kept: the settings',
     /// which may change as vaht runs.
     limits: LogRotation,
+    /// When older files were last checked for age.
+    pruned_at: Instant,
 }
 
 impl RotatingFile {
@@ -214,7 +217,7 @@ impl RotatingFile {
     /// file for this session if the previous one holds anything.
     ///
     /// The directory and the files are private to the user (modes 0700 and
-    /// 0600): logs at debug level contain window titles.
+    /// 0600): logs at debug level contain the commands vaht runs.
     ///
     /// # Errors
     ///
@@ -237,6 +240,8 @@ impl RotatingFile {
         let mut file = Self::open(path.clone(), limits).map_err(open_error)?;
         if file.written > 0 {
             file.rotate().map_err(open_error)?;
+        } else {
+            file.delete_old();
         }
         Ok((file, path))
     }
@@ -251,6 +256,7 @@ impl RotatingFile {
             file,
             written,
             limits,
+            pruned_at: Instant::now(),
         })
     }
 
@@ -292,7 +298,28 @@ impl RotatingFile {
         fs::rename(&self.path, self.older(1))?;
         self.file = Self::open_file(&self.path)?;
         self.written = 0;
+        self.delete_old();
         Ok(())
+    }
+
+    /// Deletes the older files not written for longer than the limits
+    /// allow, if they set an age; the current file is never deleted. A
+    /// file that cannot be read or deleted is left for the next time.
+    fn delete_old(&mut self) {
+        self.pruned_at = Instant::now();
+        let Some(after) = self.limits.delete_after() else {
+            return;
+        };
+        let now = SystemTime::now();
+        for number in 1..=LogRotation::MAX_FILE_COUNT {
+            let older = self.older(number);
+            let is_old = fs::metadata(&older)
+                .and_then(|metadata| metadata.modified())
+                .is_ok_and(|written| now.duration_since(written).is_ok_and(|age| age > after));
+            if is_old {
+                let _ = fs::remove_file(&older);
+            }
+        }
     }
 
     /// Removes the file at `path`, if there is one.
@@ -320,8 +347,12 @@ impl Write for RotatingFile {
         reason = "the standard library names it buf; vaht spells names out (N1)"
     )]
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        /// How often a long session checks its older files' age.
+        const AGE_CHECK_INTERVAL: Duration = Duration::from_hours(1);
         if self.written >= self.limits.file_size_bytes() {
             self.rotate()?;
+        } else if self.pruned_at.elapsed() >= AGE_CHECK_INTERVAL {
+            self.delete_old();
         }
         let count = self.file.write(buffer)?;
         self.written += u64::try_from(count).unwrap_or(u64::MAX);
@@ -658,6 +689,33 @@ mod tests {
         );
         limits.set(10, 2);
         writeln!(file, "after the change").expect("writable");
+        assert_eq!(file_names(directory.path()), ["vaht.log", "vaht.log.1"]);
+    }
+
+    #[test]
+    fn older_files_not_written_for_too_long_are_deleted_but_never_the_current_one() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let written = |name: &str, days_ago: u64| {
+            let file = File::create(directory.path().join(name)).expect("created");
+            let when = SystemTime::now() - Duration::from_hours(days_ago * 24);
+            file.set_modified(when).expect("dated");
+        };
+        // An empty current file: opening it rotates nothing.
+        written("vaht.log", 30);
+        written("vaht.log.1", 1);
+        written("vaht.log.2", 10);
+        let limits = defaults();
+        limits.set_delete_after(Some(Duration::from_hours(7 * 24)));
+        drop(RotatingFile::open_in(directory.path(), limits).expect("opens"));
+        assert_eq!(file_names(directory.path()), ["vaht.log", "vaht.log.1"]);
+    }
+
+    #[test]
+    fn without_an_age_older_files_are_kept() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let file = File::create(directory.path().join("vaht.log.1")).expect("created");
+        file.set_modified(SystemTime::UNIX_EPOCH).expect("dated");
+        drop(RotatingFile::open_in(directory.path(), defaults()).expect("opens"));
         assert_eq!(file_names(directory.path()), ["vaht.log", "vaht.log.1"]);
     }
 

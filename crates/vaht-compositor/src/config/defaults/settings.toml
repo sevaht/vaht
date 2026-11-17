@@ -210,3 +210,7 @@ deny = []
 # file_size_mb × files on disk.
 file_size_mb = 10
 files = 5
+# Older log files not written for this many days (1 to 3650) are deleted,
+# at start, at each rotation and hourly; unset, they are kept until
+# rotation drops them. vaht.log itself is never deleted.
+# delete_after_days = 14

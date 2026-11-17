@@ -164,8 +164,10 @@ builds skip these checks.
   through `tracing-subscriber`'s reload layer. Tracking down a focus bug no
   longer needs a restart, and `vaht msg log-filter reset` returns to the
   startup filter.
-- **Privacy:** window titles and command lines appear only at `debug` and
-  below, since titles often contain document names and other personal text.
+- **Privacy:** window titles are never logged: they name documents, pages
+  and people, and an application id identifies a window as well for
+  debugging. Command lines appear only at `debug` and below. Old log files
+  can be deleted after a number of days (`[logging] delete_after_days`).
 
 ### 4.3 Where it goes, and rotation
 

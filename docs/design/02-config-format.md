@@ -167,6 +167,7 @@ allow_commands = true           # allowRemoteActions
 [logging]
 file_size_mb = 10               # new: vaht.log starts anew past this
 files = 5                       # new: files kept, vaht.log included
+# delete_after_days = 14        # new: older files unwritten that long go
 
 [session]
 autostart = ["~/.config/vaht/autostart"]
@@ -266,7 +267,10 @@ rest by name, so a setting never silently does nothing:
   newest), `.2`, …, so the logs take at most the size times the count.
   Read before anything is logged, so the first file obeys them, and
   followed as they change (a reload, `set-setting`); a lowered count
-  clears the extra files at the next rotation. There is no rotation by
+  clears the extra files at the next rotation. `delete_after_days` (1 to
+  3650; unset, files are kept until rotation drops them) deletes older
+  files not written for that many days, at start, at each rotation and
+  hourly; `vaht.log` itself is never deleted. There is no rotation by
   time: a session's log stays one file, which is what is wanted after a
   crash.
 - `[input]` (fluxland's `session.input.*`, which `vaht import` converts):
