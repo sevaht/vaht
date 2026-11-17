@@ -19,6 +19,8 @@ use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client:
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_surface_v1::{self, ExtSessionLockSurfaceV1};
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_v1::{self, ExtSessionLockV1};
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{self, WpFractionalScaleV1};
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3;
@@ -105,6 +107,12 @@ pub(super) struct ClientState {
     pub(super) layer_colors: Vec<(wl_surface::WlSurface, [u8; 3])>,
     /// How many windows have drawn for the first time.
     pub(super) first_draws: usize,
+    /// The buffer scale vaht last preferred for any surface
+    /// (`wl_surface.preferred_buffer_scale`), if it said one.
+    pub(super) preferred_scale: Option<i32>,
+    /// The fractional scale vaht last preferred, in 120ths
+    /// (`wp_fractional_scale_v1.preferred_scale`), if it said one.
+    pub(super) fractional_scale: Option<u32>,
     /// The surfaces of the windows that have drawn.
     pub(super) drawn: Vec<wl_surface::WlSurface>,
     /// How many times vaht asked to close a window.
@@ -178,6 +186,8 @@ impl ClientState {
             shm,
             windows: Vec::new(),
             first_draws: 0,
+            preferred_scale: None,
+            fractional_scale: None,
             drawn: Vec::new(),
             close_requests: 0,
             closed_layers: 0,
@@ -294,6 +304,7 @@ ignore_events!(
     ExtIdleNotifierV1,
     ZwpIdleInhibitManagerV1,
     ZwpIdleInhibitorV1,
+    WpFractionalScaleManagerV1,
     ZwpKeyboardShortcutsInhibitManagerV1,
     ZwpKeyboardShortcutsInhibitorV1,
     ZwpRelativePointerManagerV1,
@@ -400,6 +411,26 @@ impl Dispatch2<wl_pointer::WlPointer, ClientState> for PointerEvents {
                 state.pointer_position = None;
             }
             _ => {}
+        }
+    }
+}
+
+/// User data of a surface's fractional scale: records the scale vaht
+/// prefers.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FractionalScaleEvents;
+
+impl Dispatch2<WpFractionalScaleV1, ClientState> for FractionalScaleEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
+            state.fractional_scale = Some(scale);
         }
     }
 }
@@ -654,8 +685,9 @@ impl CompositorHandler for ClientState {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: &wl_surface::WlSurface,
-        _: i32,
+        new_factor: i32,
     ) {
+        self.preferred_scale = Some(new_factor);
     }
 
     fn transform_changed(

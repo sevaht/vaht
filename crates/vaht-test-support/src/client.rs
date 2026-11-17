@@ -20,6 +20,7 @@ use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_manager_v1::ExtSessionLockManagerV1;
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_v1::ExtSessionLockV1;
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_manager_v1::ZwpRelativePointerManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::ZwpRelativePointerV1;
@@ -127,6 +128,8 @@ pub struct TestClient {
     idle_notifier: ExtIdleNotifierV1,
     /// Keeps the session awake.
     idle_inhibitors: ZwpIdleInhibitManagerV1,
+    /// Hears the fractional scale vaht prefers for a surface.
+    fractional_scales: WpFractionalScaleManagerV1,
     /// Locks the session.
     session_locks: ExtSessionLockManagerV1,
     /// The session lock the client holds, if it does.
@@ -195,6 +198,8 @@ impl TestClient {
         let idle_notifier: ExtIdleNotifierV1 = bind(&globals, &handle, "ext_idle_notifier_v1");
         let idle_inhibitors: ZwpIdleInhibitManagerV1 =
             bind(&globals, &handle, "zwp_idle_inhibit_manager_v1");
+        let fractional_scales: WpFractionalScaleManagerV1 =
+            bind(&globals, &handle, "wp_fractional_scale_manager_v1");
         let session_locks: ExtSessionLockManagerV1 =
             bind(&globals, &handle, "ext_session_lock_manager_v1");
         let presentation: WpPresentation = globals
@@ -224,6 +229,7 @@ impl TestClient {
             shortcut_inhibitors,
             idle_notifier,
             idle_inhibitors,
+            fractional_scales,
             session_locks,
             session_lock: None,
             presentation,
@@ -397,6 +403,44 @@ impl TestClient {
         let expected = self.state.first_draws + count;
         self.dispatch_until(|state| state.first_draws >= expected);
         self.roundtrip();
+    }
+
+    /// Asks the fractional scale of the first window opened, and waits
+    /// until vaht prefers `scale` for it; returns the scale it last
+    /// preferred.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no window is open, or the connection to vaht fails.
+    pub fn wait_for_fractional_scale(&mut self, scale: f64) -> Option<f64> {
+        let handle = self.queue.handle();
+        let surface = self.state.windows[0].wl_surface().clone();
+        let _fractional = self.fractional_scales.get_fractional_scale(
+            &surface,
+            &handle,
+            state::FractionalScaleEvents,
+        );
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a scale in 120ths, as the protocol sends it"
+        )]
+        let wanted = (scale * 120.0).round() as u32;
+        self.dispatch_until(|state| state.fractional_scale == Some(wanted));
+        self.state
+            .fractional_scale
+            .map(|scale| f64::from(scale) / 120.0)
+    }
+
+    /// Waits until vaht prefers a buffer scale of `scale` for a surface
+    /// (`wl_surface.preferred_buffer_scale`); returns the last it preferred.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn wait_for_preferred_scale(&mut self, scale: i32) -> Option<i32> {
+        self.dispatch_until(|state| state.preferred_scale == Some(scale));
+        self.state.preferred_scale
     }
 
     /// Opens a dialog of window `parent` (in opening order), modal if

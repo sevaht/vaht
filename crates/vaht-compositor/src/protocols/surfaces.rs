@@ -2,13 +2,16 @@
 //! the fractional scale clients are told to draw at.
 
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
+use smithay::desktop::PopupManager;
+use smithay::output::Output;
 use smithay::reexports::wayland_server::Client;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::commit_timing::CommitTimerStateUserData;
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorHandler, CompositorState, add_pre_commit_hook, with_states,
+    CompositorClientState, CompositorHandler, CompositorState, TraversalAction,
+    add_pre_commit_hook, send_surface_state, with_states, with_surface_tree_downward,
 };
 use smithay::wayland::fractional_scale::{FractionalScaleHandler, with_fractional_scale};
 use smithay::wayland::shm::{ShmHandler, ShmState};
@@ -76,10 +79,42 @@ impl ShmHandler for Compositor {
 }
 
 impl FractionalScaleHandler for Compositor {
+    /// Until vaht knows which output the surface is on (its next frame),
+    /// it is told the primary output's scale.
     fn new_fractional_scale(&mut self, surface: WlSurface) {
-        // Every output is at scale 1 until outputs have their own scales.
+        let scale = self.outputs.primary().current_scale().fractional_scale();
         with_states(&surface, |states| {
-            with_fractional_scale(states, |fractional| fractional.set_preferred_scale(1.0));
+            with_fractional_scale(states, |fractional| fractional.set_preferred_scale(scale));
         });
     }
+}
+
+/// Tells every surface of the tree at `root`, and of its popups, to draw at
+/// `output`'s scale and transform ([`tell_tree_scale`]).
+pub(crate) fn tell_output_scale(root: &WlSurface, output: &Output) {
+    tell_tree_scale(root, output);
+    for (popup, _) in PopupManager::popups_for_surface(root) {
+        tell_tree_scale(popup.wl_surface(), output);
+    }
+}
+
+/// Tells every surface of the tree at `root` to draw at `output`'s scale
+/// and transform: its fractional scale (`wp_fractional_scale_v1`), for
+/// clients that scale themselves exactly, and the whole scale above it
+/// (`wl_surface.preferred_buffer_scale`) for the others. Both are sent
+/// only when they change, so this runs at every frame.
+fn tell_tree_scale(root: &WlSurface, output: &Output) {
+    let scale = output.current_scale();
+    let (fractional, whole) = (scale.fractional_scale(), scale.integer_scale());
+    let transform = output.current_transform();
+    with_surface_tree_downward(
+        root,
+        (),
+        |_, _, ()| TraversalAction::DoChildren(()),
+        |surface, states, ()| {
+            send_surface_state(surface, states, whole, transform);
+            with_fractional_scale(states, |state| state.set_preferred_scale(fractional));
+        },
+        |_, _, ()| true,
+    );
 }

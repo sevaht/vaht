@@ -805,7 +805,7 @@ items = [
 match = { connector = "HDMI-A-1" }    # or { make = "...", model = "...", serial = "..." }
 mode = "1920x1080@60"                 # or "1920x1080": the fastest refresh
 position = [0, 0]
-scale = 1.0                           # 0.25 to 8
+scale = 1.0                           # 0.25 to 8; windows on it are told it
 transform = "normal"                  # 90, 180, 270, flipped, flipped-90, ...
 primary = true
 vrr = "fullscreen"                    # off | on | fullscreen (default)

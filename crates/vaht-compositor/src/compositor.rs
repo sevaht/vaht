@@ -1454,11 +1454,13 @@ impl Compositor {
                 .most_overlapping(area)
                 .unwrap_or_else(|| self.outputs.primary());
             toplevel.send_frame(shown_on, time);
+            toplevel.tell_output_scale(shown_on);
         }
         for (layer, output) in self.layers.iter() {
             layer.send_frame(output, time, Some(Duration::ZERO), |_, _| {
                 Some(output.clone())
             });
+            crate::protocols::tell_output_scale(layer.wl_surface(), output);
         }
         // An X program's menus and tooltips too: Xwayland sends a window's
         // next picture only once its last one showed.

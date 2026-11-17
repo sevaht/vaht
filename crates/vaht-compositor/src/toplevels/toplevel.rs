@@ -268,6 +268,14 @@ impl Toplevel {
         }
     }
 
+    /// Tells a Wayland window, and its popups, to draw at `output`'s scale
+    /// (the output it is mostly on); an X11 window draws at 1.
+    pub(crate) fn tell_output_scale(&self, output: &Output) {
+        if let Some(xdg) = self.xdg() {
+            crate::protocols::tell_output_scale(xdg.wl_surface(), output);
+        }
+    }
+
     /// Updates what is known about the surface tree after a commit.
     pub(crate) fn on_commit(&self) {
         self.window.on_commit();

@@ -56,6 +56,20 @@ fn with_files(settings: &str, outputs: &str) -> (HeadlessVaht, TestClient) {
     (vaht, client)
 }
 
+#[test]
+fn a_window_is_told_the_scale_of_the_output_it_is_on() {
+    let (_vaht, mut client) = with_files(
+        "",
+        "[[output]]\nmatch = { connector = \"HEADLESS-1\" }\nscale = 1.5\n",
+    );
+    client.open_windows(1);
+    // Apps that scale themselves (Firefox, GTK 4, Qt 6) draw at the
+    // output's scale, not at 1 to be enlarged blurry; others draw at the
+    // whole scale above it.
+    assert_eq!(client.wait_for_fractional_scale(1.5), Some(1.5));
+    assert_eq!(client.wait_for_preferred_scale(2), Some(2));
+}
+
 /// Returns the outputs `vaht msg outputs` lists.
 fn listed_outputs(vaht: &HeadlessVaht) -> Vec<OutputInfo> {
     let output = Command::new(EXECUTABLE)
