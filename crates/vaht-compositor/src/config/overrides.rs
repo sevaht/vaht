@@ -10,6 +10,9 @@
 
 use std::fmt;
 
+use super::schema;
+use vaht_ipc::{ConfigEdit, ConfigPath};
+
 use super::{ConfigError, ConfigSource, Settings};
 
 /// One setting changed: its key and value.
@@ -17,8 +20,9 @@ use super::{ConfigError, ConfigSource, Settings};
 pub(crate) struct SettingChange {
     /// The key's parts: `["focus", "model"]` for `focus.model`.
     key: Vec<String>,
-    /// The value, written as TOML.
-    value: String,
+    /// The value, written as TOML; none for a key put back to its default
+    /// (taken out of the file when written).
+    value: Option<String>,
 }
 
 impl SettingChange {
@@ -41,7 +45,7 @@ impl SettingChange {
         };
         let change = Self {
             key,
-            value: value.to_string(),
+            value: Some(value.to_string()),
         };
         let mut table = toml::Table::new();
         change.apply_to(&mut table)?;
@@ -56,71 +60,76 @@ impl SettingChange {
 
     /// Returns the change of `key`, its parts, to `value`.
     pub(crate) fn new(key: &[&str], value: &toml::Value) -> Self {
+        Self::set(key.iter().map(|&part| part.to_owned()).collect(), value)
+    }
+
+    /// Returns the change of `key`, its parts, to `value`.
+    pub(crate) fn set(key: Vec<String>, value: &toml::Value) -> Self {
         Self {
-            key: key.iter().map(|&part| part.to_owned()).collect(),
-            value: value.to_string(),
+            key,
+            value: Some(value.to_string()),
         }
     }
 
-    /// Splits `arguments` into the key's parts and the rest, the value.
-    /// A part is bare (`focus`) or quoted (`"My Mouse"`).
+    /// Returns the change putting `key`, its parts, back to its default:
+    /// the setting is left out of the file.
+    pub(crate) const fn unset(key: Vec<String>) -> Self {
+        Self { key, value: None }
+    }
+
+    /// Returns the change `edit`, one an IPC client sent, asks for; it is
+    /// checked against the settings when made.
+    ///
+    /// # Errors
+    ///
+    /// Returns what in the edit cannot be a setting's value.
+    pub(crate) fn of_edit(edit: &ConfigEdit) -> Result<Self, String> {
+        match edit {
+            ConfigEdit::Set { path, value } => {
+                let converted = schema::toml_from_json(value)
+                    .map_err(|message| format!("`{path}`: {message}"))?;
+                Ok(Self::set(path.parts().to_vec(), &converted))
+            }
+            ConfigEdit::Unset { path } => Ok(Self::unset(path.parts().to_vec())),
+        }
+    }
+
+    /// Parses `<key>`, to put back to its default (`unset-setting`).
+    ///
+    /// # Errors
+    ///
+    /// Returns what is wrong.
+    pub(crate) fn parse_unset(arguments: &str) -> Result<Self, String> {
+        let (key, rest) = Self::split_key(arguments)?;
+        if !rest.is_empty() {
+            return Err("`unset-setting` takes only a key".to_owned());
+        }
+        Ok(Self::unset(key))
+    }
+
+    /// Reads the key `arguments` begins with, as its parts, and returns it
+    /// with the rest, the value.
     fn split_key(arguments: &str) -> Result<(Vec<String>, &str), String> {
-        let mut parts = Vec::new();
-        let mut rest = arguments.trim_start();
-        loop {
-            let (part, after) = if let Some(quoted) = rest.strip_prefix('"') {
-                let end = quoted
-                    .find('"')
-                    .ok_or_else(|| format!("the key `{arguments}` has an unclosed quote"))?;
-                (&quoted[..end], &quoted[end + 1..])
-            } else {
-                let end = rest
-                    .find(|character: char| !Self::is_bare(character))
-                    .unwrap_or(rest.len());
-                (&rest[..end], &rest[end..])
-            };
-            if part.is_empty() {
-                return Err(
-                    "`set-setting` needs a key, such as focus.model, then its value".to_owned(),
-                );
-            }
-            parts.push(part.to_owned());
-            match after.strip_prefix('.') {
-                Some(next) => rest = next,
-                None if after.is_empty() || after.starts_with(char::is_whitespace) => {
-                    return Ok((parts, after.trim()));
-                }
-                None => return Err(format!("`{arguments}` does not begin with a key")),
-            }
-        }
-    }
-
-    /// Returns whether `character` may be in a bare key part.
-    fn is_bare(character: char) -> bool {
-        character.is_ascii_alphanumeric() || character == '_' || character == '-'
+        let (path, rest) = ConfigPath::parse_leading(arguments).map_err(|error| {
+            format!("`set-setting` needs a key, such as focus.model, then its value: {error}")
+        })?;
+        Ok((path.parts().to_vec(), rest))
     }
 
     /// Returns the key as written: `focus.model`.
     fn key(&self) -> String {
-        self.key
-            .iter()
-            .map(|part| {
-                if !part.is_empty() && part.chars().all(Self::is_bare) {
-                    part.clone()
-                } else {
-                    toml::Value::String(part.clone()).to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(".")
+        ConfigPath::from_parts(self.key.clone()).map_or_else(String::new, |path| path.to_string())
     }
 
-    /// Returns the value.
-    fn value(&self) -> toml::Value {
-        toml::from_str::<toml::Table>(&format!("value = {}", self.value))
-            .ok()
-            .and_then(|mut table| table.remove("value"))
-            .unwrap_or_else(|| toml::Value::String(self.value.clone()))
+    /// Returns the value, if the change gives one.
+    fn value(&self) -> Option<toml::Value> {
+        let written = self.value.as_ref()?;
+        Some(
+            toml::from_str::<toml::Table>(&format!("value = {written}"))
+                .ok()
+                .and_then(|mut table| table.remove("value"))
+                .unwrap_or_else(|| toml::Value::String(written.clone())),
+        )
     }
 
     /// Returns what `table` says at the key, if anything.
@@ -133,7 +142,9 @@ impl SettingChange {
         table.get(last)
     }
 
-    /// Sets the key in `table` to the value, making the tables on the way.
+    /// Sets the key in `table` to the value, making the tables on the way;
+    /// or takes the key out of `table`, if the change puts it back to its
+    /// default.
     ///
     /// # Errors
     ///
@@ -141,6 +152,17 @@ impl SettingChange {
     fn apply_to(&self, table: &mut toml::Table) -> Result<(), String> {
         let Some((last, path)) = self.key.split_last() else {
             return Err("a setting needs a key".to_owned());
+        };
+        let Some(value) = self.value() else {
+            // Nothing to take out where a table on the way is missing.
+            let mut table = Some(table);
+            for part in path {
+                table = table.and_then(|table| table.get_mut(part)?.as_table_mut());
+            }
+            if let Some(table) = table {
+                table.remove(last);
+            }
+            return Ok(());
         };
         let mut table = table;
         for part in path {
@@ -150,14 +172,17 @@ impl SettingChange {
                 .as_table_mut()
                 .ok_or_else(|| format!("`{}`: `{part}` is not a table", self.key()))?;
         }
-        table.insert(last.clone(), self.value());
+        table.insert(last.clone(), value);
         Ok(())
     }
 }
 
 impl fmt::Display for SettingChange {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{} {}", self.key(), self.value)
+        match &self.value {
+            Some(value) => write!(formatter, "{} {value}", self.key()),
+            None => formatter.write_str(&self.key()),
+        }
     }
 }
 
@@ -247,7 +272,7 @@ impl SettingOverrides {
         let settings: Vec<_> = self
             .changes
             .iter()
-            .map(|made| (made.change.key.as_slice(), made.change.value.as_str()))
+            .map(|made| (made.change.key.as_slice(), made.change.value.as_deref()))
             .collect();
         source.write_settings(&settings)?;
         self.changes.clear();

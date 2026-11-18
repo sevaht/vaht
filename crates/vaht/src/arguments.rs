@@ -184,7 +184,7 @@ pub enum MessageRequest {
 }
 
 /// What `vaht msg config` asks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::Subcommand)]
+#[derive(Debug, Clone, PartialEq, Eq, clap::Subcommand)]
 pub enum ConfigCommand {
     /// Lists the files that can be read, whether each has changes not
     /// written, and the themes there are.
@@ -203,6 +203,45 @@ pub enum ConfigCommand {
         #[arg(value_enum, default_value_t)]
         file: ConfigFileArgument,
     },
+    /// Changes a setting in place, until `save` writes it: `vaht msg
+    /// config set blur.spread 7`. The value is JSON (`true`, `7`,
+    /// `"sloppy"`, `[1, 2]`), or a bare word taken as a string. Nothing
+    /// changes if the whole configuration would not be valid.
+    Set {
+        /// The setting, such as `focus.model` or `input.device."My
+        /// Mouse".accel_speed`.
+        #[arg(value_parser = parse_config_path)]
+        key: vaht_ipc::ConfigPath,
+        /// Its new value.
+        value: String,
+        /// The file.
+        #[arg(long, value_enum, default_value_t)]
+        file: ConfigFileArgument,
+    },
+    /// Puts a setting back to its default, in place, until `save` leaves
+    /// it out of the file.
+    Unset {
+        /// The setting.
+        #[arg(value_parser = parse_config_path)]
+        key: vaht_ipc::ConfigPath,
+        /// The file.
+        #[arg(long, value_enum, default_value_t)]
+        file: ConfigFileArgument,
+    },
+    /// Writes the changes made in place into their files, keeping the
+    /// files' comments and layout.
+    Save,
+    /// Drops the changes made in place: a file runs as it says.
+    Revert {
+        /// The file.
+        #[arg(value_enum, default_value_t)]
+        file: ConfigFileArgument,
+    },
+}
+
+/// Reads a setting's key for `vaht msg config`.
+fn parse_config_path(text: &str) -> Result<vaht_ipc::ConfigPath, String> {
+    vaht_ipc::ConfigPath::parse(text).map_err(|error| error.to_string())
 }
 
 /// A configuration file `vaht msg config` is about.
@@ -244,6 +283,9 @@ pub enum EventList {
     Workspaces,
     /// The outputs, as `vaht msg outputs` lists them.
     Outputs,
+    /// The configuration: each file and whether it has changes not written,
+    /// whenever vaht runs a new configuration.
+    Config,
 }
 
 impl EventList {
@@ -254,6 +296,34 @@ impl EventList {
             Self::Windows => vaht_ipc::EventKind::Windows,
             Self::Workspaces => vaht_ipc::EventKind::Workspaces,
             Self::Outputs => vaht_ipc::EventKind::Outputs,
+            Self::Config => vaht_ipc::EventKind::Config,
+        }
+    }
+}
+
+impl ConfigCommand {
+    /// Returns the request as the protocol writes it.
+    #[must_use]
+    pub fn to_request(&self) -> vaht_ipc::Request {
+        match self {
+            Self::Files => vaht_ipc::Request::ConfigFiles {},
+            Self::Schema { file } => vaht_ipc::Request::ConfigSchema { file: file.file() },
+            Self::Get { file } => vaht_ipc::Request::ConfigRead { file: file.file() },
+            Self::Set { key, value, file } => vaht_ipc::Request::ConfigEdit {
+                file: file.file(),
+                edits: vec![vaht_ipc::ConfigEdit::Set {
+                    path: key.clone(),
+                    // JSON where it is, else the bare word.
+                    value: serde_json::from_str(value)
+                        .unwrap_or_else(|_| serde_json::Value::String(value.clone())),
+                }],
+            },
+            Self::Unset { key, file } => vaht_ipc::Request::ConfigEdit {
+                file: file.file(),
+                edits: vec![vaht_ipc::ConfigEdit::Unset { path: key.clone() }],
+            },
+            Self::Save => vaht_ipc::Request::ConfigSave {},
+            Self::Revert { file } => vaht_ipc::Request::ConfigRevert { file: file.file() },
         }
     }
 }
@@ -281,13 +351,7 @@ impl MessageRequest {
                     reset,
                 }
             }
-            Self::Config { command } => match command {
-                ConfigCommand::Files => vaht_ipc::Request::ConfigFiles {},
-                ConfigCommand::Schema { file } => {
-                    vaht_ipc::Request::ConfigSchema { file: file.file() }
-                }
-                ConfigCommand::Get { file } => vaht_ipc::Request::ConfigRead { file: file.file() },
-            },
+            Self::Config { command } => command.to_request(),
             // The items come from standard input ([`crate::message::pick`]).
             Self::Pick { title } => vaht_ipc::Request::Pick {
                 title: title.clone(),

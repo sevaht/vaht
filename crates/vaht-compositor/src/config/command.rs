@@ -403,6 +403,10 @@ pub(crate) enum Action {
     /// <value>`, the value in TOML or a bare word), until `save-settings`
     /// writes it.
     SetSetting(SettingChange),
+    /// Puts a setting of `settings.toml` back to its default, in place
+    /// (`unset-setting <key>`), until `save-settings` takes it out of the
+    /// file.
+    UnsetSetting(SettingChange),
     /// Writes the settings changed in place into the files.
     SaveSettings,
     /// Applies the display profile with this name (`outputs.toml`).
@@ -731,6 +735,7 @@ impl Action {
             }
             "set-theme" => Ok(Self::SetTheme(arguments.to_owned())),
             "save-settings" => without_arguments(Self::SaveSettings),
+            "unset-setting" => SettingChange::parse_unset(arguments).map(Self::UnsetSetting),
             "reapply-rules" => without_arguments(Self::ReapplyRules),
             "set-setting" => SettingChange::parse(arguments).map(Self::SetSetting),
             "apply-profile" if arguments.is_empty() => {
@@ -865,6 +870,7 @@ impl fmt::Display for Action {
             Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
             Self::SetTheme(name) => write!(formatter, "set-theme {name}"),
             Self::SaveSettings => formatter.write_str("save-settings"),
+            Self::UnsetSetting(change) => write!(formatter, "unset-setting {change}"),
             Self::ReapplyRules => formatter.write_str("reapply-rules"),
             Self::SetSetting(change) => write!(formatter, "set-setting {change}"),
             Self::ApplyProfile(name) => write!(formatter, "apply-profile {name}"),

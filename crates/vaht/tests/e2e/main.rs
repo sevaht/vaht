@@ -9,6 +9,7 @@ mod blur;
 mod clipboard;
 mod color;
 mod command_line;
+mod config;
 mod cursor;
 mod dialogs;
 mod headless;

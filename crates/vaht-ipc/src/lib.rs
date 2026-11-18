@@ -11,15 +11,17 @@
 //! in [`SOCKET_VARIABLE`].
 
 mod client;
+mod config_path;
 mod message;
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 pub use client::{Client, ClientError};
+pub use config_path::{ConfigPath, ConfigPathError};
 pub use message::{
-    ConfigFile, ConfigFileInfo, ConfigState, Event, EventKind, ModeInfo, OutputInfo, Reply,
-    Request, WindowInfo, WorkspaceInfo,
+    ConfigEdit, ConfigFile, ConfigFileInfo, ConfigState, Event, EventKind, ModeInfo, OutputInfo,
+    Reply, Request, WindowInfo, WorkspaceInfo,
 };
 
 /// The environment variable that names vaht's IPC socket, set for every

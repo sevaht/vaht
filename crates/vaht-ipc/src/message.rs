@@ -14,12 +14,14 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::ConfigPath;
+
 /// What a client asks of vaht.
 ///
 /// Requests without fields are written `Version {}` rather than as unit
 /// variants, so a field they do not take is refused like any other: serde
 /// ignores unknown fields beside a unit variant's tag.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "request", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Request {
     /// vaht's version.
@@ -73,6 +75,26 @@ pub enum Request {
         /// The file.
         file: ConfigFile,
     },
+    /// Makes `edits` to `file` in place, all of them or none: vaht checks the
+    /// whole configuration with them made, runs it at once if it is valid,
+    /// and answers `Done`, or an error saying what is wrong and changing
+    /// nothing. The changes stay in place, not in the file, until
+    /// [`Request::ConfigSave`].
+    ConfigEdit {
+        /// The file.
+        file: ConfigFile,
+        /// What to change, in order.
+        edits: Vec<ConfigEdit>,
+    },
+    /// Writes every change made in place into its file, keeping the file's
+    /// comments and layout, and answers `Done`.
+    ConfigSave {},
+    /// Puts `file` back to what it says: the changes made in place are
+    /// dropped, and what it says runs.
+    ConfigRevert {
+        /// The file.
+        file: ConfigFile,
+    },
     /// Shows `items` as a vaht menu at the pointer, titled `title`, and
     /// answers with the one the user chooses, or none if they close the
     /// menu: a dmenu-style picker (the screen-share portal's chooser). The
@@ -99,6 +121,9 @@ pub enum EventKind {
     Workspaces,
     /// The outputs, as [`Request::Outputs`] answers.
     Outputs,
+    /// The configuration: sent whenever vaht runs a new one (the files
+    /// changed, a change made in place, saved or reverted).
+    Config,
 }
 
 /// A list a client subscribed to, sent at once and whenever it changes.
@@ -122,6 +147,14 @@ pub enum Event {
         /// The display profile applied, if one is.
         profile: Option<String>,
     },
+    /// The configuration vaht runs changed: read what it says again.
+    Config {
+        /// Counts the configurations vaht has run, so each is news even if
+        /// its files' states are as before.
+        generation: u64,
+        /// Each file and whether it has changes not written.
+        files: Vec<ConfigFileInfo>,
+    },
 }
 
 impl Event {
@@ -132,6 +165,10 @@ impl Event {
             Self::Windows { windows } => Reply::Windows { windows },
             Self::Workspaces { workspaces } => Reply::Workspaces { workspaces },
             Self::Outputs { outputs, profile } => Reply::Outputs { outputs, profile },
+            Self::Config { files, .. } => Reply::ConfigFiles {
+                files,
+                themes: Vec::new(),
+            },
         }
     }
 
@@ -142,8 +179,28 @@ impl Event {
             Self::Windows { .. } => EventKind::Windows,
             Self::Workspaces { .. } => EventKind::Workspaces,
             Self::Outputs { .. } => EventKind::Outputs,
+            Self::Config { .. } => EventKind::Config,
         }
     }
+}
+
+/// One change to a configuration file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "edit", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ConfigEdit {
+    /// Sets the setting at `path` to `value`.
+    Set {
+        /// Where the setting is.
+        path: ConfigPath,
+        /// Its new value, in the shape [`Request::ConfigRead`] gives it.
+        value: serde_json::Value,
+    },
+    /// Puts the setting at `path` back to its default: it is left out of the
+    /// file.
+    Unset {
+        /// Where the setting is.
+        path: ConfigPath,
+    },
 }
 
 /// One of the files vaht reads its configuration from.

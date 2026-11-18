@@ -264,7 +264,9 @@ fn a_subscriber_hears_each_list_at_once_and_whenever_it_changes() {
             .iter()
             .find(|workspace| workspace.is_current)
             .map(|workspace| workspace.number),
-        vaht_ipc::Event::Windows { .. } | vaht_ipc::Event::Outputs { .. } => None,
+        vaht_ipc::Event::Windows { .. }
+        | vaht_ipc::Event::Outputs { .. }
+        | vaht_ipc::Event::Config { .. } => None,
     };
     let first = [next(), next()];
     assert!(

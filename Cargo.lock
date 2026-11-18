@@ -3034,6 +3034,7 @@ dependencies = [
 name = "vaht-ipc"
 version = "0.1.0"
 dependencies = [
+ "rstest",
  "schemars",
  "serde",
  "serde_json",

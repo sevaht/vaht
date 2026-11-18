@@ -57,7 +57,10 @@ impl ConfigSource {
     ///
     /// Returns an error if `settings.toml` cannot be read, parsed or
     /// written.
-    pub(crate) fn write_settings(&self, settings: &[(&[String], &str)]) -> Result<(), ConfigError> {
+    pub(crate) fn write_settings(
+        &self,
+        settings: &[(&[String], Option<&str>)],
+    ) -> Result<(), ConfigError> {
         let path = self.directory.join("settings.toml");
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
@@ -78,14 +81,35 @@ impl ConfigSource {
         let mut document: toml_edit::DocumentMut =
             text.parse().map_err(|error| invalid(&error, &text))?;
         for (key, value) in settings {
-            let value: toml_edit::Value = value.parse().map_err(|error| invalid(&error, value))?;
-            Self::write_setting(&mut document, key, value);
+            match value {
+                Some(value) => {
+                    let value: toml_edit::Value =
+                        value.parse().map_err(|error| invalid(&error, value))?;
+                    Self::write_setting(&mut document, key, value);
+                }
+                None => Self::remove_setting(&mut document, key),
+            }
         }
         // Written beside and renamed over, so a reader never sees half.
         let temporary = path.with_extension("toml.vaht-new");
         std::fs::write(&temporary, document.to_string())
             .and_then(|()| std::fs::rename(&temporary, &path))
             .map_err(|error| ConfigError::Write { path, error })
+    }
+
+    /// Takes `key`, its parts, out of `document`, if it is there: the setting
+    /// is back to its default.
+    fn remove_setting(document: &mut toml_edit::DocumentMut, key: &[String]) {
+        let Some((last, path)) = key.split_last() else {
+            return;
+        };
+        let mut table: Option<&mut dyn toml_edit::TableLike> = Some(document.as_table_mut());
+        for part in path {
+            table = table.and_then(|table| table.get_mut(part)?.as_table_like_mut());
+        }
+        if let Some(table) = table {
+            table.remove(last);
+        }
     }
 
     /// Sets `key`, its parts, to `value` in `document`, making the tables
@@ -269,10 +293,10 @@ mod tests {
         );
         source
             .write_settings(&[
-                (&theme, "\"mine\""),
-                (&model, "\"sloppy\""),
-                (&delay, "250"),
-                (&speed, "0.5"),
+                (&theme, Some("\"mine\"")),
+                (&model, Some("\"sloppy\"")),
+                (&delay, Some("250")),
+                (&speed, Some("0.5")),
             ])
             .expect("written");
         let written = std::fs::read_to_string(&path).expect("read");
@@ -280,6 +304,29 @@ mod tests {
             written,
             "# Mine.\ntheme = \"mine\"\n\n[focus]\nmodel = \"sloppy\" # how\n\n[taskbar]\n\
              auto_hide_delay_ms = 250\n\n[input.device.\"My Mouse\"]\naccel_speed = 0.5\n"
+        );
+    }
+
+    #[test]
+    fn a_setting_put_back_to_its_default_leaves_the_file_but_not_its_comments() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let path = directory.path().join("settings.toml");
+        std::fs::write(
+            &path,
+            "# Mine.\n[focus]\nmodel = \"click\" # how\nauto_raise = true # why\n\n[blur]\npasses = 5\n",
+        )
+        .expect("written");
+        let source = ConfigSource::new(directory.path().to_path_buf());
+        let key = |text: &str| text.split('.').map(str::to_owned).collect::<Vec<_>>();
+        let (model, passes, missing) =
+            (key("focus.model"), key("blur.passes"), key("taskbar.rows"));
+        source
+            .write_settings(&[(&model, None), (&passes, None), (&missing, None)])
+            .expect("written");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "# Mine.\n[focus]\nauto_raise = true # why\n\n[blur]\n",
+            "the keys are gone; the comment of the one kept, and the file's own, stay"
         );
     }
 }

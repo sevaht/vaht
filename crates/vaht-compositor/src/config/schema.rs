@@ -50,6 +50,41 @@ pub(crate) fn bounded_integer(minimum: i64, maximum: i64) -> Schema {
     })
 }
 
+/// Returns `value`, JSON, as TOML: JSON numbers that are whole become TOML
+/// integers, which is what the settings read.
+///
+/// # Errors
+///
+/// Returns what cannot be written in TOML: a `null`, which an edit that
+/// means "no value" says with an unset instead.
+pub(crate) fn toml_from_json(value: &Value) -> Result<toml::Value, String> {
+    Ok(match value {
+        Value::Null => {
+            return Err(
+                "null is no value: put a setting back to its default by unsetting it".to_owned(),
+            );
+        }
+        Value::Bool(flag) => toml::Value::Boolean(*flag),
+        Value::Number(number) => number
+            .as_i64()
+            .map(toml::Value::Integer)
+            .or_else(|| number.as_f64().map(toml::Value::Float))
+            .ok_or_else(|| format!("{number} is too large for a setting"))?,
+        Value::String(text) => toml::Value::String(text.clone()),
+        Value::Array(items) => toml::Value::Array(
+            items
+                .iter()
+                .map(toml_from_json)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Value::Object(map) => toml::Value::Table(
+            map.iter()
+                .map(|(key, inner)| Ok((key.clone(), toml_from_json(inner)?)))
+                .collect::<Result<toml::Table, String>>()?,
+        ),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
@@ -154,31 +189,28 @@ mod tests {
         assert_eq!(back, Settings::default());
     }
 
-    /// Converts a JSON object to a TOML table, leaving out `null`s: a key
-    /// with no value is a key the file does not set.
-    fn json_to_toml(value: &Value) -> toml::Table {
-        fn convert(value: &Value) -> Option<toml::Value> {
-            match value {
-                Value::Null => None,
-                Value::Bool(flag) => Some(toml::Value::Boolean(*flag)),
-                Value::Number(number) => number
-                    .as_i64()
-                    .map(toml::Value::Integer)
-                    .or_else(|| number.as_f64().map(toml::Value::Float)),
-                Value::String(text) => Some(toml::Value::String(text.clone())),
-                Value::Array(items) => Some(toml::Value::Array(
-                    items.iter().filter_map(convert).collect(),
-                )),
-                Value::Object(map) => Some(toml::Value::Table(
-                    map.iter()
-                        .filter_map(|(key, inner)| Some((key.clone(), convert(inner)?)))
-                        .collect(),
-                )),
+    /// Returns `value` without its `null`s: a setting with no value is one
+    /// the file does not set.
+    fn without_nulls(value: &Value) -> Value {
+        match value {
+            Value::Object(map) => Value::Object(
+                map.iter()
+                    .filter(|(_, inner)| !inner.is_null())
+                    .map(|(key, inner)| (key.clone(), without_nulls(inner)))
+                    .collect(),
+            ),
+            Value::Array(items) => Value::Array(items.iter().map(without_nulls).collect()),
+            other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)) => {
+                other.clone()
             }
         }
-        match convert(value) {
-            Some(toml::Value::Table(table)) => table,
-            Some(_) | None => panic!("settings are an object"),
+    }
+
+    /// Converts a JSON object to a TOML table.
+    fn json_to_toml(value: &Value) -> toml::Table {
+        match toml_from_json(&without_nulls(value)) {
+            Ok(toml::Value::Table(table)) => table,
+            other => panic!("settings are an object: {other:?}"),
         }
     }
 

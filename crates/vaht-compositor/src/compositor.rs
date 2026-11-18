@@ -260,6 +260,8 @@ pub struct Compositor {
     pub(crate) config_source: ConfigSource,
     /// Settings changed in place, not yet saved.
     pub(crate) overrides: SettingOverrides,
+    /// How many configurations vaht has run, for those following them.
+    pub(crate) config_generation: u64,
     /// Starts programs and reaps them.
     pub(crate) launcher: Launcher,
     /// Registers timers and other sources with the event loop.
@@ -363,10 +365,7 @@ impl Compositor {
         let config_source = ConfigSource::new(options.config_directory);
         let config = Self::first_config(&config_source);
 
-        let mut outputs = backend.outputs();
-        let mut output_changes = outputs.configure(&config.outputs, &mut backend);
-        // At start, the primary output is news to the hooks whatever it is.
-        output_changes.primary = Some(outputs.primary().name());
+        let (outputs, output_changes) = Self::first_outputs(&mut backend, &config);
         let window_manager = WindowManager::new(
             &config.settings,
             Self::bare_output_areas(&outputs),
@@ -434,6 +433,7 @@ impl Compositor {
             config,
             config_source,
             overrides: SettingOverrides::default(),
+            config_generation: 0,
             launcher,
             loop_handle: handle.clone(),
             start_time: Instant::now(),
@@ -634,25 +634,77 @@ impl Compositor {
     /// Makes `change` to the settings in place, until `save-settings`
     /// writes it, if the configuration stays valid with it.
     fn change_setting(&mut self, change: SettingChange) {
-        let changed = self.config_source.settings_table().and_then(|file| {
-            let overrides = self.overrides.with(change, &file);
-            let config = self.config_source.load(&overrides)?;
-            Ok((overrides, config))
-        });
-        match changed {
-            Ok((overrides, config)) => {
-                self.overrides = overrides;
-                self.apply_config(config);
-            }
-            Err(error) => tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                "the setting was not changed"
-            ),
+        if let Err(error) = self.change_settings(vec![change]) {
+            tracing::warn!(error, "the setting was not changed");
         }
+    }
+
+    /// Makes `changes` to the settings in place, all of them or none: they
+    /// are made, and run, only if the whole configuration stays valid with
+    /// them.
+    ///
+    /// # Errors
+    ///
+    /// Returns what is wrong, changing nothing.
+    pub(crate) fn change_settings(&mut self, changes: Vec<SettingChange>) -> Result<(), String> {
+        let file = self
+            .config_source
+            .settings_table()
+            .map_err(|error| error.to_string())?;
+        let overrides = changes
+            .into_iter()
+            .fold(self.overrides.clone(), |overrides, change| {
+                overrides.with(change, &file)
+            });
+        let config = self
+            .config_source
+            .load(&overrides)
+            .map_err(|error| error.to_string())?;
+        self.overrides = overrides;
+        self.apply_config(config);
+        Ok(())
+    }
+
+    /// Puts the settings back to what `settings.toml` says: the changes
+    /// made in place are dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns what is wrong, changing nothing.
+    pub(crate) fn revert_settings(&mut self) -> Result<(), String> {
+        let config = self
+            .config_source
+            .load(&SettingOverrides::default())
+            .map_err(|error| error.to_string())?;
+        self.overrides = SettingOverrides::default();
+        self.apply_config(config);
+        Ok(())
+    }
+
+    /// Writes the settings changed in place into their file.
+    ///
+    /// # Errors
+    ///
+    /// Returns what is wrong; the changes are kept.
+    pub(crate) fn save_settings(&mut self) -> Result<(), String> {
+        self.overrides
+            .save(&self.config_source)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Arranges the outputs `backend` has as `config` says, and returns
+    /// them with what that changed: at start, the primary output is news to
+    /// the hooks whatever it is.
+    fn first_outputs(backend: &mut Backend, config: &Config) -> (Outputs, OutputChanges) {
+        let mut outputs = backend.outputs();
+        let mut changes = outputs.configure(&config.outputs, backend);
+        changes.primary = Some(outputs.primary().name());
+        (outputs, changes)
     }
 
     /// Makes `config` the configuration in effect, changing what differs.
     fn apply_config(&mut self, config: Config) {
+        self.config_generation += 1;
         let session_before = LiveSessionSettings::of(&self.config.settings);
         if let Some(rotation) = &self.log_rotation {
             rotation.follow(config.settings.logging);
@@ -2958,7 +3010,9 @@ impl Compositor {
                 .launcher
                 .show_dialog("command", self.config_source.directory()),
             Action::SetTheme(name) => self.change_setting(SettingChange::theme(name)),
-            Action::SetSetting(change) => self.change_setting(change.clone()),
+            Action::SetSetting(change) | Action::UnsetSetting(change) => {
+                self.change_setting(change.clone());
+            }
             Action::ApplyProfile(name) => {
                 match self
                     .outputs
@@ -2989,11 +3043,8 @@ impl Compositor {
                 }
             }
             Action::SaveSettings => {
-                if let Err(error) = self.overrides.save(&self.config_source) {
-                    tracing::warn!(
-                        error = &error as &dyn std::error::Error,
-                        "could not save the settings"
-                    );
+                if let Err(error) = self.save_settings() {
+                    tracing::warn!(error, "could not save the settings");
                 }
             }
             Action::SetTitleDialog => {

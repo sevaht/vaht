@@ -427,7 +427,7 @@ A command is written in one of three forms:
 
 | Area | Actions |
 |---|---|
-| Programs and session | `exec <command line>`, `reload`, `exit`, `set-environment NAME value`, `set-setting key value`, `save-settings` |
+| Programs and session | `exec <command line>`, `reload`, `exit`, `set-environment NAME value`, `set-setting key value`, `unset-setting key`, `save-settings` |
 | Window state | `close`, `kill`, `minimize`, `maximize [horizontal\|vertical]`, `fullscreen`, `shade`, `stick`, `raise`, `lower`, `set-layer <layer>`, `set-alpha <n>`, `toggle-frame`, `set-title [title]`, `set-title-dialog`, `mark-window <key>`, `go-to-marked-window <key>` |
 | Window placement | `move <dx> <dy>`, `move-to <x> <y>`, `resize <dw> <dh>`, `resize-to <w> <h>`, `snap-step <direction>`, `tile <cell>`, `send-to-output next\|previous\|<n>`, `arrange <style>` |
 | Grabs | `start-moving`, `start-resizing [nearest-corner\|<corner>]` |
@@ -1235,6 +1235,20 @@ dialogs use too.
   gives the value, the defaults and the changed keys as data). Only
   `settings.toml` is described so far; the other files follow as their
   editors do. Reads are open to every client, as `windows` is.
+  Edits are made in place and run at once: `set <key> <value>` (the value
+  is JSON, or a bare word taken as a string), `unset <key>` (the setting is
+  left out of the file when saved, so it is the default again), `save` (writes
+  every change into its file, keeping the file's comments and layout) and
+  `revert [file]` (drops the changes, so the file runs as it says). The
+  `config-edit` request takes a list of edits and makes all of them or none:
+  vaht checks the whole configuration with them made, and a refusal says
+  which setting and why. A key is written as `set-setting` takes it:
+  `focus.model`, or `input.device."My Mouse".accel_speed` where a part is
+  not a plain word (one grammar, `vaht_ipc::ConfigPath`). Changing is a
+  command, so `[ipc] allow_commands = false` refuses it except from vaht's
+  own dialogs. `vaht msg subscribe config` sends each file's state whenever
+  vaht runs a new configuration (an edit, a save, a revert, a file changed
+  on disk), with a counter so a refresh is never mistaken for the last one.
 - **`vaht msg pick`** (`pick` request) is a dmenu-style chooser: the lines
   on standard input show as a vaht menu at the pointer (`--title` above
   them), in the user's theme, and the one chosen is printed; closing the

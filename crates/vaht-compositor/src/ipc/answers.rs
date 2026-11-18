@@ -1,14 +1,14 @@
 //! What the compositor answers each IPC request with.
 
 use vaht_ipc::{
-    ConfigFile, ConfigFileInfo, ConfigState, Event, EventKind, ModeInfo, OutputInfo, Reply,
-    Request, WindowInfo, WorkspaceInfo,
+    ConfigEdit, ConfigFile, ConfigFileInfo, ConfigState, Event, EventKind, ModeInfo, OutputInfo,
+    Reply, Request, WindowInfo, WorkspaceInfo,
 };
 
 use super::{Answer, IpcClient, IpcHandler, IpcServer};
 use crate::Compositor;
 use crate::WindowId;
-use crate::config::{Action, Command, Settings, ThemeFile, schema};
+use crate::config::{Action, Command, SettingChange, Settings, ThemeFile, schema};
 use crate::execution::ExecutionContext;
 use crate::outputs::Outputs;
 
@@ -22,6 +22,62 @@ impl IpcHandler for Compositor {
 }
 
 impl Compositor {
+    /// Returns the refusal of a command from the process `peer`, if
+    /// `[ipc] allow_commands` is off and it is not one of vaht's own
+    /// dialogs (the settings window among them).
+    fn refuse_commands_from(&self, peer: Option<i32>) -> Option<Reply> {
+        let is_own_dialog = peer.is_some_and(|pid| self.launcher.is_dialog(pid));
+        (!self.config.settings.ipc.allow_commands && !is_own_dialog).then(|| Reply::Error {
+            message: "commands from other programs are turned off ([ipc] allow_commands)"
+                .to_owned(),
+        })
+    }
+
+    /// Makes `edits` to `file` in place, all or none.
+    fn edit_config(&mut self, file: ConfigFile, edits: &[ConfigEdit]) -> Result<(), String> {
+        match file {
+            ConfigFile::Settings => {
+                let changes = edits
+                    .iter()
+                    .map(SettingChange::of_edit)
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.change_settings(changes)
+            }
+            ConfigFile::Outputs | ConfigFile::Bindings | ConfigFile::Rules | ConfigFile::Menus => {
+                Err(format!(
+                    "{} cannot be edited through IPC yet",
+                    file.file_name()
+                ))
+            }
+        }
+    }
+
+    /// Puts `file` back to what it says.
+    fn revert_config(&mut self, file: ConfigFile) -> Result<(), String> {
+        match file {
+            ConfigFile::Settings => self.revert_settings(),
+            ConfigFile::Outputs | ConfigFile::Bindings | ConfigFile::Rules | ConfigFile::Menus => {
+                Err(format!(
+                    "{} cannot be edited through IPC yet",
+                    file.file_name()
+                ))
+            }
+        }
+    }
+
+    /// Returns each file that can be read, with whether it has changes not
+    /// written.
+    fn config_file_infos(&self) -> Vec<ConfigFileInfo> {
+        vec![ConfigFileInfo {
+            file: ConfigFile::Settings,
+            state: if self.overrides.is_empty() {
+                ConfigState::Clean
+            } else {
+                ConfigState::Changed
+            },
+        }]
+    }
+
     /// Returns the error for a file that cannot be described yet.
     fn undescribed(file: ConfigFile) -> Reply {
         Reply::Error {
@@ -37,13 +93,8 @@ impl Compositor {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
             },
             Request::Run { command, window } => {
-                let is_own_dialog = peer.is_some_and(|pid| self.launcher.is_dialog(pid));
-                if !self.config.settings.ipc.allow_commands && !is_own_dialog {
-                    return Reply::Error {
-                        message:
-                            "commands from other programs are turned off ([ipc] allow_commands)"
-                                .to_owned(),
-                    };
+                if let Some(refused) = self.refuse_commands_from(peer) {
+                    return refused;
                 }
                 let action = match Action::parse(&command) {
                     Ok(action) => action,
@@ -90,14 +141,7 @@ impl Compositor {
                 },
             },
             Request::ConfigFiles {} => Reply::ConfigFiles {
-                files: vec![ConfigFileInfo {
-                    file: ConfigFile::Settings,
-                    state: if self.overrides.is_empty() {
-                        ConfigState::Clean
-                    } else {
-                        ConfigState::Changed
-                    },
-                }],
+                files: self.config_file_infos(),
                 themes: ThemeFile::available(self.config_source.directory()),
             },
             Request::ConfigSchema { file } => match schema::schema_of(file) {
@@ -115,6 +159,27 @@ impl Compositor {
                 | ConfigFile::Rules
                 | ConfigFile::Menus => Self::undescribed(file),
             },
+            Request::ConfigEdit { file, edits } => {
+                if let Some(refused) = self.refuse_commands_from(peer) {
+                    return refused;
+                }
+                self.edit_config(file, &edits)
+                    .map_or_else(|message| Reply::Error { message }, |()| Reply::Done {})
+            }
+            Request::ConfigSave {} => {
+                if let Some(refused) = self.refuse_commands_from(peer) {
+                    return refused;
+                }
+                self.save_settings()
+                    .map_or_else(|message| Reply::Error { message }, |()| Reply::Done {})
+            }
+            Request::ConfigRevert { file } => {
+                if let Some(refused) = self.refuse_commands_from(peer) {
+                    return refused;
+                }
+                self.revert_config(file)
+                    .map_or_else(|message| Reply::Error { message }, |()| Reply::Done {})
+            }
             // A connection answers this itself, and a pick comes later.
             Request::Subscribe { .. } | Request::Pick { .. } => Reply::Error {
                 message: "subscriptions are kept by the connection".to_owned(),
@@ -136,6 +201,10 @@ impl Compositor {
             EventKind::Outputs => Event::Outputs {
                 outputs: output_infos(&self.outputs),
                 profile: self.outputs.profile().map(str::to_owned),
+            },
+            EventKind::Config => Event::Config {
+                generation: self.config_generation,
+                files: self.config_file_infos(),
             },
         }
     }
