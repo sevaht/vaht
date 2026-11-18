@@ -169,6 +169,22 @@ pub(crate) enum MenuChoice {
     },
 }
 
+impl MenuChoice {
+    /// Returns whether choosing leaves the menus open, as Fluxbox's style
+    /// menus do, so one style, layout or theme can be tried after another.
+    pub(crate) const fn keeps_menus_open(&self) -> bool {
+        matches!(
+            self,
+            Self::Run {
+                command: Command::Run(
+                    Action::SetStyle(_) | Action::SetLayout(_) | Action::SetTheme(_)
+                ),
+                ..
+            }
+        )
+    }
+}
+
 /// Makes menus from `menus.toml` and the window manager's state.
 #[derive(Debug, Clone)]
 pub(crate) struct MenuBuilder<'state> {

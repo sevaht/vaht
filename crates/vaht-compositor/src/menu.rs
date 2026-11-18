@@ -550,7 +550,7 @@ impl MenuStack {
             }
             MenuItem::Choice { choice, .. } => {
                 let choice = choice.clone();
-                if !keep_open {
+                if !keep_open && !choice.keeps_menus_open() {
                     self.close();
                 }
                 Some(choice)
@@ -834,6 +834,28 @@ mod tests {
                 window: None
             })
         );
+    }
+
+    #[test]
+    fn choosing_a_style_layout_or_theme_leaves_the_menus_open_and_anything_else_closes_them() {
+        let (style, mut typesetter) = style();
+        for (action, stays_open) in [
+            (Action::SetStyle("a".to_owned()), true),
+            (Action::SetLayout("a".to_owned()), true),
+            (Action::SetTheme("a".to_owned()), true),
+            (Action::Reload, false),
+        ] {
+            let mut stack = MenuStack::default();
+            let menu = MenuModel {
+                title: None,
+                items: vec![choice("Item", action.clone())],
+            };
+            stack.open(menu, (100, 100).into(), bounds(), (&style, &mut typesetter));
+            stack.key(MenuKey::Down, (&style, &mut typesetter));
+            let chosen = stack.key(MenuKey::Choose, (&style, &mut typesetter));
+            assert!(chosen.is_some(), "{action:?} is chosen");
+            assert_eq!(stack.is_open(), stays_open, "{action:?}");
+        }
     }
 
     #[test]

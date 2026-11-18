@@ -3145,6 +3145,23 @@ impl Compositor {
         }
     }
 
+    /// Carries out what a click or key on the menus `chosen`, which were open
+    /// as `snapshot` says; the menus that stayed open (the choice keeps them
+    /// so, or the click was a middle or Shift one) are opened again from the
+    /// configuration as it is after.
+    fn finish_menu_choice(&mut self, chosen: Option<MenuChoice>, snapshot: Option<MenuSnapshot>) {
+        let stayed_open = self.menus.is_open();
+        self.start_pipe_menu();
+        self.schedule_render();
+        let Some(choice) = chosen else {
+            return;
+        };
+        self.choose_from_menu(choice);
+        if stayed_open && let Some(snapshot) = snapshot {
+            self.reopen_menus(&snapshot);
+        }
+    }
+
     /// The middle button's code (`BTN_MIDDLE`).
     const BUTTON_MIDDLE: u32 = 0x112;
 
@@ -3494,14 +3511,11 @@ impl Compositor {
         match bound {
             Some(Some(KeyPress::Binding(command))) => self.run_key_binding(keycode, command),
             Some(Some(KeyPress::Menu(key))) => {
+                let snapshot = self.menus.snapshot();
                 let chosen = self
                     .menus
                     .key(key, (&self.config.style, &mut self.typesetter));
-                self.start_pipe_menu();
-                self.schedule_render();
-                if let Some(choice) = chosen {
-                    self.choose_from_menu(choice);
-                }
+                self.finish_menu_choice(chosen, snapshot);
             }
             Some(Some(KeyPress::SwitchTerminal(terminal))) => {
                 if let Backend::Drm(backend) = &mut self.backend {
@@ -3752,20 +3766,13 @@ impl Compositor {
                     // after it.
                     let keep_open =
                         button == Self::BUTTON_MIDDLE || self.held_modifiers().has_shift();
-                    let snapshot = keep_open.then(|| self.menus.snapshot()).flatten();
+                    let snapshot = self.menus.snapshot();
                     let chosen = self.menus.release(
                         location,
                         (&self.config.style, &mut self.typesetter),
                         keep_open,
                     );
-                    self.start_pipe_menu();
-                    self.schedule_render();
-                    if let Some(choice) = chosen {
-                        self.choose_from_menu(choice);
-                        if let Some(snapshot) = snapshot {
-                            self.reopen_menus(&snapshot);
-                        }
-                    }
+                    self.finish_menu_choice(chosen, snapshot);
                 }
                 // Opened after the menus above took this release, or it would
                 // choose the item the menu opens under.

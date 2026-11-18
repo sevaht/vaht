@@ -806,8 +806,8 @@ items = [
   - `command` (with a `label`; a missing label defaults to the action's name);
   - `submenu`;
   - `toggle` (a window state shown with a check mark);
-  - `generate`: `styles`, `workspaces`, `window-list`, `send-to-workspace`,
-    `layer`, `alpha`, `outputs`, `profiles`;
+  - `generate`: `styles`, `layouts`, `themes`, `workspaces`, `window-list`,
+    `send-to-workspace`, `layer`, `alpha`, `outputs`, `profiles`;
   - `pipe` (a command whose output is a menu in this same TOML form);
   - `separator`;
   - `icon` (optional on any item).
@@ -820,7 +820,10 @@ items = [
   `custom-menu <name>` and `hide-menus`, bound as Fluxbox binds them by
   default. Menus open with their corner at the pointer and stay on the
   output; a submenu opens beside its item after `[menus] submenu_delay_ms`
-  or at once on a click; releasing a button on an item chooses it; a press
+  or at once on a click; releasing a button on an item chooses it (choosing a
+  style, layout or theme leaves the menus open, as Fluxbox's style menus do,
+  so one can be tried after another, and the checked item moves; a middle or
+  Shift click leaves any item's menus open); a press
   elsewhere closes the menus and goes on. A menu stays in the usable
   area, off the taskbar; the action that opened it, run again while it is
   open, closes it, as in fluxland. A `custom-menu` naming no menu is an
