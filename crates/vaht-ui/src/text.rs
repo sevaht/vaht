@@ -258,7 +258,11 @@ impl Typesetter {
             #[expect(clippy::cast_precision_loss, reason = "text widths are far below 2^24")]
             Placement::Scrolled(scroll) => -(scroll as f32),
         };
-        let origin = (across + margin_pixels, margin_pixels);
+        // cosmic-text cuts a glyph's vertical position down to a whole pixel,
+        // which puts the text up to a pixel above the middle of its area
+        // (the baseline of a 20 pixel taskbar's text is at 13.7, and drawn at
+        // 13). Half a pixel more makes it the nearest pixel instead.
+        let origin = (across + margin_pixels, margin_pixels + 0.5);
         let at = |shift_x: f32, shift_y: f32| (origin.0 + shift_x, origin.1 + shift_y);
         match style.effect {
             TextEffect::None => {}
@@ -559,6 +563,34 @@ mod tests {
         assert_eq!(
             typesetter.installed_family("no such family"),
             "no such family"
+        );
+    }
+
+    #[test]
+    fn digits_sit_in_the_middle_of_a_taskbar_row() {
+        // A clock: 8 point bold digits in a 20 pixel row, as the default
+        // taskbar has them. The font's baseline is at 13.7, which cosmic-text
+        // alone draws at 13, a pixel above the middle.
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let style = TextStyle {
+            font: Font {
+                family: "DejaVu Sans".to_owned(),
+                size_points: 8,
+                weight: FontWeight::Bold,
+                is_italic: false,
+            },
+            color: Color::WHITE,
+            effect: TextEffect::None,
+            justify: Justify::Left,
+        };
+        let mut pixmap = Pixmap::new(60, 20).expect("a pixmap");
+        typesetter.draw(&mut pixmap, "23:15", &style, Rect::new(0, 0, 60, 20));
+        let (_, top, _, bottom) = bounds(&pixmap, |pixel| pixel.alpha() > 128);
+        let gap_above = top;
+        let gap_below = 19 - bottom;
+        assert!(
+            gap_above.abs_diff(gap_below) <= 1,
+            "{gap_above} rows above the digits and {gap_below} below"
         );
     }
 }
