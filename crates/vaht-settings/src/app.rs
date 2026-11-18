@@ -48,6 +48,8 @@ pub struct SettingsApp<L: Link> {
     new_names: HashMap<ConfigPath, String>,
     /// How the connection is.
     status: Status,
+    /// What vaht could not use of its configuration files and left out.
+    problems: Vec<String>,
 }
 
 impl SettingsApp<VahtLink> {
@@ -91,6 +93,7 @@ impl<L: Link> SettingsApp<L> {
             search: String::new(),
             new_names: HashMap::new(),
             status: Status::Loading,
+            problems: Vec::new(),
         }
     }
 
@@ -111,10 +114,12 @@ impl<L: Link> SettingsApp<L> {
                     defaults,
                     changed,
                     themes: _,
+                    problems,
                 } => {
                     if let Some(editor) = &mut self.editor {
                         editor.read(value, defaults, &changed);
                     }
+                    self.problems = problems;
                     self.pending.clear();
                     if !matches!(self.status, Status::Refused(_) | Status::Disconnected(_)) {
                         self.status = Status::Ready;
@@ -141,6 +146,30 @@ impl<L: Link> SettingsApp<L> {
             self.status = Status::Ready;
         }
         self.link.send(Command::Edit(vec![edit]));
+    }
+
+    /// What the panel naming the configuration's problems is filled with.
+    const WARNING_FILL: egui::Color32 = egui::Color32::from_rgb(160, 0, 0);
+
+    /// Draws what vaht could not use of its configuration files, so that it
+    /// cannot be missed.
+    fn problems_panel(&self, ui: &mut Ui) {
+        let count = self.problems.len();
+        ui.colored_label(
+            egui::Color32::WHITE,
+            egui::RichText::new(format!(
+                "{count} problem{} in the configuration files: what could be used is in effect",
+                if count == 1 { "" } else { "s" }
+            ))
+            .strong(),
+        );
+        for problem in &self.problems {
+            ui.colored_label(egui::Color32::WHITE, format!("- {problem}"));
+        }
+        ui.colored_label(
+            egui::Color32::WHITE,
+            "Edit the files named; vaht reloads them when they are saved.",
+        );
     }
 
     /// Draws the sidebar: the files, and the search.
@@ -342,6 +371,15 @@ impl<L: Link> SettingsApp<L> {
     /// edits the user makes.
     pub fn show(&mut self, ui: &mut Ui) {
         self.take_updates();
+        if !self.problems.is_empty() {
+            egui::Panel::top("problems")
+                .frame(
+                    egui::Frame::new()
+                        .fill(Self::WARNING_FILL)
+                        .inner_margin(8.0),
+                )
+                .show(ui, |ui| self.problems_panel(ui));
+        }
         egui::Panel::bottom("actions").show(ui, |ui| self.actions(ui));
         egui::Panel::left("sidebar")
             .default_size(220.0)
@@ -437,6 +475,7 @@ mod tests {
                 defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
                 changed: Vec::new(),
                 themes: Vec::new(),
+                problems: Vec::new(),
             },
         ]);
         (SettingsApp::new(link.clone()), link)
@@ -503,6 +542,7 @@ mod tests {
             defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
             changed: Vec::new(),
             themes: Vec::new(),
+                problems: Vec::new(),
         });
         let mut harness = harness_of(&mut app);
         harness.run();
@@ -527,6 +567,7 @@ mod tests {
             defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
             changed: vec![vec!["focus".to_owned(), "model".to_owned()]],
             themes: Vec::new(),
+                problems: Vec::new(),
         });
         let mut harness = harness_of(&mut app);
         harness.run();
@@ -591,6 +632,7 @@ mod tests {
                 defaults: json!({ "rows": 1 }),
                 changed: Vec::new(),
                 themes: Vec::new(),
+                problems: Vec::new(),
             },
         ]);
         let mut harness = harness_of(&mut app);
@@ -618,6 +660,7 @@ mod tests {
                 value,
                 changed: Vec::new(),
                 themes: Vec::new(),
+                problems: Vec::new(),
             },
         ]);
         (SettingsApp::new(link.clone()), link)
@@ -795,5 +838,36 @@ mod tests {
         harness.run();
         harness.get_by_label("Rows");
         harness.get_by_label("Hiding");
+    }
+
+    #[test]
+    fn what_vaht_left_out_of_its_files_is_shown_at_the_top() {
+        let (mut app, link) = window();
+        link.to_tell.borrow_mut().push_back(Update::Reading {
+            value: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
+            defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
+            changed: Vec::new(),
+            themes: Vec::new(),
+            problems: vec![
+                "settings.toml: taskbar.windows: unknown field (using the default)".to_owned(),
+            ],
+        });
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness
+            .get_by_label("1 problem in the configuration files: what could be used is in effect");
+        harness.get_by_label("- settings.toml: taskbar.windows: unknown field (using the default)");
+    }
+
+    #[test]
+    fn nothing_is_shown_when_nothing_was_left_out() {
+        let (mut app, _link) = window();
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        assert!(
+            harness
+                .query_by_label_contains("in the configuration files")
+                .is_none()
+        );
     }
 }

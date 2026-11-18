@@ -65,6 +65,10 @@ pub enum ThemeElement {
     Wireframe,
     /// A tooltip: a title too long for its place, or a tray item's text.
     Tooltip,
+    /// vaht's warning about its own configuration. vaht draws it with the
+    /// built-in theme whatever the user's says, so a broken theme cannot hide
+    /// what is broken.
+    Warning,
 }
 
 impl ThemeElement {
@@ -90,6 +94,7 @@ impl ThemeElement {
             Self::DialogField => "dialog.field",
             Self::Wireframe => "wireframe",
             Self::Tooltip => "tooltip",
+            Self::Warning => "warning",
         }
     }
 

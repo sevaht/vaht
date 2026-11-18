@@ -10,6 +10,7 @@ mod clipboard;
 mod color;
 mod command_line;
 mod config;
+mod config_problems;
 mod cursor;
 mod dialogs;
 mod headless;

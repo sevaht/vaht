@@ -48,13 +48,16 @@ struct Shown {
     opacity: f32,
 }
 
-/// What a tooltip panel shows: its lines.
+/// What a panel of lines of text shows (a tooltip, the configuration
+/// warning): its lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Lines {
+pub(crate) struct Lines {
     /// The lines of text.
-    lines: Vec<String>,
+    pub(crate) texts: Vec<String>,
     /// How tall each line is.
-    line_height: u32,
+    pub(crate) line_height: u32,
+    /// What styles it.
+    pub(crate) element: ThemeElement,
 }
 
 impl PanelContent for Lines {
@@ -62,14 +65,17 @@ impl PanelContent for Lines {
 
     fn build(&self) -> Widget<()> {
         let rows = self
-            .lines
+            .texts
             .iter()
             .map(|line| {
-                Widget::text(ThemeElement::Tooltip, line.clone())
+                // The column has the background; its lines sit on it, so a
+                // gradient runs unbroken behind them.
+                Widget::text(self.element, line.clone())
                     .with_size(SizePolicy::Fixed(self.line_height))
+                    .without_background()
             })
             .collect();
-        Widget::column(ThemeElement::Tooltip, rows)
+        Widget::column(self.element, rows)
     }
 
     fn state(&self) -> WidgetState {
@@ -161,8 +167,9 @@ impl Tooltip {
         );
         let area = Rectangle::new((x, y).into(), (outer_width, outer_height).into());
         let content = Lines {
-            lines,
+            texts: lines,
             line_height: row_height,
+            element: ThemeElement::Tooltip,
         };
         let corners = tooltip.corner_radii();
         let mut panel = Panel::new(content, vaht_ui::Size::new(width, height));

@@ -69,14 +69,16 @@ use crate::buffer_fences::FenceWaits;
 use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::{
-    Action, Command, Config, ConfigSource, Delay, FocusModel, KeyChord, MenuGenerator, MenuRequest,
-    Menus, Modifiers, ResizeFrom, SettingChange, SettingOverrides, ThemeFile, WindowManagerAction,
+    Action, Command, Config, ConfigProblem, ConfigSource, Delay, FocusModel, KeyChord, Loaded,
+    MenuGenerator, MenuRequest, Menus, Modifiers, ResizeFrom, SettingChange, SettingOverrides,
+    ThemeFile, WindowManagerAction,
 };
 use crate::config::{CycleOrder, WindowCycle};
 use crate::config::{
     FocusStealing, MenuEntry, OutputEntry, OutputMode, OutputScale, OutputTransform, SwitchFlip,
     SwitchKind, TaskbarAction, TaskbarOutput,
 };
+use crate::config_banner::ConfigBanner;
 use crate::cursor::Cursor;
 use crate::event_source::{EndingSource, EventSource, Timer};
 use crate::execution::{ExecutionContext, Press};
@@ -234,6 +236,8 @@ pub struct Compositor {
     pub(crate) tray_grant: Option<(u32, Instant)>,
     /// The tooltip for what the pointer rests on.
     pub(crate) tooltip: Tooltip,
+    /// The red notice that the configuration has problems.
+    pub(crate) config_banner: ConfigBanner,
     /// Shapes and draws text; shared by every panel.
     typesetter: Typesetter,
     /// Finds application icons, for the taskbar and menus.
@@ -363,7 +367,7 @@ impl Compositor {
             .watch(handle, &ledger)
             .map_err(RunError::WatchSignals)?;
         let config_source = ConfigSource::new(options.config_directory);
-        let config = Self::first_config(&config_source);
+        let (config, config_banner) = Self::first_config(&config_source);
 
         let (outputs, output_changes) = Self::first_outputs(&mut backend, &config);
         let window_manager = WindowManager::new(
@@ -421,6 +425,7 @@ impl Compositor {
             outline: Outline::default(),
             snap_overlay: SnapOverlay::default(),
             tooltip: Tooltip::default(),
+            config_banner,
             tray_grant: None,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             icons: vaht_ui::IconStore::from_environment(),
@@ -529,18 +534,23 @@ impl Compositor {
         Some(protocols.dmabuf.create_global::<Self>(display, formats))
     }
 
-    /// Returns the configuration in `source`, or the built-in one, with an
-    /// error logged, if it is not valid.
-    fn first_config(source: &ConfigSource) -> Config {
-        source
-            .load(&SettingOverrides::default())
-            .unwrap_or_else(|error| {
-                tracing::error!(
-                    error = &error as &dyn std::error::Error,
-                    "the configuration is not valid; using the built-in one until it is fixed"
-                );
-                Config::built_in()
-            })
+    /// Returns the configuration in `source`: all of it that is valid, the
+    /// built-in version of each file that is not; and the banner naming what
+    /// was left out.
+    fn first_config(source: &ConfigSource) -> (Config, ConfigBanner) {
+        let loaded = Config::load_lenient(source.directory(), &SettingOverrides::default(), None);
+        Self::log_problems(&loaded.problems);
+        let mut banner = ConfigBanner::default();
+        banner.set_problems(loaded.problems);
+        (loaded.config, banner)
+    }
+
+    /// Logs each of `problems` as an error: vaht goes on with what it can
+    /// use, so these are all that says what it could not.
+    fn log_problems(problems: &[ConfigProblem]) {
+        for problem in problems {
+            tracing::error!(%problem, "the configuration has a problem");
+        }
     }
 
     /// Opens the IPC socket beside the Wayland one `listener` opened; none,
@@ -576,6 +586,7 @@ impl Compositor {
                 backdrop: &self.backdrop,
                 outline: &self.outline,
                 tooltip: &self.tooltip,
+                config_banner: &self.config_banner,
                 snap: &self.snap_overlay,
                 xwayland: self.xwayland.as_ref(),
                 lock: &self.session_lock,
@@ -595,40 +606,38 @@ impl Compositor {
         self.is_running = false;
     }
 
-    /// Reads the configuration again and applies it if it is valid;
-    /// otherwise the current one stays, and the problem is logged.
+    /// Reads the configuration again and applies all of it that is valid: a
+    /// file that is not stays as it was, and a setting that is not is the
+    /// default. What was left out is logged and shown on every output.
     pub(crate) fn reload_configuration(&mut self) {
         self.config_source.watch(&self.loop_handle, &self.ledger);
         if let Ok(file) = self.config_source.settings_table() {
             self.overrides.follow_file(&file);
         }
-        let loaded = match self.config_source.load(&self.overrides) {
-            Err(error) if !self.overrides.is_empty() => {
-                let without = self.config_source.load(&SettingOverrides::default());
-                if without.is_ok() {
-                    tracing::warn!(
-                        error = &error as &dyn std::error::Error,
-                        "the settings changed in place no longer apply; they are dropped"
-                    );
-                    self.overrides = SettingOverrides::default();
-                }
-                without
-            }
-            loaded => loaded,
-        };
-        match loaded {
-            Ok(config) => {
-                self.apply_config(config);
-                tracing::info!(
-                    directory = %self.config_source.directory().display(),
-                    "configuration reloaded"
-                );
-            }
-            Err(error) => tracing::warn!(
-                error = &error as &dyn std::error::Error,
-                "configuration rejected; the previous one stays in effect"
-            ),
+        let loaded = Config::load_lenient(
+            self.config_source.directory(),
+            &self.overrides,
+            Some(&self.config),
+        );
+        if loaded.dropped_overrides {
+            tracing::warn!("the settings changed in place no longer apply; they are dropped");
+            self.overrides = SettingOverrides::default();
         }
+        let problems = loaded.problems.len();
+        self.apply_loaded(loaded);
+        tracing::info!(
+            directory = %self.config_source.directory().display(),
+            problems,
+            "configuration reloaded"
+        );
+    }
+
+    /// Makes the configuration `loaded` the one in effect, and what it left
+    /// out the problems shown.
+    fn apply_loaded(&mut self, loaded: Loaded) {
+        Self::log_problems(&loaded.problems);
+        self.config_banner.set_problems(loaded.problems);
+        self.apply_config(loaded.config);
     }
 
     /// Makes `change` to the settings in place, until `save-settings`
@@ -656,29 +665,34 @@ impl Compositor {
             .fold(self.overrides.clone(), |overrides, change| {
                 overrides.with(change, &file)
             });
-        let config = self
-            .config_source
-            .load(&overrides)
-            .map_err(|error| error.to_string())?;
+        // Refused only if the change itself leaves something out: problems the
+        // files already had do not stop settings being changed (the window
+        // that fixes them is how they get fixed).
+        let directory = self.config_source.directory();
+        let before = Config::load_lenient(directory, &self.overrides, Some(&self.config));
+        let after = Config::load_lenient(directory, &overrides, Some(&self.config));
+        if let Some(introduced) = after
+            .problems
+            .iter()
+            .find(|problem| !before.problems.contains(problem))
+        {
+            return Err(introduced.reason());
+        }
         self.overrides = overrides;
-        self.apply_config(config);
+        self.apply_loaded(after);
         Ok(())
     }
 
     /// Puts the settings back to what `settings.toml` says: the changes
     /// made in place are dropped.
-    ///
-    /// # Errors
-    ///
-    /// Returns what is wrong, changing nothing.
-    pub(crate) fn revert_settings(&mut self) -> Result<(), String> {
-        let config = self
-            .config_source
-            .load(&SettingOverrides::default())
-            .map_err(|error| error.to_string())?;
+    pub(crate) fn revert_settings(&mut self) {
+        let loaded = Config::load_lenient(
+            self.config_source.directory(),
+            &SettingOverrides::default(),
+            Some(&self.config),
+        );
         self.overrides = SettingOverrides::default();
-        self.apply_config(config);
-        Ok(())
+        self.apply_loaded(loaded);
     }
 
     /// Writes the settings changed in place into their file.
@@ -1614,6 +1628,7 @@ impl Compositor {
                 backdrop: &self.backdrop,
                 outline: &self.outline,
                 tooltip: &self.tooltip,
+                config_banner: &self.config_banner,
                 snap: &self.snap_overlay,
                 xwayland: self.xwayland.as_ref(),
                 lock: &self.session_lock,
@@ -1840,6 +1855,8 @@ impl Compositor {
         }
         self.menus.prepare(&self.config.theme, &mut self.typesetter);
         let output_areas: Vec<_> = self.outputs.iter().map(Outputs::geometry).collect();
+        self.config_banner
+            .prepare(&output_areas, &mut self.typesetter);
         self.backdrop.prepare(&output_areas, &self.window_manager);
         self.outline
             .update(self.window_manager.outline(), &self.config.theme);
@@ -3656,6 +3673,15 @@ impl Compositor {
             .expect("the seat gets a pointer at startup");
         let serial = SERIAL_COUNTER.next_serial();
         let location = pointer.current_location();
+        // The notice is vaht's own: a click on it hides it, and goes no
+        // further, nor does that click's release.
+        if state == ButtonState::Pressed && self.config_banner.press(location) {
+            self.schedule_render();
+            return;
+        }
+        if state == ButtonState::Released && self.config_banner.release() {
+            return;
+        }
         match state {
             ButtonState::Pressed if !pointer.is_grabbed() => {
                 if self.tooltip.hide() {

@@ -411,7 +411,12 @@ fn the_configuration_files_are_listed_with_their_state_and_the_themes() {
         Path::new(EXECUTABLE),
         &[("themes/mine.toml", "[default]\ntext_color = \"white\"\n")],
     );
-    let Reply::ConfigFiles { files, themes } = config(&vaht, &["files"]) else {
+    let Reply::ConfigFiles {
+        files,
+        themes,
+        problems,
+    } = config(&vaht, &["files"])
+    else {
         panic!("not a file list");
     };
     assert_eq!(
@@ -422,6 +427,11 @@ fn the_configuration_files_are_listed_with_their_state_and_the_themes() {
         }]
     );
     assert!(themes.contains(&"mine".to_owned()), "{themes:?}");
+    assert_eq!(
+        problems,
+        Vec::<String>::new(),
+        "a valid configuration has none"
+    );
 }
 
 #[test]

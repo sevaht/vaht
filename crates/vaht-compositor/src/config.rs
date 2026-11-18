@@ -1,9 +1,11 @@
 //! The configuration: TOML files parsed once into typed values (02).
 //!
 //! [`Config::load`] reads every file in the configuration directory and
-//! validates all of it before anything uses it, so a reload either applies a
-//! complete new configuration or none at all (02 §2). A file that does not
-//! exist is replaced by vaht's built-in version of it, the one
+//! validates all of it, returning the first problem, for a program that needs
+//! a whole configuration or none (`vaht dialog`). A running vaht uses
+//! [`Config::load_lenient`] instead, which uses what is valid and returns what
+//! it left out (02 §2), and `vaht check` lists every problem
+//! ([`Config::problems`]). A file that does not exist is replaced by vaht's built-in version of it, the one
 //! `vaht check --print-defaults` prints: defaults are written down once,
 //! as configuration (K3).
 //!
@@ -13,6 +15,7 @@
 
 mod bindings;
 mod command;
+mod lenient;
 mod matcher;
 mod menus;
 mod outputs;
@@ -38,6 +41,7 @@ pub(crate) use self::command::{
     Action, Command, CycleOrder, Delay, KeyModeSwitch, MenuRequest, ResizeFrom, TaskbarAction,
     TaskbarOutput, WindowCycle, WindowManagerAction,
 };
+pub(crate) use self::lenient::{ConfigProblem, Loaded};
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};
 pub(crate) use self::outputs::{
@@ -150,6 +154,19 @@ impl Config {
     /// that is not valid, with the line and column of the problem.
     pub fn load(directory: &Path) -> Result<Self, ConfigError> {
         Self::load_with(directory, &SettingOverrides::default())
+    }
+
+    /// Returns every problem in the configuration in `directory`, a sentence
+    /// each (the file, the setting, what is wrong, and what vaht uses
+    /// instead): empty if all of it is valid. Where [`Config::load`] stops
+    /// at the first, this finds them all, as a running vaht does.
+    #[must_use]
+    pub fn problems(directory: &Path) -> Vec<String> {
+        Self::load_lenient(directory, &SettingOverrides::default(), None)
+            .problems
+            .iter()
+            .map(ToString::to_string)
+            .collect()
     }
 
     /// Reads and validates the configuration in `directory`, as

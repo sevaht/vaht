@@ -14,19 +14,20 @@ use crate::terminal;
 /// Checks the configuration in `directory`, printing the result.
 #[must_use]
 pub fn run(directory: &Path) -> ExitCode {
-    match Config::load(directory) {
-        Ok(_) => {
-            terminal::print(&format!(
-                "The configuration in {} is valid.\n",
-                directory.display()
-            ));
-            ExitCode::SUCCESS
-        }
-        Err(error) => {
-            terminal::report_error(&anyhow::Error::new(error));
-            ExitCode::FAILURE
-        }
+    let problems = Config::problems(directory);
+    if problems.is_empty() {
+        terminal::print(&format!(
+            "The configuration in {} is valid.\n",
+            directory.display()
+        ));
+        return ExitCode::SUCCESS;
     }
+    // Every one, not the first: a running vaht uses what it can and shows all
+    // that it left out.
+    for problem in problems {
+        terminal::report_error(&anyhow::anyhow!(problem));
+    }
+    ExitCode::FAILURE
 }
 
 /// Prints every built-in configuration file, each under a header naming it,

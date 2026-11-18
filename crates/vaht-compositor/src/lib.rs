@@ -21,6 +21,7 @@ mod client;
 mod color;
 mod compositor;
 mod config;
+mod config_banner;
 mod cursor;
 pub mod event_source;
 mod execution;

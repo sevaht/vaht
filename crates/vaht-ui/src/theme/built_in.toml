@@ -8,7 +8,9 @@
 # taskbar.button, taskbar.workspace, taskbar.clock,
 # taskbar.window-list.entry, taskbar.window-list.empty (the tray shows on
 # the taskbar's own background), menu.title, menu.frame, menu.item,
-# dialog.field, wireframe (a resize's outline: its border), tooltip.
+# dialog.field, wireframe (a resize's outline: its border), tooltip, warning
+# (vaht's notice that its configuration has problems: always drawn from this
+# built-in theme, so a theme of yours cannot hide it).
 # States:
 # focused, unfocused, pressed, hovered (a menu's highlighted item) and
 # disabled (a menu item that does nothing).
@@ -135,3 +137,13 @@ justify = "left"
 padding = [8, 14, 8, 13]
 border = { width = 1, color = "#191919" }
 corner_radius = 5
+
+[warning]
+# Impossible to miss: white on red.
+texture = { gradient = "vertical", from = "red3", to = "red4" }
+font = { family = "DejaVu Sans", size = 11, weight = "bold" }
+text_effect = "none"
+text_color = "white"
+justify = "left"
+padding = [4, 14, 4, 14]
+border = { width = 2, color = "white" }

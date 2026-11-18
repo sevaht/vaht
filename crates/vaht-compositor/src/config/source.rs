@@ -10,7 +10,7 @@ use std::time::Duration;
 use smithay::reexports::calloop::LoopHandle;
 
 use super::watch::ConfigWatch;
-use super::{Config, ConfigError, SettingOverrides};
+use super::{Config, ConfigError};
 use crate::Compositor;
 use crate::event_source::Timer;
 use crate::resources::ResourceLedger;
@@ -197,16 +197,6 @@ impl ConfigSource {
             .map_or(before.len(), |newline| before.len() - newline - 1)
             + 1;
         (line, column)
-    }
-
-    /// Reads and validates the configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first problem found, as [`Config::load`] does, with the
-    /// settings `overrides` changes.
-    pub(crate) fn load(&self, overrides: &SettingOverrides) -> Result<Config, ConfigError> {
-        Config::load_with(&self.directory, overrides)
     }
 
     /// Reads `settings.toml` as a table, or its built-in version.

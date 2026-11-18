@@ -154,6 +154,9 @@ pub enum Event {
         generation: u64,
         /// Each file and whether it has changes not written.
         files: Vec<ConfigFileInfo>,
+        /// What could not be used of the files and was left out, a sentence
+        /// each.
+        problems: Vec<String>,
     },
 }
 
@@ -165,9 +168,12 @@ impl Event {
             Self::Windows { windows } => Reply::Windows { windows },
             Self::Workspaces { workspaces } => Reply::Workspaces { workspaces },
             Self::Outputs { outputs, profile } => Reply::Outputs { outputs, profile },
-            Self::Config { files, .. } => Reply::ConfigFiles {
+            Self::Config {
+                files, problems, ..
+            } => Reply::ConfigFiles {
                 files,
                 themes: Vec::new(),
+                problems,
             },
         }
     }
@@ -298,6 +304,9 @@ pub enum Reply {
         /// The themes that can be chosen: those in the configuration
         /// directory's `themes/` and the system's, and the built-in one.
         themes: Vec<String>,
+        /// What vaht could not use of the configuration files and left out,
+        /// a sentence each; empty when all of it is in effect.
+        problems: Vec<String>,
     },
     /// A file's schema, for [`Request::ConfigSchema`].
     ConfigSchema {

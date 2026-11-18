@@ -43,6 +43,7 @@ target. A ★ marks features it actually uses.
 | **setting** | option, preference, resource | One key of `settings.toml`, with a documented type, range and default |
 | **pending change** | draft, dirty edit | A setting changed while vaht runs and not yet written to its file; it already runs |
 | **revert** | undo, discard | Drop the pending changes, so the files run as they say |
+| **problem** | error, warning | Something in the configuration files vaht could not use: it left that out, used the default or what was in effect, and reports it (log, banner, `vaht msg config files`) |
 
 ---
 

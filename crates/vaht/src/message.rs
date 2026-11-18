@@ -162,7 +162,11 @@ fn readable(reply: &Reply) -> String {
                 output_lines(&mut text, output);
             }
         }
-        Reply::ConfigFiles { files, themes } => {
+        Reply::ConfigFiles {
+            files,
+            themes,
+            problems,
+        } => {
             for info in files {
                 let state = match info.state {
                     vaht_ipc::ConfigState::Clean => "clean",
@@ -171,6 +175,16 @@ fn readable(reply: &Reply) -> String {
                 let _ = writeln!(text, "{}\t{state}", info.file.file_name());
             }
             let _ = writeln!(text, "\nthemes: {}", themes.join(", "));
+            if !problems.is_empty() {
+                let _ = writeln!(
+                    text,
+                    "\n{} problem(s) in the configuration, left out:",
+                    problems.len()
+                );
+                for problem in problems {
+                    let _ = writeln!(text, "  {problem}");
+                }
+            }
         }
         Reply::ConfigSchema { schema } => {
             let _ = writeln!(

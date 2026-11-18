@@ -359,7 +359,10 @@ impl Sources {
             ThemeElement::MenuTitle | ThemeElement::MenuFrame | ThemeElement::MenuItem => {
                 Self::of_menu(element, state)
             }
-            ThemeElement::DialogField | ThemeElement::Wireframe | ThemeElement::Tooltip => Self {
+            ThemeElement::DialogField
+            | ThemeElement::Wireframe
+            | ThemeElement::Tooltip
+            | ThemeElement::Warning => Self {
                 is_built_in: true,
                 ..Self::texture(&[])
             },
@@ -425,7 +428,8 @@ impl Sources {
             | ThemeElement::WindowListEmpty
             | ThemeElement::DialogField
             | ThemeElement::Wireframe
-            | ThemeElement::Tooltip => Self {
+            | ThemeElement::Tooltip
+            | ThemeElement::Warning => Self {
                 font: Some(&["menu.frame.font"]),
                 text_color: Some(&["menu.frame.textColor"]),
                 justify: Some(&["menu.frame.justify"]),
@@ -505,8 +509,11 @@ impl StyleFile {
         let mut tooltip: Option<Cell> = None;
         let mut textures: HashMap<(ThemeElement, WidgetState), Written> = HashMap::new();
         // Parents first, so ParentRelative finds their textures.
-        let mut elements: Vec<ThemeElement> =
-            <ThemeElement as strum::IntoEnumIterator>::iter().collect();
+        // The warning has no Fluxbox source, and vaht draws it from the
+        // built-in theme whatever the theme says, so a theme does not carry it.
+        let mut elements: Vec<ThemeElement> = <ThemeElement as strum::IntoEnumIterator>::iter()
+            .filter(|element| *element != ThemeElement::Warning)
+            .collect();
         elements
             .sort_by_key(|element| Sources::of(*element, WidgetState::Focused).parent.is_some());
         for element in elements {
@@ -629,7 +636,8 @@ impl StyleFile {
             | ThemeElement::WindowListEmpty
             | ThemeElement::DialogField
             | ThemeElement::Wireframe
-            | ThemeElement::Tooltip => None,
+            | ThemeElement::Tooltip
+            | ThemeElement::Warning => None,
         };
         if let Some(height) = height {
             cell.insert(Property::Height, Written(Value::from(i64::from(height))));
@@ -677,7 +685,8 @@ impl StyleFile {
             | ThemeElement::MenuItem
             | ThemeElement::DialogField
             | ThemeElement::Wireframe
-            | ThemeElement::Tooltip => {}
+            | ThemeElement::Tooltip
+            | ThemeElement::Warning => {}
         }
     }
 

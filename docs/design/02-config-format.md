@@ -21,9 +21,9 @@ is a draft for discussion. Names follow the glossary in 00. Types are those of
    only once).
 4. **No paths to other config files.** File names are fixed (K3). Fluxbox's
    `session.keyFile`, `session.menuFile` and the rest are gone.
-5. **A bad reload keeps the old config.** vaht logs the error and posts a
-   desktop notification over `org.freedesktop.Notifications`, the same channel
-   other programs use. `vaht check` validates without running.
+5. **A bad config is used as far as it can be, and loudly.** What cannot be
+   used is left out, never the rest: see *Partly valid* under §2. `vaht check`
+   validates without running and lists every problem.
 6. **vaht writes config only on SaveSettings**, through `toml_edit`, which
    keeps comments and layout (00 decision).
 7. **Spelling.** Keys are `snake_case`, as is usual in TOML. Values that name
@@ -56,11 +56,23 @@ Everything lives under `$XDG_CONFIG_HOME/vaht/` (normally `~/.config/vaht/`):
     it, which a watch on the file would lose.
   - **Debounced.** An editor's burst of events (write, rename, chmod) settles
     into one reload after 200 ms of quiet.
-  - **All or nothing.** Every file is parsed and validated into a complete new
-    `Config` first. Only if all of it is valid does vaht apply it. Otherwise the
-    running config stays exactly as it was, and the user gets a desktop notification
-    naming the file, line and problem (plus a log entry). Fixing the file
-    triggers the next attempt by itself.
+  - **Partly valid.** At the start and on every reload vaht uses all of the
+    configuration that is valid and says what it could not use. Each file is
+    taken on its own: one that is not TOML or not valid stays what it was (the
+    built-in one, at the start). `settings.toml` is taken a setting at a time:
+    a setting that is not valid, a misspelled key or a value out of range, is
+    left out, so it is the default, and every other setting, and every other
+    file, is in effect. A theme that cannot be read is the built-in theme;
+    `bindings.toml` and `menus.toml` that name each other's menus or key modes
+    wrongly are both put back. Each thing left out is a problem. It is logged as
+    an error and drawn as a red banner along the top of every output, naming the
+    file, the setting, what is wrong and what vaht used instead, until the files
+    are fixed; a click hides it (until the problems change). The banner is drawn
+    from the built-in theme, whatever theme is in use, so a broken theme cannot
+    hide it. `vaht msg config files` and the settings window list the problems
+    too. Fixing the files triggers the next load by itself. A change made from
+    the settings window or `vaht msg config set` is still refused if it is
+    itself what is not valid; problems the files already had do not stop it.
 
 ---
 

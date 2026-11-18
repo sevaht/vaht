@@ -38,6 +38,9 @@ pub enum Update {
         changed: Vec<Vec<String>>,
         /// The themes that can be chosen.
         themes: Vec<String>,
+        /// What vaht could not use of the configuration files and left
+        /// out.
+        problems: Vec<String>,
     },
     /// An edit, save or revert was refused, for this reason.
     Refused(String),
@@ -174,12 +177,15 @@ impl VahtLink {
                     defaults,
                     changed,
                 }),
-                Ok(Reply::ConfigFiles { themes, .. }),
+                Ok(Reply::ConfigFiles {
+                    themes, problems, ..
+                }),
             ) => updates.push(Update::Reading {
                 value,
                 defaults,
                 changed,
                 themes,
+                problems,
             }),
             (Err(error), _) | (_, Err(error)) => return Err(error.to_string()),
             (Ok(other), _) => return Err(format!("vaht answered something else: {other:?}")),

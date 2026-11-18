@@ -81,7 +81,7 @@ fn a_key_binding_starts_a_program_that_vaht_reaps() {
 }
 
 #[test]
-fn changing_the_bindings_file_takes_effect_and_a_broken_one_is_rejected() {
+fn changing_the_bindings_file_takes_effect_and_a_broken_one_leaves_the_last_good() {
     let files = WrittenFiles::new();
     let first = super_t_writes(&files.path("result"), "first");
     let vaht = HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("bindings.toml", &first)]);
@@ -99,7 +99,7 @@ fn changing_the_bindings_file_takes_effect_and_a_broken_one_is_rejected() {
 
     std::fs::remove_file(files.path("result")).expect("the output is removed");
     std::fs::write(&bindings_file, "[keys]\n\"Super+T\" = \"explode\"\n").expect("written");
-    vaht.wait_for_logged("configuration rejected", 1);
+    vaht.wait_for_logged("the configuration has a problem", 1);
     client.type_chord(&SUPER_T);
     assert_eq!(
         files.wait_for("result").trim(),

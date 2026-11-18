@@ -65,6 +65,7 @@ pub(crate) use self::shaped_element::ShapedElement;
 pub(crate) use self::snap_overlay::SnapOverlay;
 use crate::color::{Conversion, ImageDescription};
 use crate::config::BlurSettings;
+use crate::config_banner::ConfigBanner;
 use crate::cursor::Cursor;
 use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, ALL_LAYERS, BELOW_WINDOWS, LayerMaps};
 use crate::menu::MenuStack;
@@ -264,6 +265,8 @@ pub(crate) struct Drawn<'state> {
     pub(crate) outline: &'state Outline,
     /// The tooltip, if one shows.
     pub(crate) tooltip: &'state Tooltip,
+    /// The notice that the configuration has problems, if it has.
+    pub(crate) config_banner: &'state ConfigBanner,
     /// X11 programs' override-redirect windows, when Xwayland runs.
     pub(crate) xwayland: Option<&'state XwaylandServer>,
     /// The session lock: while locked, the outputs show only it.
@@ -462,6 +465,7 @@ impl<'state> Scene<'state> {
             .map(|(cursor, location)| cursor.render_elements(renderer, location, scale))
             .unwrap_or_default();
         elements.extend(self.drawn.tooltip.render_elements(renderer, scale));
+        elements.extend(self.drawn.config_banner.render_elements(renderer, scale));
         elements.extend(self.drawn.menus.render_elements(renderer, scale));
         elements.extend(self.drawn.outline.render_elements(renderer, scale, 1.0));
         elements.extend(self.drawn.snap.picker_element(renderer, scale));

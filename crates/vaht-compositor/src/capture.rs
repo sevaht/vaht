@@ -362,6 +362,7 @@ impl Compositor {
                 backdrop: &self.backdrop,
                 outline: &self.outline,
                 tooltip: &self.tooltip,
+                config_banner: &self.config_banner,
                 snap: &self.snap_overlay,
                 xwayland: self.xwayland.as_ref(),
                 lock: &self.session_lock,

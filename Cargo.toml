@@ -49,6 +49,9 @@ serde = { version = "1", features = ["derive"] }
 # preserve_order: the settings window shows a schema's properties in the order
 # vaht declares them, which needs the order kept wherever the schema is read.
 serde_json = { version = "1", features = ["preserve_order"] }
+# Names the key a value that does not deserialize is at, so a loader can leave
+# that key out and use the rest.
+serde_path_to_error = "0.1"
 # Pinned to a reviewed master revision (Smithay's releases lag far behind);
 # bump deliberately, one bump per commit (docs/design/04 §5).
 smithay = { version = "0.7.0", git = "https://github.com/Smithay/smithay", rev = "ae6921bbbf464ae90122f0c184e95e89093a4257", default-features = false, features = ["backend_drm", "backend_gbm", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "desktop", "renderer_gl", "renderer_multi", "renderer_pixman", "wayland_frontend", "xwayland", "backend_libei"] }

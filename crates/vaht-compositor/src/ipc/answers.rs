@@ -55,7 +55,10 @@ impl Compositor {
     /// Puts `file` back to what it says.
     fn revert_config(&mut self, file: ConfigFile) -> Result<(), String> {
         match file {
-            ConfigFile::Settings => self.revert_settings(),
+            ConfigFile::Settings => {
+                self.revert_settings();
+                Ok(())
+            }
             ConfigFile::Outputs | ConfigFile::Bindings | ConfigFile::Rules | ConfigFile::Menus => {
                 Err(format!(
                     "{} cannot be edited through IPC yet",
@@ -76,6 +79,16 @@ impl Compositor {
                 ConfigState::Changed
             },
         }]
+    }
+
+    /// Returns what could not be used of the configuration files, a sentence
+    /// each.
+    fn config_problem_texts(&self) -> Vec<String> {
+        self.config_banner
+            .problems()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
     }
 
     /// Returns the error for a file that cannot be described yet.
@@ -143,6 +156,7 @@ impl Compositor {
             Request::ConfigFiles {} => Reply::ConfigFiles {
                 files: self.config_file_infos(),
                 themes: ThemeFile::available(self.config_source.directory()),
+                problems: self.config_problem_texts(),
             },
             Request::ConfigSchema { file } => match schema::schema_of(file) {
                 Some(schema) => Reply::ConfigSchema { schema },
@@ -205,6 +219,7 @@ impl Compositor {
             EventKind::Config => Event::Config {
                 generation: self.config_generation,
                 files: self.config_file_infos(),
+                problems: self.config_problem_texts(),
             },
         }
     }

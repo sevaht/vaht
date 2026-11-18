@@ -133,6 +133,11 @@ impl Typesetter {
     /// The resolution assumed when none is configured; also Fluxbox's.
     pub const DEFAULT_DOTS_PER_INCH: u16 = 96;
 
+    /// How many pixels above and below its area text may reach: the underscore
+    /// and descenders of a line reach its very bottom, and rounding the
+    /// baseline can push them a pixel or two past it.
+    const VERTICAL_SLACK: u32 = 2;
+
     /// Points in an inch: a point is 1/72 inch.
     const POINTS_PER_INCH: f32 = 72.0;
 
@@ -240,7 +245,13 @@ impl Typesetter {
         // or shadow around the outermost letters is never clipped.
         let margin = style.effect.reach();
         let extra = 2 * u32::from(margin);
-        let Some(mut layer) = Pixmap::new(area.width + extra, area.height + extra) else {
+        // It also extends past it above and below, which text may use: the
+        // underscore and descenders touch the bottom of a line, and where
+        // the line is the whole area, rounding the baseline would cut them
+        // off. Only text wider than its area is clipped.
+        let slack = Self::VERTICAL_SLACK;
+        let Some(mut layer) = Pixmap::new(area.width + extra, area.height + extra + 2 * slack)
+        else {
             return;
         };
         #[expect(
@@ -262,7 +273,8 @@ impl Typesetter {
         // which puts the text up to a pixel above the middle of its area
         // (the baseline of a 20 pixel taskbar's text is at 13.7, and drawn at
         // 13). Half a pixel more makes it the nearest pixel instead.
-        let origin = (across + margin_pixels, margin_pixels + 0.5);
+        #[expect(clippy::cast_precision_loss, reason = "the slack is a pixel or so")]
+        let origin = (across + margin_pixels, margin_pixels + slack as f32 + 0.5);
         let at = |shift_x: f32, shift_y: f32| (origin.0 + shift_x, origin.1 + shift_y);
         match style.effect {
             TextEffect::None => {}
@@ -288,7 +300,7 @@ impl Typesetter {
         let margin_offset = i32::from(margin);
         target.draw_pixmap(
             area.x - margin_offset,
-            area.y - margin_offset,
+            area.y - margin_offset - i32::try_from(slack).unwrap_or(0),
             layer.as_ref(),
             &PixmapPaint::default(),
             Transform::identity(),
@@ -591,6 +603,42 @@ mod tests {
         assert!(
             gap_above.abs_diff(gap_below) <= 1,
             "{gap_above} rows above the digits and {gap_below} below"
+        );
+    }
+
+    /// Returns how many pixels of `text` show when it is drawn into an area
+    /// `padding` pixels taller than its line, in a pixmap that has room for
+    /// all of it.
+    fn inked_pixels(text: &str, padding: u32) -> usize {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let style = TextStyle {
+            font: Font {
+                family: "DejaVu Sans".to_owned(),
+                size_points: 11,
+                weight: FontWeight::Bold,
+                is_italic: false,
+            },
+            color: Color::WHITE,
+            effect: TextEffect::None,
+            justify: Justify::Left,
+        };
+        let height = typesetter.line_height(&style.font) + padding;
+        let mut pixmap = Pixmap::new(200, height + 8).expect("a pixmap");
+        typesetter.draw(&mut pixmap, text, &style, Rect::new(0, 4, 200, height));
+        (0..pixmap.height())
+            .flat_map(|y| (0..pixmap.width()).map(move |x| (x, y)))
+            .filter(|(x, y)| pixmap.pixel(*x, *y).is_some_and(|pixel| pixel.alpha() > 0))
+            .count()
+    }
+
+    #[test]
+    fn text_in_an_area_as_tall_as_its_line_is_not_cut_off() {
+        // The underscore and the descenders reach the bottom of the line.
+        let text = "window_list gpqy_";
+        assert_eq!(
+            inked_pixels(text, 0),
+            inked_pixels(text, 10),
+            "the same letters show with no room to spare as with plenty"
         );
     }
 }
