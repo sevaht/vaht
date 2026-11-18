@@ -122,8 +122,24 @@ impl StyleDatabase {
     }
 
     /// Returns the first of `names` a line gives, without marking it used.
+    ///
+    /// A name a line gives outright is preferred to one only a wildcard
+    /// answers, even a later one: `names` are a resource and what it falls
+    /// back to (`toolbar.workspace.textColor`, then `toolbar.label.textColor`),
+    /// and a style with `*textColor: …` and its own `toolbar.label.textColor`
+    /// means the label's, though Fluxbox's matching would let the wildcard
+    /// answer for the first.
     pub(crate) fn first_given<'name>(&self, names: &[&'name str]) -> Option<&'name str> {
-        names.iter().copied().find(|name| self.find(name).is_some())
+        let is_stated = |name: &str| {
+            self.lines
+                .iter()
+                .any(|line| line.name.eq_ignore_ascii_case(name))
+        };
+        names
+            .iter()
+            .copied()
+            .find(|name| is_stated(name))
+            .or_else(|| names.iter().copied().find(|name| self.find(name).is_some()))
     }
 
     /// Returns the lines no lookup returned.

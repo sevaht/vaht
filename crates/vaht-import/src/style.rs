@@ -43,6 +43,8 @@ enum Property {
     Justify,
     /// `padding`.
     Padding,
+    /// `spacing`.
+    Spacing,
     /// `border`.
     Border,
     /// `height`.
@@ -67,6 +69,7 @@ impl Property {
         matches!(
             self,
             Self::Padding
+                | Self::Spacing
                 | Self::Border
                 | Self::Height
                 | Self::CornerRadius
@@ -88,6 +91,7 @@ impl Property {
             Self::GlyphImages => "glyph_images",
             Self::Justify => "justify",
             Self::Padding => "padding",
+            Self::Spacing => "spacing",
             Self::Border => "border",
             Self::Height => "height",
             Self::CornerRadius => "corner_radius",
@@ -282,12 +286,21 @@ impl Sources {
                     }
                 },
                 parent: Some(StyleElement::Taskbar),
-                glyph_color: Some(&[
-                    "toolbar.button.picColor",
-                    "toolbar.clock.picColor",
-                    "toolbar.clock.textColor",
-                    "toolbar.textColor",
-                ]),
+                glyph_color: Some(match state {
+                    Pressed => &[
+                        "toolbar.button.pressed.picColor",
+                        "toolbar.button.picColor",
+                        "toolbar.clock.picColor",
+                        "toolbar.clock.textColor",
+                        "toolbar.textColor",
+                    ],
+                    Focused | Unfocused | Hovered | Disabled => &[
+                        "toolbar.button.picColor",
+                        "toolbar.clock.picColor",
+                        "toolbar.clock.textColor",
+                        "toolbar.textColor",
+                    ],
+                }),
                 // The arrow is two fifths of the button (Fluxbox's
                 // toolbar.button.scale, 250), drawn in the whole button.
                 padding: Some([0, 0, 0, 0]),
@@ -337,10 +350,16 @@ impl Sources {
                     ],
                 }),
                 text_color: Some(match state {
-                    Focused | Pressed | Hovered | Disabled => {
-                        &["toolbar.iconbar.focused.textColor", "toolbar.textColor"]
-                    }
-                    Unfocused => &["toolbar.iconbar.unfocused.textColor", "toolbar.textColor"],
+                    Focused | Pressed | Hovered | Disabled => &[
+                        "toolbar.iconbar.focused.textColor",
+                        "toolbar.windowLabel.textColor",
+                        "toolbar.textColor",
+                    ],
+                    Unfocused => &[
+                        "toolbar.iconbar.unfocused.textColor",
+                        "toolbar.windowLabel.textColor",
+                        "toolbar.textColor",
+                    ],
                 }),
                 justify: Some(match state {
                     Focused | Pressed | Hovered | Disabled => &[
@@ -619,6 +638,105 @@ impl StyleFile {
         cells
     }
 
+    /// Adds to `cell` the padding and spacing of `element` that Fluxbox's
+    /// bevel width asks, for a bar.
+    fn add_bevel(&mut self, cell: &mut Cell, element: StyleElement) {
+        // Fluxbox's bevel width keeps a bar's parts that far from its edges and
+        // from each other: vaht's padding and spacing of the bar.
+        let bevel = if element == StyleElement::Titlebar {
+            self.number(&["window.bevelWidth"])
+        } else if element == StyleElement::Taskbar {
+            self.number(&["toolbar.bevelWidth"])
+        } else {
+            None
+        };
+        if let Some(bevel) = bevel.filter(|bevel| *bevel > 0) {
+            let sides: Array = [bevel; 4].into_iter().map(i64::from).collect();
+            cell.insert(Property::Padding, Written(Value::Array(sides)));
+            cell.insert(Property::Spacing, Written(Value::from(i64::from(bevel))));
+        }
+    }
+
+    /// Adds to `cell` the border of `element` in `state`, where it has one.
+    fn add_border(
+        &mut self,
+        cell: &mut Cell,
+        element: StyleElement,
+        state: WidgetState,
+        report: &mut Report,
+    ) {
+        let border: Option<(&[&str], &[&str])> = match (element, state) {
+            (StyleElement::Border, WidgetState::Focused | WidgetState::Pressed) => Some((
+                &["window.focus.borderWidth", "window.borderWidth"],
+                &["window.focus.borderColor", "window.borderColor"],
+            )),
+            (StyleElement::Border, WidgetState::Unfocused) => Some((
+                &["window.unfocus.borderWidth", "window.borderWidth"],
+                &["window.unfocus.borderColor", "window.borderColor"],
+            )),
+            (StyleElement::Taskbar, _) => {
+                Some((&["toolbar.borderWidth"], &["toolbar.borderColor"]))
+            }
+            (StyleElement::WindowListEntry, WidgetState::Unfocused) => Some((
+                &[
+                    "toolbar.iconbar.unfocused.borderWidth",
+                    "toolbar.iconbar.borderWidth",
+                ],
+                &[
+                    "toolbar.iconbar.unfocused.borderColor",
+                    "toolbar.iconbar.borderColor",
+                ],
+            )),
+            (StyleElement::WindowListEntry, _) => Some((
+                &[
+                    "toolbar.iconbar.focused.borderWidth",
+                    "toolbar.iconbar.borderWidth",
+                ],
+                &[
+                    "toolbar.iconbar.focused.borderColor",
+                    "toolbar.iconbar.borderColor",
+                ],
+            )),
+            (StyleElement::MenuFrame, _) => Some((&["menu.borderWidth"], &["menu.borderColor"])),
+            _ => None,
+        };
+        if let Some((widths, colors)) = border {
+            let width = self.number(widths).unwrap_or(0);
+            // Most window-list entries have no line, and need not say so: unless
+            // the other state's has one, which this state then does without.
+            if width == 0
+                && element == StyleElement::WindowListEntry
+                && !self.window_list_has_a_border()
+            {
+                return;
+            }
+            let color = self
+                .color_chain(colors, report)
+                .unwrap_or_else(|| "black".to_owned());
+            let mut border = InlineTable::new();
+            border.insert("width", Value::from(i64::from(width)));
+            border.insert("color", Value::from(color));
+            cell.insert(Property::Border, Written(Value::InlineTable(border)));
+        }
+    }
+
+    /// Returns whether the style gives window-list entries a border in any
+    /// state.
+    fn window_list_has_a_border(&mut self) -> bool {
+        [
+            [
+                "toolbar.iconbar.focused.borderWidth",
+                "toolbar.iconbar.borderWidth",
+            ],
+            [
+                "toolbar.iconbar.unfocused.borderWidth",
+                "toolbar.iconbar.borderWidth",
+            ],
+        ]
+        .iter()
+        .any(|names| self.number(names).is_some_and(|width| width > 0))
+    }
+
     /// Adds to `cell` the border and the bar height `element` has in
     /// `state`, where it has them.
     fn add_sizes(
@@ -668,31 +786,8 @@ impl StyleFile {
         if let Some(height) = height {
             cell.insert(Property::Height, Written(Value::from(i64::from(height))));
         }
-        let border: Option<(&[&str], &[&str])> = match (element, state) {
-            (StyleElement::Border, WidgetState::Focused | WidgetState::Pressed) => Some((
-                &["window.focus.borderWidth", "window.borderWidth"],
-                &["window.focus.borderColor", "window.borderColor"],
-            )),
-            (StyleElement::Border, WidgetState::Unfocused) => Some((
-                &["window.unfocus.borderWidth", "window.borderWidth"],
-                &["window.unfocus.borderColor", "window.borderColor"],
-            )),
-            (StyleElement::Taskbar, _) => {
-                Some((&["toolbar.borderWidth"], &["toolbar.borderColor"]))
-            }
-            (StyleElement::MenuFrame, _) => Some((&["menu.borderWidth"], &["menu.borderColor"])),
-            _ => None,
-        };
-        if let Some((widths, colors)) = border {
-            let width = self.number(widths).unwrap_or(0);
-            let color = self
-                .color_chain(colors, report)
-                .unwrap_or_else(|| "black".to_owned());
-            let mut border = InlineTable::new();
-            border.insert("width", Value::from(i64::from(width)));
-            border.insert("color", Value::from(color));
-            cell.insert(Property::Border, Written(Value::InlineTable(border)));
-        }
+        self.add_bevel(cell, element);
+        self.add_border(cell, element, state, report);
         match element {
             StyleElement::Border => self.add_round_corners(cell, "window.roundCorners"),
             StyleElement::MenuFrame => self.add_round_corners(cell, "menu.roundCorners"),
@@ -984,11 +1079,12 @@ impl StyleFile {
     /// each as the vaht glyphs it draws.
     fn add_glyph_images(&mut self, cell: &mut Cell, state: WidgetState) {
         // Fluxbox's buttons, and the vaht glyphs each is the picture of.
-        const BUTTONS: [(&str, &[&str]); 7] = [
+        const BUTTONS: [(&str, &[&str]); 8] = [
             ("close", &["close"]),
             ("iconify", &["minimize"]),
             ("maximize", &["maximize"]),
             ("shade", &["shade"]),
+            ("unshade", &["unshade"]),
             ("stick", &["stick"]),
             ("stuck", &["stuck"]),
             ("menuicon", &["menu"]),
@@ -1527,6 +1623,7 @@ menu.bullet:\tsquare
                     Property::GlyphImages => got.glyph_images == want.glyph_images,
                     Property::Justify => got.text.justify == want.text.justify,
                     Property::Padding => got.padding == want.padding,
+                    Property::Spacing => got.spacing == want.spacing,
                     Property::Border => got.border == want.border,
                     Property::Height => got.height == want.height,
                     Property::CornerRadius => got.corner_radius == want.corner_radius,
@@ -1737,6 +1834,80 @@ menu.bullet:\tsquare
         assert_eq!(
             font,
             expected.map(|(family, size, bold, italic)| (family.to_owned(), size, bold, italic))
+        );
+    }
+
+    #[test]
+    fn a_fallback_the_style_states_beats_a_wildcard_for_the_first_name() {
+        // LemonSpace: `*textColor` would answer for the workspace's own name
+        // and hide the label's, which the style states.
+        let (_, vaht_style, _) = convert(
+            "*textColor: rgb:c/c/c\n\
+             toolbar.label: flat solid\ntoolbar.label.color: yellow\n\
+             toolbar.label.textColor: black\n",
+        );
+        let document: DocumentMut = vaht_style.parse().expect("TOML");
+        assert_eq!(
+            document["taskbar"]["workspace"]["text_color"].as_str(),
+            Some("black"),
+            "{vaht_style}"
+        );
+    }
+
+    #[test]
+    fn a_pressed_taskbar_button_has_its_own_arrow_color() {
+        let (_, vaht_style, _) = convert(
+            "toolbar.button: flat solid\ntoolbar.button.color: grey\n\
+             toolbar.button.picColor: white\ntoolbar.button.pressed: flat solid\n\
+             toolbar.button.pressed.color: grey\ntoolbar.button.pressed.picColor: red\n",
+        );
+        let document: DocumentMut = vaht_style.parse().expect("TOML");
+        assert_eq!(
+            document["taskbar"]["button"]["pressed"]["glyph_color"].as_str(),
+            Some("red"),
+            "{vaht_style}"
+        );
+    }
+
+    #[test]
+    fn a_bevel_width_is_the_bars_padding_and_spacing() {
+        let (_, vaht_style, _) = convert(
+            "window.bevelWidth: 3\ntoolbar.bevelWidth: 2\n\
+             window.title.focus: flat solid\nwindow.title.focus.color: grey\n",
+        );
+        let document: DocumentMut = vaht_style.parse().expect("TOML");
+        assert_eq!(
+            document["window"]["titlebar"]["padding"].to_string().trim(),
+            "[3, 3, 3, 3]"
+        );
+        assert_eq!(
+            document["window"]["titlebar"]["spacing"].as_integer(),
+            Some(3)
+        );
+        assert_eq!(document["taskbar"]["spacing"].as_integer(), Some(2));
+    }
+
+    #[test]
+    fn the_iconbars_border_is_the_window_list_entries() {
+        let (_, vaht_style, _) = convert(
+            "toolbar.iconbar.focused: flat solid\ntoolbar.iconbar.focused.color: grey\n\
+             toolbar.iconbar.focused.borderWidth: 2\n\
+             toolbar.iconbar.focused.borderColor: red\n\
+             toolbar.iconbar.unfocused: flat solid\ntoolbar.iconbar.unfocused.color: grey\n\
+             toolbar.iconbar.unfocused.borderWidth: 0\n",
+        );
+        let document: DocumentMut = vaht_style.parse().expect("TOML");
+        let entry = &document["taskbar"]["window-list"]["entry"];
+        assert_eq!(
+            entry["border"]["width"].as_integer(),
+            Some(2),
+            "{vaht_style}"
+        );
+        assert_eq!(entry["border"]["color"].as_str(), Some("red"));
+        assert_eq!(
+            entry["unfocused"]["border"]["width"].as_integer(),
+            Some(0),
+            "an unfocused entry with no line says so, since the focused one has one: {vaht_style}"
         );
     }
 }
