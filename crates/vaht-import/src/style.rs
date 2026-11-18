@@ -984,7 +984,7 @@ impl StyleFile {
         const BUTTONS: [(&str, &[&str]); 7] = [
             ("close", &["close"]),
             ("iconify", &["minimize"]),
-            ("maximize", &["maximize", "restore"]),
+            ("maximize", &["maximize"]),
             ("shade", &["shade"]),
             ("stick", &["stick"]),
             ("stuck", &["stuck"]),
