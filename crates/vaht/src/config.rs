@@ -14,7 +14,7 @@ use crate::terminal;
 
 /// Checks the configuration in `directory`, printing the result.
 #[must_use]
-pub fn run(directory: &Path) -> ExitCode {
+pub fn check(directory: &Path) -> ExitCode {
     let problems = Config::problems(directory);
     if problems.is_empty() {
         terminal::print(&format!(

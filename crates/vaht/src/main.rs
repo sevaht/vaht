@@ -13,11 +13,11 @@ fn run_config(command: &ConfigCommand, arguments: &Arguments) -> ExitCode {
     match command {
         ConfigCommand::Check {
             print_defaults: true,
-        } => vaht::check::print_defaults(),
+        } => vaht::config::print_defaults(),
         ConfigCommand::Check {
             print_defaults: false,
-        } => vaht::check::run(&arguments.config_directory()),
-        ConfigCommand::Schema { file } => vaht::check::schema(file.file()),
+        } => vaht::config::check(&arguments.config_directory()),
+        ConfigCommand::Schema { file } => vaht::config::schema(file.file()),
         ConfigCommand::Files
         | ConfigCommand::Get { .. }
         | ConfigCommand::Set { .. }

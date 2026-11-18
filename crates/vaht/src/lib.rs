@@ -7,7 +7,7 @@
 //! it is reachable from tests and from the generated documentation.
 
 pub mod arguments;
-pub mod check;
+pub mod config;
 pub mod dialog;
 pub mod import;
 pub mod logging;
