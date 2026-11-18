@@ -1041,7 +1041,13 @@ exactly what each element gets.
 - The default style is itself a style file, `vaht` (`data/styles/vaht.toml`
   in the source): installed as `/usr/share/vaht/styles/vaht.toml` for people to
   read and copy, and built into vaht, so it needs no file; printed by
-  `vaht config check --print-defaults`.
+  `vaht config check --print-defaults`. With no `style` chosen, `vaht` is the
+  style, and it is found like any other: a `vaht.toml` in your `styles/`
+  directory first, then the installed one, and the copy built in only when
+  neither exists. So editing a `vaht.toml` changes the default style. (The
+  config-problem banner is the exception: it always uses the copy built in, so
+  a style of yours cannot hide it. `/usr/share/vaht/styles` is not watched, so
+  an edit there is read on the next reload.)
 - A style file is a whole style: what it leaves out takes vaht's fallback,
   not the built-in style's value.
 

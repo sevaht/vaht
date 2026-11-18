@@ -145,18 +145,18 @@ impl Config {
             (fallback, instead),
             &mut problems,
         );
-        let style = match &settings.style {
-            Some(name) => StyleFile::load(directory, name).unwrap_or_else(|error| {
-                problems.push(ConfigProblem {
-                    file: format!("style {name}"),
-                    key: None,
-                    message: error.to_string(),
-                    instead: Instead::BuiltIn,
-                });
-                Style::built_in()
-            }),
-            None => Style::built_in(),
-        };
+        // No style chosen is the default style, which is a file like any other
+        // (a user's, or the installed one) and only falls back to the copy built in.
+        let name = settings.style.as_deref().unwrap_or(Style::DEFAULT_NAME);
+        let style = StyleFile::load(directory, name).unwrap_or_else(|error| {
+            problems.push(ConfigProblem {
+                file: format!("style {name}"),
+                key: None,
+                message: error.to_string(),
+                instead: Instead::BuiltIn,
+            });
+            Style::built_in()
+        });
         let mut config = Self {
             bindings: Self::lenient_file::<Bindings>(
                 bindings_file,
@@ -506,6 +506,22 @@ mod tests {
         assert_eq!(
             problem.brief(),
             "settings.toml: taskbar.windows: unknown field `windows` (using the default)"
+        );
+    }
+
+    #[test]
+    fn a_vaht_toml_of_the_users_is_the_default_style_when_none_is_chosen() {
+        let configuration = directory(&[("settings.toml", "[taskbar]\nrows = 2\n")]);
+        let styles = configuration.path().join("styles");
+        std::fs::create_dir(&styles).expect("a directory");
+        std::fs::write(styles.join("vaht.toml"), "[window.titlebar]\nheight = 33\n")
+            .expect("written");
+        let loaded = load(&configuration);
+        assert_eq!(loaded.problems, []);
+        assert_eq!(
+            loaded.config.style.metrics().titlebar_height,
+            33,
+            "no `style` chosen, so the default's own file, not the copy built in"
         );
     }
 }

@@ -197,10 +197,10 @@ impl Config {
                 .and_then(|()| Settings::from_table(table))
                 .map_err(|message| ConfigError::Changed { message })?
         };
-        let style = match &settings.style {
-            Some(name) => StyleFile::load(directory, name)?,
-            None => Style::built_in(),
-        };
+        // No style chosen is the default style, which is a file like any other
+        // (a user's, or the installed one) and only falls back to the copy built in.
+        let name = settings.style.as_deref().unwrap_or(Style::DEFAULT_NAME);
+        let style = StyleFile::load(directory, name)?;
         let config = Self {
             bindings: bindings.read(directory)?,
             settings,
