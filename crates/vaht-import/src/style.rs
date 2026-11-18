@@ -595,6 +595,9 @@ impl StyleFile {
                 if element == StyleElement::Button {
                     self.add_glyph_images(&mut cell, state);
                 }
+                if element == StyleElement::MenuItem {
+                    self.add_menu_images(&mut cell, state);
+                }
                 if let Some(names) = sources.justify {
                     let justify = self.justify(names);
                     cell.insert(Property::Justify, Written(Value::from(justify)));
@@ -1002,6 +1005,26 @@ impl StyleFile {
                 for glyph in glyphs {
                     images.insert(*glyph, Value::from(image.clone()));
                 }
+            }
+        }
+        if !images.is_empty() {
+            cell.insert(Property::GlyphImages, Written(Value::InlineTable(images)));
+        }
+    }
+
+    /// Adds to `cell` the pictures the style gives a menu item's submenu
+    /// bullet and check mark (`menu.submenu.pixmap`, `menu.selected.pixmap`;
+    /// `menu.hilite.…` for the highlighted item).
+    fn add_menu_images(&mut self, cell: &mut Cell, state: WidgetState) {
+        let prefix = match state {
+            WidgetState::Focused => "menu",
+            WidgetState::Hovered => "menu.hilite",
+            WidgetState::Unfocused | WidgetState::Pressed | WidgetState::Disabled => return,
+        };
+        let mut images = InlineTable::new();
+        for (resource, glyph) in [("submenu", "submenu"), ("selected", "check")] {
+            if let Some(image) = self.image_resource(&format!("{prefix}.{resource}.pixmap")) {
+                images.insert(glyph, Value::from(image));
             }
         }
         if !images.is_empty() {
