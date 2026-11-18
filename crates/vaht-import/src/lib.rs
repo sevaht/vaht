@@ -24,6 +24,7 @@ mod keys;
 mod menu;
 mod outputs;
 mod pattern;
+mod presentation;
 mod report;
 mod resources;
 mod settings;
@@ -135,6 +136,8 @@ impl FluxboxSetup {
         let init_path = self.init.path().to_path_buf();
         let init = InitFile::new(self.init).convert(&mut report);
         let mut settings = init.settings;
+        let layout = presentation::take_layout(&mut settings);
+        let mut theme_style = None;
         if let Some(outputs) = init.outputs {
             files.push(OutputFile {
                 name: "outputs.toml".to_owned(),
@@ -145,25 +148,19 @@ impl FluxboxSetup {
             let name = style_name(path);
             let mut vaht_style = StyleFile::new(path, text).convert(&mut report);
             Self::place_alphas(&init.alphas, Some(&mut vaht_style), &init_path, &mut report);
-            settings.insert("style", toml_edit::value(name.clone()));
             files.push(OutputFile {
                 name: format!("styles/{name}.toml"),
                 text: header(path) + &vaht_style.to_string(),
             });
+            theme_style = Some(name);
         }
         if self.style.is_none() {
             Self::place_alphas(&init.alphas, None, &init_path, &mut report);
         }
-        if let Some((path, text)) = &self.startup {
-            let why = match StartupWallpaper::find(text) {
-                Some(wallpaper) => {
-                    settings.insert("wallpaper", wallpaper.settings());
-                    "the startup script, but for its wallpaper: add the rest to \
-                     session.autostart if vaht should run it"
-                }
-                None => "the startup script: add it to session.autostart if vaht should run it",
-            };
-            report.note(path, 1, Reason::NotYetInVaht, why);
+        Self::convert_startup(self.startup.as_ref(), &mut settings, &mut report);
+        if let Some((theme, look)) = Self::look_files(&layout, theme_style.as_deref(), &init_path) {
+            files.extend(look);
+            settings.insert("theme", toml_edit::value(theme));
         }
         files.insert(
             0,
@@ -223,6 +220,63 @@ impl FluxboxSetup {
             files,
             report,
         }
+    }
+
+    /// Converts the `startup` script: its wallpaper into `settings`, the rest
+    /// reported, as its commands belong in `session.autostart`.
+    fn convert_startup(
+        startup: Option<&(PathBuf, String)>,
+        settings: &mut toml_edit::DocumentMut,
+        report: &mut Report,
+    ) {
+        if let Some((path, text)) = startup {
+            let why = match StartupWallpaper::find(text) {
+                Some(wallpaper) => {
+                    settings.insert("wallpaper", wallpaper.settings());
+                    "the startup script, but for its wallpaper: add the rest to \
+                     session.autostart if vaht should run it"
+                }
+                None => "the startup script: add it to session.autostart if vaht should run it",
+            };
+            report.note(path, 1, Reason::NotYetInVaht, why);
+        }
+    }
+
+    /// Returns the name of the theme and the files that make it, the layout
+    /// and the theme itself, for the `layout` taken from `init` (at
+    /// `init_path`) and the `style` converted (written already); none if
+    /// there is neither. What is shown and how it looks go to a style and a
+    /// layout under one theme, so `settings.toml` is left with how vaht
+    /// behaves and another theme swaps the look whole.
+    fn look_files(
+        layout: &toml_edit::DocumentMut,
+        style: Option<&str>,
+        init_path: &Path,
+    ) -> Option<(String, Vec<OutputFile>)> {
+        let layout_name =
+            (!layout.as_table().is_empty()).then(|| style.unwrap_or("fluxbox").to_owned());
+        let name = style.map(str::to_owned).or_else(|| layout_name.clone())?;
+        let header = format!(
+            "# Converted from {} by vaht import fluxbox.\n\n",
+            init_path.display()
+        );
+        let mut files = Vec::new();
+        let mut theme = toml_edit::DocumentMut::new();
+        if let Some(style) = style {
+            theme.insert("style", toml_edit::value(style));
+        }
+        if let Some(layout_name) = &layout_name {
+            theme.insert("layout", toml_edit::value(layout_name.clone()));
+            files.push(OutputFile {
+                name: format!("layouts/{layout_name}.toml"),
+                text: format!("{header}{layout}"),
+            });
+        }
+        files.push(OutputFile {
+            name: format!("themes/{name}.toml"),
+            text: format!("{header}{theme}"),
+        });
+        Some((name, files))
     }
 
     /// Puts the `alphas` `init` (at `init_path`) sets into the converted

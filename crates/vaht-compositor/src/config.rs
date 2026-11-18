@@ -27,6 +27,7 @@ pub(crate) mod schema;
 mod settings;
 mod source;
 mod style;
+mod theme;
 mod unique_map;
 mod watch;
 
@@ -61,6 +62,7 @@ pub(crate) use self::settings::{
 };
 pub(crate) use self::source::ConfigSource;
 pub(crate) use self::style::StyleFile;
+pub(crate) use self::theme::ThemeFile;
 
 /// One configuration file and vaht's built-in version of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -228,6 +230,11 @@ impl Config {
                 .apply_to(&mut user)
                 .and_then(|()| Settings::from_table(user.clone()))
                 .map_err(|message| ConfigError::Changed { message })?;
+        }
+        if let Some(name) = user.get("theme").and_then(toml::Value::as_str) {
+            ThemeFile::find(directory, name)?
+                .read()?
+                .lay_under(&mut user);
         }
         let Some(name) = user.get("layout").and_then(toml::Value::as_str) else {
             let settings =

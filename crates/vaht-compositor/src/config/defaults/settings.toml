@@ -1,8 +1,14 @@
 # vaht's built-in settings: what applies to each key that
 # ~/.config/vaht/settings.toml leaves out. Every key is optional.
 
+# The theme: a style and a layout under one name, themes/<name>.toml in this
+# directory or in /usr/share/vaht/themes. The `style` and `layout` below, when
+# set, win over the theme's.
+# theme = "name"
+
 # The style (colors, fonts, textures): styles/<name>.toml in this directory,
-# or in /usr/share/vaht/styles. Without it, `vaht`, the default style.
+# or in /usr/share/vaht/styles. Without it, the theme's, else `vaht`, the
+# default style.
 # style = "name"
 
 # The layout (a named set of presentation settings: what the taskbar shows,

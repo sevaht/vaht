@@ -178,3 +178,40 @@ fn a_layout_cannot_be_chosen_that_does_not_exist() {
         "{refused:?}"
     );
 }
+
+/// A theme of the slim layout.
+const CALM: &str = "layout = \"slim\"\n";
+
+#[test]
+fn a_theme_brings_its_layout_and_settings_toml_still_wins() {
+    let vaht = start(&[
+        ("settings.toml", "theme = \"calm\"\n"),
+        ("themes/calm.toml", CALM),
+        ("layouts/slim.toml", SLIM),
+    ]);
+    let shown = settings(&vaht);
+    assert!(shown.contains("taskbar.rows = 3"), "{shown}");
+    assert!(shown.contains("layout slim"), "{shown}");
+}
+
+#[test]
+fn choosing_a_theme_puts_back_the_style_and_layout_that_would_win_over_it() {
+    let vaht = start(&[
+        ("settings.toml", "theme = \"calm\"\nlayout = \"full\"\n"),
+        ("themes/calm.toml", CALM),
+        ("layouts/slim.toml", SLIM),
+        ("layouts/full.toml", FULL),
+    ]);
+    assert!(
+        settings(&vaht).contains("taskbar.rows = 1"),
+        "the file's layout wins"
+    );
+    let chosen = run(&vaht, &["run", "set-theme", "calm"]);
+    assert!(chosen.status.success(), "{chosen:?}");
+    assert!(
+        settings(&vaht).contains("taskbar.rows = 3"),
+        "now the theme's"
+    );
+    let files = String::from_utf8(run(&vaht, &["config", "files"]).stdout).expect("UTF-8");
+    assert!(files.contains("themes: calm"), "{files}");
+}

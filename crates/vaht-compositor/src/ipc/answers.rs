@@ -8,7 +8,7 @@ use vaht_ipc::{
 use super::{Answer, IpcClient, IpcHandler, IpcServer};
 use crate::Compositor;
 use crate::WindowId;
-use crate::config::{Action, Command, LayoutFile, SettingChange, StyleFile, schema};
+use crate::config::{Action, Command, LayoutFile, SettingChange, StyleFile, ThemeFile, schema};
 use crate::execution::ExecutionContext;
 use crate::outputs::Outputs;
 
@@ -98,6 +98,18 @@ impl Compositor {
         }
     }
 
+    /// Returns the files and the styles, layouts and themes there are.
+    fn config_files(&self) -> Reply {
+        let directory = self.config_source.directory();
+        Reply::ConfigFiles {
+            files: self.config_file_infos(),
+            styles: StyleFile::available(directory),
+            layouts: LayoutFile::available(directory),
+            themes: ThemeFile::available(directory),
+            problems: self.config_problem_texts(),
+        }
+    }
+
     /// Carries out `request`, from the process `peer` (none if unknown),
     /// and returns the reply.
     fn answer_now(&mut self, request: Request, peer: Option<i32>) -> Reply {
@@ -153,12 +165,7 @@ impl Compositor {
                     message: "this vaht has no log filter to change".to_owned(),
                 },
             },
-            Request::ConfigFiles {} => Reply::ConfigFiles {
-                files: self.config_file_infos(),
-                styles: StyleFile::available(self.config_source.directory()),
-                layouts: LayoutFile::available(self.config_source.directory()),
-                problems: self.config_problem_texts(),
-            },
+            Request::ConfigFiles {} => self.config_files(),
             Request::ConfigSchema { file } => match schema::schema_of(file) {
                 Some(schema) => Reply::ConfigSchema { schema },
                 None => Self::undescribed(file),

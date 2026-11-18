@@ -42,12 +42,16 @@ use crate::window_manager::{
 )]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Settings {
-    /// The style: `styles/<name>.toml`; `vaht` when absent.
+    /// The theme: `themes/<name>.toml`, a style and a layout under one name.
+    /// `style` and `layout` here win over the theme's own; none when absent.
+    #[schemars(extend("x-vaht-names" = "themes"))]
+    pub(crate) theme: Option<String>,
+    /// The style: `styles/<name>.toml`; the theme's, else `vaht`, when absent.
     #[schemars(extend("x-vaht-names" = "styles"))]
     pub(crate) style: Option<String>,
     /// The layout: `layouts/<name>.toml`, a named set of presentation
     /// settings (what the taskbar shows, the window buttons) that lies under
-    /// these settings, which win over it; none when absent.
+    /// these settings, which win over it; the theme's, else none, when absent.
     #[schemars(extend("x-vaht-names" = "layouts"))]
     pub(crate) layout: Option<String>,
     /// The taskbar.

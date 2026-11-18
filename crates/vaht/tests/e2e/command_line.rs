@@ -198,7 +198,7 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     std::fs::write(
         setup.path().join("init"),
         "session.screen0.focusModel: MouseFocus\nsession.styleFile: styles/Night Sky\n\
-         session.screen0.toolbar.alpha: 200\n",
+         session.screen0.toolbar.alpha: 200\nsession.screen0.toolbar.autoHide: true\n",
     )
     .expect("written");
     std::fs::create_dir_all(setup.path().join("styles/Night Sky")).expect("made");
@@ -238,7 +238,18 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     assert!(printed.contains("keys:2: dropped"), "{printed}");
     let settings = std::fs::read_to_string(target.path().join("settings.toml")).expect("written");
     assert!(settings.contains("model = \"sloppy\""), "{settings}");
-    assert!(settings.contains("style = \"Night-Sky\""), "{settings}");
+    assert!(settings.contains("theme = \"Night-Sky\""), "{settings}");
+    assert!(
+        !settings.contains("auto_hide"),
+        "what is shown is the layout's, not settings.toml's: {settings}"
+    );
+    let layout =
+        std::fs::read_to_string(target.path().join("layouts/Night-Sky.toml")).expect("written");
+    assert!(layout.contains("auto_hide = true"), "{layout}");
+    let theme =
+        std::fs::read_to_string(target.path().join("themes/Night-Sky.toml")).expect("written");
+    assert!(theme.contains("style = \"Night-Sky\""), "{theme}");
+    assert!(theme.contains("layout = \"Night-Sky\""), "{theme}");
     let style =
         std::fs::read_to_string(target.path().join("styles/Night-Sky.toml")).expect("written");
     assert!(style.contains("SteelBlue"), "{style}");

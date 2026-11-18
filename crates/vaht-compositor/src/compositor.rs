@@ -71,7 +71,7 @@ use crate::client::{ClientListener, ListenError};
 use crate::config::{
     Action, Command, Config, ConfigProblem, ConfigSource, Delay, FocusModel, KeyChord, LayoutFile,
     Loaded, MenuGenerator, MenuRequest, Menus, Modifiers, ResizeFrom, SettingChange,
-    SettingOverrides, StyleFile, WindowManagerAction,
+    SettingOverrides, StyleFile, ThemeFile, WindowManagerAction,
 };
 use crate::config::{CycleOrder, WindowCycle};
 use crate::config::{
@@ -3029,6 +3029,11 @@ impl Compositor {
             Action::Settings => self.launcher.show_settings(),
             Action::SetStyle(name) => self.change_setting(SettingChange::style(name)),
             Action::SetLayout(name) => self.change_setting(SettingChange::layout(name)),
+            Action::SetTheme(name) => {
+                if let Err(error) = self.change_settings(SettingChange::theme(name)) {
+                    tracing::warn!(error, "the theme was not set");
+                }
+            }
             Action::SetSetting(change) | Action::UnsetSetting(change) => {
                 self.change_setting(change.clone());
             }
@@ -3206,6 +3211,10 @@ impl Compositor {
             .with_layouts(
                 LayoutFile::available(self.config_source.directory()),
                 self.config.settings.layout.as_deref(),
+            )
+            .with_themes(
+                ThemeFile::available(self.config_source.directory()),
+                self.config.settings.theme.as_deref(),
             )
             .with_window_icons(icons)
             .with_outputs(OutputChoices {

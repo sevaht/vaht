@@ -1172,6 +1172,28 @@ configuration keeps running (the usual red banner, and `vaht config files`).
 `vaht config get` marks the settings a layout supplies with `+` (and the ones
 changed in place with `*`); `vaht config files` lists the layouts there are.
 
+### 10.4 Themes: `themes/<name>.toml`
+
+A theme is a style and a layout under one name, so a whole look is chosen at
+once. It says nothing else:
+
+```toml
+# themes/calm.toml
+style = "nord"
+layout = "slim"
+```
+
+Either part may be left out. `settings.toml` picks one with `theme = "calm"`,
+found like styles and layouts (`themes/`, then `/usr/share/vaht/themes`). A
+`style` or `layout` `settings.toml` sets itself wins over the theme's, so a
+theme can be taken with another style or layout. A theme that is missing or says
+more than a style and a layout is reported against its own file, and the rest of
+the configuration keeps running.
+
+`set-theme <name>` (and the `themes` menu list) chooses a theme and puts back
+the `style` and `layout` settings, so the theme's apply and nothing overrides
+them; `save-settings` writes that.
+
 ## 11. `vaht import`
 
 ```
@@ -1208,8 +1230,10 @@ vaht import fluxbox-style <path>... [--to ~/.config/vaht/styles] [--force] [--no
   style Name`.
 - **Built so far:** `init` to `settings.toml`, `keys` to `bindings.toml`,
   `apps` to `rules.toml`, and the style `session.styleFile` names (a file,
-  or a directory with `theme.cfg`) to `styles/<name>.toml`, which the
-  converted `settings.toml` chooses.
+  or a directory with `theme.cfg`) to `styles/<name>.toml`. What `init` sets
+  that is presentation (the toolbar, the window buttons, ...) goes to
+  `layouts/<name>.toml`, a theme `themes/<name>.toml` ties the two, and the
+  converted `settings.toml` holds only behavior and `theme = "<name>"`.
   Every setting, binding or pattern vaht lacks is reported as "not in vaht
   yet", so importing again as features arrive picks them up. The first
   wallpaper `startup` sets with `swaybg`, `feh --bg-*` or `fbsetbg` becomes

@@ -166,28 +166,9 @@ fn readable(reply: &Reply) -> String {
             files,
             styles,
             layouts,
+            themes,
             problems,
-        } => {
-            for info in files {
-                let state = match info.state {
-                    vaht_ipc::ConfigState::Clean => "clean",
-                    vaht_ipc::ConfigState::Changed => "changed",
-                };
-                let _ = writeln!(text, "{}\t{state}", info.file.file_name());
-            }
-            let _ = writeln!(text, "\nstyles: {}", styles.join(", "));
-            let _ = writeln!(text, "layouts: {}", layouts.join(", "));
-            if !problems.is_empty() {
-                let _ = writeln!(
-                    text,
-                    "\n{} problem(s) in the configuration, left out:",
-                    problems.len()
-                );
-                for problem in problems {
-                    let _ = writeln!(text, "  {problem}");
-                }
-            }
-        }
+        } => config_files_lines(&mut text, files, [styles, layouts, themes], problems),
         Reply::ConfigSchema { schema } => {
             let _ = writeln!(
                 text,
@@ -218,6 +199,42 @@ fn readable(reply: &Reply) -> String {
         }
     }
     text
+}
+
+/// Appends the lines of a `config files` reply to `text`: each file and its
+/// state, the `lists` of styles, layouts and themes there are, and the
+/// `problems` left out.
+fn config_files_lines(
+    text: &mut String,
+    files: &[vaht_ipc::ConfigFileInfo],
+    lists: [&[String]; 3],
+    problems: &[String],
+) {
+    for info in files {
+        let state = match info.state {
+            vaht_ipc::ConfigState::Clean => "clean",
+            vaht_ipc::ConfigState::Changed => "changed",
+        };
+        let _ = writeln!(text, "{}\t{state}", info.file.file_name());
+    }
+    for (index, (kind, names)) in ["styles", "layouts", "themes"]
+        .iter()
+        .zip(lists)
+        .enumerate()
+    {
+        let gap = if index == 0 { "\n" } else { "" };
+        let _ = writeln!(text, "{gap}{kind}: {}", names.join(", "));
+    }
+    if !problems.is_empty() {
+        let _ = writeln!(
+            text,
+            "\n{} problem(s) in the configuration, left out:",
+            problems.len()
+        );
+        for problem in problems {
+            let _ = writeln!(text, "  {problem}");
+        }
+    }
 }
 
 /// Appends a `key = value` line to `text` for each setting in `value`,

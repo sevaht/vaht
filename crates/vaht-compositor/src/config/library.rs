@@ -1,5 +1,5 @@
 //! Named files of one kind, found by name: `styles/<name>.toml`,
-//! `layouts/<name>.toml` (02 §10).
+//! `layouts/<name>.toml`, `themes/<name>.toml` (02 §10).
 //!
 //! Each kind has a directory in the configuration directory, where the user's
 //! files are, and one installed with vaht; [`Library::find`] looks in the
@@ -13,7 +13,7 @@ use super::ConfigError;
 /// One kind of named file, and where it is looked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Library {
-    /// What the files are called in messages: `style`, `layout`.
+    /// What the files are called in messages: `style`, `layout`, `theme`.
     pub(crate) kind: &'static str,
     /// The directory of the user's, inside the configuration directory.
     pub(crate) directory: &'static str,
@@ -36,8 +36,15 @@ impl Library {
         system_directory: "/usr/share/vaht/layouts",
     };
 
+    /// The themes (a style and a layout under one name).
+    pub(crate) const THEMES: Self = Self {
+        kind: "theme",
+        directory: "themes",
+        system_directory: "/usr/share/vaht/themes",
+    };
+
     /// Every kind: the directories the configuration watches.
-    pub(crate) const ALL: [Self; 2] = [Self::STYLES, Self::LAYOUTS];
+    pub(crate) const ALL: [Self; 3] = [Self::STYLES, Self::LAYOUTS, Self::THEMES];
 
     /// Finds the file `name`: in the kind's directory of the configuration
     /// `directory`, then among the installed ones.

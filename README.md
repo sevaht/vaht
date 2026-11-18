@@ -21,7 +21,8 @@ Colors, fonts and textures are a *style* (`styles/<name>.toml`, the `style`
 setting). Which taskbar widgets, clock and window buttons are shown is a *layout*
 (`layouts/<name>.toml`, the `layout` setting); it lies under `settings.toml`,
 which wins, so swapping layouts (`vaht run set-layout <name>`) leaves your own
-settings alone.
+settings alone. A *theme* (`themes/<name>.toml`, `vaht run set-theme <name>`) is
+a style and a layout under one name.
 
 ## Installing
 

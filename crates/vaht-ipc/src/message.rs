@@ -174,6 +174,7 @@ impl Event {
                 files,
                 styles: Vec::new(),
                 layouts: Vec::new(),
+                themes: Vec::new(),
                 problems,
             },
         }
@@ -308,6 +309,9 @@ pub enum Reply {
         /// The layouts that can be chosen: those in the configuration
         /// directory's `layouts/` and the system's.
         layouts: Vec<String>,
+        /// The themes that can be chosen: those in the configuration
+        /// directory's `themes/` and the system's.
+        themes: Vec<String>,
         /// What vaht could not use of the configuration files and left out,
         /// a sentence each; empty when all of it is in effect.
         problems: Vec<String>,

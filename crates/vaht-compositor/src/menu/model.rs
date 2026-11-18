@@ -186,6 +186,10 @@ pub(crate) struct MenuBuilder<'state> {
     layouts: Vec<String>,
     /// The layout in use, if there is one.
     current_layout: Option<&'state str>,
+    /// The themes there are, for the `themes` list.
+    themes: Vec<String>,
+    /// The theme in use, if there is one.
+    current_theme: Option<&'state str>,
     /// Each window's icon, for lists of windows that show them.
     window_icons: HashMap<WindowId, vaht_ui::Icon>,
     /// The icons `menus.toml` names, by the name written, those found.
@@ -234,6 +238,8 @@ impl<'state> MenuBuilder<'state> {
             current_style: None,
             layouts: Vec::new(),
             current_layout: None,
+            themes: Vec::new(),
+            current_theme: None,
             window_icons: HashMap::new(),
             named_icons: HashMap::new(),
             outputs: OutputChoices::default(),
@@ -281,6 +287,15 @@ impl<'state> MenuBuilder<'state> {
     ) -> Self {
         self.layouts = layouts;
         self.current_layout = current;
+        self
+    }
+
+    /// Returns the builder listing `themes` in the `themes` list, `current`
+    /// checked.
+    #[must_use]
+    pub(crate) fn with_themes(mut self, themes: Vec<String>, current: Option<&'state str>) -> Self {
+        self.themes = themes;
+        self.current_theme = current;
         self
     }
 
@@ -490,6 +505,27 @@ impl<'state> MenuBuilder<'state> {
             .collect()
     }
 
+    /// Returns an item for each of `names`, the one that is `current`
+    /// checked, choosing it running `action` on its name.
+    fn named_items(
+        names: &[String],
+        current: Option<&str>,
+        action: fn(String) -> Action,
+    ) -> Vec<MenuItem> {
+        names
+            .iter()
+            .map(|name| MenuItem::Choice {
+                label: name.clone(),
+                choice: MenuChoice::Run {
+                    command: Command::Run(action(name.clone())),
+                    window: None,
+                },
+                mark: Some(current == Some(name.as_str())),
+                icon: None,
+            })
+            .collect()
+    }
+
     /// Returns the items of the list `generator` makes.
     fn generate(&self, generator: MenuGenerator) -> Vec<MenuItem> {
         let manager = self.window_manager;
@@ -527,32 +563,15 @@ impl<'state> MenuBuilder<'state> {
                 })
                 .collect(),
             MenuGenerator::WindowList => self.window_list(),
-            MenuGenerator::Styles => self
-                .styles
-                .iter()
-                .map(|name| MenuItem::Choice {
-                    label: name.clone(),
-                    choice: MenuChoice::Run {
-                        command: Command::Run(Action::SetStyle(name.clone())),
-                        window: None,
-                    },
-                    mark: Some(self.current_style == Some(name.as_str())),
-                    icon: None,
-                })
-                .collect(),
-            MenuGenerator::Layouts => self
-                .layouts
-                .iter()
-                .map(|name| MenuItem::Choice {
-                    label: name.clone(),
-                    choice: MenuChoice::Run {
-                        command: Command::Run(Action::SetLayout(name.clone())),
-                        window: None,
-                    },
-                    mark: Some(self.current_layout == Some(name.as_str())),
-                    icon: None,
-                })
-                .collect(),
+            MenuGenerator::Styles => {
+                Self::named_items(&self.styles, self.current_style, Action::SetStyle)
+            }
+            MenuGenerator::Layouts => {
+                Self::named_items(&self.layouts, self.current_layout, Action::SetLayout)
+            }
+            MenuGenerator::Themes => {
+                Self::named_items(&self.themes, self.current_theme, Action::SetTheme)
+            }
             MenuGenerator::Profiles => self.profile_items(),
             MenuGenerator::Outputs => self.output_items(),
             MenuGenerator::Layer => {
