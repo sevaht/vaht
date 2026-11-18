@@ -20,7 +20,8 @@
 # built-in copy, so a style of yours cannot hide it; the `warning` section
 # here is what it looks like).
 # States:
-# focused, unfocused, pressed, hovered (a menu's highlighted item) and
+# focused, unfocused, pressed, hovered (a menu's highlighted item; also a
+# window button under the pointer, if [window.button.hovered] says how) and
 # disabled (a menu item that does nothing).
 
 [default]

@@ -37,16 +37,18 @@ impl<'pixmap> Canvas<'pixmap> {
     }
 
     /// Paints every widget of `layout`, styled by `style` in the state
-    /// `state_of` gives for each placed widget.
+    /// `state_of` gives for each placed widget, and whether the pointer is
+    /// on it.
     pub(crate) fn paint<Hit: Copy>(
         &mut self,
         layout: &Layout<Hit>,
         style: &Style,
         typesetter: &mut Typesetter,
-        state_of: impl Fn(&Placed<Hit>) -> WidgetState,
+        state_of: impl Fn(&Placed<Hit>) -> (WidgetState, bool),
     ) {
         for placed in layout.placed() {
-            let style = style.element_style(placed.element, state_of(placed));
+            let (state, is_hovered) = state_of(placed);
+            let style = style.element_style_under_pointer(placed.element, state, is_hovered);
             if placed.has_background {
                 self.fill_texture(&style.texture, placed.rect);
             }

@@ -981,7 +981,11 @@ exactly what each element gets.
     text color);
   - other: `tooltip`, `snap-picker`, `wireframe`.
 - **States:** `focused`, `unfocused`, `hovered`, `pressed`, `active`,
-  `disabled`. A menu item's highlight is its `hovered` state.
+  `disabled`. A menu item's highlight is its `hovered` state. A window's
+  titlebar buttons have one too: while the pointer is on one, what the element's
+  `hovered` section sets (`[window.button.hovered]`: a texture, `glyph_color`,
+  `glyph_images`) is laid over its look in the window's own state. A style
+  without the section looks the same hovered or not, as Fluxbox's do.
 - **Style keys:**
   - `texture`: `{ solid = "#rrggbb" }`, or
     `{ gradient = "vertical", from, to, bevel = "raised"|"sunken", interlaced }`,

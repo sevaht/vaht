@@ -45,6 +45,8 @@ pub struct Panel<Content: PanelContent> {
     pixels: Option<Pixmap>,
     /// The widget the pointer is holding down.
     pressed: Option<Content::Hit>,
+    /// The button the pointer is on.
+    hovered: Option<Content::Hit>,
     /// Whether the pixels are out of date.
     is_dirty: bool,
     /// Counts repaints, so a compositor knows when to upload again.
@@ -61,6 +63,7 @@ impl<Content: PanelContent> Panel<Content> {
             layout: None,
             pixels: None,
             pressed: None,
+            hovered: None,
             is_dirty: true,
             generation: 0,
         }
@@ -159,6 +162,30 @@ impl<Content: PanelContent> Panel<Content> {
         pressed.filter(|held| self.hit_at(point) == Some(*held))
     }
 
+    /// Notes where the pointer is, at `point` in the panel (none: not on it);
+    /// returns whether the button it is on changed, which needs painting
+    /// again.
+    pub fn hover(&mut self, point: Option<Point>) -> bool {
+        let hit = point.and_then(|point| self.button_hit_at(point));
+        if hit == self.hovered {
+            return false;
+        }
+        self.hovered = hit;
+        self.invalidate();
+        true
+    }
+
+    /// Returns what clicking at `point` would report, if it is a button.
+    fn button_hit_at(&self, point: Point) -> Option<Content::Hit> {
+        let layout = self.layout.as_ref()?;
+        let hit = layout.hit_at(point)?;
+        layout
+            .placed()
+            .iter()
+            .any(|placed| placed.is_button && placed.hit == Some(hit))
+            .then_some(hit)
+    }
+
     /// Lets go without clicking anything.
     pub fn cancel_press(&mut self) {
         self.set_pressed(None);
@@ -175,12 +202,16 @@ impl<Content: PanelContent> Panel<Content> {
         self.pixels = Pixmap::new(self.size.width, self.size.height);
         if let Some(pixels) = &mut self.pixels {
             let base = self.content.state();
-            let pressed = self.pressed;
+            let (pressed, hovered) = (self.pressed, self.hovered);
             Canvas::new(pixels).paint(&layout, style, typesetter, |placed| {
-                if placed.is_button && placed.hit.is_some() && placed.hit == pressed {
-                    WidgetState::Pressed
+                let is_button = placed.is_button && placed.hit.is_some();
+                if is_button && placed.hit == pressed {
+                    (WidgetState::Pressed, false)
                 } else {
-                    placed.state.unwrap_or(base)
+                    (
+                        placed.state.unwrap_or(base),
+                        is_button && placed.hit == hovered,
+                    )
                 }
             });
             self.corners.cut(pixels);
@@ -280,6 +311,19 @@ mod tests {
         panel
     }
 
+    /// The test titlebar, painted in `style`.
+    fn painted_titlebar_in(style: &Style, typesetter: &mut Typesetter) -> Panel<Titlebar> {
+        let mut panel = Panel::new(
+            Titlebar {
+                title: "kitty: ~/scm".to_owned(),
+                is_focused: true,
+            },
+            Size::new(200, 20),
+        );
+        assert!(panel.paint(style, typesetter));
+        panel
+    }
+
     /// The color of the pixel at `x`, `y`.
     fn pixel(panel: &Panel<Titlebar>, x: u32, y: u32) -> (u8, u8, u8) {
         let pixel = panel
@@ -329,6 +373,50 @@ mod tests {
         panel.press(Point::new(190, 10));
         assert!(panel.paint(&style, &mut typesetter));
         assert_ne!(pixel(&panel, 181, 18), before);
+    }
+
+    #[test]
+    fn a_button_under_the_pointer_takes_what_its_hovered_section_sets() {
+        let layers = crate::style::StyleLayers::from_toml(
+            "[window.button]\ntexture = { solid = \"black\" }\n\
+             [window.button.hovered]\ntexture = { solid = \"red\" }\n",
+        )
+        .expect("a valid style");
+        let style = Style::resolve(&layers);
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = painted_titlebar_in(&style, &mut typesetter);
+        assert_eq!(pixel(&panel, 185, 3), (0, 0, 0));
+        assert!(panel.hover(Some(Point::new(190, 10))), "the button changed");
+        assert!(panel.paint(&style, &mut typesetter));
+        assert_eq!(pixel(&panel, 185, 3), (255, 0, 0), "hovered");
+        assert!(
+            !panel.hover(Some(Point::new(191, 11))),
+            "still the same button"
+        );
+        assert!(panel.hover(None));
+        panel.paint(&style, &mut typesetter);
+        assert_eq!(pixel(&panel, 185, 3), (0, 0, 0), "and back");
+    }
+
+    #[test]
+    fn a_style_without_a_hovered_section_looks_the_same_hovered_or_not() {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let style = Style::built_in();
+        let mut panel = painted_titlebar(&mut typesetter);
+        let before = panel.pixels().expect("painted").clone();
+        panel.hover(Some(Point::new(190, 10)));
+        panel.paint(&style, &mut typesetter);
+        assert_eq!(panel.pixels().expect("painted"), &before);
+    }
+
+    #[test]
+    fn hovering_a_plain_hit_region_is_not_hovering_a_button() {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = painted_titlebar(&mut typesetter);
+        assert!(
+            !panel.hover(Some(Point::new(20, 10))),
+            "the label is no button"
+        );
     }
 
     #[test]

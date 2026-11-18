@@ -16,6 +16,7 @@
 
 mod file;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -423,6 +424,10 @@ pub struct StyleLayers {
 pub struct Style {
     /// The style of each element in each state.
     styles: HashMap<(StyleElement, WidgetState), ElementStyle>,
+    /// What each element's `hovered` section changes: laid over the element's
+    /// look in its own state while the pointer is on it, so a style that
+    /// has none looks the same hovered or not.
+    hovering: HashMap<StyleElement, ElementStylePatch>,
 }
 
 impl Style {
@@ -456,7 +461,13 @@ impl Style {
                 styles.insert((element, state), style);
             }
         }
-        Self { styles }
+        let hovering = layers
+            .by_element_state
+            .iter()
+            .filter(|((_, state), _)| *state == WidgetState::Hovered)
+            .map(|((element, _), patch)| (*element, patch.clone()))
+            .collect();
+        Self { styles, hovering }
     }
 
     /// Returns the built-in style: dark grey gradients with white, haloed
@@ -483,6 +494,27 @@ impl Style {
         self.styles
             .get(&(element, state))
             .expect("resolution styles every element in every state")
+    }
+
+    /// Returns how `element` looks in `state`, with the pointer on it if
+    /// `is_hovered`: its own look, with what its `hovered` section sets laid
+    /// over it.
+    #[must_use]
+    pub fn element_style_under_pointer(
+        &self,
+        element: StyleElement,
+        state: WidgetState,
+        is_hovered: bool,
+    ) -> Cow<'_, ElementStyle> {
+        let style = self.element_style(element, state);
+        match self.hovering.get(&element).filter(|_| is_hovered) {
+            Some(patch) => {
+                let mut hovered = style.clone();
+                patch.apply_to(&mut hovered);
+                Cow::Owned(hovered)
+            }
+            None => Cow::Borrowed(style),
+        }
     }
 
     /// Returns the sizes the compositor lays windows and bars out by: the
