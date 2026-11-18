@@ -201,8 +201,16 @@ impl Modifiers {
         ("Super", "Mod4", Self(1 << 3)),
         ("Ctrl", "Control", Self(1 << 1)),
         ("Alt", "Mod1", Self(1)),
-        ("Shift", "Shift", Self(1 << 2)),
+        ("Shift", "Shift", Self::SHIFT),
     ];
+
+    /// Shift.
+    pub(crate) const SHIFT: Self = Self(1 << 2);
+
+    /// Returns whether Shift is among these.
+    pub(crate) const fn has_shift(self) -> bool {
+        self.0 & Self::SHIFT.0 != 0
+    }
 
     /// Returns the modifiers held in `state`.
     pub(crate) fn held(state: &ModifiersState) -> Self {

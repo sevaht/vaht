@@ -95,8 +95,8 @@ use crate::layers::{LayerMaps, Layers, OutputLayers};
 use crate::log_filter::LogFilterHandle;
 use crate::log_rotation::LogRotation;
 use crate::menu::{
-    MenuBuilder, MenuChoice, MenuItem, MenuKey, MenuModel, MenuStack, OutputChoices, PipeRead,
-    parse_printed,
+    MenuBuilder, MenuChoice, MenuItem, MenuKey, MenuModel, MenuSnapshot, MenuStack, OutputChoices,
+    PipeRead, parse_printed,
 };
 use crate::output_management::{HeadRequest, HeadState};
 use crate::output_memory::OutputMemory;
@@ -3150,6 +3150,21 @@ impl Compositor {
         }
     }
 
+    /// The middle button's code (`BTN_MIDDLE`).
+    const BUTTON_MIDDLE: u32 = 0x112;
+
+    /// Opens the menus again as `snapshot` found them, built from the
+    /// configuration as it is now: what a choice changed (the style, the
+    /// checked item) shows, and the pointer's place in the menus stays.
+    fn reopen_menus(&mut self, snapshot: &MenuSnapshot) {
+        self.menus.close();
+        if self.open_menu_at(&snapshot.request, snapshot.window, snapshot.at) {
+            self.menus
+                .restore(&snapshot.path, (&self.config.style, &mut self.typesetter));
+        }
+        self.schedule_render();
+    }
+
     /// Opens the menu `request` names, its corner at the pointer, about
     /// `window` (the window menu's; the focused window when none); asked
     /// again while it is open, as fluxland does, it closes.
@@ -3159,6 +3174,19 @@ impl Compositor {
             self.schedule_render();
             return;
         }
+        let at = self.pointer_location().to_i32_round();
+        self.open_menu_at(request, window, at);
+        self.schedule_render();
+    }
+
+    /// Opens the menu `request` names with its corner at `at`; returns
+    /// whether there was such a menu to open.
+    fn open_menu_at(
+        &mut self,
+        request: &MenuRequest,
+        window: Option<WindowId>,
+        at: Point<i32, Logical>,
+    ) -> bool {
         let window = window.or_else(|| self.window_manager.focused());
         let model = self.with_menu_builder(window, &[], |builder| match request {
             MenuRequest::Root => builder.build(Menus::ROOT),
@@ -3169,9 +3197,8 @@ impl Compositor {
         });
         let Some(model) = model else {
             tracing::warn!(?request, "no such menu, or no window for it");
-            return;
+            return false;
         };
-        let at = self.pointer_location().to_i32_round();
         // Off the taskbar, as fluxland keeps menus in the usable area of
         // the output the pointer is on.
         let bounds = self.output_areas().at(at).usable;
@@ -3182,7 +3209,7 @@ impl Compositor {
             (&self.config.style, &mut self.typesetter),
         );
         self.menus.mark_opened_by(request.clone(), window);
-        self.schedule_render();
+        true
     }
 
     /// Runs `build` with a builder of menus about `window`, as the
@@ -3714,13 +3741,24 @@ impl Compositor {
                 self.window_manager.release_titlebar_button(location);
                 self.release_taskbar_button(location);
                 if self.menus.is_open() {
-                    let chosen = self
-                        .menus
-                        .release(location, (&self.config.style, &mut self.typesetter));
+                    // The middle button, or Shift, chooses without closing the
+                    // menus, so a style or theme can be tried and another
+                    // after it.
+                    let keep_open =
+                        button == Self::BUTTON_MIDDLE || self.held_modifiers().has_shift();
+                    let snapshot = keep_open.then(|| self.menus.snapshot()).flatten();
+                    let chosen = self.menus.release(
+                        location,
+                        (&self.config.style, &mut self.typesetter),
+                        keep_open,
+                    );
                     self.start_pipe_menu();
                     self.schedule_render();
                     if let Some(choice) = chosen {
                         self.choose_from_menu(choice);
+                        if let Some(snapshot) = snapshot {
+                            self.reopen_menus(&snapshot);
+                        }
                     }
                 }
             }

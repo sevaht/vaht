@@ -93,6 +93,8 @@ pub(crate) struct MenuStack {
     pressed: Option<(usize, usize)>,
     /// The action that opened the menus, if one did.
     opened_by: Option<MenuRequest>,
+    /// Where the first menu was asked to open, to open it again there.
+    anchor: Point<i32, Logical>,
     /// A pipe menu waiting for its command's output: its number, its
     /// level, and its item in the menu before; and the command, until the
     /// compositor takes it to run.
@@ -120,6 +122,19 @@ struct PipeWait {
     item: usize,
     /// The command line, until the compositor takes it to run.
     command: Option<String>,
+}
+
+/// How the menus were open: enough to open them again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MenuSnapshot {
+    /// What opened them.
+    pub(crate) request: MenuRequest,
+    /// The window they are about, if any.
+    pub(crate) window: Option<WindowId>,
+    /// Where the first one opened.
+    pub(crate) at: Point<i32, Logical>,
+    /// The item highlighted in each menu, first to last.
+    pub(crate) path: Vec<Option<usize>>,
 }
 
 /// One open menu.
@@ -156,6 +171,7 @@ impl MenuStack {
     ) {
         self.close();
         self.bounds = bounds;
+        self.anchor = at;
         self.push(model, at, None, style);
     }
 
@@ -271,11 +287,12 @@ impl MenuStack {
 
     /// Lets go of the button with the pointer at global `point`: an item
     /// there opens its submenu, or is chosen, which closes every menu and
-    /// returns the choice.
+    /// returns the choice; with `keep_open`, the menus stay.
     pub(crate) fn release(
         &mut self,
         point: Point<f64, Logical>,
         style: (&Style, &mut Typesetter),
+        keep_open: bool,
     ) -> Option<MenuChoice> {
         self.pressed = None;
         let (level, item) = self.item_at(point)?;
@@ -284,7 +301,38 @@ impl MenuStack {
             .panel
             .update_if(|content| content.set_hovered(Some(item)));
         self.menus.truncate(level + 1);
-        self.choose_highlighted(style)
+        self.choose_highlighted(style, keep_open)
+    }
+
+    /// Returns how the menus are open now, to open them again as they were
+    /// (after what a choice changed): what opened them, for which window,
+    /// where, and the item highlighted in each menu.
+    pub(crate) fn snapshot(&self) -> Option<MenuSnapshot> {
+        Some(MenuSnapshot {
+            request: self.opened_by.clone()?,
+            window: self.opened_for,
+            at: self.anchor,
+            path: self
+                .menus
+                .iter()
+                .map(|menu| menu.panel.content().hovered())
+                .collect(),
+        })
+    }
+
+    /// Highlights the items of `path`, opening the submenu of each but the
+    /// last: the menus as `snapshot` found them.
+    pub(crate) fn restore(&mut self, path: &[Option<usize>], style: (&Style, &mut Typesetter)) {
+        let (style, typesetter) = style;
+        for (position, item) in path.iter().enumerate() {
+            let Some(menu) = self.menus.last_mut() else {
+                return;
+            };
+            menu.panel.update_if(|content| content.set_hovered(*item));
+            if position + 1 < path.len() {
+                self.open_highlighted_submenu((style, &mut *typesetter));
+            }
+        }
     }
 
     /// Acts on `key`; returns the choice it made, if it chose an item.
@@ -324,7 +372,7 @@ impl MenuStack {
                 self.open_highlighted_submenu(style);
                 None
             }
-            MenuKey::Choose => self.choose_highlighted(style),
+            MenuKey::Choose => self.choose_highlighted(style, false),
             MenuKey::Close => {
                 self.close();
                 None
@@ -487,8 +535,12 @@ impl MenuStack {
     }
 
     /// Opens the highlighted item's submenu, or chooses it, closing every
-    /// menu and returning the choice.
-    fn choose_highlighted(&mut self, style: (&Style, &mut Typesetter)) -> Option<MenuChoice> {
+    /// menu (unless `keep_open`) and returning the choice.
+    fn choose_highlighted(
+        &mut self,
+        style: (&Style, &mut Typesetter),
+        keep_open: bool,
+    ) -> Option<MenuChoice> {
         let last = self.menus.last()?;
         let index = last.panel.content().hovered()?;
         match last.panel.content().model().items.get(index)? {
@@ -498,7 +550,9 @@ impl MenuStack {
             }
             MenuItem::Choice { choice, .. } => {
                 let choice = choice.clone();
-                self.close();
+                if !keep_open {
+                    self.close();
+                }
                 Some(choice)
             }
             MenuItem::Inert { .. } | MenuItem::Separator => None,
@@ -772,13 +826,59 @@ mod tests {
             .into();
         // The panel lays out as it paints.
         stack.prepare(&style, &mut typesetter);
-        let chosen = stack.release(first_row, (&style, &mut typesetter));
+        let chosen = stack.release(first_row, (&style, &mut typesetter), false);
         assert_eq!(
             chosen,
             Some(MenuChoice::Run {
                 command: Command::Run(Action::Reload),
                 window: None
             })
+        );
+    }
+
+    #[test]
+    fn choosing_with_keep_open_leaves_the_menus_as_they_were() {
+        let (style, mut typesetter) = style();
+        let mut stack = MenuStack::default();
+        let at = (100, 100).into();
+        stack.open(model(), at, bounds(), (&style, &mut typesetter));
+        stack.mark_opened_by(MenuRequest::Root, None);
+        stack.prepare(&style, &mut typesetter);
+        let menu = &stack.menus[0];
+        let corner = menu.geometry.panel.loc.to_f64();
+        let first_row: Point<f64, Logical> = (
+            corner.x + 10.0,
+            corner.y + f64::from(menu.panel.content().row_top(0)) + 5.0,
+        )
+            .into();
+        let chosen = stack.release(first_row, (&style, &mut typesetter), true);
+        assert!(chosen.is_some(), "the item is chosen");
+        assert!(stack.is_open(), "and the menus stay");
+        let snapshot = stack.snapshot().expect("opened by a request");
+        assert_eq!(snapshot.at, at);
+        assert_eq!(
+            snapshot.path,
+            [Some(0)],
+            "the chosen item stays highlighted"
+        );
+    }
+
+    #[test]
+    fn restoring_a_snapshot_reopens_the_submenus_it_had_open() {
+        let (style, mut typesetter) = style();
+        let mut stack = MenuStack::default();
+        stack.open(
+            model(),
+            (100, 100).into(),
+            bounds(),
+            (&style, &mut typesetter),
+        );
+        stack.mark_opened_by(MenuRequest::Root, None);
+        stack.restore(&[Some(2), Some(0)], (&style, &mut typesetter));
+        assert_eq!(stack.menus.len(), 2, "the submenu is open");
+        assert_eq!(
+            stack.snapshot().expect("a request").path,
+            [Some(2), Some(0)]
         );
     }
 
