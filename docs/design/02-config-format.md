@@ -984,7 +984,9 @@ exactly what each element gets.
 - **Style keys:**
   - `texture`: `{ solid = "#rrggbb" }`, or
     `{ gradient = "vertical", from, to, bevel = "raised"|"sunken", interlaced }`,
-    or `{ image = "path", fit = "tile"|"stretch" }`, or `"parent"`;
+    or `{ image = "file.xpm" }` (an XPM beside the style file, as Fluxbox styles
+    use, stretched to fill the element; `fit = "tile"` is not built yet), or
+    `"parent"`;
   - text: `font = { family, size, weight, style }`, `text_color`,
     `text_effect` (`{ halo = color }` or `{ shadow = color, offset = [x, y] }`),
     `justify`;

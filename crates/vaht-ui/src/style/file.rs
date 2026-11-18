@@ -13,6 +13,8 @@
 //! them.
 
 use std::fmt;
+use std::path::Path;
+use std::sync::Arc;
 
 use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 
@@ -20,6 +22,7 @@ use super::{BorderStyle, Bullet, ElementStylePatch, StyleElement, StyleLayers, W
 use crate::color::Color;
 use crate::corner::{Corner, CornerSet};
 use crate::geometry::Insets;
+use crate::image::Image;
 use crate::text::{Font, FontWeight, Justify, TextEffect};
 use crate::texture::{Bevel, GradientDirection, Texture};
 use crate::widget::MarkSide;
@@ -59,18 +62,59 @@ impl StyleLayers {
     ///
     /// Returns an error naming the first problem and where it is.
     pub fn from_toml(text: &str) -> Result<Self, toml::de::Error> {
-        toml::from_str(text)
+        Self::from_toml_in(text, None)
     }
-}
 
-impl<'de> serde::Deserialize<'de> for StyleLayers {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+    /// Reads a style file's text; the images it names are files relative to
+    /// `directory` (none: it names none).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the first problem and where it is, including
+    /// an image that cannot be read.
+    pub fn from_toml_in(text: &str, directory: Option<&Path>) -> Result<Self, toml::de::Error> {
         let mut layers = Self::default();
+        let images = Images { directory };
+        let deserializer = toml::de::Deserializer::parse(text)?;
         deserializer.deserialize_map(Table {
             path: String::new(),
             layers: &mut layers,
+            images,
         })?;
         Ok(layers)
+    }
+}
+
+/// Where the images a style file names are: files in `directory`.
+#[derive(Debug, Clone, Copy)]
+struct Images<'directory> {
+    /// The directory the names are relative to; none where there are no
+    /// files (a style read from text alone).
+    directory: Option<&'directory Path>,
+}
+
+impl Images<'_> {
+    /// Reads the image file `name`, relative to the style's directory.
+    fn load(self, name: &str) -> Result<Arc<Image>, String> {
+        let directory = self
+            .directory
+            .ok_or_else(|| format!("`{name}`: this style is not a file, so it has no images"))?;
+        let path = Path::new(name);
+        // A style's images are beside it, not anywhere on the disk.
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+        {
+            return Err(format!(
+                "`{name}`: an image is a path inside the style's directory"
+            ));
+        }
+        let text = std::fs::read_to_string(directory.join(path))
+            .map_err(|error| format!("`{name}`: {error}"))?;
+        Image::from_xpm(&text)
+            .map(Arc::new)
+            .map_err(|error| format!("`{name}`: {error}"))
     }
 }
 
@@ -81,6 +125,8 @@ struct Table<'layers> {
     path: String,
     /// Where what it says goes.
     layers: &'layers mut StyleLayers,
+    /// Where the images it names are.
+    images: Images<'layers>,
 }
 
 impl Table<'_> {
@@ -116,23 +162,24 @@ impl<'de> Visitor<'de> for Table<'_> {
         let element = StyleElement::at_path(&self.path);
         while let Some(key) = map.next_key::<String>()? {
             if self.path.is_empty() && key == "default" {
-                self.layers.default = map.next_value()?;
+                self.layers.default = map.next_value_seed(PatchSeed(self.images))?;
                 continue;
             }
             if self.path.is_empty() && key == "state" {
                 map.next_value_seed(States {
                     layers: &mut *self.layers,
+                    images: self.images,
                 })?;
                 continue;
             }
             if let Some(element) = element {
                 let patch = self.layers.by_element.entry(element).or_default();
-                if patch.read_property(&key, &mut map, Some(element))? {
+                if patch.read_property(&key, &mut map, Some(element), self.images)? {
                     continue;
                 }
                 match state_named(&key) {
                     Ok(Some(state)) => {
-                        let patch: ElementStylePatch = map.next_value()?;
+                        let patch = map.next_value_seed(PatchSeed(self.images))?;
                         self.layers.by_element_state.insert((element, state), patch);
                         continue;
                     }
@@ -160,6 +207,7 @@ impl<'de> Visitor<'de> for Table<'_> {
             map.next_value_seed(Table {
                 path,
                 layers: &mut *self.layers,
+                images: self.images,
             })?;
         }
         Ok(())
@@ -178,6 +226,8 @@ impl<'de> DeserializeSeed<'de> for Table<'_> {
 struct States<'layers> {
     /// Where the states' styles go.
     layers: &'layers mut StyleLayers,
+    /// Where the images they name are.
+    images: Images<'layers>,
 }
 
 impl<'de> Visitor<'de> for States<'_> {
@@ -199,7 +249,7 @@ impl<'de> Visitor<'de> for States<'_> {
                 }
                 Err(reason) => return Err(refuse(&mut map, reason)),
             };
-            let patch: ElementStylePatch = map.next_value()?;
+            let patch = map.next_value_seed(PatchSeed(self.images))?;
             self.layers.by_state.insert(state, patch);
         }
         Ok(())
@@ -253,6 +303,7 @@ impl ElementStylePatch {
         key: &str,
         map: &mut A,
         element: Option<StyleElement>,
+        images: Images<'_>,
     ) -> Result<bool, A::Error> {
         if CORNER_PROPERTIES.contains(&key)
             && !element.is_some_and(|element| ROUNDED_ELEMENTS.contains(&element))
@@ -283,7 +334,7 @@ impl ElementStylePatch {
         }
         match key {
             "alpha" => self.alpha = Some(map.next_value()?),
-            "texture" => self.texture = Some(map.next_value::<TextureValue>()?.0),
+            "texture" => self.texture = Some(map.next_value_seed(TextureSeed(images))?),
             "font" => self.font = Some(map.next_value::<FontFile>()?.into_font()),
             "text_color" => self.text_color = Some(map.next_value::<ColorText>()?.0),
             "text_effect" => self.text_effect = Some(map.next_value::<TextEffectFile>()?.0),
@@ -318,12 +369,17 @@ impl ElementStylePatch {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for ElementStylePatch {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        /// Reads a table of style properties, and nothing else.
-        struct PatchVisitor;
+/// Reads a table of style properties into a patch.
+struct PatchSeed<'directory>(Images<'directory>);
 
-        impl<'de> Visitor<'de> for PatchVisitor {
+impl<'de> DeserializeSeed<'de> for PatchSeed<'_> {
+    type Value = ElementStylePatch;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        /// Reads a table of style properties, and nothing else.
+        struct PatchVisitor<'directory>(Images<'directory>);
+
+        impl<'de> Visitor<'de> for PatchVisitor<'_> {
             type Value = ElementStylePatch;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -336,7 +392,7 @@ impl<'de> serde::Deserialize<'de> for ElementStylePatch {
             ) -> Result<ElementStylePatch, A::Error> {
                 let mut patch = ElementStylePatch::default();
                 while let Some(key) = map.next_key::<String>()? {
-                    if !patch.read_property(&key, &mut map, None)? {
+                    if !patch.read_property(&key, &mut map, None, self.0)? {
                         return Err(de::Error::custom(format!("`{key}` is no style property")));
                     }
                 }
@@ -344,7 +400,7 @@ impl<'de> serde::Deserialize<'de> for ElementStylePatch {
             }
         }
 
-        deserializer.deserialize_map(PatchVisitor)
+        deserializer.deserialize_map(PatchVisitor(self.0))
     }
 }
 
@@ -362,45 +418,47 @@ struct ColorText(Color);
 
 /// A texture, checked while it is read so a mistake is located at it:
 /// `"parent"`, or a table ([`TextureFile`]).
-struct TextureValue(Texture);
+struct TextureSeed<'directory>(Images<'directory>);
 
-impl<'de> serde::Deserialize<'de> for TextureValue {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+impl<'de> DeserializeSeed<'de> for TextureSeed<'_> {
+    type Value = Texture;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Texture, D::Error> {
         /// Reads either form.
-        struct TextureVisitor;
+        struct TextureVisitor<'directory>(Images<'directory>);
 
-        impl<'de> Visitor<'de> for TextureVisitor {
-            type Value = TextureValue;
+        impl<'de> Visitor<'de> for TextureVisitor<'_> {
+            type Value = Texture;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str(
-                    "\"parent\", { solid = color } or { gradient = direction, from = color, \
-                     to = color }",
+                    "\"parent\", { solid = color }, { gradient = direction, from = color, \
+                     to = color } or { image = \"file.xpm\" }",
                 )
             }
 
-            fn visit_str<E: de::Error>(self, text: &str) -> Result<TextureValue, E> {
+            fn visit_str<E: de::Error>(self, text: &str) -> Result<Texture, E> {
                 if text == "parent" {
-                    Ok(TextureValue(Texture::parent()))
+                    Ok(Texture::parent())
                 } else {
                     Err(E::invalid_value(de::Unexpected::Str(text), &self))
                 }
             }
 
-            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<TextureValue, A::Error> {
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Texture, A::Error> {
                 let file = <TextureFile as serde::Deserialize>::deserialize(
                     de::value::MapAccessDeserializer::new(map),
                 )?;
-                file.texture().map(TextureValue).map_err(de::Error::custom)
+                file.texture(self.0).map_err(de::Error::custom)
             }
         }
 
-        deserializer.deserialize_any(TextureVisitor)
+        deserializer.deserialize_any(TextureVisitor(self.0))
     }
 }
 
-/// A texture as written: `{ solid = color }` or `{ gradient = direction,
-/// from, to }`, either with a `bevel`.
+/// A texture as written: `{ solid = color }`, `{ gradient = direction, from,
+/// to }` (either with a `bevel`), or `{ image = "file.xpm" }`.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TextureFile {
@@ -412,6 +470,8 @@ struct TextureFile {
     from: Option<Color>,
     /// A gradient's last color.
     to: Option<Color>,
+    /// An image file, relative to the style's directory.
+    image: Option<String>,
     /// The edge shading.
     #[serde(default)]
     bevel: BevelName,
@@ -419,16 +479,18 @@ struct TextureFile {
 
 impl TextureFile {
     /// Returns the texture written, or why it is not one.
-    fn texture(self) -> Result<Texture, &'static str> {
+    fn texture(self, images: Images<'_>) -> Result<Texture, String> {
         let bevel = self.bevel.into_bevel();
-        match (self.solid, self.gradient, self.from, self.to) {
-            (Some(color), None, None, None) => Ok(Texture::solid(color).with_bevel(bevel)),
-            (None, Some(direction), Some(from), Some(to)) => {
+        match (self.solid, self.gradient, self.from, self.to, self.image) {
+            (Some(color), None, None, None, None) => Ok(Texture::solid(color).with_bevel(bevel)),
+            (None, Some(direction), Some(from), Some(to), None) => {
                 Ok(Texture::gradient(direction.into_direction(), from, to).with_bevel(bevel))
             }
+            (None, None, None, None, Some(name)) => Ok(Texture::image(images.load(&name)?)),
             _ => Err(
-                "a texture is { solid = color } or { gradient = direction, from = color, \
-                 to = color }, either with a bevel",
+                "a texture is { solid = color }, { gradient = direction, from = color, \
+                      to = color } (either with a bevel) or { image = \"file.xpm\" }"
+                    .to_owned(),
             ),
         }
     }
@@ -811,5 +873,45 @@ mod tests {
         let start = error.span().expect("the problem is located").start;
         let found = text[..start].matches('\n').count() + 1;
         assert_eq!(found, line, "located: {error}");
+    }
+
+    /// An XPM of one black pixel.
+    const DOT: &str = "\"1 1 1 1\",\n\"a\tc #000000\",\n\"a\"";
+
+    #[test]
+    fn an_image_texture_is_an_image_read_from_beside_the_style() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        std::fs::write(directory.path().join("dot.xpm"), DOT).expect("written");
+        let layers = StyleLayers::from_toml_in(
+            "[window.titlebar]\ntexture = { image = \"dot.xpm\" }\n",
+            Some(directory.path()),
+        )
+        .expect("valid");
+        let texture = layers
+            .by_element
+            .get(&StyleElement::Titlebar)
+            .and_then(|patch| patch.texture.clone())
+            .expect("a texture");
+        assert!(matches!(texture.fill, crate::texture::Fill::Image(_)));
+    }
+
+    #[test]
+    fn an_image_cannot_leave_the_styles_directory_or_be_missing() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        for (name, expected) in [
+            ("../escape.xpm", "inside the style's directory"),
+            ("/etc/passwd", "inside the style's directory"),
+            ("absent.xpm", "absent.xpm"),
+        ] {
+            let text = format!("[window.titlebar]\ntexture = {{ image = \"{name}\" }}\n");
+            let error = StyleLayers::from_toml_in(&text, Some(directory.path()))
+                .expect_err(name)
+                .to_string();
+            assert!(error.contains(expected), "{error}");
+        }
+        let error = StyleLayers::from_toml("[window.titlebar]\ntexture = { image = \"a.xpm\" }\n")
+            .expect_err("no directory")
+            .to_string();
+        assert!(error.contains("not a file"), "{error}");
     }
 }

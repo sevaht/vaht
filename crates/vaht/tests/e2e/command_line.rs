@@ -335,6 +335,61 @@ const FLUXBOX_STYLE: &str = "toolbar: Raised Gradient Vertical\n\
     menu.frame: Flat Solid\nmenu.frame.color: black\nmenu.frame.textColor: white\n";
 
 #[test]
+fn a_fluxbox_style_of_images_is_converted_with_its_images() {
+    let logs = log_directory();
+    let work = tempfile::tempdir().expect("a temporary directory");
+    let source = work.path().join("Pictured");
+    std::fs::create_dir_all(source.join("pixmaps")).expect("made");
+    std::fs::write(
+        source.join("theme.cfg"),
+        "toolbar:\ntoolbar.pixmap: bar.xpm\ntoolbar.clock.textColor: white\n",
+    )
+    .expect("written");
+    std::fs::write(
+        source.join("pixmaps/bar.xpm"),
+        "/* XPM */\nstatic char * bar[] = {\n\"1 2 2 1\",\n\".\tc #202020\",\n\"+\tc #101010\",\n\".\",\n\"+\"};\n",
+    )
+    .expect("written");
+    let configuration = work.path().join("config");
+    let output = run_executable(
+        &[
+            "import",
+            "fluxbox-style",
+            source.to_str().expect("UTF-8"),
+            "--to",
+            configuration.join("styles").to_str().expect("UTF-8"),
+        ],
+        logs.path(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let style =
+        std::fs::read_to_string(configuration.join("styles/Pictured.toml")).expect("written");
+    assert!(style.contains("image = \"Pictured/bar.xpm\""), "{style}");
+    assert!(
+        configuration.join("styles/Pictured/bar.xpm").is_file(),
+        "the image is written beside the style"
+    );
+    std::fs::write(
+        configuration.join("settings.toml"),
+        "style = \"Pictured\"\n",
+    )
+    .expect("written");
+    let checked = run_executable(
+        &[
+            "config",
+            "check",
+            "--config-directory",
+            configuration.to_str().expect("UTF-8"),
+        ],
+        logs.path(),
+    );
+    assert!(
+        checked.status.success(),
+        "vaht reads it with its image: {checked:?}"
+    );
+}
+
+#[test]
 fn a_fluxbox_style_converts_on_its_own_and_vaht_accepts_it() {
     let logs = log_directory();
     let work = tempfile::tempdir().expect("a temporary directory");

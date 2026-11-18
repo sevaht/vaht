@@ -42,7 +42,7 @@ use crate::keys::KeysFile;
 use crate::menu::MenuFiles;
 use crate::resources::Resources;
 use crate::settings::InitFile;
-use crate::style::StyleFile;
+use crate::style::{StyleFile, StyleImage};
 use crate::wallpaper::StartupWallpaper;
 
 /// A Fluxbox configuration directory, read.
@@ -146,8 +146,12 @@ impl FluxboxSetup {
         }
         if let Some((path, text)) = &self.style {
             let name = style_name(path);
-            let mut vaht_style = StyleFile::new(path, text).convert(&mut report);
+            let (mut vaht_style, images) = StyleFile::new(path, text).convert(&mut report);
             Self::place_alphas(&init.alphas, Some(&mut vaht_style), &init_path, &mut report);
+            files.extend(images.into_iter().map(|image| OutputFile {
+                name: format!("styles/{}", image.name),
+                text: image.text,
+            }));
             files.push(OutputFile {
                 name: format!("styles/{name}.toml"),
                 text: header(path) + &vaht_style.to_string(),
@@ -323,7 +327,7 @@ impl FluxboxSetup {
 /// the style's own (its directory's, for a `theme.cfg`, and without a
 /// `.style` extension), with anything but letters, digits, `-` and `_` made
 /// `-`.
-fn style_name(path: &Path) -> String {
+pub(crate) fn style_name(path: &Path) -> String {
     let named = if path.file_name().is_some_and(|name| name == "theme.cfg") {
         path.parent().unwrap_or(path)
     } else {
@@ -419,6 +423,8 @@ pub struct ConvertedStyle {
     name: String,
     /// The vaht style file.
     text: String,
+    /// The images it draws with, to be written beside it.
+    images: Vec<StyleImage>,
     /// What was not converted.
     report: Report,
 }
@@ -462,16 +468,30 @@ impl ConvertedStyle {
         if !replace && path.exists() {
             return Err(ImportError::Exists(path));
         }
-        vaht_ui::style::StyleLayers::from_toml(&self.text).map_err(|error| {
-            ImportError::InvalidStyle {
-                name: self.name.clone(),
-                message: error.to_string(),
-            }
-        })?;
         std::fs::create_dir_all(directory).map_err(|error| ImportError::Write {
             path: directory.to_path_buf(),
             error,
         })?;
+        for image in &self.images {
+            let image_path = directory.join(&image.name);
+            if let Some(parent) = image_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| ImportError::Write {
+                    path: parent.to_path_buf(),
+                    error,
+                })?;
+            }
+            std::fs::write(&image_path, &image.text).map_err(|error| ImportError::Write {
+                path: image_path.clone(),
+                error,
+            })?;
+        }
+        // Read as vaht reads it, images and all, before it is written.
+        vaht_ui::style::StyleLayers::from_toml_in(&self.text, Some(directory)).map_err(
+            |error| ImportError::InvalidStyle {
+                name: self.name.clone(),
+                message: error.to_string(),
+            },
+        )?;
         std::fs::write(&path, &self.text).map_err(|error| ImportError::Write {
             path: path.clone(),
             error,
@@ -498,7 +518,7 @@ pub fn convert_style(path: &Path) -> Result<ConvertedStyle, ImportError> {
         error,
     })?;
     let mut report = Report::default();
-    let converted = StyleFile::new(&file, &text).convert(&mut report);
+    let (converted, images) = StyleFile::new(&file, &text).convert(&mut report);
     Ok(ConvertedStyle {
         source: path.to_path_buf(),
         name: style_name(&file),
@@ -506,6 +526,7 @@ pub fn convert_style(path: &Path) -> Result<ConvertedStyle, ImportError> {
             "# Converted from {} by vaht import fluxbox-style.\n\n{converted}",
             path.display()
         ),
+        images,
         report,
     })
 }

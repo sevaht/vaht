@@ -467,6 +467,21 @@ const UNUSED_REASONS: [(&str, Reason, &str); 6] = [
 pub(crate) struct StyleFile {
     /// Its lines.
     database: StyleDatabase,
+    /// The name the converted style gets: the directory of its images.
+    name: String,
+    /// The images its textures use, found beside it, as the converted style
+    /// names them.
+    images: Vec<StyleImage>,
+}
+
+/// An image a converted style draws with, to be written beside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StyleImage {
+    /// Its path in the styles directory, as the style names it:
+    /// `<style>/<file>`.
+    pub(crate) name: String,
+    /// The XPM text.
+    pub(crate) text: String,
 }
 
 impl StyleFile {
@@ -492,15 +507,17 @@ impl StyleFile {
     pub(crate) fn new(path: &Path, text: &str) -> Self {
         Self {
             database: StyleDatabase::parse(path, text),
+            name: crate::style_name(path),
+            images: Vec::new(),
         }
     }
 
     /// Converts the style to a vaht style file, noting in `report` what it
     /// leaves out.
-    pub(crate) fn convert(mut self, report: &mut Report) -> DocumentMut {
+    pub(crate) fn convert(mut self, report: &mut Report) -> (DocumentMut, Vec<StyleImage>) {
         let cells = self.cells(report);
         self.report_unused(report);
-        Layers::fitting(&cells).document()
+        (Layers::fitting(&cells).document(), self.images)
     }
 
     /// Returns what the style gives every element in every state.
@@ -821,6 +838,14 @@ impl StyleFile {
         if spec.contains("parentrelative") || spec.contains("parent_relative") {
             return TextureSource::Parent;
         }
+        // The image is the texture where the style asks for a pixmap, or asks
+        // for nothing else (an empty texture beside a pixmap, as Neon's).
+        let asks_for_an_image = spec.trim().is_empty() || spec.contains("pixmap");
+        if let Some(image) = asks_for_an_image.then(|| self.pixmap_image(name)).flatten() {
+            let mut texture = InlineTable::new();
+            texture.insert("image", Value::from(image));
+            return TextureSource::Own(Written(Value::InlineTable(texture)));
+        }
         let from = self
             .color(&format!("{name}.color"), report)
             .unwrap_or_else(|| "darkgray".to_owned());
@@ -935,6 +960,40 @@ impl StyleFile {
             Some("right") => "right",
             _ => "left",
         }
+    }
+
+    /// Returns the name the converted style gives the image the resource
+    /// `name`'s `pixmap` names, once it is kept to be written beside the
+    /// style: found beside the Fluxbox style or in its `pixmaps` directory,
+    /// and an XPM vaht reads.
+    fn pixmap_image(&mut self, name: &str) -> Option<String> {
+        let file = self.database.get(&format!("{name}.pixmap"))?.to_owned();
+        let relative = Path::new(&file);
+        // Only what is inside the style's own directory is carried along.
+        if file.is_empty()
+            || relative.is_absolute()
+            || relative
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+        {
+            return None;
+        }
+        let directory = self.database.path().parent()?;
+        let text = [
+            directory.join("pixmaps").join(relative),
+            directory.join(relative),
+        ]
+        .iter()
+        .find_map(|path| std::fs::read_to_string(path).ok())?;
+        vaht_ui::Image::from_xpm(&text).ok()?;
+        let kept = format!("{}/{file}", self.name);
+        if !self.images.iter().any(|image| image.name == kept) {
+            self.images.push(StyleImage {
+                name: kept.clone(),
+                text,
+            });
+        }
+        Some(kept)
     }
 
     /// Returns the color the first of `names` the style has gives.

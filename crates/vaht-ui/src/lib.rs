@@ -15,6 +15,7 @@ pub mod color;
 pub mod corner;
 pub mod geometry;
 pub mod icon;
+pub mod image;
 pub mod layout;
 pub mod panel;
 pub mod raster;
@@ -32,6 +33,8 @@ pub use corner::{Corner, CornerArc, CornerRadii};
 pub use geometry::{Insets, Point, Rect, Size};
 #[doc(inline)]
 pub use icon::{Icon, IconEmphasis, IconStore, WidgetIcon};
+#[doc(inline)]
+pub use image::{Image, ImageError};
 #[doc(inline)]
 pub use panel::{Panel, PanelContent};
 #[doc(inline)]

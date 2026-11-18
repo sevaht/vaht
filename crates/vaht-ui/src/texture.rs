@@ -2,14 +2,18 @@
 //!
 //! These are Fluxbox's textures without the X11 baggage: a solid color or a
 //! two-color gradient, optionally bevelled to look raised or sunken, or
-//! nothing at all, so what is behind shows (Fluxbox's `ParentRelative`).
+//! an image stretched to fit, or nothing at all, so what is behind shows
+//! (Fluxbox's `ParentRelative`).
 
 pub(crate) mod render;
 
+use std::sync::Arc;
+
 use crate::color::Color;
+use crate::image::Image;
 
 /// A widget's background.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Texture {
     /// What fills the area.
     pub fill: Fill,
@@ -40,6 +44,15 @@ impl Texture {
         }
     }
 
+    /// Returns an image, stretched to fill the area.
+    #[must_use]
+    pub const fn image(image: Arc<Image>) -> Self {
+        Self {
+            fill: Fill::Image(image),
+            bevel: Bevel::Flat,
+        }
+    }
+
     /// Returns no texture: what is behind the widget shows.
     #[must_use]
     pub const fn parent() -> Self {
@@ -58,7 +71,7 @@ impl Texture {
 }
 
 /// What fills an area.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Fill {
     /// One color.
     Solid(Color),
@@ -71,6 +84,9 @@ pub enum Fill {
         /// The ending color.
         to: Color,
     },
+    /// A picture, stretched to the area; it carries its own shading, so the
+    /// bevel is not drawn over it.
+    Image(Arc<Image>),
     /// Nothing: what is behind shows.
     Parent,
 }

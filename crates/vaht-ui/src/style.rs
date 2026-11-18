@@ -284,8 +284,8 @@ pub struct ElementStylePatch {
 impl ElementStylePatch {
     /// Overrides in `style` every property this patch sets.
     fn apply_to(&self, style: &mut ElementStyle) {
-        if let Some(texture) = self.texture {
-            style.texture = texture;
+        if let Some(texture) = &self.texture {
+            style.texture = texture.clone();
         }
         if let Some(font) = &self.font {
             style.text.font = font.clone();
@@ -554,7 +554,12 @@ mod tests {
     #[test]
     fn the_built_in_style_styles_focus_and_pressing_differently() {
         let style = Style::built_in();
-        let texture = |state| style.element_style(StyleElement::Button, state).texture;
+        let texture = |state| {
+            style
+                .element_style(StyleElement::Button, state)
+                .texture
+                .clone()
+        };
         assert_ne!(
             texture(WidgetState::Focused),
             texture(WidgetState::Unfocused)

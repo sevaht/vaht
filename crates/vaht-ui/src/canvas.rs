@@ -4,12 +4,14 @@
 //! through it.
 
 use tiny_skia::{
-    ColorU8, Paint, PathBuilder, Pixmap, PixmapPaint, Rect as SkiaRect, Stroke, Transform,
+    ColorU8, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, PixmapPaint, Rect as SkiaRect,
+    SpreadMode, Stroke, Transform,
 };
 
 use crate::color::Color;
 use crate::geometry::Rect;
 use crate::icon::WidgetIcon;
+use crate::image::Image;
 use crate::layout::{Content, Layout, Placed};
 use crate::style::{Style, WidgetState};
 use crate::text::{TextStyle, Typesetter};
@@ -46,7 +48,7 @@ impl<'pixmap> Canvas<'pixmap> {
         for placed in layout.placed() {
             let style = style.element_style(placed.element, state_of(placed));
             if placed.has_background {
-                self.fill_texture(style.texture, placed.rect);
+                self.fill_texture(&style.texture, placed.rect);
             }
             let mut inner = placed.rect.inset(style.padding);
             if let Some(icon) = &placed.icon {
@@ -123,10 +125,11 @@ impl<'pixmap> Canvas<'pixmap> {
 
     /// Fills `rect` with `texture`'s fill and bevel, as Fluxbox renders
     /// textures ([`crate::texture::render`]).
-    fn fill_texture(&mut self, texture: Texture, rect: Rect) {
-        match texture.fill {
+    fn fill_texture(&mut self, texture: &Texture, rect: Rect) {
+        match &texture.fill {
             Fill::Parent => {}
-            Fill::Solid(color) => {
+            Fill::Image(image) => self.draw_stretched(image, rect),
+            &Fill::Solid(color) => {
                 if let Some(area) = rect.to_skia() {
                     let mut paint = Paint::default();
                     paint.set_color(color.to_skia());
@@ -135,7 +138,7 @@ impl<'pixmap> Canvas<'pixmap> {
                 }
                 self.draw_solid_bevel(texture.bevel, color, rect);
             }
-            Fill::Gradient {
+            &Fill::Gradient {
                 direction,
                 from,
                 to,
@@ -152,6 +155,42 @@ impl<'pixmap> Canvas<'pixmap> {
                 self.draw_image(&image, rect);
             }
         }
+    }
+
+    /// Draws `picture` stretched to fill `rect`, smoothly.
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "pictures are at most a few thousand pixels across, and so are panels"
+    )]
+    fn draw_stretched(&mut self, picture: &Image, rect: Rect) {
+        let (Some(source), Some(area)) = (Self::pixmap_of(picture), rect.to_skia()) else {
+            return;
+        };
+        let scale_x = rect.width as f32 / picture.width() as f32;
+        let scale_y = rect.height as f32 / picture.height() as f32;
+        let paint = Paint {
+            shader: Pattern::new(
+                source.as_ref(),
+                SpreadMode::Pad,
+                FilterQuality::Bilinear,
+                1.0,
+                Transform::from_scale(scale_x, scale_y)
+                    .post_translate(rect.x as f32, rect.y as f32),
+            ),
+            ..Paint::default()
+        };
+        self.pixmap
+            .fill_rect(area, &paint, Transform::identity(), None);
+    }
+
+    /// Returns `picture` as pixels to paint with; none if it is empty.
+    fn pixmap_of(picture: &Image) -> Option<Pixmap> {
+        let mut pixmap = Pixmap::new(picture.width(), picture.height())?;
+        for (target, color) in pixmap.pixels_mut().iter_mut().zip(picture.pixels()) {
+            *target =
+                ColorU8::from_rgba(color.red, color.green, color.blue, color.alpha).premultiply();
+        }
+        Some(pixmap)
     }
 
     /// Draws `image` at `rect`'s top left corner.

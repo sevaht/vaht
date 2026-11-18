@@ -73,7 +73,8 @@ impl StyleFile {
                 path: self.path.clone(),
                 error,
             })?;
-        let layers: StyleLayers = toml::from_str(&text)
+        // The images a style names are beside it.
+        let layers = StyleLayers::from_toml_in(&text, self.path.parent())
             .map_err(|error| ConfigError::invalid(self.path.clone(), &text, &error))?;
         Ok(Style::resolve(&layers))
     }
