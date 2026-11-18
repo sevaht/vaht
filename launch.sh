@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # Runs the installed vaht (the Arch package, packaging/arch) from a virtual
-# terminal, with the logging below. Edit the settings between runs; extra
+# terminal, with the logging below. Edit the settings between runs; other
 # arguments are passed on to vaht (for example --no-xwayland).
 #
-# First it checks that the installed vaht is this checkout: built from the
-# commit checked out, with no changes since. If not, it says how to build and
-# install it, and waits for Enter before starting the installed one anyway.
+#   ./launch.sh            check the installed vaht is this checkout, then run it
+#   ./launch.sh --build    build and install it first if it is not
+#
+# The check: the installed vaht was built from the commit checked out, with no
+# changes since (`vaht --version` names its commit). If not, without --build
+# it says how to build and install it, and waits for Enter before starting the
+# installed one anyway; with --build it builds and installs the package
+# (asking for your password to install) and then starts it.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -19,6 +24,17 @@ log_filter='info,vaht_compositor::compositor=trace,vaht_compositor::backend=trac
 journald=off
 
 installed=/usr/bin/vaht
+
+# --build is launch.sh's own; every other argument goes to vaht.
+builds=no
+vaht_arguments=()
+for argument in "${@}"; do
+    if [[ ${argument} == --build ]]; then
+        builds=yes
+    else
+        vaht_arguments+=("${argument}")
+    fi
+done
 
 # Prints why the installed vaht is not this checkout, one reason a line;
 # nothing if it is.
@@ -44,6 +60,17 @@ uninstalled_changes() {
     fi
 }
 
+# Builds the package from this checkout and installs it. A vaht installed
+# before it was packaged (no package owns it) is removed first, since pacman
+# will not install over files it does not own.
+build_and_install() {
+    if [[ -e ${installed} ]] && ! pacman -Qqo "${installed}" >/dev/null 2>&1; then
+        echo "Removing the vaht installed without a package..."
+        sudo packaging/install.sh --uninstall
+    fi
+    (cd packaging/arch && makepkg -fi)
+}
+
 reasons=$(uninstalled_changes)
 if [[ -n ${reasons} ]]; then
     echo "The installed vaht is not this checkout:"
@@ -51,15 +78,20 @@ if [[ -n ${reasons} ]]; then
         echo "  - ${reason}"
     done <<<"${reasons}"
     echo
-    echo "To build and install it (commit first, so it is named by its commit):"
-    echo "  cd $(pwd)/packaging/arch && makepkg -fi"
-    echo
-    if [[ -t 0 ]]; then
-        read -r -p "Press Enter to start the installed vaht anyway, or Ctrl+C to stop. "
+    if [[ ${builds} == yes ]]; then
+        build_and_install
+    else
+        echo "To build and install it (commit first, so it is named by its commit):"
+        echo "  ./launch.sh --build"
+        echo "or by hand: cd $(pwd)/packaging/arch && makepkg -fi"
+        echo
+        if [[ -t 0 ]]; then
+            read -r -p "Press Enter to start the installed vaht anyway, or Ctrl+C to stop. "
+        fi
     fi
 fi
 
 exec "${installed}" \
     --journald "${journald}" \
     --log "${log_filter}" \
-    "${@}"
+    "${vaht_arguments[@]}"

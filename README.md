@@ -38,7 +38,8 @@ depends on it); `xdg-desktop-portal-gtk` gives programs file choosers.
 Working from this checkout, `./launch.sh` starts the installed vaht with
 the logging it sets, after checking that the installed vaht was built from
 the commit checked out with no changes since (`vaht --version` names the
-commit). If not, it gives the commands to build and install it, and waits.
+commit). If not, it gives the commands to build and install it, and waits;
+`./launch.sh --build` builds and installs the package itself, then starts it.
 
 To start vaht, log in on a virtual terminal and run `vaht`, or choose
 *vaht* at a display manager's login screen. Ctrl+Alt+F1…F12 switch
