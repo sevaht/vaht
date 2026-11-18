@@ -447,6 +447,7 @@ impl Window {
         self.frame
             .set_maximized(self.placement.is_fully_maximized());
         self.frame.set_sticky(self.state.is_sticky);
+        self.frame.set_shaded(self.state.is_shaded);
         let geometry = self.frame_geometry(metrics);
         self.frame.paint(&geometry, style, typesetter);
     }

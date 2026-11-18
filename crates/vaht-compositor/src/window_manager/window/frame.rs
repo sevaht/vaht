@@ -87,21 +87,34 @@ impl TitlebarButton {
         }
     }
 
-    /// Returns the button's picture, for a window that is `is_maximized` or
-    /// not and `is_sticky` or not: the maximize and stick buttons show what
-    /// clicking them would do.
-    const fn glyph(self, (is_maximized, is_sticky): (bool, bool)) -> Glyph {
+    /// Returns the button's picture for a window that `look` says is
+    /// maximized, on every workspace or rolled up, or not: those buttons show
+    /// what clicking them would do.
+    const fn glyph(self, look: WindowLook) -> Glyph {
         match self {
+            Self::Shade if look.is_shaded => Glyph::Unshade,
             Self::Shade => Glyph::Shade,
-            Self::Stick if is_sticky => Glyph::Stuck,
+            Self::Stick if look.is_sticky => Glyph::Stuck,
             Self::Stick => Glyph::Stick,
             Self::Menu => Glyph::Menu,
             Self::Minimize => Glyph::Minimize,
-            Self::Maximize if is_maximized => Glyph::Restore,
+            Self::Maximize if look.is_maximized => Glyph::Restore,
             Self::Maximize => Glyph::Maximize,
             Self::Close => Glyph::Close,
         }
     }
+}
+
+/// What a window is, as its titlebar buttons show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct WindowLook {
+    /// Whether it is maximized, so its maximize button restores it.
+    pub(crate) is_maximized: bool,
+    /// Whether it is on every workspace, so its stick button unsticks it.
+    pub(crate) is_sticky: bool,
+    /// Whether it is rolled up into its titlebar, so its shade button rolls
+    /// it down.
+    pub(crate) is_shaded: bool,
 }
 
 /// The buttons on either side of a titlebar's title.
@@ -453,8 +466,7 @@ impl Frame {
                     title: String::new(),
                     icon: None,
                     is_focused: false,
-                    is_maximized: false,
-                    is_sticky: false,
+                    look: WindowLook::default(),
                     buttons,
                 },
                 vaht_ui::Size::default(),
@@ -552,24 +564,34 @@ impl Frame {
     /// Returns whether the frame shows its window as maximized.
     #[cfg(test)]
     pub(crate) fn shows_maximized(&self) -> bool {
-        self.titlebar.content().is_maximized
+        self.titlebar.content().look.is_maximized
     }
 
     /// Shows the window as maximized or not, which its maximize button
     /// shows by being a restore button.
     pub(crate) fn set_maximized(&mut self, is_maximized: bool) {
-        if self.titlebar.content().is_maximized != is_maximized {
-            self.titlebar
-                .update(|content| content.is_maximized = is_maximized);
-        }
+        self.set_look(|look| look.is_maximized = is_maximized);
     }
 
     /// Shows the window as on every workspace or not, which its stick button
     /// shows by being an unstick button.
     pub(crate) fn set_sticky(&mut self, is_sticky: bool) {
-        if self.titlebar.content().is_sticky != is_sticky {
-            self.titlebar
-                .update(|content| content.is_sticky = is_sticky);
+        self.set_look(|look| look.is_sticky = is_sticky);
+    }
+
+    /// Shows the window as rolled up into its titlebar or not, which its
+    /// shade button shows by being an unshade button.
+    pub(crate) fn set_shaded(&mut self, is_shaded: bool) {
+        self.set_look(|look| look.is_shaded = is_shaded);
+    }
+
+    /// Changes what the window looks to be with `change`, painting the
+    /// titlebar again if that is not what it was.
+    fn set_look(&mut self, change: impl FnOnce(&mut WindowLook)) {
+        let mut look = self.titlebar.content().look;
+        change(&mut look);
+        if look != self.titlebar.content().look {
+            self.titlebar.update(|content| content.look = look);
         }
     }
 
@@ -616,10 +638,8 @@ pub(crate) struct Titlebar {
     icon: Option<Icon>,
     /// Whether the window has keyboard focus.
     is_focused: bool,
-    /// Whether the window is maximized, so its maximize button restores it.
-    is_maximized: bool,
-    /// Whether the window is on every workspace, so its stick button unsticks.
-    is_sticky: bool,
+    /// What the window is now, which its buttons show.
+    look: WindowLook,
     /// The buttons either side of the title.
     buttons: TitlebarLayout,
 }
@@ -629,11 +649,8 @@ impl PanelContent for Titlebar {
 
     fn build(&self) -> Widget<TitlebarHit> {
         let button = |button: &TitlebarButton| {
-            Widget::glyph(
-                StyleElement::Button,
-                button.glyph((self.is_maximized, self.is_sticky)),
-            )
-            .with_button(TitlebarHit::Button(*button))
+            Widget::glyph(StyleElement::Button, button.glyph(self.look))
+                .with_button(TitlebarHit::Button(*button))
         };
         let label = Widget::text(StyleElement::Label, self.title.clone())
             .with_size(SizePolicy::Fill { weight: 1 })
@@ -966,8 +983,7 @@ mod tests {
             title: "a window".to_owned(),
             icon: None,
             is_focused: true,
-            is_maximized: false,
-            is_sticky: false,
+            look: WindowLook::default(),
             buttons: TitlebarLayout {
                 left: vec![TitlebarButton::Stick],
                 right: vec![
@@ -1003,8 +1019,10 @@ mod tests {
             title: String::new(),
             icon: None,
             is_focused: true,
-            is_maximized,
-            is_sticky: false,
+            look: WindowLook {
+                is_maximized,
+                ..WindowLook::default()
+            },
             buttons: TitlebarLayout {
                 left: Vec::new(),
                 right: vec![button],
@@ -1027,7 +1045,24 @@ mod tests {
 
     /// Returns the picture of `button` for a window that is `is_sticky` or not.
     fn glyph_when_sticky(button: TitlebarButton, is_sticky: bool) -> Glyph {
-        button.glyph((false, is_sticky))
+        button.glyph(WindowLook {
+            is_sticky,
+            ..WindowLook::default()
+        })
+    }
+
+    #[test]
+    fn the_shade_button_shows_unshade_while_the_window_is_rolled_up() {
+        let shaded = WindowLook {
+            is_shaded: true,
+            ..WindowLook::default()
+        };
+        assert_eq!(
+            TitlebarButton::Shade.glyph(WindowLook::default()),
+            Glyph::Shade
+        );
+        assert_eq!(TitlebarButton::Shade.glyph(shaded), Glyph::Unshade);
+        assert_eq!(TitlebarButton::Close.glyph(shaded), Glyph::Close);
     }
 
     #[test]
