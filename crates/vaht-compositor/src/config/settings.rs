@@ -44,33 +44,33 @@ use crate::window_manager::{
 pub(crate) struct Settings {
     /// The theme: `themes/<name>.toml`; the built-in theme when absent.
     pub(crate) theme: Option<String>,
+    /// The taskbar.
+    pub(crate) taskbar: TaskbarSettings,
+    /// How windows behave and look.
+    pub(crate) windows: WindowSettings,
+    /// The wallpaper.
+    pub(crate) wallpaper: WallpaperSettings,
+    /// Whether and how strongly what is behind windows asking for it is
+    /// blurred.
+    pub(crate) blur: BlurSettings,
     /// Which window gets keyboard focus, and when windows rise.
     pub(crate) focus: FocusSettings,
     /// Where new windows go.
     pub(crate) placement: PlacementSettings,
-    /// How windows behave and look.
-    pub(crate) windows: WindowSettings,
     /// The workspaces.
     pub(crate) workspaces: WorkspaceSettings,
-    /// The taskbar.
-    pub(crate) taskbar: TaskbarSettings,
     /// Menus.
     pub(crate) menus: MenuSettings,
-    /// The wallpaper.
-    pub(crate) wallpaper: WallpaperSettings,
-    /// vaht's IPC socket.
-    pub(crate) ipc: IpcSettings,
+    /// How pointing devices behave.
+    pub(crate) input: InputSettings,
     /// Starting the session.
     pub(crate) session: SessionSettings,
     /// X11 programs.
     pub(crate) xwayland: XwaylandSettings,
-    /// How pointing devices behave.
-    pub(crate) input: InputSettings,
+    /// vaht's IPC socket.
+    pub(crate) ipc: IpcSettings,
     /// How big the log file may grow, and how many are kept.
     pub(crate) logging: LoggingSettings,
-    /// Whether and how strongly what is behind windows asking for it is
-    /// blurred.
-    pub(crate) blur: BlurSettings,
 }
 
 impl Settings {

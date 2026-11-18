@@ -187,7 +187,7 @@ impl Taskbar {
                 && widgets.contains(&TaskbarWidget::Clock),
             opacity: 1.0,
             output: output.to_owned(),
-            lists_own_output: settings.window_list.windows == WindowListScope::OwnOutput,
+            lists_own_output: settings.windows == WindowListScope::OwnOutput,
             rows: settings.row_range().0,
         })
     }
@@ -450,17 +450,19 @@ impl Taskbar {
         let width = u32::try_from(self.area_in(view.whole, row_height).size.w).unwrap_or(0);
         if *self.panel.content() != content || self.panel.size().width != width {
             let (fewest, most) = view.settings.row_range();
-            let min_entry_width = view
-                .settings
-                .window_list
-                .min_entry_width
-                .pixels(view.whole.size.w);
-            self.rows = (fewest..most)
-                .find(|rows| {
-                    content.rows = *rows;
-                    content.entries_fit(width, min_entry_width, theme, typesetter)
-                })
-                .unwrap_or(most);
+            let limit = view.settings.row_limit;
+            self.rows = if let Some(rows) = limit.rows_for(content.entries.len()) {
+                // A number of windows in a row: no need to lay anything out.
+                rows.clamp(fewest, most)
+            } else {
+                let narrowest = limit.narrowest_entry(view.whole.size.w).unwrap_or(0);
+                (fewest..most)
+                    .find(|rows| {
+                        content.rows = *rows;
+                        content.entries_fit(width, narrowest, theme, typesetter)
+                    })
+                    .unwrap_or(most)
+            };
             content.rows = self.rows;
         }
         self.area = self.area_in(view.whole, self.height(row_height));
@@ -748,7 +750,7 @@ impl TaskbarContent {
     }
 
     /// Returns whether the window list's entries are at least
-    /// `min_entry_width` wide with the taskbar as many rows as it is now,
+    /// `min_entry_width` pixels wide with the taskbar as many rows as it is now,
     /// `width` wide, as `theme` styles it.
     fn entries_fit(
         &self,

@@ -291,10 +291,7 @@ fn a_taskbar_of_two_rows_wraps_its_list_and_keeps_windows_off_both() {
 #[test]
 fn an_auto_taskbar_takes_a_row_when_entries_get_too_narrow() {
     // 1920 pixels wide: two entries of 960 fit, three of 640 do not.
-    let (_vaht, mut client) = start_with(
-        "[\"window-list\"]\nrows = \"auto\"",
-        "min_entry_width = 700",
-    );
+    let (_vaht, mut client) = start_with("[\"window-list\"]\nrows = \"auto\"\nrow_limit = 700", "");
     client.open_windows(2);
     assert_eq!(taskbar_height(&client.screenshot()), HEIGHT);
     let one_row = maximize_and_find_bottom(&mut client);
@@ -314,8 +311,8 @@ fn an_auto_taskbar_takes_a_row_at_a_share_of_the_outputs_width() {
     // 1920 pixels wide, so 36% is 691 pixels: two entries of 960 fit, three
     // of 640 do not.
     let (_vaht, mut client) = start_with(
-        "[\"window-list\"]\nrows = \"auto\"",
-        "min_entry_width = { percent = 36 }",
+        "[\"window-list\"]\nrows = \"auto\"\nrow_limit = { percent = 36 }",
+        "",
     );
     client.open_windows(2);
     assert_eq!(taskbar_height(&client.screenshot()), HEIGHT);
@@ -327,6 +324,27 @@ fn an_auto_taskbar_takes_a_row_at_a_share_of_the_outputs_width() {
         lowest_window_row(&mut client),
         one_row - HEIGHT,
         "the maximized window shrinks to keep off it"
+    );
+    client.close_windows();
+}
+
+#[test]
+fn an_auto_taskbar_takes_a_row_for_so_many_windows() {
+    let (_vaht, mut client) = start_with(
+        "[\"window-list\"]\nrows = \"auto\"\nrow_limit = { windows = 2 }",
+        "",
+    );
+    client.open_windows(2);
+    assert_eq!(
+        taskbar_height(&client.screenshot()),
+        HEIGHT,
+        "two fit a row"
+    );
+    client.open_windows(1);
+    assert_eq!(
+        taskbar_height(&client.screenshot()),
+        2 * HEIGHT,
+        "a third takes a second row, however wide they are"
     );
     client.close_windows();
 }
@@ -557,7 +575,7 @@ fn a_title_too_long_for_its_entry_shows_in_a_tooltip_until_a_click() {
 fn every_output_with(windows: &str) -> ([u8; 3], [u8; 3]) {
     let settings = format!(
         "theme = \"test\"\n[taskbar]\nwidgets = [\"window-list\"]\non_every_output = true\n\
-         [taskbar.window_list]\nwindows = \"{windows}\"\n"
+         windows = \"{windows}\"\n"
     );
     let vaht = HeadlessVaht::start_with_outputs(
         Path::new(EXECUTABLE),

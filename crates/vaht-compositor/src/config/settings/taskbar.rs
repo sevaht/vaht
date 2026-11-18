@@ -23,41 +23,68 @@ use crate::config::WindowMatcher;
 )]
 pub(crate) struct TaskbarSettings {
     /// Whether there is one.
+    #[schemars(extend("x-vaht-group" = "Taskbar"))]
     pub(crate) enabled: bool,
+    /// How many rows tall it is: a number, or `"auto"` for one row and another
+    /// whenever the window list reaches its `row_limit` (and fewer again when
+    /// it no longer does), up to `max_rows`.
+    #[schemars(extend("x-vaht-group" = "Taskbar"))]
+    pub(crate) rows: TaskbarRows,
+    /// The most rows an `"auto"` taskbar grows to.
+    #[schemars(
+        title = "Most rows when automatic",
+        extend("x-vaht-group" = "Taskbar")
+    )]
+    pub(crate) max_rows: NonZeroU32,
+    /// What makes an `"auto"` taskbar take another row: entries narrower than
+    /// a share of the output's width (`{ percent = 15 }`) or than a number of
+    /// pixels (`100`), or more windows in a row than a number
+    /// (`{ windows = 8 }`). The taskbar uses the fewest rows that stay within
+    /// the limit, up to `max_rows`.
+    #[schemars(
+        title = "When to take another row",
+        extend("x-vaht-group" = "Taskbar")
+    )]
+    pub(crate) row_limit: RowLimit,
+    /// Whether every output has a taskbar, not only `output`.
+    #[schemars(extend("x-vaht-group" = "Taskbar"))]
+    pub(crate) on_every_output: bool,
     /// The name of the output it shows on, such as `HDMI-A-1`; the
     /// primary output without one, or while that output is not there.
     /// With `on_every_output`, this is the main taskbar, the one with the
     /// tray.
+    #[schemars(extend("x-vaht-group" = "Taskbar"))]
     pub(crate) output: Option<String>,
-    /// Whether every output has a taskbar, not only `output`.
-    pub(crate) on_every_output: bool,
+    /// Whose windows a taskbar lists: every output's, or only those on the
+    /// taskbar's own output (for a taskbar on every output).
+    #[schemars(title = "Windows listed", extend("x-vaht-group" = "Taskbar"))]
+    pub(crate) windows: WindowListScope,
     /// The output edge it runs along.
+    #[schemars(extend("x-vaht-group" = "Position"))]
     pub(crate) edge: TaskbarEdge,
     /// How much of the edge it spans.
+    #[schemars(extend("x-vaht-group" = "Position"))]
     pub(crate) width_percent: WidthPercent,
-    /// How many rows tall it is: a number, or `"auto"` for one row and another
-    /// whenever the window list's entries would be narrower than the window
-    /// list's `min_entry_width` (and fewer again when they fit), up to
-    /// `max_rows`.
-    pub(crate) rows: TaskbarRows,
-    /// The most rows an `"auto"` taskbar grows to.
-    #[schemars(title = "Most rows when automatic")]
-    pub(crate) max_rows: NonZeroU32,
     /// Where along the edge it sits, when narrower than the edge.
+    #[schemars(extend("x-vaht-group" = "Position"))]
     pub(crate) align: TaskbarAlign,
     /// Whether maximized and tiled windows leave it uncovered; an
     /// auto-hiding taskbar never reserves its space.
+    #[schemars(extend("x-vaht-group" = "Position"))]
     pub(crate) reserve_space: bool,
     /// Whether it hides until the pointer touches its edge.
+    #[schemars(extend("x-vaht-group" = "Hiding"))]
     pub(crate) auto_hide: bool,
     /// How long after the pointer leaves it an auto-hiding taskbar hides.
+    #[schemars(extend("x-vaht-group" = "Hiding"))]
     pub(crate) auto_hide_delay_ms: u64,
-    /// Its tooltips.
-    pub(crate) tooltips: TooltipSettings,
     /// What it shows, left to right.
+    #[schemars(extend("x-vaht-group" = "Contents"))]
     pub(crate) widgets: Vec<TaskbarWidget>,
     /// The window list.
     pub(crate) window_list: WindowListSettings,
+    /// Its tooltips.
+    pub(crate) tooltips: TooltipSettings,
     /// The clock.
     pub(crate) clock: ClockSettings,
     /// The tray.
@@ -69,11 +96,13 @@ impl Default for TaskbarSettings {
         Self {
             enabled: true,
             output: None,
+            windows: WindowListScope::default(),
             on_every_output: false,
             edge: TaskbarEdge::Bottom,
             width_percent: WidthPercent::WHOLE,
             rows: TaskbarRows::default(),
             max_rows: NonZeroU32::new(3).expect("3 is not 0"),
+            row_limit: RowLimit::default(),
             align: TaskbarAlign::Center,
             reserve_space: true,
             auto_hide: false,
@@ -126,7 +155,7 @@ impl TaskbarSettings {
 
 /// How many rows the taskbar is: always a number of them (`rows = 2`), or
 /// (`"auto"`) one, and another whenever the window list's entries would be
-/// narrower than its `min_entry_width`, up to `max_rows`. Each row is as
+/// narrower than its `row_limit` allows (or hold more windows), up to `max_rows`. Each row is as
 /// tall as the theme's taskbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum TaskbarRows {
@@ -430,16 +459,6 @@ pub(crate) struct WindowListSettings {
     pub(crate) entry_width: EntryWidth,
     /// Whether entries show their application's icon.
     pub(crate) icons: bool,
-    /// Whose windows a taskbar lists: every output's, or only those on the
-    /// taskbar's own output (for a taskbar on every output).
-    #[schemars(title = "Windows listed")]
-    pub(crate) windows: WindowListScope,
-    /// The narrowest an entry gets before an `"auto"` taskbar takes another
-    /// row: a number of pixels, or a share of the output's width
-    /// (`{ percent = 15 }`). The taskbar uses the fewest rows that keep every
-    /// entry at least this wide.
-    #[schemars(title = "Narrowest entry before another row")]
-    pub(crate) min_entry_width: MinEntryWidth,
 }
 
 impl Default for WindowListSettings {
@@ -448,8 +467,6 @@ impl Default for WindowListSettings {
             show: WindowMatcher::on_current_workspace(),
             entry_width: EntryWidth::default(),
             icons: true,
-            windows: WindowListScope::default(),
-            min_entry_width: MinEntryWidth::default(),
         }
     }
 }
@@ -564,32 +581,57 @@ impl<'de> serde::Deserialize<'de> for EntryWidth {
     }
 }
 
-/// How narrow a window list's entries get before an `"auto"` taskbar takes
-/// another row: a number of pixels (`min_entry_width = 100`), or a share of
-/// the width of the output the taskbar is on (`{ percent = 15 }`), so the same
-/// setting suits a laptop's screen and a television.
+/// What makes an `"auto"` taskbar take another row: its window list's entries
+/// getting too narrow, as a number of pixels (`row_limit = 100`) or a share of
+/// the width of the output the taskbar is on (`{ percent = 15 }`, so one
+/// setting suits a laptop's screen and a television), or a row holding too
+/// many windows (`{ windows = 8 }`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MinEntryWidth {
-    /// This many pixels.
+pub(crate) enum RowLimit {
+    /// Entries narrower than this many pixels.
     Pixels(u32),
-    /// This share of the output's width.
+    /// Entries narrower than this share of the output's width.
     Percent(WidthPercent),
+    /// More windows than this in a row.
+    Windows(NonZeroU32),
 }
 
-impl MinEntryWidth {
+impl RowLimit {
     /// The share of the output's width that is the default.
     const DEFAULT_PERCENT: u32 = 15;
 
-    /// Returns the width in pixels, on an output `output_width` wide.
-    pub(crate) fn pixels(self, output_width: i32) -> u32 {
+    /// The number of windows a row holds, when the limit is a count, that
+    /// the schema suggests.
+    const SUGGESTED_WINDOWS: u32 = 8;
+
+    /// Returns the narrowest an entry may be, in pixels, on an output
+    /// `output_width` wide; none when the limit is a number of windows.
+    pub(crate) fn narrowest_entry(self, output_width: i32) -> Option<u32> {
         match self {
-            Self::Pixels(pixels) => pixels,
-            Self::Percent(percent) => u32::try_from(percent.of(output_width)).unwrap_or(0),
+            Self::Pixels(pixels) => Some(pixels),
+            Self::Percent(percent) => Some(u32::try_from(percent.of(output_width)).unwrap_or(0)),
+            Self::Windows(_) => None,
+        }
+    }
+
+    /// Returns how many rows `windows` windows need, when the limit is a
+    /// number of windows in a row; none when it is a width.
+    pub(crate) fn rows_for(self, windows: usize) -> Option<u32> {
+        match self {
+            Self::Windows(most) => {
+                let per_row = usize::try_from(most.get()).unwrap_or(usize::MAX);
+                Some(
+                    u32::try_from(windows.div_ceil(per_row))
+                        .unwrap_or(u32::MAX)
+                        .max(1),
+                )
+            }
+            Self::Pixels(_) | Self::Percent(_) => None,
         }
     }
 }
 
-impl Default for MinEntryWidth {
+impl Default for RowLimit {
     fn default() -> Self {
         Self::Percent(
             WidthPercent::new(Self::DEFAULT_PERCENT).expect("the default share is from 1 to 100"),
@@ -597,7 +639,7 @@ impl Default for MinEntryWidth {
     }
 }
 
-impl serde::Serialize for MinEntryWidth {
+impl serde::Serialize for RowLimit {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap as _;
         match self {
@@ -607,21 +649,27 @@ impl serde::Serialize for MinEntryWidth {
                 share.serialize_entry("percent", percent)?;
                 share.end()
             }
+            Self::Windows(windows) => {
+                let mut count = serializer.serialize_map(Some(1))?;
+                count.serialize_entry("windows", windows)?;
+                count.end()
+            }
         }
     }
 }
 
-impl schemars::JsonSchema for MinEntryWidth {
+impl schemars::JsonSchema for RowLimit {
     fn schema_name() -> std::borrow::Cow<'static, str> {
-        "MinEntryWidth".into()
+        "RowLimit".into()
     }
 
     fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "oneOf": [
                 {
-                    "type": "object", "title": "Percent of the output's width",
-                    "description": "This share of the width of the output the taskbar is on, so the setting suits a small screen and a large one alike.",
+                    "type": "object",
+                    "title": "Entry narrower than a share of the output's width",
+                    "description": "Another row when an entry would be narrower than this share of the width of the output the taskbar is on, so the setting suits a small screen and a large one alike.",
                     "properties": {
                         "percent": {
                             "type": "integer", "title": "Percent",
@@ -633,18 +681,32 @@ impl schemars::JsonSchema for MinEntryWidth {
                     "default": { "percent": Self::DEFAULT_PERCENT },
                 },
                 {
-                    "type": "integer", "minimum": 0, "title": "Pixels",
-                    "description": "This many pixels, whatever the output.",
+                    "type": "integer", "minimum": 0,
+                    "title": "Entry narrower than a number of pixels",
+                    "description": "Another row when an entry would be narrower than this many pixels, whatever the output.",
                     "default": 200,
+                },
+                {
+                    "type": "object",
+                    "title": "More windows in a row than a number",
+                    "description": "Another row when a row would hold more than this many windows.",
+                    "properties": {
+                        "windows": {
+                            "type": "integer", "title": "Windows", "minimum": 1,
+                        },
+                    },
+                    "required": ["windows"],
+                    "additionalProperties": false,
+                    "default": { "windows": Self::SUGGESTED_WINDOWS },
                 },
             ],
         })
     }
 }
 
-impl<'de> serde::Deserialize<'de> for MinEntryWidth {
+impl<'de> serde::Deserialize<'de> for RowLimit {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        /// What `min_entry_width` may say.
+        /// What `row_limit` may say.
         #[derive(serde::Deserialize)]
         #[serde(untagged)]
         enum Given {
@@ -652,6 +714,8 @@ impl<'de> serde::Deserialize<'de> for MinEntryWidth {
             Pixels(u32),
             /// A share of the output's width.
             Share(Share),
+            /// A number of windows in a row.
+            Count(Count),
         }
         /// `{ percent = <1 to 100> }`.
         #[derive(serde::Deserialize)]
@@ -660,11 +724,22 @@ impl<'de> serde::Deserialize<'de> for MinEntryWidth {
             /// The share, as a whole percentage.
             percent: u32,
         }
-        let message = "min_entry_width is a number of pixels, or { percent = <1 to 100> }";
+        /// `{ windows = <1 or more> }`.
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Count {
+            /// The most windows in a row.
+            windows: u32,
+        }
+        let message = "row_limit is a number of pixels, { percent = <1 to 100> } \
+                       or { windows = <1 or more> }";
         match Given::deserialize(deserializer) {
             Ok(Given::Pixels(pixels)) => Ok(Self::Pixels(pixels)),
             Ok(Given::Share(Share { percent })) => WidthPercent::new(percent)
                 .map(Self::Percent)
+                .ok_or_else(|| de::Error::custom(message)),
+            Ok(Given::Count(Count { windows })) => NonZeroU32::new(windows)
+                .map(Self::Windows)
                 .ok_or_else(|| de::Error::custom(message)),
             Err(_) => Err(de::Error::custom(message)),
         }
@@ -816,37 +891,64 @@ mod tests {
     }
 
     #[rstest]
-    #[case::a_share_by_default("", 288)]
-    #[case::pixels("[window_list]\nmin_entry_width = 100\n", 100)]
-    #[case::a_share("[window_list]\nmin_entry_width = { percent = 25 }\n", 480)]
-    #[case::the_whole_width("[window_list]\nmin_entry_width = { percent = 100 }\n", 1920)]
+    #[case::a_share_by_default("", Some(288))]
+    #[case::pixels("row_limit = 100\n", Some(100))]
+    #[case::a_share("row_limit = { percent = 25 }\n", Some(480))]
+    #[case::the_whole_width("row_limit = { percent = 100 }\n", Some(1920))]
+    #[case::a_count("row_limit = { windows = 8 }\n", None)]
     fn the_narrowest_entry_is_pixels_or_a_share_of_the_output(
         #[case] text: &str,
-        #[case] pixels: u32,
+        #[case] pixels: Option<u32>,
     ) {
-        let width = taskbar(text).expect("valid").window_list.min_entry_width;
-        assert_eq!(width.pixels(1920), pixels);
+        let limit = taskbar(text).expect("valid").row_limit;
+        assert_eq!(limit.narrowest_entry(1920), pixels);
     }
 
     #[test]
     fn the_narrowest_entry_follows_the_width_of_the_output() {
-        let width = MinEntryWidth::default();
-        assert_eq!(width.pixels(1920), 288, "15% of a 1080p output");
-        assert_eq!(width.pixels(1280), 192, "15% of a smaller one");
-        assert_eq!(MinEntryWidth::Pixels(100).pixels(1280), 100);
+        let limit = RowLimit::default();
+        assert_eq!(
+            limit.narrowest_entry(1920),
+            Some(288),
+            "15% of a 1080p output"
+        );
+        assert_eq!(
+            limit.narrowest_entry(1280),
+            Some(192),
+            "15% of a smaller one"
+        );
+        assert_eq!(RowLimit::Pixels(100).narrowest_entry(1280), Some(100));
     }
 
     #[rstest]
-    #[case::no_share("[window_list]\nmin_entry_width = { percent = 0 }\n")]
-    #[case::too_much("[window_list]\nmin_entry_width = { percent = 101 }\n")]
-    #[case::a_word("[window_list]\nmin_entry_width = \"wide\"\n")]
-    #[case::another_key("[window_list]\nmin_entry_width = { max = 5 }\n")]
-    fn a_share_outside_one_to_a_hundred_is_refused(#[case] text: &str) {
-        let error = taskbar(text).expect_err(text);
-        assert!(
-            error.contains("min_entry_width is a number of pixels"),
-            "{error}"
+    #[case::none(0, 1)]
+    #[case::one(1, 1)]
+    #[case::a_full_row(8, 1)]
+    #[case::one_over(9, 2)]
+    #[case::two_full_rows(16, 2)]
+    #[case::three(17, 3)]
+    fn a_count_of_windows_takes_a_row_for_each_set_of_that_many(
+        #[case] windows: usize,
+        #[case] rows: u32,
+    ) {
+        let limit = RowLimit::Windows(NonZeroU32::new(8).expect("8 is not 0"));
+        assert_eq!(limit.rows_for(windows), Some(rows));
+        assert_eq!(
+            RowLimit::default().rows_for(windows),
+            None,
+            "a width is laid out"
         );
+    }
+
+    #[rstest]
+    #[case::no_share("row_limit = { percent = 0 }\n")]
+    #[case::too_much("row_limit = { percent = 101 }\n")]
+    #[case::no_windows("row_limit = { windows = 0 }\n")]
+    #[case::a_word("row_limit = \"wide\"\n")]
+    #[case::another_key("row_limit = { max = 5 }\n")]
+    fn a_limit_that_is_none_of_the_three_is_refused(#[case] text: &str) {
+        let error = taskbar(text).expect_err(text);
+        assert!(error.contains("row_limit is a number of pixels"), "{error}");
     }
 
     #[rstest]

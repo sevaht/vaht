@@ -41,10 +41,14 @@ regex = "1"
 reis = { version = "0.7", features = ["calloop"] }
 rstest = { version = "0.28", default-features = false }
 # The IPC protocol's JSON Schema, from its message types.
-schemars = "1.0"
+# preserve_order: a schema lists its properties as the code declares them, which
+# is the order the settings window shows them in.
+schemars = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1", features = ["derive"] }
 # The IPC protocol's messages: one JSON value per line.
-serde_json = "1"
+# preserve_order: the settings window shows a schema's properties in the order
+# vaht declares them, which needs the order kept wherever the schema is read.
+serde_json = { version = "1", features = ["preserve_order"] }
 # Pinned to a reviewed master revision (Smithay's releases lag far behind);
 # bump deliberately, one bump per commit (docs/design/04 §5).
 smithay = { version = "0.7.0", git = "https://github.com/Smithay/smithay", rev = "ae6921bbbf464ae90122f0c184e95e89093a4257", default-features = false, features = ["backend_drm", "backend_gbm", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "desktop", "renderer_gl", "renderer_multi", "renderer_pixman", "wayland_frontend", "xwayland", "backend_libei"] }

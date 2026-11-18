@@ -212,10 +212,20 @@ impl<L: Link> SettingsApp<L> {
         edits: &mut Vec<ConfigEdit>,
     ) {
         let is_searching = !self.search.trim().is_empty();
+        let mut group: Option<&str> = None;
         for setting in &section.settings {
             if !editor.is_shown(setting) {
                 continue;
             }
+            // Settings the schema groups are shown under a heading each.
+            if setting.group.as_deref() != group
+                && let Some(name) = setting.group.as_deref()
+            {
+                ui.add_space(8.0);
+                ui.strong(name);
+                ui.separator();
+            }
+            group = setting.group.as_deref();
             if let SettingKind::Scopes(_) = &setting.kind {
                 self.scopes(ui, editor, setting, edits);
                 continue;
@@ -769,5 +779,21 @@ mod tests {
         harness.get_by_label("\u{2212}").click();
         harness.run();
         assert!(link.sent.borrow().is_empty(), "nothing to remove");
+    }
+
+    #[test]
+    fn grouped_settings_are_shown_under_their_headings() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "beta": { "type": "boolean", "x-vaht-group": "Rows" },
+                "alpha": { "type": "boolean", "x-vaht-group": "Hiding" },
+            },
+        });
+        let (mut app, _link) = window_of(schema, json!({ "beta": true, "alpha": false }));
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_label("Rows");
+        harness.get_by_label("Hiding");
     }
 }

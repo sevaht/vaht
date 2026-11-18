@@ -316,15 +316,19 @@ rest by name, so a setting never silently does nothing:
   is not there), `on_every_output` (off by default: on, every output has a
   taskbar, the one on `output` being the main one, the only one with the
   tray, as a desktop has one; each keeps its own output's room and
-  auto-hides at its own edge), `[taskbar.window_list] windows` (`all`, the
-  default, or `own-output`: each taskbar lists only the windows whose
-  middle is on its output), `edge` (`top` or `bottom`), `width_percent`
+  auto-hides at its own edge), `windows` (`all`, the default, or
+  `own-output`: each taskbar lists only the windows whose middle is on its
+  output), `edge` (`top` or `bottom`), `width_percent`
   (1 to 100), `rows` (new: a number of rows, each as tall as the theme's
   taskbar, 1 by default; or `"auto"`: one, and another whenever the window
-  list's entries would be narrower than `[taskbar.window_list]
-  min_entry_width` (a share of the output's width, `{ percent = 15 }`
-  by default, so it suits a laptop's screen and a television alike; or a
-  number of pixels, `min_entry_width = 100`), up to `max_rows` (3). The window list's
+  list reaches its `row_limit`, up to `max_rows` (3). `row_limit` is one of
+  three ways to say when: entries narrower than a share of the output's
+  width (`{ percent = 15 }`, the default, so it suits a laptop's screen and
+  a television alike), entries narrower than a number of pixels
+  (`row_limit = 100`), or more windows in a row than a number
+  (`{ windows = 8 }`); the taskbar uses the fewest rows that stay within it.
+  (`row_limit` and `windows` were briefly in `[taskbar.window_list]`; they are
+  `[taskbar]` settings, and the old place is refused.) The window list's
   entries fill the rows in order, each as wide as the rest; the tray wraps
   across the rows but never adds one; the arrows stay a row wide; the clock
   and workspace name span the rows. Windows keep off every row, and
@@ -1266,7 +1270,12 @@ dialogs use too.
   a number or `auto`; `entry_width`; a matcher's text, yes/no/either and
   workspace) has a list to choose the way and the control for it; tables by
   name (`[input.device]`) have a section each, with a name to add one by and
-  a *Remove*; plain tables (`[wallpaper.workspaces]`) have a row each. A
+  a *Remove*; plain tables (`[wallpaper.workspaces]`) have a row each. The
+  window shows settings in the order the schema declares them, which is the
+  order of the fields in vaht's code (so a table lists what belongs
+  together together, not alphabetically), and a `x-vaht-group` on a setting
+  puts a heading above it and its neighbours (the taskbar's page is
+  *Taskbar*, *Position*, *Hiding*, *Contents*). A
   matcher's `not` shows one level deep (a `not` inside it is for the file). A
   test fails if a setting of `settings.toml` has no control of its own. The
   schema names what the window shows: `title` is a setting's or a way's name,

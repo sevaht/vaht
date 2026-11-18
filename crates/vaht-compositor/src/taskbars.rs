@@ -2,7 +2,7 @@
 //! primary one), or one on every output with `on_every_output` (02 §3).
 //!
 //! Each [`Taskbar`] is on one output, by connector, and lists every
-//! output's windows or only its own (`window_list.windows`). A desktop has
+//! output's windows or only its own (`windows`). A desktop has
 //! one tray, shown on the main taskbar, and one clock alarm, which wakes
 //! vaht to draw every taskbar's clock anew; both live here, so the hooks
 //! that find them in the compositor find one of each.

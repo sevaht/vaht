@@ -217,6 +217,10 @@ pub struct Setting {
     pub kind: SettingKind,
     /// Whether it may be left unset: no value at all, not a default one.
     pub is_optional: bool,
+    /// The heading it is shown under on its page (`x-vaht-group`), if the
+    /// schema groups the settings; neighbours with the same group are
+    /// shown together, in the order the schema declares them.
+    pub group: Option<String>,
 }
 
 /// A group of settings, a table in the file.
@@ -421,10 +425,23 @@ impl<'schema> SchemaReader<'schema> {
             default,
             kind,
             is_optional: resolved.is_optional,
+            group: Self::extension(property, resolved.schema, "x-vaht-group")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         }
     }
 
-    /// Returns the name `outer` or, failing that, `inner` gives itself.
+    /// Returns what `outer` or, failing that, `inner` says under the
+    /// extension keyword `name`.
+    fn extension<'node>(
+        outer: &'node Value,
+        inner: &'node Value,
+        name: &str,
+    ) -> Option<&'node Value> {
+        outer.get(name).or_else(|| inner.get(name))
+    }
+
+    /// Returns what `outer` or, failing that, `inner` says it is for.
     fn title_of(outer: &Value, inner: &Value) -> Option<String> {
         [outer, inner]
             .into_iter()
@@ -1002,6 +1019,35 @@ mod tests {
         assert_eq!(
             setting(&form, "images").kind,
             SettingKind::Mapping(Box::new(SettingKind::Text))
+        );
+    }
+
+    #[test]
+    fn settings_keep_the_order_the_schema_declares_and_name_their_group() {
+        let schema: Value = serde_json::from_str(
+            r#"{ "type": "object", "properties": {
+                "zeta":  { "type": "boolean", "x-vaht-group": "Basics" },
+                "alpha": { "type": "boolean", "x-vaht-group": "Basics" },
+                "mid":   { "type": "boolean", "x-vaht-group": "More" },
+                "none":  { "type": "boolean" }
+            } }"#,
+        )
+        .expect("JSON");
+        let form = Form::from_schema(&schema).expect("a form");
+        let listed: Vec<(String, Option<String>)> = form
+            .settings()
+            .into_iter()
+            .map(|setting| (setting.path.to_string(), setting.group.clone()))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("zeta".to_owned(), Some("Basics".to_owned())),
+                ("alpha".to_owned(), Some("Basics".to_owned())),
+                ("mid".to_owned(), Some("More".to_owned())),
+                ("none".to_owned(), None),
+            ],
+            "not alphabetical: the schema's order"
         );
     }
 

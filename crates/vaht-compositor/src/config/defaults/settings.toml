@@ -81,23 +81,29 @@ names = ["Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4"]
 
 [taskbar]
 enabled = true
-# The output it shows on, by name, such as output = "HDMI-A-1"; without
-# one, the primary output (outputs.toml).
-# Whether every output has a taskbar; the one above is then the main one,
-# the only one with the tray.
+# How many rows tall it is, each as tall as the theme's taskbar: a number
+# (always that many), or "auto": one, and another whenever the window list
+# reaches row_limit, up to max_rows. The window list and the tray wrap across
+# the rows; the tray never adds one.
+rows = 1
+max_rows = 3
+# What makes a taskbar with rows = "auto" take another row: entries narrower
+# than { percent = <1 to 100> } of the width of the output the taskbar is on,
+# or than a number of pixels; or more windows in a row than
+# { windows = <1 or more> }. It uses the fewest rows that stay within this.
+row_limit = { percent = 15 }
+# Whether every output has a taskbar; the one on `output` is then the main
+# one, the only one with the tray.
 on_every_output = false
+# The output it shows on, by name, such as output = "HDMI-A-1"; without one,
+# the primary output (outputs.toml).
+# Whose windows each taskbar lists: "all" outputs', or its "own-output"'s.
+windows = "all"
 edge = "bottom"                     # or top
 # How much of the edge it spans, 1 to 100 percent, and where it sits when
 # narrower: left, center or right.
 width_percent = 100
 align = "center"
-# How many rows tall it is, each as tall as the theme's taskbar: a number
-# (always that many), or "auto": one, and another whenever the window
-# list's entries would be narrower than window_list.min_entry_width, up to
-# max_rows. The window list and the tray wrap across the rows; the tray
-# never adds one.
-rows = 1
-max_rows = 3
 # Whether maximized and tiled windows leave the taskbar uncovered; an
 # auto-hiding taskbar never reserves its space.
 reserve_space = true
@@ -119,12 +125,6 @@ entry_width = "fill"
 # Whether entries show their application's icon: the one the window names,
 # else its desktop entry's, from the hicolor theme or pixmaps.
 icons = true
-# Whose windows each taskbar lists: "all" outputs', or its "own-output"'s.
-windows = "all"
-# With rows = "auto", the narrowest an entry gets before the taskbar takes
-# another row: a number of pixels, or { percent = <1 to 100> } of the width
-# of the output the taskbar is on.
-min_entry_width = { percent = 15 }
 
 [taskbar.tray]
 # Programs' status icons named here (by their id, in any case) go first,
