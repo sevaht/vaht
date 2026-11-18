@@ -69,9 +69,9 @@ use crate::buffer_fences::FenceWaits;
 use crate::capture::ScreenCapture;
 use crate::client::{ClientListener, ListenError};
 use crate::config::{
-    Action, Command, Config, ConfigProblem, ConfigSource, Delay, FocusModel, KeyChord, Loaded,
-    MenuGenerator, MenuRequest, Menus, Modifiers, ResizeFrom, SettingChange, SettingOverrides,
-    StyleFile, WindowManagerAction,
+    Action, Command, Config, ConfigProblem, ConfigSource, Delay, FocusModel, KeyChord, LayoutFile,
+    Loaded, MenuGenerator, MenuRequest, Menus, Modifiers, ResizeFrom, SettingChange,
+    SettingOverrides, StyleFile, WindowManagerAction,
 };
 use crate::config::{CycleOrder, WindowCycle};
 use crate::config::{
@@ -3028,6 +3028,7 @@ impl Compositor {
                 .show_dialog("command", self.config_source.directory()),
             Action::Settings => self.launcher.show_settings(),
             Action::SetStyle(name) => self.change_setting(SettingChange::style(name)),
+            Action::SetLayout(name) => self.change_setting(SettingChange::layout(name)),
             Action::SetSetting(change) | Action::UnsetSetting(change) => {
                 self.change_setting(change.clone());
             }
@@ -3194,7 +3195,17 @@ impl Compositor {
             .with_named_icons(named_icons)
             .with_styles(
                 StyleFile::available(self.config_source.directory()),
-                self.config.settings.style.as_deref(),
+                Some(
+                    self.config
+                        .settings
+                        .style
+                        .as_deref()
+                        .unwrap_or(vaht_ui::Style::DEFAULT_NAME),
+                ),
+            )
+            .with_layouts(
+                LayoutFile::available(self.config_source.directory()),
+                self.config.settings.layout.as_deref(),
             )
             .with_window_icons(icons)
             .with_outputs(OutputChoices {

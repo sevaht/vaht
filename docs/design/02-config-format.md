@@ -1138,6 +1138,40 @@ corner_radius = 5
 
 ---
 
+### 10.3 Layouts: `layouts/<name>.toml`
+
+A layout is a named set of *presentation* settings: what is shown and how it is
+arranged, as opposed to how it is colored (a style) or how vaht behaves. It is a
+partial `settings.toml`, in the same shape:
+
+```toml
+# layouts/slim.toml
+[taskbar]
+rows = 1
+widgets = ["window-list", "clock"]
+```
+
+`settings.toml` chooses one with `layout = "slim"`, found like a style: the
+configuration directory's `layouts/`, then `/usr/share/vaht/layouts`.
+
+**Precedence, lowest to highest:** vaht's defaults, the layout, `settings.toml`,
+then changes made in place (`set-setting`, the settings window). `settings.toml`
+wins, so it is the user's overrides: it names only what differs from the layout,
+and swapping the layout (`set-layout <name>`, the `layouts` menu list, the
+settings window) never rewrites it. Tables merge key by key; a list or a value
+replaces. "Reset to default" in the settings window goes back to the layout's
+value, and a setting the layout supplies is marked "from layout".
+
+**Only presentation settings are allowed:** `[taskbar]`, `windows.frame`, the snap
+picker, blur, window transparency and menu icons. Anything else (focus, input,
+placement, session, ...) in a layout is reported against the layout's own file
+(`layouts/slim.toml`), left out, and the rest of the layout is used. A layout
+that names a missing file, or holds a bad value, is reported the same way and the
+configuration keeps running (the usual red banner, and `vaht config files`).
+
+`vaht config get` marks the settings a layout supplies with `+` (and the ones
+changed in place with `*`); `vaht config files` lists the layouts there are.
+
 ## 11. `vaht import`
 
 ```

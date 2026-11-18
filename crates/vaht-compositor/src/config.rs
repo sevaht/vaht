@@ -15,7 +15,9 @@
 
 mod bindings;
 mod command;
+mod layout;
 mod lenient;
+mod library;
 mod matcher;
 mod menus;
 mod outputs;
@@ -41,6 +43,7 @@ pub(crate) use self::command::{
     Action, Command, CycleOrder, Delay, KeyModeSwitch, MenuRequest, ResizeFrom, TaskbarAction,
     TaskbarOutput, WindowCycle, WindowManagerAction,
 };
+pub(crate) use self::layout::{LayoutFile, LayoutState};
 pub(crate) use self::lenient::{ConfigProblem, Loaded};
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};
@@ -118,6 +121,8 @@ pub struct Config {
     pub(crate) outputs: OutputSettings,
     /// How everything vaht draws looks: the style `settings.toml` names.
     pub(crate) style: Style,
+    /// The layout `settings.toml` names, and what it contributes.
+    pub(crate) layout: LayoutState,
 }
 
 impl Config {
@@ -188,15 +193,7 @@ impl Config {
         overrides: &SettingOverrides,
     ) -> Result<Self, ConfigError> {
         let [bindings, settings, rules, menus, outputs] = Self::FILES;
-        let settings: Settings = if overrides.is_empty() {
-            settings.read(directory)?
-        } else {
-            let mut table = settings.read_table(directory)?;
-            overrides
-                .apply_to(&mut table)
-                .and_then(|()| Settings::from_table(table))
-                .map_err(|message| ConfigError::Changed { message })?
-        };
+        let (settings, layout) = Self::strict_settings(settings, directory, overrides)?;
         // No style chosen is the default style, which is a file like any other
         // (a user's, or the installed one) and only falls back to the copy built in.
         let name = settings.style.as_deref().unwrap_or(Style::DEFAULT_NAME);
@@ -208,10 +205,67 @@ impl Config {
             menus: menus.read(directory)?,
             outputs: outputs.read(directory)?,
             style,
+            layout,
         };
         config.check_custom_menus()?;
         config.check_key_modes()?;
         Ok(config)
+    }
+
+    /// Reads `file` (`settings.toml`) with `overrides`, and the layout it
+    /// names under it, as one set of settings; the first problem is an error.
+    fn strict_settings(
+        file: ConfigFile,
+        directory: &Path,
+        overrides: &SettingOverrides,
+    ) -> Result<(Settings, LayoutState), ConfigError> {
+        let mut user = file.read_table(directory)?;
+        if overrides.is_empty() {
+            // The file alone, so its errors say line and column.
+            file.read::<Settings>(directory)?;
+        } else {
+            overrides
+                .apply_to(&mut user)
+                .and_then(|()| Settings::from_table(user.clone()))
+                .map_err(|message| ConfigError::Changed { message })?;
+        }
+        let Some(name) = user.get("layout").and_then(toml::Value::as_str) else {
+            let settings =
+                Settings::from_table(user).map_err(|message| ConfigError::Changed { message })?;
+            return Ok((settings, LayoutState::default()));
+        };
+        let mut layout = LayoutFile::find(directory, name)?.read_table()?;
+        let other = layout::leave_out_other_settings(&mut layout);
+        if !other.is_empty() {
+            return Err(ConfigError::Layout {
+                name: name.to_owned(),
+                message: format!(
+                    "{} {} not presentation; a layout sets only what is shown and how it is \
+                     arranged",
+                    other.join(", "),
+                    if other.len() == 1 { "is" } else { "are" },
+                ),
+            });
+        }
+        let defaults =
+            Settings::from_table(layout.clone()).map_err(|message| ConfigError::Layout {
+                name: name.to_owned(),
+                message,
+            })?;
+        let keys = layout::leaf_keys(&layout)
+            .into_iter()
+            .filter(|key| !layout::sets(&user, key))
+            .collect();
+        let settings = Settings::from_table(layout::merge_under(&layout, &user))
+            .map_err(|message| ConfigError::Changed { message })?;
+        Ok((
+            settings,
+            LayoutState {
+                name: Some(name.to_owned()),
+                defaults,
+                keys,
+            },
+        ))
     }
 
     /// Makes sure every `custom-menu` names a menu `menus.toml` has.
@@ -290,6 +344,7 @@ impl Config {
             menus: toml::from_str(menus.defaults).expect("the built-in menus are valid (tested)"),
             outputs: OutputSettings::default(),
             style: Style::built_in(),
+            layout: LayoutState::default(),
         }
     }
 }
@@ -355,17 +410,33 @@ pub enum ConfigError {
         error: io::Error,
     },
 
-    /// The settings name a style by something other than a plain name.
-    #[error("not a style name: {name:?} (a style is styles/<name>.toml)")]
-    StyleName {
+    /// A layout is not valid.
+    #[error("layout `{name}`: {message}")]
+    Layout {
+        /// The layout's name.
+        name: String,
+        /// What is wrong.
+        message: String,
+    },
+
+    /// The settings name a style or layout by something other than a plain
+    /// name.
+    #[error("not a {kind} name: {name:?} (a {kind} is {directory}/<name>.toml)")]
+    LibraryName {
+        /// What it is: `style`, `layout`.
+        kind: &'static str,
+        /// The directory of its kind.
+        directory: &'static str,
         /// The name as written.
         name: String,
     },
 
-    /// The style the settings name exists nowhere vaht looks.
-    #[error("no style `{name}`: looked for {}", searched.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(" and "))]
-    MissingStyle {
-        /// The style's name.
+    /// The style or layout the settings name exists nowhere vaht looks.
+    #[error("no {kind} `{name}`: looked for {}", searched.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(" and "))]
+    MissingInLibrary {
+        /// What it is: `style`, `layout`.
+        kind: &'static str,
+        /// The name.
         name: String,
         /// Where vaht looked.
         searched: Vec<PathBuf>,

@@ -17,6 +17,12 @@ converts just styles (colors, fonts, textures), from a style, a style
 directory, or a whole directory of them such as `/usr/share/fluxbox/styles`,
 without touching the rest of your configuration.
 
+Colors, fonts and textures are a *style* (`styles/<name>.toml`, the `style`
+setting). Which taskbar widgets, clock and window buttons are shown is a *layout*
+(`layouts/<name>.toml`, the `layout` setting); it lies under `settings.toml`,
+which wins, so swapping layouts (`vaht run set-layout <name>`) leaves your own
+settings alone.
+
 ## Installing
 
 `packaging/install.sh` builds vaht and installs it with the files it needs

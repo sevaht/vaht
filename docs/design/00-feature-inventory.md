@@ -40,6 +40,7 @@ target. A ★ marks features it actually uses.
 | **tray** | systray, system tray | The taskbar's StatusNotifierItem host |
 | **panel** | (none) | Anything vaht draws and lays out itself: a frame, the taskbar, a menu, a tooltip, a dialog |
 | **profile** | layout, profile set | A named output configuration |
+| **layout** | preset, profile | A named set of presentation settings (which taskbar widgets, the clock, the window buttons, blur): a file in `layouts/`, chosen by the `layout` setting. It lies under `settings.toml`, which wins, and swapping it never rewrites that file |
 | **style** | theme, skin | The colors, fonts, textures and sizes of everything vaht draws: a file in `styles/`, chosen by the `style` setting. Fluxbox calls the same thing a style; `vaht import fluxbox-style` converts one |
 | **setting** | option, preference, resource | One key of `settings.toml`, with a documented type, range and default |
 | **pending change** | draft, dirty edit | A setting changed while vaht runs and not yet written to its file; it already runs |

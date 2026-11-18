@@ -18,6 +18,7 @@ mod idle;
 mod input_method;
 mod ipc;
 mod layers;
+mod layouts;
 mod lock;
 mod menus;
 mod outputs;

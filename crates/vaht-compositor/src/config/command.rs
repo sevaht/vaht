@@ -401,6 +401,9 @@ pub(crate) enum Action {
     /// Uses a style in place of the settings' (`set-style <name>`), until
     /// `save-settings` writes it to `settings.toml`.
     SetStyle(String),
+    /// Uses a layout in place of the settings' (`set-layout <name>`), until
+    /// `save-settings` writes it to `settings.toml`.
+    SetLayout(String),
     /// Changes a setting of `settings.toml` in place (`set-setting <key>
     /// <value>`, the value in TOML or a bare word), until `save-settings`
     /// writes it.
@@ -737,6 +740,10 @@ impl Action {
                 Err("`set-style` needs a style's name".to_owned())
             }
             "set-style" => Ok(Self::SetStyle(arguments.to_owned())),
+            "set-layout" if arguments.is_empty() => {
+                Err("`set-layout` needs a layout's name".to_owned())
+            }
+            "set-layout" => Ok(Self::SetLayout(arguments.to_owned())),
             "save-settings" => without_arguments(Self::SaveSettings),
             "unset-setting" => SettingChange::parse_unset(arguments).map(Self::UnsetSetting),
             "reapply-rules" => without_arguments(Self::ReapplyRules),
@@ -873,6 +880,7 @@ impl fmt::Display for Action {
             Self::Settings => formatter.write_str("settings"),
             Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
             Self::SetStyle(name) => write!(formatter, "set-style {name}"),
+            Self::SetLayout(name) => write!(formatter, "set-layout {name}"),
             Self::SaveSettings => formatter.write_str("save-settings"),
             Self::UnsetSetting(change) => write!(formatter, "unset-setting {change}"),
             Self::ReapplyRules => formatter.write_str("reapply-rules"),

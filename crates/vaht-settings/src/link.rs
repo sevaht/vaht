@@ -25,6 +25,10 @@ pub enum Command {
 
 /// What vaht told the window.
 #[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one update per reading, moved once into the window"
+)]
 pub enum Update {
     /// The settings' schema (JSON Schema), sent once, first.
     Schema(Value),
@@ -38,6 +42,12 @@ pub enum Update {
         changed: Vec<Vec<String>>,
         /// The styles that can be chosen.
         styles: Vec<String>,
+        /// The layouts that can be chosen.
+        layouts: Vec<String>,
+        /// The layout in use, if there is one.
+        layout: Option<String>,
+        /// The settings the layout supplies, each as a path.
+        from_layout: Vec<Vec<String>>,
         /// What vaht could not use of the configuration files and left
         /// out.
         problems: Vec<String>,
@@ -176,15 +186,23 @@ impl VahtLink {
                     value,
                     defaults,
                     changed,
+                    layout,
+                    from_layout,
                 }),
                 Ok(Reply::ConfigFiles {
-                    styles, problems, ..
+                    styles,
+                    layouts,
+                    problems,
+                    ..
                 }),
             ) => updates.push(Update::Reading {
                 value,
                 defaults,
                 changed,
                 styles,
+                layouts,
+                layout,
+                from_layout,
                 problems,
             }),
             (Err(error), _) | (_, Err(error)) => return Err(error.to_string()),

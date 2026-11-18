@@ -1,4 +1,4 @@
-//! Settings changed while vaht runs (`set-setting`, `set-style`), kept
+//! Settings changed while vaht runs (`set-setting`, `set-style`, `set-layout`), kept
 //! apart from the files until `save-settings` writes them there (00 §3,
 //! `SaveSettings`).
 //!
@@ -56,6 +56,11 @@ impl SettingChange {
     /// Returns the change of `style` to `name`.
     pub(crate) fn style(name: &str) -> Self {
         Self::new(&["style"], &toml::Value::String(name.to_owned()))
+    }
+
+    /// Returns the change of `layout` to `name`.
+    pub(crate) fn layout(name: &str) -> Self {
+        Self::new(&["layout"], &toml::Value::String(name.to_owned()))
     }
 
     /// Returns the change of `key`, its parts, to `value`.

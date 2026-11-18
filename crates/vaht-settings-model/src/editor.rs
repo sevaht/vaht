@@ -26,6 +26,11 @@ pub struct SettingsEditor {
     defaults: Value,
     /// The keys changed in place and not yet written.
     changed: Vec<ConfigPath>,
+    /// The layout in use, if there is one.
+    layout: Option<String>,
+    /// The settings the layout supplies: what it sets that `settings.toml`
+    /// does not.
+    from_layout: Vec<ConfigPath>,
     /// What the user searched for, lowercase; empty for everything.
     query: String,
 }
@@ -40,6 +45,8 @@ impl SettingsEditor {
             value: Value::Null,
             defaults: Value::Null,
             changed: Vec::new(),
+            layout: None,
+            from_layout: Vec::new(),
             query: String::new(),
         }
     }
@@ -53,6 +60,28 @@ impl SettingsEditor {
             .iter()
             .filter_map(|parts| ConfigPath::from_parts(parts.clone()))
             .collect();
+    }
+
+    /// Takes the layout in use and the settings it supplies.
+    pub fn set_layout(&mut self, layout: Option<String>, from_layout: &[Vec<String>]) {
+        self.layout = layout;
+        self.from_layout = from_layout
+            .iter()
+            .filter_map(|parts| ConfigPath::from_parts(parts.clone()))
+            .collect();
+    }
+
+    /// Returns the layout in use, if there is one.
+    #[must_use]
+    pub fn layout(&self) -> Option<&str> {
+        self.layout.as_deref()
+    }
+
+    /// Returns whether the layout supplies `path`: it sets it, and
+    /// `settings.toml` does not.
+    #[must_use]
+    pub fn is_from_layout(&self, path: &ConfigPath) -> bool {
+        self.from_layout.contains(path)
     }
 
     /// Returns the form.
@@ -265,5 +294,18 @@ mod tests {
         editor.search("nothing like it");
         assert_eq!(shown(&editor), Vec::<String>::new());
         assert!(!editor.has_shown_settings(editor.form().root()));
+    }
+
+    #[test]
+    fn the_layout_in_use_and_what_it_supplies_are_known() {
+        let mut editor = editor();
+        assert_eq!(editor.layout(), None);
+        editor.set_layout(
+            Some("slim".to_owned()),
+            &[vec!["focus".to_owned(), "model".to_owned()]],
+        );
+        assert_eq!(editor.layout(), Some("slim"));
+        assert!(editor.is_from_layout(&path("focus.model")));
+        assert!(!editor.is_from_layout(&path("focus.auto_raise")));
     }
 }

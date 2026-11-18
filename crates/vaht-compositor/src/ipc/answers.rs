@@ -8,7 +8,7 @@ use vaht_ipc::{
 use super::{Answer, IpcClient, IpcHandler, IpcServer};
 use crate::Compositor;
 use crate::WindowId;
-use crate::config::{Action, Command, SettingChange, Settings, StyleFile, schema};
+use crate::config::{Action, Command, LayoutFile, SettingChange, StyleFile, schema};
 use crate::execution::ExecutionContext;
 use crate::outputs::Outputs;
 
@@ -156,6 +156,7 @@ impl Compositor {
             Request::ConfigFiles {} => Reply::ConfigFiles {
                 files: self.config_file_infos(),
                 styles: StyleFile::available(self.config_source.directory()),
+                layouts: LayoutFile::available(self.config_source.directory()),
                 problems: self.config_problem_texts(),
             },
             Request::ConfigSchema { file } => match schema::schema_of(file) {
@@ -165,8 +166,10 @@ impl Compositor {
             Request::ConfigRead { file } => match file {
                 ConfigFile::Settings => Reply::ConfigRead {
                     value: schema::settings_value(&self.config.settings),
-                    defaults: schema::settings_value(&Settings::default()),
+                    defaults: schema::settings_value(&self.config.layout.defaults),
                     changed: self.overrides.keys(),
+                    layout: self.config.layout.name.clone(),
+                    from_layout: self.config.layout.keys.clone(),
                 },
                 ConfigFile::Outputs
                 | ConfigFile::Bindings

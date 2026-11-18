@@ -180,8 +180,12 @@ pub(crate) struct MenuBuilder<'state> {
     window: Option<WindowId>,
     /// The styles there are, for the `styles` list.
     styles: Vec<String>,
-    /// The style in use, if not the built-in one.
+    /// The style in use.
     current_style: Option<&'state str>,
+    /// The layouts there are, for the `layouts` list.
+    layouts: Vec<String>,
+    /// The layout in use, if there is one.
+    current_layout: Option<&'state str>,
     /// Each window's icon, for lists of windows that show them.
     window_icons: HashMap<WindowId, vaht_ui::Icon>,
     /// The icons `menus.toml` names, by the name written, those found.
@@ -228,6 +232,8 @@ impl<'state> MenuBuilder<'state> {
             window,
             styles: Vec::new(),
             current_style: None,
+            layouts: Vec::new(),
+            current_layout: None,
             window_icons: HashMap::new(),
             named_icons: HashMap::new(),
             outputs: OutputChoices::default(),
@@ -262,6 +268,19 @@ impl<'state> MenuBuilder<'state> {
     pub(crate) fn with_styles(mut self, styles: Vec<String>, current: Option<&'state str>) -> Self {
         self.styles = styles;
         self.current_style = current;
+        self
+    }
+
+    /// Returns the builder listing `layouts` in the `layouts` list, `current`
+    /// checked.
+    #[must_use]
+    pub(crate) fn with_layouts(
+        mut self,
+        layouts: Vec<String>,
+        current: Option<&'state str>,
+    ) -> Self {
+        self.layouts = layouts;
+        self.current_layout = current;
         self
     }
 
@@ -518,6 +537,19 @@ impl<'state> MenuBuilder<'state> {
                         window: None,
                     },
                     mark: Some(self.current_style == Some(name.as_str())),
+                    icon: None,
+                })
+                .collect(),
+            MenuGenerator::Layouts => self
+                .layouts
+                .iter()
+                .map(|name| MenuItem::Choice {
+                    label: name.clone(),
+                    choice: MenuChoice::Run {
+                        command: Command::Run(Action::SetLayout(name.clone())),
+                        window: None,
+                    },
+                    mark: Some(self.current_layout == Some(name.as_str())),
                     icon: None,
                 })
                 .collect(),

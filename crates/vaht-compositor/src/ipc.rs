@@ -46,6 +46,10 @@ pub(crate) struct IpcClient {
 
 /// How a request is answered.
 #[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one answer per request, moved once; boxing every reply gains nothing"
+)]
 pub(crate) enum Answer {
     /// With this reply, now.
     Now(Reply),

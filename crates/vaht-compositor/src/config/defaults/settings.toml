@@ -1,9 +1,17 @@
 # vaht's built-in settings: what applies to each key that
 # ~/.config/vaht/settings.toml leaves out. Every key is optional.
 
-# The style: styles/<name>.toml in this directory, or in
-# /usr/share/vaht/styles. Without it, the built-in style.
+# The style (colors, fonts, textures): styles/<name>.toml in this directory,
+# or in /usr/share/vaht/styles. Without it, `vaht`, the default style.
 # style = "name"
+
+# The layout (a named set of presentation settings: what the taskbar shows,
+# the window buttons): layouts/<name>.toml in this directory, or in
+# /usr/share/vaht/layouts. It lies under this file: a setting set here wins over
+# the layout's, and one left out here comes from the layout. A layout may set
+# only what is shown and how it is arranged ([taskbar], [windows.frame], the snap
+# picker, blur, window opacity, menu icons), never behavior.
+# layout = "name"
 
 [focus]
 # click: a window takes focus when clicked. sloppy: when the pointer

@@ -46,6 +46,11 @@ pub struct SettingView<'setting> {
     pub is_default: bool,
     /// Whether it is changed and not yet written.
     pub is_changed: bool,
+    /// Whether the layout supplies it (`settings.toml` does not set it).
+    pub is_from_layout: bool,
+    /// The names there are, for a setting that names a file (a style, a
+    /// layout).
+    pub names: &'setting [String],
 }
 
 impl SettingView<'_> {
@@ -59,7 +64,10 @@ impl SettingView<'_> {
                 name.clone().on_hover_text(&setting.description);
             }
             let mut is_set = self.value.is_some();
-            if setting.is_optional {
+            // A name picks from a list, set or not: choosing sets it, and Reset
+            // unsets it, so it has no Set box.
+            let names_a_file = matches!(setting.kind, SettingKind::Name(_));
+            if setting.is_optional && !names_a_file {
                 let toggle = ui.checkbox(&mut is_set, "Set").labelled_by(name.id);
                 if toggle.changed() {
                     edit = Some(if is_set {
@@ -74,14 +82,14 @@ impl SettingView<'_> {
                     });
                 }
             }
-            if is_set
-                && let Some(current) = self.value
+            if (is_set || names_a_file)
                 && let Some(value) = (Control {
                     path: &setting.path,
                     kind: &setting.kind,
                     label: name.id,
+                    names: self.names,
                 })
-                .show(ui, drafts, current)
+                .show(ui, drafts, self.value.unwrap_or(&Value::Null))
             {
                 edit = Some(ConfigEdit::Set {
                     path: setting.path.clone(),
@@ -103,6 +111,9 @@ impl SettingView<'_> {
             }
             if self.is_changed {
                 ui.small("unsaved");
+            } else if self.is_from_layout {
+                ui.small("from layout")
+                    .on_hover_text("The layout supplies this; set it here to override it");
             }
         });
         // What the chosen form means, then what the setting is for.
@@ -132,19 +143,21 @@ struct Control<'control> {
     kind: &'control SettingKind,
     /// The label that names it, for a screen reader.
     label: Id,
+    /// The names there are, for a value that names a file.
+    names: &'control [String],
 }
 
-impl Control<'_> {
+impl<'control> Control<'control> {
     /// Returns the control for a value inside this one, at `path`.
-    fn inside<'inner>(
-        &self,
-        path: &'inner ConfigPath,
-        kind: &'inner SettingKind,
-    ) -> Control<'inner> {
+    fn inside<'inner>(&self, path: &'inner ConfigPath, kind: &'inner SettingKind) -> Control<'inner>
+    where
+        'control: 'inner,
+    {
         Control {
             path,
             kind,
             label: self.label,
+            names: self.names,
         }
     }
 
@@ -178,6 +191,7 @@ impl Control<'_> {
                     .flatten()
             }
             SettingKind::Text => self.text(ui, drafts, current),
+            SettingKind::Name(_) => Self::name(ui, self.path, self.names, current, label),
             SettingKind::Choice(choices) => Self::choice(
                 ui,
                 self.path,
@@ -311,6 +325,34 @@ impl Control<'_> {
                     .map(|value| Value::Object(serde_json::Map::from_iter([(key.clone(), value)])))
             }
         }
+    }
+
+    /// The name of a file, chosen from the `names` there are; `current` is the
+    /// name now, or none (the default).
+    fn name(
+        ui: &mut Ui,
+        path: &ConfigPath,
+        names: &[String],
+        current: &Value,
+        label: Id,
+    ) -> Option<Value> {
+        let now = current.as_str();
+        let mut chosen = None;
+        let combo = egui::ComboBox::from_id_salt(path.to_string())
+            .selected_text(now.unwrap_or("(default)"))
+            .show_ui(ui, |ui| {
+                for name in names {
+                    if ui
+                        .selectable_label(now == Some(name.as_str()), name)
+                        .clicked()
+                        && now != Some(name.as_str())
+                    {
+                        chosen = Some(Value::String(name.clone()));
+                    }
+                }
+            });
+        combo.response.labelled_by(label);
+        chosen
     }
 
     /// A line of text, sent when the user leaves it.

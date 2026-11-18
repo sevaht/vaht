@@ -16,6 +16,7 @@ use std::path::Path;
 
 use vaht_ui::Style;
 
+use super::layout::{self, LayoutFile, LayoutState};
 use super::{
     Bindings, Config, ConfigFile, Menus, OutputSettings, Rules, SettingOverrides, Settings,
     StyleFile,
@@ -30,6 +31,8 @@ pub(crate) enum Instead {
     LastGood,
     /// vaht's built-in version.
     BuiltIn,
+    /// Nothing: the thing was left out.
+    Left,
 }
 
 impl fmt::Display for Instead {
@@ -38,6 +41,7 @@ impl fmt::Display for Instead {
             Self::Default => "using the default",
             Self::LastGood => "using what it said before",
             Self::BuiltIn => "using the built-in one",
+            Self::Left => "left out",
         })
     }
 }
@@ -138,7 +142,7 @@ impl Config {
             Instead::BuiltIn
         };
         let mut problems = Vec::new();
-        let (settings, dropped_overrides) = Self::lenient_settings(
+        let (settings, layout, dropped_overrides) = Self::lenient_settings(
             settings_file,
             directory,
             overrides,
@@ -177,6 +181,7 @@ impl Config {
                 (&fallback.menus, instead),
                 &mut problems,
             ),
+            layout,
             outputs: Self::lenient_file::<OutputSettings>(
                 outputs_file,
                 directory,
@@ -229,9 +234,12 @@ impl Config {
         })
     }
 
-    /// Reads `settings.toml` (with `overrides`) a setting at a time: one that
-    /// does not deserialize is left out, so it is the default. A file that
-    /// is not even TOML is replaced by `fallback`'s settings. Returns them
+    /// Reads `settings.toml` (with `overrides`) and the layout it names, as one
+    /// set of settings, a setting at a time: one that does not deserialize is
+    /// left out, so it is the default (or the layout's). A file that is not
+    /// even TOML is replaced by `fallback`'s settings. Each file is cleaned on
+    /// its own before they are merged, so a problem is always blamed on the
+    /// file that has it. Returns the settings, what the layout contributes,
     /// and whether `overrides` could not be applied, and were not.
     fn lenient_settings(
         file: ConfigFile,
@@ -239,9 +247,9 @@ impl Config {
         overrides: &SettingOverrides,
         fallback: (&Self, Instead),
         problems: &mut Vec<ConfigProblem>,
-    ) -> (Settings, bool) {
+    ) -> (Settings, LayoutState, bool) {
         let mut dropped_overrides = false;
-        let mut table = match file.read_table(directory) {
+        let mut user = match file.read_table(directory) {
             Ok(table) => table,
             Err(error) => {
                 problems.push(ConfigProblem {
@@ -250,13 +258,17 @@ impl Config {
                     message: error.to_string(),
                     instead: fallback.1,
                 });
-                return (fallback.0.settings.clone(), false);
+                return (
+                    fallback.0.settings.clone(),
+                    fallback.0.layout.clone(),
+                    false,
+                );
             }
         };
         if !overrides.is_empty() {
-            let mut changed = table.clone();
+            let mut changed = user.clone();
             match overrides.apply_to(&mut changed) {
-                Ok(()) => table = changed,
+                Ok(()) => user = changed,
                 Err(message) => {
                     dropped_overrides = true;
                     problems.push(ConfigProblem {
@@ -268,31 +280,105 @@ impl Config {
                 }
             }
         }
+        if !Self::drop_invalid(&mut user, file.name, problems) {
+            user = toml::Table::new();
+        }
+        let (layout_table, name) = Self::lenient_layout(directory, &user, problems);
+        let merged = layout::merge_under(&layout_table, &user);
+        let settings = Settings::from_table(merged).unwrap_or_else(|message| {
+            problems.push(ConfigProblem {
+                file: file.name.to_owned(),
+                key: None,
+                message,
+                instead: Instead::Default,
+            });
+            Settings::default()
+        });
+        let layout = LayoutState {
+            name,
+            defaults: Settings::from_table(layout_table.clone()).unwrap_or_default(),
+            keys: layout::leaf_keys(&layout_table)
+                .into_iter()
+                .filter(|key| !layout::sets(&user, key))
+                .collect(),
+        };
+        (settings, layout, dropped_overrides)
+    }
+
+    /// Reads the layout `user`'s settings name, as a table of settings that
+    /// are all valid and all presentation: what is not is left out, and noted
+    /// against the layout's own file. Returns it (empty if there is none, or it
+    /// cannot be used) and the name.
+    fn lenient_layout(
+        directory: &Path,
+        user: &toml::Table,
+        problems: &mut Vec<ConfigProblem>,
+    ) -> (toml::Table, Option<String>) {
+        let Some(name) = user.get("layout").and_then(toml::Value::as_str) else {
+            return (toml::Table::new(), None);
+        };
+        let file = LayoutFile::file_name(name);
+        let mut table = match LayoutFile::find(directory, name).and_then(|found| found.read_table())
+        {
+            Ok(table) => table,
+            Err(error) => {
+                problems.push(ConfigProblem {
+                    file: format!("layout {name}"),
+                    key: None,
+                    message: error.to_string(),
+                    instead: Instead::Left,
+                });
+                return (toml::Table::new(), Some(name.to_owned()));
+            }
+        };
+        for key in layout::leave_out_other_settings(&mut table) {
+            problems.push(ConfigProblem {
+                file: file.clone(),
+                key: Some(key),
+                message: "a layout sets only what is shown and how it is arranged, not behavior"
+                    .to_owned(),
+                instead: Instead::Left,
+            });
+        }
+        if !Self::drop_invalid(&mut table, &file, problems) {
+            table = toml::Table::new();
+        }
+        (table, Some(name.to_owned()))
+    }
+
+    /// Takes out of `table` each setting that does not deserialize, noting
+    /// each against `file`. Returns false if the table cannot be made valid
+    /// that way (the problem is noted), so it should not be used.
+    fn drop_invalid(
+        table: &mut toml::Table,
+        file: &str,
+        problems: &mut Vec<ConfigProblem>,
+    ) -> bool {
         for _ in 0..Self::MOST_LEFT_OUT {
             let result: Result<Settings, _> =
                 serde_path_to_error::deserialize(toml::Value::Table(table.clone()));
             let Err(error) = result else {
-                return (result.unwrap_or_default(), dropped_overrides);
+                return true;
             };
             let message = error.inner().message().trim_end().to_owned();
             let key = Self::key_of(error.path());
-            if key.is_empty() || !Self::leave_out(&mut table, &key) {
+            if key.is_empty() || !Self::leave_out(table, &key) {
                 problems.push(ConfigProblem {
-                    file: file.name.to_owned(),
+                    file: file.to_owned(),
                     key: None,
                     message,
                     instead: Instead::Default,
                 });
-                return (Settings::default(), dropped_overrides);
+                return false;
             }
             problems.push(ConfigProblem {
-                file: file.name.to_owned(),
+                file: file.to_owned(),
                 key: Some(key.join(".")),
                 message,
                 instead: Instead::Default,
             });
         }
-        (Settings::default(), dropped_overrides)
+        false
     }
 
     /// Returns the key `path` is in: its leading names, up to the first
@@ -333,7 +419,11 @@ mod tests {
     fn directory(files: &[(&str, &str)]) -> tempfile::TempDir {
         let directory = tempfile::tempdir().expect("a temporary directory");
         for (name, text) in files {
-            std::fs::write(directory.path().join(name), text).expect("written");
+            let path = directory.path().join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("a directory");
+            }
+            std::fs::write(path, text).expect("written");
         }
         directory
     }
@@ -523,5 +613,126 @@ mod tests {
             33,
             "no `style` chosen, so the default's own file, not the copy built in"
         );
+    }
+
+    /// A layout of two taskbar settings, chosen by a settings file that sets
+    /// one of them itself.
+    fn layered() -> Loaded {
+        load(&directory(&[
+            (
+                "layouts/slim.toml",
+                "[taskbar]\nrows = 3\nwidgets = [\"clock\"]\n",
+            ),
+            ("settings.toml", "layout = \"slim\"\n[taskbar]\nrows = 2\n"),
+        ]))
+    }
+
+    #[test]
+    fn a_layout_lies_under_the_settings_which_win() {
+        let loaded = layered();
+        assert_eq!(loaded.problems, []);
+        let taskbar = &loaded.config.settings.taskbar;
+        assert_eq!(taskbar.row_range(), (2, 2), "settings.toml's own rows");
+        assert_eq!(
+            taskbar.widgets,
+            [super::super::TaskbarWidget::Clock],
+            "what settings.toml leaves out comes from the layout"
+        );
+    }
+
+    #[test]
+    fn what_a_layout_contributes_is_what_settings_toml_does_not_set() {
+        let layout = layered().config.layout;
+        assert_eq!(layout.name.as_deref(), Some("slim"));
+        assert_eq!(
+            layout.keys,
+            [vec!["taskbar".to_owned(), "widgets".to_owned()]],
+            "rows is overridden, so it is not the layout's"
+        );
+        assert_eq!(
+            layout.defaults.taskbar.row_range(),
+            (3, 3),
+            "a reset goes back to the layout's value, not vaht's"
+        );
+    }
+
+    #[test]
+    fn a_setting_that_is_not_presentation_is_left_out_of_a_layout_and_blamed_on_it() {
+        let loaded = load(&directory(&[
+            (
+                "layouts/bad.toml",
+                "[taskbar]\nrows = 2\n[focus]\nmodel = \"sloppy\"\n",
+            ),
+            ("settings.toml", "layout = \"bad\"\n"),
+        ]));
+        let problems: Vec<(String, Option<String>, Instead)> = loaded
+            .problems
+            .iter()
+            .map(|problem| (problem.file.clone(), problem.key.clone(), problem.instead))
+            .collect();
+        assert_eq!(
+            problems,
+            [(
+                "layouts/bad.toml".to_owned(),
+                Some("focus".to_owned()),
+                Instead::Left
+            )]
+        );
+        assert_eq!(
+            loaded.config.settings.taskbar.row_range(),
+            (2, 2),
+            "the rest is used"
+        );
+        assert_eq!(
+            loaded.config.settings.focus.model,
+            super::super::FocusModel::default(),
+            "behavior is not changed by a layout"
+        );
+    }
+
+    #[test]
+    fn a_bad_value_in_a_layout_is_blamed_on_the_layout_not_on_settings_toml() {
+        let loaded = load(&directory(&[
+            ("layouts/bad.toml", "[taskbar]\nrows = 0\nedge = \"top\"\n"),
+            ("settings.toml", "layout = \"bad\"\n"),
+        ]));
+        assert_eq!(loaded.problems.len(), 1, "{:?}", loaded.problems);
+        assert_eq!(loaded.problems[0].file, "layouts/bad.toml");
+        assert_eq!(loaded.problems[0].key.as_deref(), Some("taskbar.rows"));
+        assert_eq!(
+            loaded.config.settings.taskbar.edge,
+            super::super::TaskbarEdge::Top,
+            "the layout's valid settings are used"
+        );
+    }
+
+    #[test]
+    fn a_layout_that_is_not_there_is_a_problem_and_the_rest_of_the_settings_stand() {
+        let loaded = load(&directory(&[(
+            "settings.toml",
+            "layout = \"nowhere\"\n[taskbar]\nrows = 2\n",
+        )]));
+        assert_eq!(loaded.problems.len(), 1, "{:?}", loaded.problems);
+        assert!(loaded.problems[0].file.contains("nowhere"));
+        assert_eq!(loaded.problems[0].instead, Instead::Left);
+        assert_eq!(loaded.config.settings.taskbar.row_range(), (2, 2));
+        assert_eq!(loaded.config.layout.name.as_deref(), Some("nowhere"));
+    }
+
+    #[test]
+    fn the_strict_load_reads_a_layout_the_same_way_and_refuses_behavior_in_one() {
+        let good = directory(&[
+            ("layouts/slim.toml", "[taskbar]\nrows = 3\n"),
+            ("settings.toml", "layout = \"slim\"\n"),
+        ]);
+        let config = Config::load(good.path()).expect("valid");
+        assert_eq!(config.settings.taskbar.row_range(), (3, 3));
+        let bad = directory(&[
+            ("layouts/slim.toml", "[focus]\nmodel = \"sloppy\"\n"),
+            ("settings.toml", "layout = \"slim\"\n"),
+        ]);
+        let error = Config::load(bad.path()).expect_err("behavior in a layout");
+        assert!(error.to_string().contains("layout `slim`"), "{error}");
+        assert!(error.to_string().contains("focus"), "{error}");
     }
 }

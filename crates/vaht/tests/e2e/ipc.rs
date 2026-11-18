@@ -422,6 +422,7 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
     let Reply::ConfigFiles {
         files,
         styles,
+        layouts,
         problems,
     } = config(&vaht, &["files"])
     else {
@@ -435,6 +436,7 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
         }]
     );
     assert!(styles.contains(&"mine".to_owned()), "{styles:?}");
+    assert_eq!(layouts, Vec::<String>::new(), "no layout files yet");
     assert_eq!(
         problems,
         Vec::<String>::new(),
@@ -481,6 +483,7 @@ fn what_the_settings_say_now_is_read_with_what_is_changed_in_place() {
         value,
         defaults,
         changed,
+        ..
     } = config(&vaht, &["get", "settings"])
     else {
         panic!("not a reading");

@@ -12,6 +12,7 @@ use vaht_ui::Style;
 use vaht_ui::style::StyleLayers;
 
 use super::ConfigError;
+use super::library::Library;
 
 /// A style file, found by name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,13 +22,6 @@ pub(crate) struct StyleFile {
 }
 
 impl StyleFile {
-    /// The directory, inside the configuration directory, of the user's
-    /// styles.
-    pub(crate) const DIRECTORY: &str = "styles";
-
-    /// The directory of styles installed with vaht.
-    const SYSTEM_DIRECTORY: &str = "/usr/share/vaht/styles";
-
     /// Finds the style `name`: in the `styles` directory of the
     /// configuration `directory`, then among the system's styles.
     ///
@@ -36,24 +30,9 @@ impl StyleFile {
     /// Returns an error if `name` is not a plain name, or no such style
     /// exists.
     pub(crate) fn find(directory: &Path, name: &str) -> Result<Self, ConfigError> {
-        if name.is_empty() || name.contains(['/', '\0']) || name.starts_with('.') {
-            return Err(ConfigError::StyleName {
-                name: name.to_owned(),
-            });
-        }
-        let file_name = format!("{name}.toml");
-        let searched = [
-            directory.join(Self::DIRECTORY).join(&file_name),
-            Path::new(Self::SYSTEM_DIRECTORY).join(&file_name),
-        ];
-        searched
-            .iter()
-            .find(|path| path.is_file())
-            .map(|path| Self { path: path.clone() })
-            .ok_or_else(|| ConfigError::MissingStyle {
-                name: name.to_owned(),
-                searched: searched.to_vec(),
-            })
+        Library::STYLES
+            .find(directory, name)
+            .map(|path| Self { path })
     }
 
     /// Reads the style `name`: as [`StyleFile::find`] finds it, or, for the
@@ -65,7 +44,7 @@ impl StyleFile {
     /// Returns an error if the style cannot be found, read, or is not valid.
     pub(crate) fn load(directory: &Path, name: &str) -> Result<Style, ConfigError> {
         match Self::find(directory, name) {
-            Err(ConfigError::MissingStyle { .. }) if name == Style::DEFAULT_NAME => {
+            Err(ConfigError::MissingInLibrary { .. }) if name == Style::DEFAULT_NAME => {
                 Ok(Style::built_in())
             }
             found => found?.read(),
@@ -76,23 +55,7 @@ impl StyleFile {
     /// user's, in the configuration `directory`, and the system's, and the
     /// default style, which is always there.
     pub(crate) fn available(directory: &Path) -> Vec<String> {
-        let directories = [
-            directory.join(Self::DIRECTORY),
-            PathBuf::from(Self::SYSTEM_DIRECTORY),
-        ];
-        let mut names: Vec<String> = directories
-            .iter()
-            .filter_map(|directory| std::fs::read_dir(directory).ok())
-            .flatten()
-            .flatten()
-            .filter_map(|entry| {
-                let path = entry.path();
-                let is_style = path
-                    .extension()
-                    .is_some_and(|extension| extension == "toml");
-                is_style.then(|| path.file_stem()?.to_str().map(ToOwned::to_owned))?
-            })
-            .collect();
+        let mut names = Library::STYLES.available(directory);
         names.push(Style::DEFAULT_NAME.to_owned());
         names.sort();
         names.dedup();
@@ -125,7 +88,7 @@ mod tests {
     #[test]
     fn a_style_in_the_configuration_directory_is_found_and_read() {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let styles = directory.path().join(StyleFile::DIRECTORY);
+        let styles = directory.path().join(Library::STYLES.directory);
         std::fs::create_dir(&styles).expect("the styles directory");
         std::fs::write(styles.join("mine.toml"), "[taskbar]\nheight = 30\n").expect("written");
         let style = StyleFile::find(directory.path(), "mine")
@@ -165,7 +128,7 @@ mod tests {
     #[test]
     fn a_file_named_for_the_default_style_wins_over_the_copy_built_in() {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let styles = directory.path().join(StyleFile::DIRECTORY);
+        let styles = directory.path().join(Library::STYLES.directory);
         std::fs::create_dir(&styles).expect("a directory");
         std::fs::write(styles.join("vaht.toml"), "[window.titlebar]\nheight = 33\n")
             .expect("written");

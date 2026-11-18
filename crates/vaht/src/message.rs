@@ -165,6 +165,7 @@ fn readable(reply: &Reply) -> String {
         Reply::ConfigFiles {
             files,
             styles,
+            layouts,
             problems,
         } => {
             for info in files {
@@ -175,6 +176,7 @@ fn readable(reply: &Reply) -> String {
                 let _ = writeln!(text, "{}\t{state}", info.file.file_name());
             }
             let _ = writeln!(text, "\nstyles: {}", styles.join(", "));
+            let _ = writeln!(text, "layouts: {}", layouts.join(", "));
             if !problems.is_empty() {
                 let _ = writeln!(
                     text,
@@ -193,9 +195,18 @@ fn readable(reply: &Reply) -> String {
                 serde_json::to_string_pretty(schema).unwrap_or_default()
             );
         }
-        Reply::ConfigRead { value, changed, .. } => {
+        Reply::ConfigRead {
+            value,
+            changed,
+            layout,
+            from_layout,
+            ..
+        } => {
+            if let Some(name) = layout {
+                let _ = writeln!(text, "layout {name}; + marks what it supplies");
+            }
             let mut path = Vec::new();
-            setting_lines(&mut text, value, &mut path, changed);
+            setting_lines(&mut text, value, &mut path, (changed, from_layout));
         }
         Reply::Picked { choice } => {
             if let Some(choice) = choice {
@@ -210,35 +221,43 @@ fn readable(reply: &Reply) -> String {
 }
 
 /// Appends a `key = value` line to `text` for each setting in `value`,
-/// reached through `path`, `*` marking those in `changed`; a setting with
-/// no value is written `unset`.
+/// reached through `path`, `*` marking those changed in place and `+` those
+/// the layout supplies (`marks`, in that order); a setting with no value is
+/// written `unset`.
 fn setting_lines(
     text: &mut String,
     value: &serde_json::Value,
     path: &mut Vec<String>,
-    changed: &[Vec<String>],
+    marks: (&[Vec<String>], &[Vec<String>]),
 ) {
     match value {
         serde_json::Value::Object(table) if !table.is_empty() => {
             for (key, inner) in table {
                 path.push(key.clone());
-                setting_lines(text, inner, path, changed);
+                setting_lines(text, inner, path, marks);
                 path.pop();
             }
         }
-        serde_json::Value::Null => write_setting(text, path, "unset", changed),
+        serde_json::Value::Null => write_setting(text, path, "unset", marks),
         scalar @ (serde_json::Value::Bool(_)
         | serde_json::Value::Number(_)
         | serde_json::Value::String(_)
         | serde_json::Value::Array(_)
-        | serde_json::Value::Object(_)) => write_setting(text, path, &scalar.to_string(), changed),
+        | serde_json::Value::Object(_)) => write_setting(text, path, &scalar.to_string(), marks),
     }
 }
 
 /// Appends the line of the setting at `path`, whose value is `shown`.
-fn write_setting(text: &mut String, path: &[String], shown: &str, changed: &[Vec<String>]) {
+fn write_setting(
+    text: &mut String,
+    path: &[String],
+    shown: &str,
+    (changed, from_layout): (&[Vec<String>], &[Vec<String>]),
+) {
     let mark = if changed.iter().any(|key| key == path) {
         '*'
+    } else if from_layout.iter().any(|key| key == path) {
+        '+'
     } else {
         ' '
     };

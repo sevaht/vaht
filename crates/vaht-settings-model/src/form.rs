@@ -46,6 +46,10 @@ pub enum SettingKind {
     },
     /// Free text.
     Text,
+    /// The name of a file of a kind there is a list of (the styles, the
+    /// layouts): one of those there are. The list is named here (`styles`,
+    /// `layouts`), and vaht says what is in it.
+    Name(String),
     /// A value written one of several ways: a number or the word `auto`,
     /// yes, no or `any`, a text or a pattern.
     Alternatives(Vec<Alternative>),
@@ -76,7 +80,7 @@ impl SettingKind {
                 .map_or(Value::Null, Alternative::starting_value),
             Self::Decimal { minimum, .. } => serde_json::Number::from_f64(minimum.unwrap_or(0.0))
                 .map_or(Value::Null, Value::Number),
-            Self::Text => Value::String(String::new()),
+            Self::Text | Self::Name(_) => Value::String(String::new()),
             Self::Choice(choices) => Value::String(
                 choices
                     .first()
@@ -95,7 +99,7 @@ impl SettingKind {
         match self {
             Self::Toggle => value.is_boolean(),
             Self::Whole { .. } | Self::Decimal { .. } => value.is_number(),
-            Self::Text | Self::Choice(_) => value.is_string(),
+            Self::Text | Self::Name(_) | Self::Choice(_) => value.is_string(),
             Self::Alternatives(alternatives) => {
                 alternatives.iter().any(|alternative| alternative.is(value))
             }
@@ -121,6 +125,7 @@ impl SettingKind {
             | Self::Whole { .. }
             | Self::Decimal { .. }
             | Self::Text
+            | Self::Name(_)
             | Self::List(_)
             | Self::Mapping(_)
             | Self::Scopes(_)
@@ -412,6 +417,14 @@ impl<'schema> SchemaReader<'schema> {
         let kind = self
             .scopes_of(&path, resolved.schema)
             .unwrap_or_else(|| self.kind_of(resolved.schema));
+        // Text that names a file there is a list of is a choice from the list.
+        let kind = match (
+            kind,
+            Self::extension(property, resolved.schema, "x-vaht-names").and_then(Value::as_str),
+        ) {
+            (SettingKind::Text, Some(list)) => SettingKind::Name(list.to_owned()),
+            (kind, _) => kind,
+        };
         let default = property
             .get("default")
             .or_else(|| resolved.schema.get("default"))
@@ -668,6 +681,7 @@ impl<'schema> SchemaReader<'schema> {
             }
             // Words are written as they are, and nothing else nests.
             SettingKind::Raw
+            | SettingKind::Name(_)
             | SettingKind::Choice(_)
             | SettingKind::Alternatives(_)
             | SettingKind::List(_)
@@ -1049,6 +1063,23 @@ mod tests {
             ],
             "not alphabetical: the schema's order"
         );
+    }
+
+    #[test]
+    fn text_that_names_a_file_there_is_a_list_of_is_a_choice_from_the_list() {
+        let form = form_of(
+            &json!({}),
+            &json!({
+                "style": { "anyOf": [{ "type": "string" }, { "type": "null" }], "x-vaht-names": "styles" },
+                "note": { "type": "string" },
+            }),
+        );
+        assert_eq!(
+            setting(&form, "style").kind,
+            SettingKind::Name("styles".to_owned())
+        );
+        assert!(setting(&form, "style").is_optional);
+        assert_eq!(setting(&form, "note").kind, SettingKind::Text);
     }
 
     #[test]

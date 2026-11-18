@@ -173,6 +173,7 @@ impl Event {
             } => Reply::ConfigFiles {
                 files,
                 styles: Vec::new(),
+                layouts: Vec::new(),
                 problems,
             },
         }
@@ -304,6 +305,9 @@ pub enum Reply {
         /// The styles that can be chosen: those in the configuration
         /// directory's `styles/` and the system's, and the built-in one.
         styles: Vec<String>,
+        /// The layouts that can be chosen: those in the configuration
+        /// directory's `layouts/` and the system's.
+        layouts: Vec<String>,
         /// What vaht could not use of the configuration files and left out,
         /// a sentence each; empty when all of it is in effect.
         problems: Vec<String>,
@@ -322,6 +326,14 @@ pub enum Reply {
         /// The keys changed in place and not written, each as a path
         /// (`["focus", "model"]`).
         changed: Vec<Vec<String>>,
+        /// The layout `settings.toml` names, if it names one. `defaults` is
+        /// vaht's defaults under that layout.
+        #[serde(default)]
+        layout: Option<String>,
+        /// The settings that come from the layout (what it sets that
+        /// `settings.toml` does not), each as a path.
+        #[serde(default)]
+        from_layout: Vec<Vec<String>>,
     },
     /// The item chosen, for [`Request::Pick`]: none if the menu was closed
     /// without a choice.

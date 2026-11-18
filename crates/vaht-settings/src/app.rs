@@ -50,6 +50,9 @@ pub struct SettingsApp<L: Link> {
     status: Status,
     /// What vaht could not use of its configuration files and left out.
     problems: Vec<String>,
+    /// The names there are of each list a setting may name (`styles`,
+    /// `layouts`).
+    names: HashMap<String, Vec<String>>,
 }
 
 impl SettingsApp<VahtLink> {
@@ -94,6 +97,7 @@ impl<L: Link> SettingsApp<L> {
             new_names: HashMap::new(),
             status: Status::Loading,
             problems: Vec::new(),
+            names: HashMap::new(),
         }
     }
 
@@ -113,12 +117,18 @@ impl<L: Link> SettingsApp<L> {
                     value,
                     defaults,
                     changed,
-                    styles: _,
+                    styles,
+                    layouts,
+                    layout,
+                    from_layout,
                     problems,
                 } => {
                     if let Some(editor) = &mut self.editor {
                         editor.read(value, defaults, &changed);
+                        editor.set_layout(layout, &from_layout);
                     }
+                    self.names.insert("styles".to_owned(), styles);
+                    self.names.insert("layouts".to_owned(), layouts);
                     self.problems = problems;
                     self.pending.clear();
                     if !matches!(self.status, Status::Refused(_) | Status::Disconnected(_)) {
@@ -271,6 +281,20 @@ impl<L: Link> SettingsApp<L> {
                 is_default: editor.is_default(&setting.path)
                     && !self.pending.contains_key(&setting.path),
                 is_changed: editor.is_changed_in_place(&setting.path),
+                is_from_layout: editor.is_from_layout(&setting.path),
+                names: match &setting.kind {
+                    SettingKind::Name(list) => self.names.get(list).map_or(&[], Vec::as_slice),
+                    SettingKind::Toggle
+                    | SettingKind::Whole { .. }
+                    | SettingKind::Decimal { .. }
+                    | SettingKind::Text
+                    | SettingKind::Alternatives(_)
+                    | SettingKind::Scopes(_)
+                    | SettingKind::Choice(_)
+                    | SettingKind::List(_)
+                    | SettingKind::Mapping(_)
+                    | SettingKind::Raw => &[],
+                },
             };
             if let Some(edit) = view.show(ui, &mut self.drafts) {
                 edits.push(edit);
@@ -475,6 +499,9 @@ mod tests {
                 defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
                 changed: Vec::new(),
                 styles: Vec::new(),
+            layouts: Vec::new(),
+            layout: None,
+            from_layout: Vec::new(),
                 problems: Vec::new(),
             },
         ]);
@@ -542,6 +569,9 @@ mod tests {
             defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
             changed: Vec::new(),
             styles: Vec::new(),
+            layouts: Vec::new(),
+            layout: None,
+            from_layout: Vec::new(),
                 problems: Vec::new(),
         });
         let mut harness = harness_of(&mut app);
@@ -567,6 +597,9 @@ mod tests {
             defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
             changed: vec![vec!["focus".to_owned(), "model".to_owned()]],
             styles: Vec::new(),
+            layouts: Vec::new(),
+            layout: None,
+            from_layout: Vec::new(),
                 problems: Vec::new(),
         });
         let mut harness = harness_of(&mut app);
@@ -632,6 +665,9 @@ mod tests {
                 defaults: json!({ "rows": 1 }),
                 changed: Vec::new(),
                 styles: Vec::new(),
+                layouts: Vec::new(),
+                layout: None,
+                from_layout: Vec::new(),
                 problems: Vec::new(),
             },
         ]);
@@ -660,6 +696,9 @@ mod tests {
                 value,
                 changed: Vec::new(),
                 styles: Vec::new(),
+                layouts: Vec::new(),
+                layout: None,
+                from_layout: Vec::new(),
                 problems: Vec::new(),
             },
         ]);
@@ -848,6 +887,9 @@ mod tests {
             defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
             changed: Vec::new(),
             styles: Vec::new(),
+            layouts: Vec::new(),
+            layout: None,
+            from_layout: Vec::new(),
             problems: vec![
                 "settings.toml: taskbar.windows: unknown field (using the default)".to_owned(),
             ],
@@ -869,5 +911,92 @@ mod tests {
                 .query_by_label_contains("in the configuration files")
                 .is_none()
         );
+    }
+
+    /// Returns a window told `schema` and a reading with these `styles` and
+    /// `layouts` to choose from, `from_layout` supplied by the layout.
+    fn named_window(
+        schema: Value,
+        value: Value,
+        lists: (&[&str], &[&str]),
+        from_layout: Vec<Vec<String>>,
+    ) -> (SettingsApp<FakeLink>, FakeLink) {
+        let link = FakeLink::default();
+        let names = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect();
+        link.to_tell.borrow_mut().extend([
+            Update::Schema(schema),
+            Update::Reading {
+                defaults: value.clone(),
+                value,
+                changed: Vec::new(),
+                styles: names(lists.0),
+                layouts: names(lists.1),
+                layout: Some("slim".to_owned()),
+                from_layout,
+                problems: Vec::new(),
+            },
+        ]);
+        (SettingsApp::new(link.clone()), link)
+    }
+
+    #[test]
+    fn a_setting_that_names_a_style_is_chosen_from_the_styles_there_are() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "style": {
+                    "anyOf": [{ "type": "string" }, { "type": "null" }],
+                    "x-vaht-names": "styles",
+                },
+            },
+        });
+        let (mut app, link) = named_window(
+            schema,
+            json!({ "style": null }),
+            (&["vaht", "nord"], &[]),
+            Vec::new(),
+        );
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_role(egui::accesskit::Role::ComboBox).click();
+        harness.run();
+        harness.get_by_label("nord").click();
+        harness.run();
+        assert_eq!(
+            edits_sent(&link),
+            [ConfigEdit::Set {
+                path: ConfigPath::parse("style").expect("a key"),
+                value: json!("nord"),
+            }],
+            "no Set box: choosing from the list sets it"
+        );
+    }
+
+    #[test]
+    fn a_setting_the_layout_supplies_says_so() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "focus": {
+                    "type": "object",
+                    "properties": {
+                        "raise_on_click": { "type": "boolean", "default": true },
+                        "model": { "enum": ["click", "sloppy"], "default": "click" },
+                    },
+                },
+            },
+        });
+        let value = json!({ "focus": { "raise_on_click": true, "model": "sloppy" } });
+        let (mut app, _link) = named_window(
+            schema,
+            value,
+            (&[], &[]),
+            vec![vec!["focus".to_owned(), "model".to_owned()]],
+        );
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_label("Focus").click();
+        harness.run();
+        harness.get_by_label("from layout");
     }
 }
