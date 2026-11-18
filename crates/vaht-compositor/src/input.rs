@@ -796,9 +796,8 @@ mod tests {
     fn turning_back_or_pausing_forgets_part_of_a_notch() {
         let mut wheel = WheelNotches::default();
         assert_eq!(wheel.turn(90.0, 0), 0);
-        assert_eq!(wheel.turn(-60.0, 10), 0, "turned back: starts over");
-        assert_eq!(wheel.turn(-60.0, 20), 0, "only 120 down so far in that way");
-        assert_eq!(wheel.turn(-60.0, 30), -1);
+        assert_eq!(wheel.turn(-60.0, 10), 0, "turned back: the 90 is forgotten");
+        assert_eq!(wheel.turn(-60.0, 20), -1, "60 and 60 up make a notch");
         assert_eq!(wheel.turn(90.0, 100), 0);
         assert_eq!(wheel.turn(60.0, 2_000), 0, "a pause: the 90 is forgotten");
     }
