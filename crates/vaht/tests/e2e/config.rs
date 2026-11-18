@@ -251,13 +251,17 @@ fn the_form_built_from_vahts_schema_has_every_setting_vaht_has() {
     for path in paths {
         let parts = ConfigPath::from_parts(path.clone()).expect("a key");
         let own = form.setting(&parts).is_some();
-        // Or inside a setting that is a whole table or list.
+        // Or inside a setting that is a whole table or list, or one written
+        // several ways (`{ percent = 15 }` is a way to write a width).
         let inside = (1..path.len()).any(|length| {
             let outer = ConfigPath::from_parts(path[..length].to_vec()).expect("a key");
             form.setting(&outer).is_some_and(|setting| {
                 matches!(
                     setting.kind,
-                    SettingKind::Raw | SettingKind::Mapping(_) | SettingKind::Scopes(_)
+                    SettingKind::Raw
+                        | SettingKind::Mapping(_)
+                        | SettingKind::Scopes(_)
+                        | SettingKind::Alternatives(_)
                 )
             })
         });
