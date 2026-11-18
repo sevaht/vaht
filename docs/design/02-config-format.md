@@ -327,9 +327,7 @@ rest by name, so a setting never silently does nothing:
   a television alike), entries narrower than a number of pixels
   (`row_limit = 100`), or more windows in a row than a number
   (`{ windows = 8 }`); the taskbar uses the fewest rows that stay within it.
-  (`row_limit` and `windows` were briefly in `[taskbar.window_list]`; they are
-  `[taskbar]` settings, and the old place is refused.) The window list's
-  entries fill the rows in order, each as wide as the rest; the tray wraps
+  The window list's entries fill the rows in order, each as wide as the rest; the tray wraps
   across the rows but never adds one; the arrows stay a row wide; the clock
   and workspace name span the rows. Windows keep off every row, and
   maximized ones resize as an `"auto"` taskbar grows or shrinks) and
