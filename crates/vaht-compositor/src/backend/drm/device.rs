@@ -29,11 +29,13 @@ use smithay_drm_extras::display_info;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use super::DrmRenderer;
+use super::hdr::{self, HdrCapability};
 use super::lease::Headset;
 use super::plan::{self, ConnectorMode, FrameState, GpuQuirks, ModeFit, TopWindow};
 use crate::Compositor;
 use crate::backend::{OutputEvent, RenderError};
-use crate::config::{OutputMode, Vrr};
+use crate::color::ImageDescription;
+use crate::config::{HdrRequest, OutputMode, Vrr};
 use crate::event_source::{EventSource, Timer};
 use crate::gamma::GammaRamps;
 use crate::presentation;
@@ -77,6 +79,28 @@ pub(super) struct GpuDevice {
     pub(super) _events: EventSource<Compositor>,
 }
 
+/// Whether a monitor is in HDR, and how.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum HdrMode {
+    /// In SDR.
+    Sdr,
+    /// In HDR10.
+    Hdr {
+        /// Its peak, in cd/m².
+        peak: f64,
+        /// SDR white, in cd/m².
+        sdr_white: f64,
+    },
+}
+
+impl Drop for GpuDevice {
+    fn drop(&mut self) {
+        // A monitor left in HDR would show the console, or the next
+        // compositor, washed out.
+        self.leave_hdr();
+    }
+}
+
 /// One monitor's output.
 pub(super) struct Screen {
     /// The output clients see.
@@ -98,6 +122,12 @@ pub(super) struct Screen {
     is_powered: bool,
     /// The colors a night-light tool set, if one did.
     gamma: Option<GammaRamps>,
+    /// What its monitor can show in HDR, if it can.
+    hdr_capability: Option<HdrCapability>,
+    /// Whether it is in HDR, and how.
+    hdr: HdrMode,
+    /// What the kernel last refused, so the refusal is logged once.
+    hdr_refused: Option<HdrMode>,
     /// What clients on it are told of buffers, as their surfaces are
     /// scanned out or composited.
     dmabuf_feedback: Option<SurfaceDmabufFeedback>,
@@ -227,6 +257,18 @@ impl GpuDevice {
         };
         let mode = connector.modes()[index];
         let info = display_info::for_connector(self.manager.device(), connector.handle());
+        let hdr_capability = info.as_ref().and_then(|info| {
+            let metadata = info.hdr_static_metadata();
+            let takes_hdr10 = metadata.pq && info.supported_signal_colorimetry().bt2020_rgb;
+            HdrCapability::of(
+                takes_hdr10,
+                [
+                    metadata.desired_content_max_luminance,
+                    metadata.desired_content_max_frame_avg_luminance,
+                    metadata.desired_content_min_luminance,
+                ],
+            )
+        });
         let (make, display_model, serial_number) = info.map_or_else(Default::default, |info| {
             (
                 info.make().unwrap_or_default(),
@@ -292,6 +334,9 @@ impl GpuDevice {
                 queued_at: None,
                 is_powered: true,
                 gamma: None,
+                hdr_capability,
+                hdr: HdrMode::Sdr,
+                hdr_refused: None,
                 dmabuf_feedback,
             },
         );
@@ -459,6 +504,74 @@ impl GpuDevice {
         for (crtc, screen) in &self.screens {
             if let Some(ramps) = &screen.gamma {
                 Self::apply_gamma(&self.manager, *crtc, ramps);
+            }
+        }
+    }
+
+    /// Puts `output`'s monitor, if it is this device's, into HDR as
+    /// `request` says, or out of it with none or when it cannot; returns
+    /// whether that changed what it shows.
+    pub(super) fn set_hdr(&mut self, output: &Output, request: Option<HdrRequest>) -> bool {
+        let device = self.manager.device();
+        let Some(screen) = self
+            .screens
+            .values_mut()
+            .find(|screen| screen.output == *output)
+        else {
+            return false;
+        };
+        let wanted =
+            request
+                .zip(screen.hdr_capability)
+                .map_or(HdrMode::Sdr, |(request, capability)| HdrMode::Hdr {
+                    peak: request.peak.unwrap_or(capability.peak),
+                    sdr_white: request.sdr_white,
+                });
+        if wanted == screen.hdr {
+            return false;
+        }
+        let signal = match (wanted, screen.hdr_capability.as_ref()) {
+            (HdrMode::Hdr { peak, .. }, Some(capability)) => Some((capability, peak)),
+            (HdrMode::Sdr | HdrMode::Hdr { .. }, _) => None,
+        };
+        let signalled = hdr::signal(device, screen.connector.handle(), signal);
+        if let Err(error) = signalled {
+            if screen.hdr_refused != Some(wanted) {
+                tracing::warn!(
+                    error = &error as &dyn std::error::Error,
+                    output = screen.output.name(),
+                    ?wanted,
+                    "could not change HDR; trying again each frame"
+                );
+                screen.hdr_refused = Some(wanted);
+            }
+            return false;
+        }
+        tracing::info!(output = screen.output.name(), ?wanted, "HDR changed");
+        screen.hdr = wanted;
+        screen.hdr_refused = None;
+        let description = match wanted {
+            HdrMode::Sdr => ImageDescription::SRGB,
+            HdrMode::Hdr { peak, sdr_white } => ImageDescription::hdr10(peak, sdr_white),
+        };
+        description.set_for_output(&screen.output);
+        // Every pixel's encoding changed: draw everything anew.
+        screen.drm_output.reset_buffers();
+        true
+    }
+
+    /// Takes every monitor of this device out of HDR, as vaht leaves.
+    pub(super) fn leave_hdr(&mut self) {
+        let device = self.manager.device();
+        for screen in self.screens.values_mut() {
+            if std::mem::replace(&mut screen.hdr, HdrMode::Sdr) != HdrMode::Sdr
+                && let Err(error) = hdr::signal(device, screen.connector.handle(), None)
+            {
+                tracing::warn!(
+                    error = &error as &dyn std::error::Error,
+                    output = screen.output.name(),
+                    "could not take the monitor out of HDR"
+                );
             }
         }
     }
@@ -700,7 +813,11 @@ impl Screen {
         scene: &Scene<'_>,
     ) -> Result<bool, RenderError> {
         let started = Instant::now();
-        let elements = scene.output_elements(renderer, &self.output);
+        let elements = scene.output_elements(
+            renderer,
+            &self.output,
+            ImageDescription::of_output(&self.output),
+        );
         let gathered = started.elapsed();
         let result = self
             .drm_output

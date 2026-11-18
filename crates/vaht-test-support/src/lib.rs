@@ -33,6 +33,10 @@ pub use client::{
     WINDOW_SIZE, keys,
 };
 pub use clipboard::{ClipboardManager, Selection};
+/// What colour management names transfer functions and primaries by.
+pub use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::client::wp_color_manager_v1::{
+    Primaries, TransferFunction,
+};
 pub use gamma_control::GammaControl;
 pub use headless::{ExitReport, HeadlessVaht};
 pub use input_method::InputMethod;

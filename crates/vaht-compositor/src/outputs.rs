@@ -15,7 +15,9 @@ use smithay::output::Output;
 use smithay::utils::{Logical, Point, Rectangle, Transform};
 
 use self::arrangement::Arrangement;
-use crate::config::{OutputIdentity, OutputMode, OutputPlan, OutputProfile, OutputSettings, Vrr};
+use crate::config::{
+    HdrRequest, OutputIdentity, OutputMode, OutputPlan, OutputProfile, OutputSettings, Vrr,
+};
 
 /// What only the backend can do to an output.
 pub(crate) trait OutputControl {
@@ -117,6 +119,20 @@ impl Outputs {
         match settings.plan(profile, identity.as_identity()) {
             OutputPlan::Follows(entry) => entry.vrr,
             OutputPlan::Unlisted | OutputPlan::Off => Vrr::default(),
+        }
+    }
+
+    /// Returns what `output`'s HDR settings ask for: none unless it is to
+    /// be in HDR.
+    pub(crate) fn hdr_of(&self, output: &Output, settings: &OutputSettings) -> Option<HdrRequest> {
+        let profile = self
+            .profile
+            .as_deref()
+            .and_then(|name| settings.profile(name));
+        let identity = Self::identity(output);
+        match settings.plan(profile, identity.as_identity()) {
+            OutputPlan::Follows(entry) => entry.hdr_request(),
+            OutputPlan::Unlisted | OutputPlan::Off => None,
         }
     }
 

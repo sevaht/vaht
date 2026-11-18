@@ -27,6 +27,10 @@ pub(crate) const ABOVE_WINDOWS: [Layer; 2] = [Layer::Overlay, Layer::Top];
 /// The layers drawn above a fullscreen window, which covers the rest.
 pub(crate) const ABOVE_FULLSCREEN: [Layer; 1] = [Layer::Overlay];
 
+/// Every layer, topmost first.
+pub(crate) const ALL_LAYERS: [Layer; 4] =
+    [Layer::Overlay, Layer::Top, Layer::Bottom, Layer::Background];
+
 /// The layers drawn below the windows, topmost first.
 pub(crate) const BELOW_WINDOWS: [Layer; 2] = [Layer::Bottom, Layer::Background];
 

@@ -298,6 +298,7 @@ impl Compositor {
             // referenced while its resources are released.
             compositor.settle();
             compositor.release_dead_client_resources();
+            compositor.protocols.color_management.describe_asked();
             // Last, so what clients changed just now is in it.
             compositor.publish_ipc_events();
             compositor.announce_outputs();
@@ -1431,6 +1432,7 @@ impl Compositor {
         self.let_frames_go_on(released);
         self.prepare_frames();
         self.update_vrr();
+        self.update_hdr();
         let scene = Scene::new(
             &self.window_manager,
             &self.toplevels,
@@ -1597,6 +1599,20 @@ impl Compositor {
             self.window_manager.run(&action, Some(window));
         }
         self.schedule_render();
+    }
+
+    /// Puts each monitor into HDR or out of it as its `hdr` setting says,
+    /// telling programs watching it when it changed.
+    fn update_hdr(&mut self) {
+        let Backend::Drm(backend) = &mut self.backend else {
+            return;
+        };
+        for output in self.outputs.iter() {
+            let request = self.outputs.hdr_of(output, &self.config.outputs);
+            if backend.set_hdr(output, request) {
+                self.protocols.color_management.output_changed(output);
+            }
+        }
     }
 
     /// Turns each monitor's variable refresh on or off as its `vrr` setting

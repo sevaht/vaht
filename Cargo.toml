@@ -44,6 +44,9 @@ serde_json = "1"
 smithay = { version = "0.7.0", git = "https://github.com/Smithay/smithay", rev = "ae6921bbbf464ae90122f0c184e95e89093a4257", default-features = false, features = ["backend_drm", "backend_gbm", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "desktop", "renderer_gl", "renderer_multi", "renderer_pixman", "wayland_frontend", "xwayland", "backend_libei"] }
 # Connectors appearing and going, and what their monitors' EDID says.
 smithay-drm-extras = { version = "0.1", git = "https://github.com/Smithay/smithay", rev = "ae6921bbbf464ae90122f0c184e95e89093a4257" }
+# What smithay-drm-extras parses EDIDs with; named only to turn on the
+# libdisplay-info 0.3 API (HDR metadata, colorimetry) the system has.
+libdisplay-info = { version = "0.3.0", features = ["v0_3"] }
 # Test clients and the dialogs. No default features here: the dialogs ask
 # for the event loop and keymap code they need, test clients need neither.
 smithay-client-toolkit = { version = "0.21", default-features = false }

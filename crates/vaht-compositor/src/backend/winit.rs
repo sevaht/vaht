@@ -125,7 +125,11 @@ impl WinitBackend {
         let age = self.graphics.buffer_age().unwrap_or(0);
         let (damage, feedback) = {
             let (renderer, mut framebuffer) = self.graphics.bind().map_err(RenderError::Bind)?;
-            let elements = scene.output_elements(renderer, &self.output);
+            let elements = scene.output_elements(
+                renderer,
+                &self.output,
+                crate::color::ImageDescription::of_output(&self.output),
+            );
             let drawn = self
                 .damage_tracker
                 .render_output(

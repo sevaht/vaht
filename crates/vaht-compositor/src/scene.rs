@@ -15,6 +15,7 @@
 
 mod backdrop;
 mod blur;
+mod color_element;
 mod corner_texture;
 mod frame_textures;
 mod menu_texture;
@@ -22,6 +23,8 @@ mod outline;
 mod panel_texture;
 mod shaped_element;
 mod snap_overlay;
+
+use std::collections::HashMap;
 
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
@@ -32,7 +35,7 @@ use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{AsRenderElements as _, Element as _};
 use smithay::backend::renderer::element::{
-    RenderElementStates, default_primary_scanout_output_compare,
+    Id, RenderElementStates, default_primary_scanout_output_compare,
 };
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer};
 use smithay::desktop::utils::{
@@ -45,12 +48,14 @@ use smithay::desktop::{PopupManager, WindowSurfaceType, layer_map_for_output};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Physical, Point, Scale};
+use smithay::wayland::compositor::{TraversalAction, with_surface_tree_downward};
 use smithay::wayland::dmabuf::DmabufFeedback;
 use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::xwayland::X11Surface;
 
 pub(crate) use self::backdrop::Backdrop;
 pub(crate) use self::blur::{BlurElement, BlurRenderer};
+pub(crate) use self::color_element::{ColorElement, ColorRenderer};
 pub(crate) use self::corner_texture::CornerTexture;
 pub(crate) use self::frame_textures::FrameTextures;
 pub(crate) use self::menu_texture::MenuTexture;
@@ -58,11 +63,13 @@ pub(crate) use self::outline::Outline;
 pub(crate) use self::panel_texture::PanelTexture;
 pub(crate) use self::shaped_element::ShapedElement;
 pub(crate) use self::snap_overlay::SnapOverlay;
+use crate::color::{Conversion, ImageDescription};
 use crate::config::BlurSettings;
 use crate::cursor::Cursor;
-use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, BELOW_WINDOWS, LayerMaps};
+use crate::layers::{ABOVE_FULLSCREEN, ABOVE_WINDOWS, ALL_LAYERS, BELOW_WINDOWS, LayerMaps};
 use crate::menu::MenuStack;
 use crate::outputs::Outputs;
+use crate::protocols::color_management;
 use crate::session_lock::SessionLock;
 use crate::taskbar::{Taskbar, TaskbarHit};
 use crate::taskbars::Taskbars;
@@ -93,13 +100,16 @@ smithay::backend::renderer::element::render_elements! {
 
 /// A renderer that draws scenes: it imports client and vaht's own
 /// buffers, and blurs.
-pub(crate) trait SceneRenderer: Renderer + ImportAll + ImportMem + BlurRenderer {}
+pub(crate) trait SceneRenderer:
+    Renderer + ImportAll + ImportMem + BlurRenderer + ColorRenderer
+{
+}
 
-impl<R: Renderer + ImportAll + ImportMem + BlurRenderer> SceneRenderer for R {}
+impl<R: Renderer + ImportAll + ImportMem + BlurRenderer + ColorRenderer> SceneRenderer for R {}
 
 /// One drawable part of a frame, moved from global coordinates to where
-/// it is on one output.
-pub(crate) type OutputElement<R> = RelocateRenderElement<SceneElement<R>>;
+/// it is on one output, in that output's colours.
+pub(crate) type OutputElement<R> = ColorElement<RelocateRenderElement<SceneElement<R>>>;
 
 /// What of a window is under a point.
 #[derive(Debug, Clone, PartialEq)]
@@ -491,6 +501,7 @@ impl<'state> Scene<'state> {
         &self,
         renderer: &mut R,
         output: &Output,
+        target: ImageDescription,
     ) -> Vec<OutputElement<R>>
     where
         R: SceneRenderer,
@@ -506,12 +517,83 @@ impl<'state> Scene<'state> {
         } else {
             self.elements(renderer, scale)
         };
+        self.in_colors_of(elements, target, (toward_origin, scale))
+    }
+
+    /// Returns `elements` moved by `offset` and drawn in `target`'s
+    /// colours at `scale`: each surface's from what it said its pixels
+    /// mean, everything else from sRGB.
+    fn in_colors_of<R>(
+        &self,
+        elements: Vec<SceneElement<R>>,
+        target: ImageDescription,
+        (offset, scale): (Point<i32, Physical>, Scale<f64>),
+    ) -> Vec<OutputElement<R>>
+    where
+        R: SceneRenderer,
+        R::TextureId: Send + Clone + 'static,
+    {
+        let described = self.surface_descriptions();
+        let from_srgb = Conversion::new(ImageDescription::SRGB, target);
+        let moved =
+            |element| RelocateRenderElement::from_element(element, offset, Relocate::Relative);
         elements
             .into_iter()
-            .map(|element| {
-                RelocateRenderElement::from_element(element, toward_origin, Relocate::Relative)
+            .map(|element| match element {
+                // A blur copies what is drawn: it is in the output's
+                // colours already.
+                SceneElement::Blur(_) => ColorElement::unconverted(moved(element)),
+                // A solid colour is drawn without a texture: converted now.
+                SceneElement::Solid(solid) if !from_srgb.is_identity() => {
+                    ColorElement::unconverted(moved(SceneElement::Solid(
+                        color_element::convert_solid(&solid, &from_srgb, scale),
+                    )))
+                }
+                SceneElement::Surface(ref surface) => {
+                    let conversion = described
+                        .get(surface.id())
+                        .map_or(from_srgb, |source| Conversion::new(*source, target));
+                    ColorElement::new(moved(element), &conversion)
+                }
+                other @ (SceneElement::Panel(_)
+                | SceneElement::Solid(_)
+                | SceneElement::Shaped(_)
+                | SceneElement::_GenericCatcher(_)) => ColorElement::new(moved(other), &from_srgb),
             })
             .collect()
+    }
+
+    /// Returns what the surfaces shown said their pixels mean, by their
+    /// elements' ids: only those that said something other than sRGB.
+    fn surface_descriptions(&self) -> HashMap<Id, ImageDescription> {
+        let mut described = HashMap::new();
+        let mut gather = |root: &WlSurface| {
+            let trees = std::iter::once(root.clone()).chain(
+                PopupManager::popups_for_surface(root).map(|(popup, _)| popup.wl_surface().clone()),
+            );
+            for tree in trees {
+                with_surface_tree_downward(
+                    &tree,
+                    (),
+                    |_, _, ()| TraversalAction::DoChildren(()),
+                    |surface, states, ()| {
+                        let description = color_management::surface_description(states);
+                        if description != ImageDescription::SRGB {
+                            described.insert(Id::from_wayland_resource(surface), description);
+                        }
+                    },
+                    |_, _, ()| true,
+                );
+            }
+        };
+        for (_, toplevel) in self.windows() {
+            if let Some(surface) = toplevel.wl_surface() {
+                gather(&surface);
+            }
+        }
+        self.layers
+            .each(&ALL_LAYERS, |surface, _| gather(surface.wl_surface()));
+        described
     }
 
     /// Returns what window `id` draws itself, at `scale`, with the corner
@@ -533,7 +615,7 @@ impl<'state> Scene<'state> {
             return Vec::new();
         };
         let offset = window.surface_origin() - window.content_area().loc;
-        toplevel
+        let elements: Vec<SceneElement<R>> = toplevel
             .render_elements(
                 renderer,
                 offset.to_physical_precise_round(scale),
@@ -541,14 +623,10 @@ impl<'state> Scene<'state> {
                 1.0,
             )
             .into_iter()
-            .map(|element| {
-                RelocateRenderElement::from_element(
-                    SceneElement::Surface(element),
-                    Point::default(),
-                    Relocate::Relative,
-                )
-            })
-            .collect()
+            .map(SceneElement::Surface)
+            .collect::<Vec<_>>();
+        // A shared window is shown in sRGB, as a stream's viewers see it.
+        self.in_colors_of(elements, ImageDescription::SRGB, (Point::default(), scale))
     }
 
     /// Returns what `output` (whose corner is at `corner`) shows while the

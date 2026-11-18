@@ -10,6 +10,9 @@
 # scale = 1.0                         # 0.25 to 8
 # primary = true                      # the taskbar's and windows' default
 # vrr = "fullscreen"                  # off, on, or fullscreen (the default)
+# hdr = false                         # HDR10, if the monitor's EDID says it can
+# sdr_white = 203                     # in HDR: windows' white, 80 to 1000 cd/m²
+# hdr_peak = 600                      # in HDR: the monitor's peak, if its EDID is wrong
 #
 # [[output]]
 # match = { connector = "eDP-1" }

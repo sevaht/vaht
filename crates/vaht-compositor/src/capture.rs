@@ -32,6 +32,7 @@ use smithay::wayland::image_copy_capture::{
 };
 
 use crate::Compositor;
+use crate::color::ImageDescription;
 use crate::layers::LayerMaps;
 use crate::resources::{ResourceKind, Tracked};
 use crate::scene::{self, Drawn, OutputElement, Scene, SceneRenderer};
@@ -105,7 +106,9 @@ impl CaptureView {
         R::TextureId: Send + Clone + 'static,
     {
         match self {
-            Self::Output(output) => scene.output_elements(renderer, output),
+            // Captures are sRGB, as screenshots and streams are viewed,
+            // whether or not the output is in HDR.
+            Self::Output(output) => scene.output_elements(renderer, output, ImageDescription::SRGB),
             Self::Window { window, .. } => scene.window_elements(renderer, *window, self.scale()),
         }
     }

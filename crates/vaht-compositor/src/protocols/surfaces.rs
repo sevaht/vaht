@@ -113,6 +113,7 @@ fn tell_tree_scale(root: &WlSurface, output: &Output) {
         |_, _, ()| TraversalAction::DoChildren(()),
         |surface, states, ()| {
             send_surface_state(surface, states, whole, transform);
+            crate::protocols::color_management::tell_preferred(states, output);
             with_fractional_scale(states, |state| state.set_preferred_scale(fractional));
         },
         |_, _, ()| true,

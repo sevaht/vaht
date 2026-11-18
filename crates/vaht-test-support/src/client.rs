@@ -27,6 +27,7 @@ use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client
 use smithay_client_toolkit::reexports::protocols::xdg::toplevel_drag::v1::client::xdg_toplevel_drag_v1::XdgToplevelDragV1;
 use smithay_client_toolkit::reexports::protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 use smithay_client_toolkit::reexports::protocols::ext::background_effect::v1::client::ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1;
+use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::client::wp_color_manager_v1::{self, WpColorManagerV1};
 use smithay_client_toolkit::data_device_manager::data_source::DragSource;
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
@@ -148,6 +149,8 @@ pub struct TestClient {
     screencopy: ZwlrScreencopyManagerV1,
     /// Asks for what is behind surfaces to be blurred.
     background_effects: ExtBackgroundEffectManagerV1,
+    /// Says what surfaces' pixels mean, and asks what outputs show.
+    color_manager: WpColorManagerV1,
     /// The drag this client started, with the window it drags along,
     /// while it lasts.
     drag_source: Option<(DragSource, XdgToplevelDragV1)>,
@@ -232,6 +235,9 @@ impl TestClient {
         let background_effects: ExtBackgroundEffectManagerV1 = globals
             .bind(&handle, 1..=1, state::BackgroundEffectEvents)
             .expect("vaht offers ext_background_effect_manager_v1");
+        let color_manager: WpColorManagerV1 = globals
+            .bind(&handle, 1..=1, state::ColorEvents)
+            .expect("vaht offers wp_color_manager_v1");
         let session_locks: ExtSessionLockManagerV1 =
             bind(&globals, &handle, "ext_session_lock_manager_v1");
         let presentation: WpPresentation = globals
@@ -268,6 +274,7 @@ impl TestClient {
             drag_source: None,
             screencopy,
             background_effects,
+            color_manager,
             session_locks,
             session_lock: None,
             presentation,
@@ -601,6 +608,64 @@ impl TestClient {
         let signed = |length: u32| i32::try_from(length).expect("a window fits in i32");
         region.add(0, 0, signed(WINDOW_SIZE.0), signed(WINDOW_SIZE.1));
         effect.set_blur_region(Some(region.wl_region()));
+        window.commit();
+        self.roundtrip();
+    }
+
+    /// Returns the transfer functions vaht says it converts.
+    ///
+    /// # Panics
+    ///
+    /// Panics if vaht never says, or the connection to vaht fails.
+    pub fn converted_transfer_functions(&mut self) -> Vec<wp_color_manager_v1::TransferFunction> {
+        self.dispatch_until(|state| state.transfer_functions.is_some());
+        self.state.transfer_functions.clone().unwrap_or_default()
+    }
+
+    /// Returns what vaht says the (first) output shows: its transfer
+    /// function and named primaries.
+    ///
+    /// # Panics
+    ///
+    /// Panics if vaht never says, or the connection to vaht fails.
+    pub fn output_colors(
+        &mut self,
+    ) -> (
+        Option<wp_color_manager_v1::TransferFunction>,
+        Option<wp_color_manager_v1::Primaries>,
+    ) {
+        let handle = self.queue.handle();
+        let output = self.output();
+        let colors = self.color_manager.get_output(&output, &handle, NoEvents);
+        let description = colors.get_image_description(&handle, state::ColorEvents);
+        self.state.description_info = None;
+        let _info = description.get_information(&handle, state::ColorEvents);
+        self.dispatch_until(|state| state.description_info.is_some());
+        self.state.description_info.take().unwrap_or_default()
+    }
+
+    /// Has window `index` say its pixels are HDR10 (BT.2100 PQ), and waits
+    /// until vaht has the commit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, vaht never makes the
+    /// description, or the connection to vaht fails.
+    pub fn describe_window_as_hdr10(&mut self, index: usize) {
+        let handle = self.queue.handle();
+        let creator = self
+            .color_manager
+            .create_parametric_creator(&handle, NoEvents);
+        creator.set_tf_named(wp_color_manager_v1::TransferFunction::St2084Pq);
+        creator.set_primaries_named(wp_color_manager_v1::Primaries::Bt2020);
+        self.state.description_ready = None;
+        let description = creator.create(&handle, state::ColorEvents);
+        self.dispatch_until(|state| state.description_ready.is_some());
+        let window = &self.state.windows[index];
+        let colors = self
+            .color_manager
+            .get_surface(window.wl_surface(), &handle, NoEvents);
+        colors.set_image_description(&description, wp_color_manager_v1::RenderIntent::Perceptual);
         window.commit();
         self.roundtrip();
     }

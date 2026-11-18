@@ -12,6 +12,7 @@
 //! without hardware; this module carries them out.
 
 mod device;
+mod hdr;
 mod input_device;
 mod lease;
 pub(crate) mod plan;
@@ -57,7 +58,7 @@ use self::plan::{GpuQuirks, TopWindow};
 use super::{BackendError, OutputEvent, RenderError};
 use crate::Compositor;
 use crate::capture::{self, CaptureError, CaptureView, CapturedImage};
-use crate::config::{InputSettings, OutputMode, Vrr};
+use crate::config::{HdrRequest, InputSettings, OutputMode, Vrr};
 use crate::event_source::{EventSource, Timer};
 use crate::gamma::GammaRamps;
 use crate::outputs::{OutputControl, Outputs};
@@ -751,6 +752,14 @@ impl DrmBackend {
         {
             screen.set_vrr(vrr, top);
         }
+    }
+
+    /// Puts `output`'s monitor into HDR as `request` says, or out of it
+    /// with none, if that changes anything; returns whether it changed.
+    pub(crate) fn set_hdr(&mut self, output: &Output, request: Option<HdrRequest>) -> bool {
+        self.devices
+            .values_mut()
+            .any(|device| device.set_hdr(output, request))
     }
 
     /// Returns the primary GPU's renderer.

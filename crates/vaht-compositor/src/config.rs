@@ -40,7 +40,7 @@ pub(crate) use self::command::{
 pub(crate) use self::matcher::WindowMatcher;
 pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};
 pub(crate) use self::outputs::{
-    OutputEntry, OutputIdentity, OutputMode, OutputPlan, OutputProfile, OutputScale,
+    HdrRequest, OutputEntry, OutputIdentity, OutputMode, OutputPlan, OutputProfile, OutputScale,
     OutputSettings, OutputTransform, Vrr,
 };
 pub(crate) use self::overrides::{SettingChange, SettingOverrides};

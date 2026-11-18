@@ -40,6 +40,11 @@ vaht = "crates/vaht-compositor/src/protocols/output_management.rs"
 modules = ["output_management", "wlr_output_management"]
 
 [[own]]
+protocol = "color-management-v1 (HDR)"
+vaht = "crates/vaht-compositor/src/protocols/color_management.rs"
+modules = ["color_management", "color"]
+
+[[own]]
 protocol = "wlr-output-power-management"
 vaht = "crates/vaht-compositor/src/protocols/output_power.rs"
 modules = ["output_power", "output_power_management", "wlr_output_power"]
@@ -60,8 +65,9 @@ modules = ["tearing_control"]
 prs = [1948, 1325]
 
 [[waiting]]
-feature = "HDR and color management"
+feature = "HDR: Smithay's colour pipeline and protocols (vaht's own: crate::color, scene/color_element.rs, protocols/color_management.rs)"
 modules = ["color_management", "color_representation"]
+prs = [982, 1143]
 
 [[waiting]]
 feature = "session restore (xdg-session-management)"

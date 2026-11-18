@@ -18,6 +18,7 @@ mod buffer_fences;
 mod bus;
 mod capture;
 mod client;
+mod color;
 mod compositor;
 mod config;
 mod cursor;

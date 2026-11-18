@@ -435,7 +435,11 @@ impl Screen {
         let mut framebuffer = renderer
             .bind(&mut self.target)
             .map_err(RenderError::BindSoftware)?;
-        let elements = scene.output_elements(renderer, &self.output);
+        let elements = scene.output_elements(
+            renderer,
+            &self.output,
+            crate::color::ImageDescription::of_output(&self.output),
+        );
         let drawn = self
             .damage_tracker
             .render_output(

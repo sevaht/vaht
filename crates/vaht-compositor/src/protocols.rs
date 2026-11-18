@@ -8,6 +8,7 @@
 
 mod activation;
 mod background_effect;
+pub(crate) mod color_management;
 mod decoration;
 mod dmabuf;
 mod gamma;
@@ -94,6 +95,18 @@ use crate::output_management::OutputManagement;
 use crate::output_power::OutputPower;
 use crate::workspace_pager::WorkspacePager;
 
+/// The surface extensions Smithay applies itself when drawing: held only
+/// to keep their globals alive.
+type SurfaceExtensions = (
+    ViewporterState,
+    FractionalScaleManagerState,
+    SinglePixelBufferState,
+    AlphaModifierState,
+    ContentTypeState,
+    FixesState,
+    BackgroundEffectState,
+);
+
 /// Smithay's state for every protocol global vaht advertises.
 pub(crate) struct ProtocolStates {
     /// `wl_compositor` and `wl_subcompositor`: surfaces and their commits.
@@ -114,6 +127,9 @@ pub(crate) struct ProtocolStates {
     /// `xdg_toplevel_drag_manager_v1`: windows dragged along with a drag
     /// and drop (a browser's tab dragged out).
     pub(crate) toplevel_drags: toplevel_drag::ToplevelDrags,
+    /// `wp_color_manager_v1`: what programs' pixels mean, and what each
+    /// output shows (HDR).
+    pub(crate) color_management: color_management::ColorManagement,
     /// `zwlr_screencopy_manager_v1`: screen capture as older tools ask.
     pub(crate) screencopies: screencopy::Screencopies,
     /// `zwp_primary_selection_device_manager_v1`: the middle-click paste.
@@ -144,15 +160,7 @@ pub(crate) struct ProtocolStates {
     /// what they show (video, a game), registry objects destroyed, and
     /// what is behind them blurred. Held only to keep the globals alive; Smithay applies them
     /// when drawing.
-    _surface_extensions: (
-        ViewporterState,
-        FractionalScaleManagerState,
-        SinglePixelBufferState,
-        AlphaModifierState,
-        ContentTypeState,
-        FixesState,
-        BackgroundEffectState,
-    ),
+    _surface_extensions: SurfaceExtensions,
     /// `wp_presentation`: clients told when their frames showed, by the
     /// monotonic clock. Held only to keep the global alive.
     _presentation: PresentationState,
@@ -256,6 +264,20 @@ impl ProtocolStates {
     /// taskbar's (18 by default) and larger, which read well scaled down.
     const TOPLEVEL_ICON_SIZES: [i32; 4] = [16, 24, 32, 48];
 
+    /// Creates the globals of the surface extensions Smithay applies
+    /// itself when drawing.
+    fn surface_extensions(display: &DisplayHandle) -> SurfaceExtensions {
+        (
+            ViewporterState::new::<Compositor>(display),
+            FractionalScaleManagerState::new::<Compositor>(display),
+            SinglePixelBufferState::new::<Compositor>(display),
+            AlphaModifierState::new::<Compositor>(display),
+            ContentTypeState::new::<Compositor>(display),
+            FixesState::new::<Compositor>(display),
+            BackgroundEffectState::new::<Compositor>(display),
+        )
+    }
+
     /// Creates every global on `display`; idle notifications time out on
     /// `handle`'s loop.
     pub(crate) fn new(display: &DisplayHandle, handle: &LoopHandle<'static, Compositor>) -> Self {
@@ -273,6 +295,7 @@ impl ProtocolStates {
             data_device: DataDeviceState::new::<Compositor>(display),
             toplevel_drags: toplevel_drag::ToplevelDrags::new(display),
             screencopies: screencopy::Screencopies::new(display),
+            color_management: color_management::ColorManagement::new(display),
             // Sandboxed programs may not read every selection, nor the rest
             // filtered so below.
             data_control: (
@@ -296,15 +319,7 @@ impl ProtocolStates {
             ),
             dmabuf: DmabufState::new(),
             dmabuf_global: None,
-            _surface_extensions: (
-                ViewporterState::new::<Compositor>(display),
-                FractionalScaleManagerState::new::<Compositor>(display),
-                SinglePixelBufferState::new::<Compositor>(display),
-                AlphaModifierState::new::<Compositor>(display),
-                ContentTypeState::new::<Compositor>(display),
-                FixesState::new::<Compositor>(display),
-                BackgroundEffectState::new::<Compositor>(display),
-            ),
+            _surface_extensions: Self::surface_extensions(display),
             _presentation: PresentationState::new::<Compositor>(
                 display,
                 <Monotonic as ClockSource>::ID as u32,

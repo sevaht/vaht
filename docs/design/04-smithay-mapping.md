@@ -60,7 +60,8 @@ re-renders its buffer only when its content changes.
 | wlr-gamma-control | Night-light tools | **built** (§8.8) |
 | wlr-output-power-management | DPMS via `wlopm` | **built** (§8.7) |
 | **tearing-control** | Games | not built: needs async page flips, which Smithay lacks ([#1948](https://github.com/Smithay/smithay/pull/1948), §3 below) |
-| color-representation, color-management | HDR | later |
+| color-management | HDR | **built**, by vaht (Smithay#982 and #1143 are drafts): `wp_color_manager_v1` v1, parametric descriptions (named or given primaries; sRGB, gamma 2.2/2.8, BT.1886, linear and PQ; luminances and mastering metadata) and Windows-scRGB, no ICC (`protocols/color_management.rs`). Each element is converted from its surface's description into its output's by a texture shader of vaht's (`crate::color`, `scene/color_element.rs`); converted elements stay off planes. A monitor in HDR gets its connector's `Colorspace` and `HDR_OUTPUT_METADATA` set by vaht (`backend/drm/hdr.rs`), since Smithay sets neither. `tools/smithay-watch` follows both drafts |
+| color-representation | YCbCr buffers' matrix and range | later |
 | transient-seat, export-dmabuf | | drop: unused or deprecated |
 
 Each of these sits behind a module of its own with a narrow handler (M4

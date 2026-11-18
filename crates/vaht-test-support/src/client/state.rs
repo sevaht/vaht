@@ -70,6 +70,12 @@ use smithay_client_toolkit::reexports::protocols_wlr::screencopy::v1::client::zw
 use smithay_client_toolkit::reexports::protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 use smithay_client_toolkit::reexports::protocols::ext::background_effect::v1::client::ext_background_effect_manager_v1::{self, ExtBackgroundEffectManagerV1};
 use smithay_client_toolkit::reexports::protocols::ext::background_effect::v1::client::ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1;
+use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::client::wp_color_management_output_v1::WpColorManagementOutputV1;
+use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::client::wp_color_management_surface_v1::WpColorManagementSurfaceV1;
+use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::client::wp_color_manager_v1::{self, WpColorManagerV1};
+use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::client::wp_image_description_creator_params_v1::WpImageDescriptionCreatorParamsV1;
+use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::client::wp_image_description_info_v1::{self, WpImageDescriptionInfoV1};
+use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::client::wp_image_description_v1::{self, WpImageDescriptionV1};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
 use super::{BYTES_PER_PIXEL, Presentation, WINDOW_COLOR, WINDOW_SIZE};
@@ -148,6 +154,23 @@ pub(super) struct ClientState {
     pub(super) screencopy_result: Option<Result<(), ()>>,
     /// Whether vaht said it blurs what is behind surfaces, once it said.
     pub(super) blurs: Option<bool>,
+    /// The transfer functions vaht says it converts, once it said.
+    pub(super) transfer_functions: Option<Vec<wp_color_manager_v1::TransferFunction>>,
+    /// Those it is saying, until it says it is done.
+    pub(super) transfer_functions_told: Vec<wp_color_manager_v1::TransferFunction>,
+    /// The identity of the image description made last, once ready.
+    pub(super) description_ready: Option<u32>,
+    /// What vaht said an image description is: its transfer function and
+    /// named primaries, once done.
+    pub(super) description_info: Option<(
+        Option<wp_color_manager_v1::TransferFunction>,
+        Option<wp_color_manager_v1::Primaries>,
+    )>,
+    /// What it is saying, until done.
+    pub(super) description_info_told: (
+        Option<wp_color_manager_v1::TransferFunction>,
+        Option<wp_color_manager_v1::Primaries>,
+    ),
     /// How the current capture's image is turned from the output's own
     /// orientation.
     pub(super) capture_transform: wl_output::Transform,
@@ -218,6 +241,11 @@ impl ClientState {
             screencopy_described: false,
             screencopy_result: None,
             blurs: None,
+            transfer_functions: None,
+            transfer_functions_told: Vec::new(),
+            description_ready: None,
+            description_info: None,
+            description_info_told: (None, None),
             drawn: Vec::new(),
             close_requests: 0,
             closed_layers: 0,
@@ -339,6 +367,9 @@ ignore_events!(
     XdgToplevelDragV1,
     ZwlrScreencopyManagerV1,
     ExtBackgroundEffectSurfaceV1,
+    WpColorManagementOutputV1,
+    WpColorManagementSurfaceV1,
+    WpImageDescriptionCreatorParamsV1,
     ZwpKeyboardShortcutsInhibitManagerV1,
     ZwpKeyboardShortcutsInhibitorV1,
     ZwpRelativePointerManagerV1,
@@ -472,6 +503,81 @@ impl Dispatch2<ExtBackgroundEffectManagerV1, ClientState> for BackgroundEffectEv
             state.blurs = Some(flags.into_result().is_ok_and(|flags| {
                 flags.contains(ext_background_effect_manager_v1::Capability::Blur)
             }));
+        }
+    }
+}
+
+/// User data of the colour manager, image descriptions and their
+/// information: records what vaht says.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ColorEvents;
+
+impl Dispatch2<WpColorManagerV1, ClientState> for ColorEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &WpColorManagerV1,
+        event: wp_color_manager_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "only the transfer functions matter to a test"
+        )]
+        match event {
+            wp_color_manager_v1::Event::SupportedTfNamed { tf } => {
+                if let Ok(tf) = tf.into_result() {
+                    state.transfer_functions_told.push(tf);
+                }
+            }
+            wp_color_manager_v1::Event::Done => {
+                state.transfer_functions = Some(std::mem::take(&mut state.transfer_functions_told));
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch2<WpImageDescriptionV1, ClientState> for ColorEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &WpImageDescriptionV1,
+        event: wp_image_description_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        if let wp_image_description_v1::Event::Ready { identity } = event {
+            state.description_ready = Some(identity);
+        }
+    }
+}
+
+impl Dispatch2<WpImageDescriptionInfoV1, ClientState> for ColorEvents {
+    fn event(
+        &self,
+        state: &mut ClientState,
+        _: &WpImageDescriptionInfoV1,
+        event: wp_image_description_info_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<ClientState>,
+    ) {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "the transfer function and primaries are what a test checks"
+        )]
+        match event {
+            wp_image_description_info_v1::Event::TfNamed { tf } => {
+                state.description_info_told.0 = tf.into_result().ok();
+            }
+            wp_image_description_info_v1::Event::PrimariesNamed { primaries } => {
+                state.description_info_told.1 = primaries.into_result().ok();
+            }
+            wp_image_description_info_v1::Event::Done => {
+                state.description_info = Some(std::mem::take(&mut state.description_info_told));
+            }
+            _ => {}
         }
     }
 }

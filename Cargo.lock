@@ -2979,6 +2979,7 @@ dependencies = [
  "calloop",
  "futures-util",
  "jiff",
+ "libdisplay-info",
  "nix",
  "procfs",
  "proptest",

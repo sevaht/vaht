@@ -83,6 +83,75 @@ pub(crate) struct OutputEntry {
     /// has one to vary.
     #[serde(default)]
     pub(crate) vrr: Vrr,
+    /// Whether it is driven in HDR10, if its monitor can be.
+    #[serde(default)]
+    pub(crate) hdr: bool,
+    /// In HDR, how bright white is in SDR content (windows, the taskbar),
+    /// in cd/m².
+    #[serde(default)]
+    pub(crate) sdr_white: SdrWhite,
+    /// In HDR, the monitor's peak in cd/m², for one whose EDID says
+    /// wrong; its EDID's without it.
+    #[serde(default)]
+    pub(crate) hdr_peak: Option<HdrPeak>,
+}
+
+impl OutputEntry {
+    /// Returns what its HDR settings ask for: none unless it is in HDR.
+    pub(crate) fn hdr_request(&self) -> Option<HdrRequest> {
+        self.hdr.then_some(HdrRequest {
+            sdr_white: f64::from(self.sdr_white.0),
+            peak: self.hdr_peak.map(|peak| f64::from(peak.0)),
+        })
+    }
+}
+
+/// An output's HDR settings, when it is to be in HDR.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct HdrRequest {
+    /// How bright SDR white is, in cd/m².
+    pub(crate) sdr_white: f64,
+    /// The monitor's peak, if the settings say, in cd/m².
+    pub(crate) peak: Option<f64>,
+}
+
+/// How bright SDR white is on a monitor in HDR: 80 to 1000 cd/m², 203 by
+/// default (BT.2408's reference white).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(try_from = "u16")]
+pub(crate) struct SdrWhite(u16);
+
+impl Default for SdrWhite {
+    fn default() -> Self {
+        Self(203)
+    }
+}
+
+impl TryFrom<u16> for SdrWhite {
+    type Error = String;
+
+    fn try_from(nits: u16) -> Result<Self, String> {
+        (80..=1000)
+            .contains(&nits)
+            .then_some(Self(nits))
+            .ok_or_else(|| format!("sdr_white is 80 to 1000 cd/m², not {nits}"))
+    }
+}
+
+/// A monitor's peak in HDR: 100 to 10 000 cd/m².
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(try_from = "u16")]
+pub(crate) struct HdrPeak(u16);
+
+impl TryFrom<u16> for HdrPeak {
+    type Error = String;
+
+    fn try_from(nits: u16) -> Result<Self, String> {
+        (100..=10_000)
+            .contains(&nits)
+            .then_some(Self(nits))
+            .ok_or_else(|| format!("hdr_peak is 100 to 10000 cd/m², not {nits}"))
+    }
 }
 
 /// Which outputs an entry is for: every field given must be the output's.
@@ -324,6 +393,9 @@ impl OutputEntry {
             enabled: true,
             primary: false,
             vrr: Vrr::default(),
+            hdr: false,
+            sdr_white: SdrWhite::default(),
+            hdr_peak: None,
         }
     }
 }
@@ -682,5 +754,40 @@ profile_applied = "~/bin/on-profile"
         )
         .expect_err("a zero scale is refused");
         assert!(error.to_string().contains("not from"), "{error}");
+    }
+
+    /// Returns the HDR request of `outputs.toml` holding one entry for
+    /// `eDP-1` with `settings`.
+    fn hdr_of(settings: &str) -> Result<Option<HdrRequest>, String> {
+        let text = format!("[[output]]\nmatch = {{ connector = \"eDP-1\" }}\n{settings}");
+        let parsed = toml::from_str::<OutputSettings>(&text).map_err(|error| error.to_string())?;
+        Ok(parsed.entries[0].hdr_request())
+    }
+
+    #[test]
+    fn hdr_is_off_unless_asked_and_sdr_white_is_bt2408s_by_default() {
+        assert_eq!(hdr_of(""), Ok(None));
+        assert_eq!(
+            hdr_of("hdr = true\n"),
+            Ok(Some(HdrRequest {
+                sdr_white: 203.0,
+                peak: None
+            }))
+        );
+        assert_eq!(
+            hdr_of("hdr = true\nsdr_white = 250\nhdr_peak = 600\n"),
+            Ok(Some(HdrRequest {
+                sdr_white: 250.0,
+                peak: Some(600.0)
+            }))
+        );
+    }
+
+    #[test]
+    fn hdr_luminances_must_be_sensible() {
+        let error = hdr_of("hdr = true\nsdr_white = 20\n").expect_err("too dim");
+        assert!(error.contains("80 to 1000"), "{error}");
+        let error = hdr_of("hdr = true\nhdr_peak = 50\n").expect_err("too dim");
+        assert!(error.contains("100 to 10000"), "{error}");
     }
 }

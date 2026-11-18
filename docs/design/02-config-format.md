@@ -829,6 +829,9 @@ scale = 1.0                           # 0.25 to 8; windows on it are told it
 transform = "normal"                  # 90, 180, 270, flipped, flipped-90, ...
 primary = true
 vrr = "fullscreen"                    # off | on | fullscreen (default)
+hdr = false                           # new: HDR10, if the monitor can
+sdr_white = 203                       # in HDR: SDR content's white, cd/m²
+# hdr_peak = 600                      # in HDR: the peak, when the EDID is wrong
 
 [[output]]
 match = { connector = "DP-2" }
@@ -865,6 +868,21 @@ primary_output_changed = "~/bin/on-primary"    # the output's connector as $1
   turned off move to the primary one. The nested backend's one output
   is the host window: it cannot be turned off, and its size is its mode.
   `vrr` is read; only the DRM backend will act on it.
+- **HDR (built, new).** `hdr = true` drives a monitor whose EDID says it
+  takes PQ in BT.2020 RGB in HDR10: vaht sets the connector's `Colorspace`
+  to BT.2020 RGB and its `HDR_OUTPUT_METADATA` (the EDID's peak, or
+  `hdr_peak`; its black and frame average), redraws everything in PQ, and
+  tells programs (`wp_color_manager_v1`) the output shows BT.2100 PQ, so
+  HDR games and video send PQ and show as they were mastered. SDR content
+  (windows, vaht's own panels) is shown with its white at `sdr_white`
+  (80 to 1000 cd/m², 203 by default, BT.2408's reference white); HDR
+  content brighter than the monitor rolls off to its peak. A monitor that
+  cannot is left in SDR; one the kernel refuses (a frame on its way) is
+  asked again each frame, the refusal logged once. Leaving vaht takes
+  every monitor out of HDR. Only the DRM backend acts on it.
+  Screenshots and streams stay sRGB, HDR content tone-mapped into them.
+  Alpha is blended in PQ rather than linear light, so translucent edges
+  differ slightly from SDR.
 - **Profiles (built).** A profile applies itself at start, on reload and
   when outputs come and go, if every output its `when_connected` lists is
   there (the one listing most wins, the first written on a tie); a

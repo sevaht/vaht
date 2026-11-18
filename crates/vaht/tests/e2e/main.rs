@@ -7,6 +7,7 @@
 mod bindings;
 mod blur;
 mod clipboard;
+mod color;
 mod command_line;
 mod cursor;
 mod dialogs;

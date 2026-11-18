@@ -24,6 +24,7 @@ serde.workspace = true
 serde_json.workspace = true
 smithay.workspace = true
 smithay-drm-extras.workspace = true
+libdisplay-info.workspace = true
 strum.workspace = true
 thiserror.workspace = true
 tiny-skia.workspace = true
@@ -43,3 +44,8 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+# libdisplay-info is named only to turn on its 0.3 API (HDR metadata) for
+# smithay-drm-extras' copy; no code uses it by name.
+[package.metadata.cargo-machete]
+ignored = ["libdisplay-info"]
