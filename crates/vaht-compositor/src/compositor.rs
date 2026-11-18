@@ -2488,19 +2488,14 @@ impl Compositor {
 
     /// Hands a wheel turn of `steps` (in 120ths of a notch, positive down)
     /// to the tray item under the pointer; returns whether one was there.
-    fn scroll_tray_item(&mut self, steps: Option<f64>) -> bool {
+    fn scroll_tray_item(&mut self, steps: Option<f64>, notches: i32) -> bool {
         let location = self.pointer_location();
         let Some(PointerTarget::Taskbar(Some(TaskbarHit::TrayItem(item)))) =
             self.scene().target_at(location)
         else {
             return false;
         };
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "a wheel turn is a few notches, far inside i32"
-        )]
-        let notches = (steps.unwrap_or(0.0) / 120.0).round() as i32;
-        if notches != 0 {
+        if steps.is_some() && notches != 0 {
             self.taskbars
                 .act_on_tray(item, TrayAction::Scroll(notches), location);
         }
@@ -3894,9 +3889,13 @@ impl Compositor {
     /// Scrolls the surface under the pointer, unless the wheel is bound
     /// there.
     fn handle_pointer_axis<B: InputBackend>(&mut self, event: &B::PointerAxisEvent) {
-        if self.scroll_tray_item(event.amount_v120(Axis::Vertical))
-            || self.run_scroll_binding(event.amount_v120(Axis::Vertical))
-        {
+        let steps = event.amount_v120(Axis::Vertical);
+        // A wheel that reports part of a notch at a time makes a notch of
+        // them: a binding runs once for it.
+        let notches = steps.map_or(0, |steps| {
+            self.input.wheel.turn(steps, event.time().millis())
+        });
+        if self.scroll_tray_item(steps, notches) || self.run_scroll_binding(steps, notches) {
             return;
         }
         let pointer = self
@@ -3909,7 +3908,7 @@ impl Compositor {
 
     /// Runs what a wheel turn of `steps` (in 120ths of a notch, positive
     /// down) is bound to where the pointer is; returns whether it was bound.
-    fn run_scroll_binding(&mut self, steps: Option<f64>) -> bool {
+    fn run_scroll_binding(&mut self, steps: Option<f64>, notches: i32) -> bool {
         let pointer = self
             .seat
             .get_pointer()
@@ -3927,7 +3926,9 @@ impl Compositor {
             return false;
         };
         let window = target.as_ref().and_then(PointerTarget::binding_window);
-        self.execute(&command, &mut ExecutionContext::for_window(window));
+        for _ in 0..notches.unsigned_abs() {
+            self.execute(&command, &mut ExecutionContext::for_window(window));
+        }
         true
     }
 

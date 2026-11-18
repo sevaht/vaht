@@ -146,9 +146,54 @@ pub(crate) enum AfterClick {
     PassToClient,
 }
 
+/// Counts wheel notches from the turns a wheel reports: a high-resolution
+/// wheel reports a notch in several small turns (in 120ths of a notch), and
+/// a binding must run once for the notch, not once for each turn.
+#[derive(Debug, Default)]
+pub(crate) struct WheelNotches {
+    /// What the turns so far add up to, less the notches already counted,
+    /// in 120ths of a notch (positive down).
+    remainder: f64,
+    /// When the last turn came, in milliseconds.
+    last_time: Option<u32>,
+}
+
+impl WheelNotches {
+    /// How long a pause makes the wheel start over: a part of a notch is
+    /// forgotten after it.
+    const PAUSE_MS: u32 = 500;
+
+    /// One notch, in the 120ths wheels report.
+    const NOTCH: f64 = 120.0;
+
+    /// Adds a turn of `steps` (120ths of a notch, positive down) at `time`
+    /// (milliseconds); returns the whole notches it completes, negative up.
+    pub(crate) fn turn(&mut self, steps: f64, time: u32) -> i32 {
+        let paused = self
+            .last_time
+            .is_some_and(|last| time.wrapping_sub(last) > Self::PAUSE_MS);
+        self.last_time = Some(time);
+        // Turning back, or pausing, forgets a part of a notch.
+        if paused || self.remainder * steps < 0.0 {
+            self.remainder = 0.0;
+        }
+        self.remainder += steps;
+        let whole = (self.remainder / Self::NOTCH).trunc();
+        self.remainder -= whole * Self::NOTCH;
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a wheel turn is a few notches, far inside i32"
+        )]
+        let notches = whole as i32;
+        notches
+    }
+}
+
 /// The input state that outlives a single event.
 #[derive(Debug, Default)]
 pub(crate) struct Input {
+    /// The wheel turns that have not yet made a notch.
+    pub(crate) wheel: WheelNotches,
     /// Keys whose press was a binding: their releases are vaht's too.
     suppressed_keys: HashSet<Keycode>,
     /// The repeating key binding being held, if any.
@@ -727,5 +772,34 @@ mod tests {
             now,
         );
         assert_eq!(then(next).0, AfterClick::PassToClient);
+    }
+
+    #[test]
+    fn small_wheel_turns_make_one_notch_between_them() {
+        let mut wheel = WheelNotches::default();
+        let notches: Vec<i32> = (0..4).map(|turn| wheel.turn(30.0, turn * 10)).collect();
+        assert_eq!(notches, [0, 0, 0, 1], "a notch is four turns of 30");
+        let more: Vec<i32> = (4..8).map(|turn| wheel.turn(30.0, turn * 10)).collect();
+        assert_eq!(more, [0, 0, 0, 1], "and the next notch likewise");
+    }
+
+    #[test]
+    fn a_whole_notch_is_one_and_a_fast_spin_is_several_with_the_direction_kept() {
+        let mut wheel = WheelNotches::default();
+        assert_eq!(wheel.turn(120.0, 0), 1);
+        assert_eq!(wheel.turn(-120.0, 10), -1);
+        assert_eq!(wheel.turn(360.0, 20), 3);
+        assert_eq!(wheel.turn(-240.0, 30), -2);
+    }
+
+    #[test]
+    fn turning_back_or_pausing_forgets_part_of_a_notch() {
+        let mut wheel = WheelNotches::default();
+        assert_eq!(wheel.turn(90.0, 0), 0);
+        assert_eq!(wheel.turn(-60.0, 10), 0, "turned back: starts over");
+        assert_eq!(wheel.turn(-60.0, 20), 0, "only 120 down so far in that way");
+        assert_eq!(wheel.turn(-60.0, 30), -1);
+        assert_eq!(wheel.turn(90.0, 100), 0);
+        assert_eq!(wheel.turn(60.0, 2_000), 0, "a pause: the 90 is forgotten");
     }
 }
