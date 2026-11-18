@@ -1,0 +1,30 @@
+[package]
+name = "vaht-settings"
+description = "The vaht settings window: edits the configuration of a running vaht."
+keywords = ["wayland", "compositor", "settings", "gui"]
+categories = ["config", "gui"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "vaht-settings"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+eframe.workspace = true
+serde_json.workspace = true
+vaht-ipc = { path = "../vaht-ipc" }
+vaht-settings-model = { path = "../vaht-settings-model" }
+
+[dev-dependencies]
+egui_kittest.workspace = true
+
+[lints]
+workspace = true

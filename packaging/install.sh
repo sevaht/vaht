@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Installs vaht and the files it needs from the system: the executable, the
+# Installs vaht and the files it needs from the system: the executables (vaht
+# and vaht-settings, its settings window), the
 # login-screen entry (wayland-sessions/vaht.desktop), the portal choice
 # (xdg-desktop-portal/vaht-portals.conf) and the session target
 # (systemd/user/vaht-session.target), which ties the portals to the session,
@@ -15,6 +16,8 @@
 #
 # What it installs, system-wide (PREFIX is /usr unless given):
 #   PREFIX/bin/vaht
+#   PREFIX/bin/vaht-settings
+#   PREFIX/share/applications/vaht-settings.desktop    the settings window, in launchers
 #   PREFIX/share/wayland-sessions/vaht.desktop        display managers list it
 #   PREFIX/share/xdg-desktop-portal/vaht-portals.conf  portals for XDG_CURRENT_DESKTOP=vaht
 #   PREFIX/lib/systemd/user/vaht-session.target        the session, for the service manager
@@ -23,6 +26,7 @@
 #   PREFIX/share/licenses/vaht/LICENSE
 # and for one user (--user):
 #   ~/.local/bin/vaht
+#   ~/.local/bin/vaht-settings
 #   ~/.config/xdg-desktop-portal/vaht-portals.conf
 #   ~/.config/systemd/user/vaht-session.target
 #   ~/.config/xdg-desktop-portal-wlr/vaht
@@ -41,7 +45,7 @@ build=yes
 action=install
 
 usage() {
-    sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ ${#} -gt 0 ]]; do
@@ -62,6 +66,7 @@ if [[ ${mode} == user ]]; then
     unit_dir=${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user
     share_dir=${XDG_CONFIG_HOME:-${HOME}/.config}/xdg-desktop-portal-wlr
     session_dir=
+    application_dir=
     doc_dir=
     license_dir=
 else
@@ -71,6 +76,7 @@ else
     # The system's XDG configuration directory, whatever the prefix.
     share_dir=${destdir}/etc/xdg/xdg-desktop-portal-wlr
     session_dir=${destdir}${prefix}/share/wayland-sessions
+    application_dir=${destdir}${prefix}/share/applications
     doc_dir=${destdir}${prefix}/share/doc/vaht
     license_dir=${destdir}${prefix}/share/licenses/vaht
 fi
@@ -78,6 +84,7 @@ fi
 # Every file this installs, as "source destination mode".
 files=(
     "target/release/vaht ${bin_dir}/vaht 755"
+    "target/release/vaht-settings ${bin_dir}/vaht-settings 755"
     "data/vaht-portals.conf ${portal_dir}/vaht-portals.conf 644"
     "data/vaht-session.target ${unit_dir}/vaht-session.target 644"
     "data/xdg-desktop-portal-wlr-vaht ${share_dir}/vaht 644"
@@ -85,6 +92,7 @@ files=(
 if [[ -n ${session_dir} ]]; then
     files+=(
         "data/vaht.desktop ${session_dir}/vaht.desktop 644"
+        "data/vaht-settings.desktop ${application_dir}/vaht-settings.desktop 644"
         "README.md ${doc_dir}/README.md 644"
         "DESIGN.md ${doc_dir}/DESIGN.md 644"
         "LICENSE ${license_dir}/LICENSE 644"
@@ -105,12 +113,14 @@ if [[ ${action} == uninstall ]]; then
 fi
 
 if [[ ${build} == yes ]]; then
-    cargo build --release --locked -p vaht
+    cargo build --release --locked -p vaht -p vaht-settings
 fi
-if [[ ! -x target/release/vaht ]]; then
-    echo "install.sh: target/release/vaht is not built; run without --no-build" >&2
-    exit 1
-fi
+for program in vaht vaht-settings; do
+    if [[ ! -x target/release/${program} ]]; then
+        echo "install.sh: target/release/${program} is not built; run without --no-build" >&2
+        exit 1
+    fi
+done
 
 for entry in "${files[@]}"; do
     read -r source destination file_mode <<<"${entry}"

@@ -3009,6 +3009,7 @@ impl Compositor {
             Action::CommandDialog => self
                 .launcher
                 .show_dialog("command", self.config_source.directory()),
+            Action::Settings => self.launcher.show_settings(),
             Action::SetTheme(name) => self.change_setting(SettingChange::theme(name)),
             Action::SetSetting(change) | Action::UnsetSetting(change) => {
                 self.change_setting(change.clone());

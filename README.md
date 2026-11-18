@@ -22,7 +22,9 @@ the choice of portals (`xdg-desktop-portal/vaht-portals.conf`), the session
 target that ties the portals to vaht's session
 (`systemd/user/vaht-session.target`), and the screen-share portal's
 settings for vaht sessions (`/etc/xdg/xdg-desktop-portal-wlr/vaht`), which
-ask which screen or window to share with vaht's own menu.
+ask which screen or window to share with vaht's own menu. It installs
+`vaht-settings` too, the window that edits the settings of a running vaht
+(`vaht msg run settings`, or *Settings* in the root menu).
 
 ```console
 $ sudo packaging/install.sh                 # into /usr (--prefix to change)

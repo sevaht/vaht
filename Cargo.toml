@@ -26,6 +26,12 @@ calloop = { version = "0.14.5", features = ["executor", "signals"] }
 clap = { version = "4", features = ["derive", "env"] }
 cosmic-text = "0.19"
 # `StreamExt`, to read D-Bus signal streams; zbus already depends on it.
+# The settings window's toolkit: Wayland only (no `x11`), OpenGL rather than
+# wgpu, AccessKit for screen readers, system fonts for the glyphs the bundled
+# ones lack.
+eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "system_fonts", "wayland"] }
+# Tests the window without a display, through AccessKit's tree.
+egui_kittest = { version = "0.37", features = ["snapshot"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 jiff = "0.2"
 nix = { version = "0.31", features = ["inotify", "poll", "process", "signal", "socket", "time"] }

@@ -434,7 +434,7 @@ A command is written in one of three forms:
 | Focus | `focus`, `next-window`, `previous-window`, `focus-direction <direction>`, `show-desktop` |
 | Workspaces | `workspace <n\|next\|previous\|last>`, `send-to-workspace <target>`, `take-to-workspace <target>`, `add-workspace`, `remove-last-workspace`, `rename-workspace` |
 | Keys | `key-mode <name> [<end chord>]` |
-| Menus and dialogs | `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`, `custom-menu <name>`, `hide-menus`, `run-dialog`, `command-dialog` |
+| Menus and dialogs | `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`, `custom-menu <name>`, `hide-menus`, `run-dialog`, `command-dialog`, `settings` |
 | Taskbar | `activate-window-list-entry <n>`, `activate-tray-item <n>`, `tray-item-menu <n>`, `toggle-taskbar`, `taskbar-to-output <target>` |
 | Outputs | `apply-profile <name>`, `cycle-profile`, `cycle-primary-output` |
 | Theme | `set-theme <name>` |
@@ -1246,9 +1246,22 @@ dialogs use too.
   `focus.model`, or `input.device."My Mouse".accel_speed` where a part is
   not a plain word (one grammar, `vaht_ipc::ConfigPath`). Changing is a
   command, so `[ipc] allow_commands = false` refuses it except from vaht's
-  own dialogs. `vaht msg subscribe config` sends each file's state whenever
+  own dialogs and the settings window. `vaht msg subscribe config` sends each file's state whenever
   vaht runs a new configuration (an edit, a save, a revert, a file changed
   on disk), with a counter so a refresh is never mistaken for the last one.
+- **`vaht-settings`** is the settings window (`vaht msg run settings`, the
+  `settings` command, the root menu's *Settings*, or `vaht-settings` from a
+  launcher). It is a separate program (egui, Wayland only) and a client of
+  `vaht msg config`: it draws the form from the schema vaht describes,
+  sends each change as it is made, and so every change runs at once. *Save*
+  writes the changes into `settings.toml` and *Revert* drops them; both are
+  enabled only while changes are pending. A value vaht refuses is shown
+  with the reason and changes nothing. Settings that are optional (`theme`,
+  `log.keep_days`...) have a *Set* box; *Reset* puts one back to its
+  default. Every control is labelled with the setting's name, so a screen
+  reader announces it. Only `settings.toml` has a page so far; maps (such
+  as `[input.device]`) and lists of tables are edited as JSON text until
+  they have widgets of their own.
 - **`vaht msg pick`** (`pick` request) is a dmenu-style chooser: the lines
   on standard input show as a vaht menu at the pointer (`--title` above
   them), in the user's theme, and the one chosen is printed; closing the

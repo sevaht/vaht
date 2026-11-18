@@ -25,6 +25,7 @@ items = [
     { generate = "workspaces" },
     { generate = "window-list" },
     { separator = true },
+    { label = "Settings", command = "settings" },
     { label = "Reload", command = "reload" },
     { label = "Exit", command = "exit" },
 ]

@@ -394,6 +394,8 @@ pub(crate) enum Action {
     RunDialog,
     /// Shows the command dialog: a vaht command to type and run.
     CommandDialog,
+    /// Shows the settings window: the configuration, to edit.
+    Settings,
     /// Shows the title dialog for the window: its title, to change.
     SetTitleDialog,
     /// Uses a theme in place of the settings' (`set-theme <name>`), until
@@ -729,6 +731,7 @@ impl Action {
             "reload" => without_arguments(Self::Reload),
             "run-dialog" => without_arguments(Self::RunDialog),
             "command-dialog" => without_arguments(Self::CommandDialog),
+            "settings" => without_arguments(Self::Settings),
             "set-title-dialog" => without_arguments(Self::SetTitleDialog),
             "set-theme" if arguments.is_empty() => {
                 Err("`set-theme` needs a theme's name".to_owned())
@@ -867,6 +870,7 @@ impl fmt::Display for Action {
             Self::Reload => formatter.write_str("reload"),
             Self::RunDialog => formatter.write_str("run-dialog"),
             Self::CommandDialog => formatter.write_str("command-dialog"),
+            Self::Settings => formatter.write_str("settings"),
             Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
             Self::SetTheme(name) => write!(formatter, "set-theme {name}"),
             Self::SaveSettings => formatter.write_str("save-settings"),

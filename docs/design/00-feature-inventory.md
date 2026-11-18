@@ -40,6 +40,9 @@ target. A ★ marks features it actually uses.
 | **tray** | systray, system tray | The taskbar's StatusNotifierItem host |
 | **panel** | (none) | Anything vaht draws and lays out itself: a frame, the taskbar, a menu, a tooltip, a dialog |
 | **profile** | layout, profile set | A named output configuration |
+| **setting** | option, preference, resource | One key of `settings.toml`, with a documented type, range and default |
+| **pending change** | draft, dirty edit | A setting changed while vaht runs and not yet written to its file; it already runs |
+| **revert** | undo, discard | Drop the pending changes, so the files run as they say |
 
 ---
 
@@ -205,7 +208,7 @@ These are structural problems in fluxland that vaht's design should avoid.
 | 132 Fluxbox commands | `keybind.c`, `keyboard_actions.c` | rework | One typed `Action` enum. Prune the alias duplicates (Iconify, Minimize, MinimizeWindow…) |
 | MacroCmd, ToggleCmd, If, Cond, ForEach, Map, Delay | `command.c` | rework | Keep the capabilities in a cleaner syntax, as part of `02-config-format.md` |
 | Client patterns `(name=…) (title!=…) {N}` | `client_pattern.c` | rework | Becomes a typed `WindowMatcher` |
-| SetResourceValue (and its dialog) | `keyboard_actions.c` | keep, renamed **SetSetting** (decided) | Changes a setting while running, by vaht's own setting key (`taskbar.auto_hide true`). Lasts until the settings file says otherwise at that key, or SaveSettings writes it. Also available from `vaht msg` |
+| SetResourceValue (and its dialog) | `keyboard_actions.c` | keep, renamed **SetSetting** (decided) | Changes a setting while running, by vaht's own setting key (`taskbar.auto_hide true`). Lasts until the settings file says otherwise at that key, or SaveSettings writes it. Also available from `vaht msg`, and by hand in the settings window (`vaht-settings`, the `settings` command), which is a client of vaht's IPC: it holds no configuration logic, shows each setting by the schema vaht describes, runs every change at once and offers Save and Revert |
 | SaveRC | | keep, renamed **SaveSettings** (decided) | Writes the settings changed at runtime into the settings file. Uses `toml_edit`, so the file's comments, ordering and formatting survive and only the changed keys are touched. This is the only time vaht writes to config, and only when you ask |
 | Export, SetEnv | | keep, merged into **SetEnvironment** (decided) | Sets a variable in vaht's environment, inherited by programs it starts afterwards |
 

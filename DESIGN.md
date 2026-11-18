@@ -20,6 +20,8 @@ repeating them.
 | `crates/vaht-compositor` | The compositor |
 | `crates/vaht-ui` | The panel toolkit; no Wayland |
 | `crates/vaht-ipc` | IPC message types |
+| `crates/vaht-settings-model` | The settings window's decisions (form from schema, editor state); no toolkit, no I/O |
+| `crates/vaht-settings` | The settings window: a thin egui shell and a client of vaht's IPC |
 | `crates/vaht-import` | `vaht import fluxbox`: Fluxbox (and fluxland) setups to vaht's TOML |
 | `crates/vaht-test-support` | Test-only: a headless vaht, a client that clicks and takes screenshots |
 

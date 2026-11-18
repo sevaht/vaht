@@ -55,6 +55,29 @@ pub enum SettingKind {
     Raw,
 }
 
+impl SettingKind {
+    /// Returns a value of this kind to start from when a setting that was
+    /// unset is first set: the least it may be, the first word, or empty.
+    #[must_use]
+    pub fn starting_value(&self) -> Value {
+        match self {
+            Self::Toggle => Value::Bool(false),
+            Self::Whole { minimum, .. } => Value::from(minimum.unwrap_or(0)),
+            Self::Decimal { minimum, .. } => serde_json::Number::from_f64(minimum.unwrap_or(0.0))
+                .map_or(Value::Null, Value::Number),
+            Self::Text => Value::String(String::new()),
+            Self::Choice(choices) => Value::String(
+                choices
+                    .first()
+                    .map(|choice| choice.value.clone())
+                    .unwrap_or_default(),
+            ),
+            Self::List(_) => Value::Array(Vec::new()),
+            Self::Mapping(_) | Self::Raw => Value::Object(serde_json::Map::new()),
+        }
+    }
+}
+
 /// One word a [`SettingKind::Choice`] allows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Choice {
@@ -277,7 +300,7 @@ impl<'schema> SchemaReader<'schema> {
             } else {
                 return Ok(Resolved {
                     schema,
-                    is_optional,
+                    is_optional: is_optional || Self::type_names(schema).any(|name| name == "null"),
                 });
             }
         }
@@ -293,12 +316,25 @@ impl<'schema> SchemaReader<'schema> {
         (present.next().is_none() && members.iter().any(|member| is_null(&member))).then_some(only)
     }
 
+    /// Returns the names `schema`'s `type` lists (it is a name or an array
+    /// of them).
+    fn type_names(schema: &Value) -> impl Iterator<Item = &str> {
+        let value = schema.get("type");
+        value.and_then(Value::as_str).into_iter().chain(
+            value
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str),
+        )
+    }
+
     /// Returns the kind of value `schema` describes.
     fn kind_of(&self, schema: &'schema Value) -> SettingKind {
         if let Some(choices) = Self::choices_of(schema) {
             return SettingKind::Choice(choices);
         }
-        match schema.get("type").and_then(Value::as_str) {
+        match Self::type_names(schema).find(|name| *name != "null") {
             Some("boolean") => SettingKind::Toggle,
             Some("integer") => SettingKind::Whole {
                 minimum: schema.get("minimum").and_then(Value::as_i64),
@@ -555,6 +591,41 @@ mod tests {
         for key in ["rows", "devices", "cells"] {
             assert_eq!(setting(&form, key).kind, SettingKind::Raw, "{key}");
         }
+    }
+
+    #[test]
+    fn a_type_that_may_be_null_is_optional() {
+        let form = form_of(
+            &json!({}),
+            &json!({ "theme": { "type": ["string", "null"] } }),
+        );
+        let theme = setting(&form, "theme");
+        assert!(theme.is_optional);
+        assert_eq!(theme.kind, SettingKind::Text);
+    }
+
+    #[test]
+    fn a_setting_first_set_starts_from_the_least_it_may_be() {
+        let kind = |schema: Value| {
+            let form = form_of(&json!({}), &json!({ "a": schema }));
+            setting(&form, "a").kind.clone()
+        };
+        assert_eq!(
+            kind(json!({ "type": "integer", "minimum": 5 })).starting_value(),
+            json!(5)
+        );
+        assert_eq!(
+            kind(json!({ "type": "boolean" })).starting_value(),
+            json!(false)
+        );
+        assert_eq!(
+            kind(json!({ "enum": ["x", "y"] })).starting_value(),
+            json!("x")
+        );
+        assert_eq!(
+            kind(json!({ "type": "string" })).starting_value(),
+            json!("")
+        );
     }
 
     #[test]

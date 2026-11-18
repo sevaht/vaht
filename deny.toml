@@ -5,7 +5,12 @@ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC",
          "MPL-2.0", "Unicode-3.0", "Unlicense", "Zlib",
          # Apache-2.0 with an exception that only loosens it; target-lexicon,
          # a build-time dependency of libdisplay-info's bindings, uses it.
-         "Apache-2.0 WITH LLVM-exception"]
+         "Apache-2.0 WITH LLVM-exception",
+         # The settings window (egui): the clipboard crates (clipboard-win,
+         # error-code) are Boost-licensed, and egui bundles fonts under the SIL
+         # Open Font License and the Ubuntu font licence, which cover only the
+         # font files.
+         "BSL-1.0", "OFL-1.1", "Ubuntu-font-1.0"]
 unused-allowed-license = "allow"   # the list is policy, not an inventory
 
 [advisories]
@@ -19,6 +24,13 @@ ignore = [
     # cosmic-text 0.19 pins; fontdb 0.24 no longer uses it, so the next
     # cosmic-text release should drop it. vaht only parses installed fonts.
     { id = "RUSTSEC-2026-0192", reason = "via cosmic-text's fontdb 0.23; fontdb 0.24 dropped it" },
+    # zbus was merged into one crate from version 6 on: zbus_names, zvariant and
+    # zvariant_derive are no longer published separately. They reach only the
+    # settings window, through AccessKit's AT-SPI adapter (accesskit_unix), which
+    # pins zbus 5. Recheck whenever eframe is bumped.
+    { id = "RUSTSEC-2026-0371", reason = "settings window only, via accesskit_unix's zbus 5" },
+    { id = "RUSTSEC-2026-0370", reason = "settings window only, via accesskit_unix's zbus 5" },
+    { id = "RUSTSEC-2026-0372", reason = "settings window only, via accesskit_unix's zbus 5" },
 ]
 
 [bans]

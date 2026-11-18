@@ -255,7 +255,21 @@ impl Launcher {
             OsStr::new(name),
         ];
         arguments.extend_from_slice(extra);
-        let what = format!("the {name} dialog");
+        self.start_helper(&executable, &arguments, name);
+    }
+
+    /// Shows the settings window: the `vaht-settings` program installed
+    /// beside vaht, which edits the configuration through vaht's IPC (and is
+    /// trusted to, as the dialogs are).
+    pub(crate) fn show_settings(&mut self) {
+        let executable = self.executable.with_file_name("vaht-settings");
+        self.start_helper(&executable, &[OsStr::new("vaht-settings")], "settings");
+    }
+
+    /// Starts `executable` as one of vaht's own windows called `name`: its
+    /// errors are logged, and its process is trusted with IPC commands.
+    fn start_helper(&mut self, executable: &Path, arguments: &[&OsStr], name: &str) {
+        let what = format!("the {name} window");
         let started = std::io::pipe()
             .map_err(SpawnError::Pipe)
             .and_then(|(reader, writer)| {
@@ -266,7 +280,7 @@ impl Launcher {
                     output: None,
                     errors: Some(&writer),
                 };
-                let pid = self.start(&executable, &arguments, &what, streams)?;
+                let pid = self.start(executable, arguments, &what, streams)?;
                 Ok((pid, reader))
             });
         match started {

@@ -52,7 +52,7 @@ prepare() {
 
 build() {
   cd "$(_source_directory)"
-  cargo build --release --frozen -p vaht
+  cargo build --release --frozen -p vaht -p vaht-settings
 }
 
 check() {
