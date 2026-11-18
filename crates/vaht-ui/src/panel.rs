@@ -768,6 +768,53 @@ mod tests {
         assert_eq!((pixel.red(), pixel.green()), (0, 255), "the maximize image");
     }
 
+    /// A menu item with a check mark on its right and a submenu's mark.
+    struct Marked(Glyph);
+
+    impl PanelContent for Marked {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            Widget::text(StyleElement::MenuItem, "item".to_owned())
+                .with_mark_on(self.0, crate::widget::MarkSide::Right)
+        }
+
+        fn state(&self) -> WidgetState {
+            WidgetState::Focused
+        }
+    }
+
+    #[test]
+    fn a_menu_marks_image_replaces_its_drawing_and_shows_even_with_no_bullet() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        std::fs::write(
+            directory.path().join("mark.xpm"),
+            "\"2 2 1 1\",\n\"a\tc #00ff00\",\n\"aa\",\n\"aa\"",
+        )
+        .expect("written");
+        let layers = crate::style::StyleLayers::from_toml_in(
+            "[menu.item]\ntexture = { solid = \"black\" }\nbullet = \"empty\"\n\
+             glyph_images = { submenu = \"mark.xpm\", check = \"mark.xpm\" }\n",
+            Some(directory.path()),
+        )
+        .expect("a valid style");
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        for glyph in [Glyph::Check, Glyph::Submenu] {
+            let mut panel = Panel::new(Marked(glyph), Size::new(100, 20));
+            assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
+            // The mark's square is the item's height, at its right end.
+            let pixel = panel
+                .pixels()
+                .and_then(|pixels| pixels.pixel(90, 10))
+                .expect("inside");
+            assert_eq!(
+                (pixel.red(), pixel.green()),
+                (0, 255),
+                "{glyph:?} is the image"
+            );
+        }
+    }
+
     #[test]
     fn the_stuck_and_menu_glyphs_are_drawn() {
         let layers = crate::style::StyleLayers::from_toml(

@@ -431,7 +431,7 @@ impl<'de> DeserializeSeed<'de> for GlyphImagesSeed<'_> {
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str(
                     "a table of image files by button: close, maximize, restore, minimize, \
-                     shade, stick, stuck or menu",
+                     shade, stick, stuck, menu, submenu or check",
                 )
             }
 
@@ -440,7 +440,9 @@ impl<'de> DeserializeSeed<'de> for GlyphImagesSeed<'_> {
                 while let Some(glyph) = map.next_key::<GlyphName>()? {
                     let name = map.next_value::<String>()?;
                     let image = self.0.load(&name).map_err(de::Error::custom)?;
-                    images = images.with(glyph.into_glyph(), image);
+                    for glyph in glyph.glyphs() {
+                        images = images.with(*glyph, Arc::clone(&image));
+                    }
                 }
                 Ok(images)
             }
@@ -490,20 +492,32 @@ enum GlyphName {
     Stuck,
     /// Three bars.
     Menu,
+    /// A submenu item's bullet, whatever its shape.
+    Submenu,
+    /// A chosen menu item's check.
+    Check,
 }
 
 impl GlyphName {
-    /// Returns the glyph.
-    const fn into_glyph(self) -> Glyph {
+    /// Returns the glyphs it names.
+    const fn glyphs(self) -> &'static [Glyph] {
         match self {
-            Self::Close => Glyph::Close,
-            Self::Maximize => Glyph::Maximize,
-            Self::Restore => Glyph::Restore,
-            Self::Minimize => Glyph::Minimize,
-            Self::Shade => Glyph::Shade,
-            Self::Stick => Glyph::Stick,
-            Self::Stuck => Glyph::Stuck,
-            Self::Menu => Glyph::Menu,
+            Self::Close => &[Glyph::Close],
+            Self::Maximize => &[Glyph::Maximize],
+            Self::Restore => &[Glyph::Restore],
+            Self::Minimize => &[Glyph::Minimize],
+            Self::Shade => &[Glyph::Shade],
+            Self::Stick => &[Glyph::Stick],
+            Self::Stuck => &[Glyph::Stuck],
+            Self::Menu => &[Glyph::Menu],
+            Self::Submenu => &[
+                Glyph::Submenu,
+                Glyph::BulletRight,
+                Glyph::BulletLeft,
+                Glyph::BulletSquare,
+                Glyph::BulletDiamond,
+            ],
+            Self::Check => &[Glyph::Check],
         }
     }
 }

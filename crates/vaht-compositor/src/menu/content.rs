@@ -161,10 +161,9 @@ impl PanelContent for MenuContent {
                         icon.as_ref(),
                     );
                     let side = self.metrics.bullet_side;
-                    match self.metrics.bullet.glyph(side) {
-                        Some(bullet) => widget.with_mark_on(bullet, side),
-                        None => widget,
-                    }
+                    // With no bullet, the mark is one only a style's image shows.
+                    let bullet = self.metrics.bullet.glyph(side).unwrap_or(Glyph::Submenu);
+                    widget.with_mark_on(bullet, side)
                 }
             };
             children.push(if self.hovered == Some(index) {

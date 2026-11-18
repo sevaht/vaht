@@ -73,7 +73,11 @@ impl<'pixmap> Canvas<'pixmap> {
                 } else {
                     style.text.color
                 };
-                self.draw_glyph(mark, color, square);
+                match style.glyph_images.get(mark) {
+                    // The style's own picture, at its own size.
+                    Some(image) => self.draw_centered(image, square),
+                    None => self.draw_glyph(mark, color, square),
+                }
             }
             match &placed.content {
                 Content::Text(text) => typesetter.draw(self.pixmap, text, &style.text, inner),
@@ -212,6 +216,24 @@ impl<'pixmap> Canvas<'pixmap> {
             .fill_rect(area, &paint, Transform::identity(), None);
     }
 
+    /// Draws `picture` at its own size, in the middle of `rect`.
+    fn draw_centered(&mut self, picture: &Image, rect: Rect) {
+        let Some(source) = Self::pixmap_of(picture) else {
+            return;
+        };
+        let offset = |space: u32, own: u32| {
+            i32::try_from(space).unwrap_or(0) / 2 - i32::try_from(own).unwrap_or(0) / 2
+        };
+        self.pixmap.draw_pixmap(
+            rect.x + offset(rect.width, picture.width()),
+            rect.y + offset(rect.height, picture.height()),
+            source.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+    }
+
     /// Draws `picture` at its own size, repeated across `rect` from its top
     /// left corner.
     #[expect(
@@ -340,6 +362,7 @@ impl<'pixmap> Canvas<'pixmap> {
             | Glyph::Stick
             | Glyph::Stuck
             | Glyph::Menu
+            | Glyph::Submenu
             | Glyph::BulletSquare => {
                 return None;
             }
@@ -434,7 +457,8 @@ impl<'pixmap> Canvas<'pixmap> {
                     path.push_rect(square);
                 }
             }
-            Glyph::ArrowLeft
+            Glyph::Submenu
+            | Glyph::ArrowLeft
             | Glyph::ArrowRight
             | Glyph::Check
             | Glyph::BulletRight

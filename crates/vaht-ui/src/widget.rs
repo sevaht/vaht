@@ -254,6 +254,9 @@ pub enum Glyph {
     ArrowRight,
     /// A filled square: a chosen menu item.
     Check,
+    /// A submenu item's mark when its bullet is none: nothing is drawn of
+    /// its own, so only a style's image for it shows.
+    Submenu,
     /// A menu's submenu bullet: a triangle a third of its square, pointing
     /// right (Fluxbox's `triangle`, on the right).
     BulletRight,
