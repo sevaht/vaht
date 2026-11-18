@@ -8,11 +8,15 @@ use vaht_compositor::{BackendChoice, RunOptions};
 
 use crate::logging::{LoggingArguments, PROGRAM_NAME};
 
+/// vaht's version and the commit it was built from (`build.rs`), as
+/// `vaht --version` prints them: `0.1.0 (1a2b3c4d5e6f)`.
+pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("VAHT_COMMIT"), ")");
+
 /// A stacking Wayland compositor descended from Fluxbox.
 ///
 /// Without a subcommand, runs the compositor.
 #[derive(Debug, clap::Parser)]
-#[command(version)]
+#[command(version = VERSION)]
 pub struct Arguments {
     /// What to do instead of running the compositor.
     #[command(subcommand)]

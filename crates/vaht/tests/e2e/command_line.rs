@@ -38,13 +38,25 @@ fn log_directory() -> tempfile::TempDir {
 }
 
 #[test]
-fn version_reports_the_package_version() {
+fn version_reports_the_package_version_and_commit() {
     let logs = log_directory();
     let output = run_executable(&["--version"], logs.path());
     assert!(output.status.success());
     let version = String::from_utf8_lossy(&output.stdout);
-    let expected = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"));
-    assert_eq!(version.trim(), expected);
+    let expected = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"), " (");
+    assert!(version.starts_with(expected), "{version}");
+    // The commit it was built from (build.rs): what launch.sh compares.
+    let commit = version
+        .trim()
+        .strip_prefix(expected)
+        .and_then(|rest| rest.strip_suffix(')'))
+        .expect("a commit in parentheses");
+    let hash = commit.strip_suffix("-modified").unwrap_or(commit);
+    assert!(
+        hash == "unknown"
+            || (hash.len() == 12 && hash.chars().all(|digit| digit.is_ascii_hexdigit())),
+        "{commit}"
+    );
 }
 
 #[test]
