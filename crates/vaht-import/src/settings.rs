@@ -572,6 +572,8 @@ impl InitFile {
                     "Shade" | "Stick" | "Minimize" | "Maximize" | "Close" => {
                         buttons.push(name.to_ascii_lowercase());
                     }
+                    // Fluxbox's menu icon opens the window menu.
+                    "MenuIcon" => buttons.push("menu".to_owned()),
                     other => report.note(
                         self.resources.path(),
                         resource.line,
@@ -1067,6 +1069,22 @@ mod tests {
         );
         assert_eq!(convert("no").1, 0);
         assert_eq!(convert("sometimes").1, 1, "reported");
+    }
+
+    #[test]
+    fn the_menu_icon_becomes_the_menu_button_and_other_buttons_are_still_reported() {
+        let init = "session.screen0.titlebar.left:\tMenuIcon Stick\n\
+                    session.screen0.titlebar.right:\tLHalf Close\n";
+        let mut report = Report::default();
+        let document = InitFile::new(Resources::parse(Path::new("init"), init))
+            .convert(&mut report)
+            .settings;
+        assert_eq!(
+            document.to_string(),
+            "[windows.frame]\ntitlebar_left = [\"menu\", \"stick\"]\n\
+             titlebar_right = [\"close\"]\n"
+        );
+        assert_eq!(report.notes().len(), 1, "LHalf has no button in vaht");
     }
 
     #[test]
