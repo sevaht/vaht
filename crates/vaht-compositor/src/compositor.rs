@@ -3667,6 +3667,17 @@ impl Compositor {
         {
             self.pointer_entered(window);
         }
+        // A titlebar button under the pointer shows it.
+        let on_titlebar = match &target {
+            Some(PointerTarget::Window(WindowTarget::Frame {
+                window,
+                part: FramePart::Titlebar(_),
+            })) => Some((*window, location)),
+            _ => None,
+        };
+        if self.window_manager.hover_titlebar(on_titlebar) {
+            self.schedule_render();
+        }
         // Over a frame, no client has the pointer: the frame is vaht's.
         let under = target.as_ref().and_then(PointerTarget::client_surface);
         let moved_from = pointer.current_location();

@@ -50,9 +50,16 @@ impl OneWindow {
     /// Starts vaht with `settings` added to its own and `bindings` as its
     /// bindings.toml, if given, and opens a window, as [`Self::open`] does.
     fn open_with(settings: &str, bindings: Option<&str>) -> Self {
+        Self::open_with_files(settings, bindings, &[])
+    }
+
+    /// Starts vaht as [`Self::open_with`] does, with `others` (a path in the
+    /// configuration directory and its text) too.
+    fn open_with_files(settings: &str, bindings: Option<&str>, others: &[(&str, &str)]) -> Self {
         let settings = format!("{settings}\n[placement]\nstrategy = \"cascade\"\n");
         let mut files = vec![("settings.toml", settings.as_str())];
         files.extend(bindings.map(|bindings| ("bindings.toml", bindings)));
+        files.extend_from_slice(others);
         let vaht = HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &files);
         let mut client = TestClient::connect(vaht.socket());
         client.open_windows(1);
@@ -239,6 +246,52 @@ fn clicking_the_close_button_asks_the_window_to_close() {
     let (x, y) = OneWindow::middle(window.close_button());
     window.client.click(x, y, BUTTON_LEFT);
     assert_eq!(window.client.close_requests(), 1);
+}
+
+/// The default style, with a hovered look for the window buttons.
+fn style_with_hovered_buttons() -> String {
+    format!(
+        "{}\n[window.button.hovered]\ntexture = {{ solid = \"#ff0000\" }}\n",
+        include_str!("../../../../data/styles/vaht.toml")
+    )
+}
+
+#[test]
+fn a_button_under_the_pointer_looks_hovered_and_goes_back_when_it_leaves() {
+    let style = style_with_hovered_buttons();
+    let mut window = OneWindow::open_with_files(
+        "style = \"hovering\"\n",
+        None,
+        &[("styles/hovering.toml", style.as_str())],
+    );
+    let before = window.client.screenshot();
+    let (x, y) = OneWindow::middle(window.close_button());
+    window.client.move_pointer_to(x, y);
+    let over = window.client.screenshot();
+    assert!(
+        over.differs_within(&before, window.close_button()),
+        "the button looks hovered"
+    );
+    let (away_x, away_y) = window.title_point();
+    window.client.move_pointer_to(away_x, away_y);
+    let after = window.client.screenshot();
+    assert!(
+        !after.differs_within(&before, window.close_button()),
+        "the button looks as it did"
+    );
+}
+
+#[test]
+fn a_style_with_no_hovered_look_leaves_a_button_as_it_was() {
+    let mut window = OneWindow::open();
+    let before = window.client.screenshot();
+    let (x, y) = OneWindow::middle(window.close_button());
+    window.client.move_pointer_to(x, y);
+    let over = window.client.screenshot();
+    assert!(
+        !over.differs_within(&before, window.close_button()),
+        "no hovered section, no change"
+    );
 }
 
 #[test]

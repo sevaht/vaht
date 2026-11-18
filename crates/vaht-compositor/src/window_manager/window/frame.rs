@@ -501,6 +501,12 @@ impl Frame {
         is_button
     }
 
+    /// Notes the pointer at `point` in the titlebar's own pixels (none: off
+    /// it); returns whether a button's look changed.
+    pub(crate) fn hover_button(&mut self, point: Option<vaht_ui::Point>) -> bool {
+        self.titlebar.hover(point)
+    }
+
     /// Lets go of the held titlebar button with the pointer at `point`;
     /// returns the button if the pointer is still on it, which clicks it.
     pub(crate) fn release_button(&mut self, point: vaht_ui::Point) -> Option<TitlebarButton> {

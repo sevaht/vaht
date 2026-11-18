@@ -118,6 +118,8 @@ pub(crate) struct WindowManager {
     snap_minimized: Option<WindowId>,
     /// The window whose titlebar button the pointer holds down, if any.
     held_titlebar: Option<WindowId>,
+    /// The window whose titlebar button the pointer is on, if any.
+    hovered_titlebar: Option<WindowId>,
     /// Where windows can be placed on each output.
     outputs: OutputAreas,
     /// The style's frame sizes.
@@ -155,6 +157,7 @@ impl WindowManager {
             focus: Focus::default(),
             snap_minimized: None,
             held_titlebar: None,
+            hovered_titlebar: None,
             outputs,
             style_metrics: metrics,
             metrics: frame.frame_metrics(metrics),
@@ -329,6 +332,9 @@ impl WindowManager {
         }
         if self.held_titlebar == Some(id) {
             self.held_titlebar = None;
+        }
+        if self.hovered_titlebar == Some(id) {
+            self.hovered_titlebar = None;
         }
         self.endings.retain(|(ending, _)| *ending != id);
         self.marks.retain(|(_, marked)| *marked != id);
@@ -857,6 +863,29 @@ impl WindowManager {
             self.held_titlebar = Some(window);
         }
         is_pressed
+    }
+
+    /// Notes the pointer is on a window's titlebar at `at` (a window and the
+    /// pointer's place), or on none; the button it is on shows it. Returns
+    /// whether anything shown changed.
+    pub(crate) fn hover_titlebar(&mut self, at: Option<(WindowId, Point<f64, Logical>)>) -> bool {
+        let metrics = self.metrics;
+        let mut changed = false;
+        if let Some(previous) = self.hovered_titlebar
+            && at.map(|(window, _)| window) != Some(previous)
+        {
+            changed |= self
+                .window_mut(previous)
+                .is_some_and(|target| target.hover_titlebar_button(None, metrics));
+            self.hovered_titlebar = None;
+        }
+        if let Some((window, location)) = at
+            && let Some(target) = self.window_mut(window)
+        {
+            changed |= target.hover_titlebar_button(Some(location), metrics);
+            self.hovered_titlebar = Some(window);
+        }
+        changed
     }
 
     /// Lets go of a held titlebar button with the pointer at `location`,

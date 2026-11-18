@@ -469,6 +469,17 @@ impl Window {
         self.frame.press_button(point)
     }
 
+    /// Notes the pointer at global `location` (none: off the titlebar), with
+    /// frames sized by `metrics`; returns whether a button's look changed.
+    pub(crate) fn hover_titlebar_button(
+        &mut self,
+        location: Option<Point<f64, Logical>>,
+        metrics: Metrics,
+    ) -> bool {
+        let point = location.map(|location| self.titlebar_point(location, metrics));
+        self.frame.hover_button(point)
+    }
+
     /// Lets go of the held titlebar button with the pointer at global
     /// `location`; returns the button if that clicks it.
     pub(crate) fn release_titlebar_button(
