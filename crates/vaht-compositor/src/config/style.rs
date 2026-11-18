@@ -56,8 +56,25 @@ impl StyleFile {
             })
     }
 
+    /// Reads the style `name`: as [`StyleFile::find`] finds it, or, for the
+    /// default style, the copy built in when no file of it is found (it is
+    /// installed for people to read and copy, so missing it is no loss).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the style cannot be found, read, or is not valid.
+    pub(crate) fn load(directory: &Path, name: &str) -> Result<Style, ConfigError> {
+        match Self::find(directory, name) {
+            Err(ConfigError::MissingStyle { .. }) if name == Style::DEFAULT_NAME => {
+                Ok(Style::built_in())
+            }
+            found => found?.read(),
+        }
+    }
+
     /// Returns the names of the styles there are, sorted, each once: the
-    /// user's, in the configuration `directory`, and the system's.
+    /// user's, in the configuration `directory`, and the system's, and the
+    /// default style, which is always there.
     pub(crate) fn available(directory: &Path) -> Vec<String> {
         let directories = [
             directory.join(Self::DIRECTORY),
@@ -76,6 +93,7 @@ impl StyleFile {
                 is_style.then(|| path.file_stem()?.to_str().map(ToOwned::to_owned))?
             })
             .collect();
+        names.push(Style::DEFAULT_NAME.to_owned());
         names.sort();
         names.dedup();
         names
@@ -123,5 +141,39 @@ mod tests {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let error = StyleFile::find(directory.path(), name).expect_err(name);
         assert!(error.to_string().contains(expected), "{error}");
+    }
+
+    #[test]
+    fn the_default_style_needs_no_file_and_is_always_listed() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let loaded = StyleFile::load(directory.path(), Style::DEFAULT_NAME).expect("built in");
+        assert_eq!(
+            loaded,
+            Style::built_in(),
+            "the copy built in stands in for the file"
+        );
+        assert!(
+            StyleFile::available(directory.path()).contains(&Style::DEFAULT_NAME.to_owned()),
+            "chooseable from a menu even when no file is installed"
+        );
+        assert!(
+            StyleFile::load(directory.path(), "no-such-style").is_err(),
+            "any other missing style is still an error"
+        );
+    }
+
+    #[test]
+    fn a_file_named_for_the_default_style_wins_over_the_copy_built_in() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let styles = directory.path().join(StyleFile::DIRECTORY);
+        std::fs::create_dir(&styles).expect("a directory");
+        std::fs::write(styles.join("vaht.toml"), "[window.titlebar]\nheight = 33\n")
+            .expect("written");
+        let loaded = StyleFile::load(directory.path(), Style::DEFAULT_NAME).expect("loads");
+        assert_eq!(
+            loaded.metrics().titlebar_height,
+            33,
+            "the user's own vaht.toml is used"
+        );
     }
 }

@@ -1,7 +1,14 @@
-# vaht's built-in style, after the nacitar_fbstyle Fluxbox style by nacitar
-# sevaht: dark grey gradients, white haloed text, a thin grey border.
+# vaht: the default style. Dark grey gradients, white haloed text, a thin
+# grey border; after the nacitar_fbstyle Fluxbox style by nacitar.
 #
-# A style gives a style to each element in each state, in four layers, each
+# This file is installed as /usr/share/vaht/styles/vaht.toml, and vaht has a
+# copy built in, so the default style needs no file. Copy it to
+# ~/.config/vaht/styles/<name>.toml and change it to make a style of your own;
+# `style = "<name>"` in settings.toml (or `vaht config set style <name>`)
+# chooses it. A style file is a whole style: what it leaves out is not taken
+# from this one.
+#
+# A style gives a look to each element in each state, in four layers, each
 # overriding the one before: [default], [state.<state>], [<element>], and
 # [<element>.<state>]. Elements: window.titlebar, window.label,
 # window.button, window.handle, window.grip, window.border, taskbar,
@@ -10,111 +17,111 @@
 # the taskbar's own background), menu.title, menu.frame, menu.item,
 # dialog.field, wireframe (a resize's outline: its border), tooltip, warning
 # (vaht's notice that its configuration has problems: always drawn from this
-# built-in style, so a style of yours cannot hide it).
+# built-in copy, so a style of yours cannot hide it; the `warning` section
+# here is what it looks like).
 # States:
 # focused, unfocused, pressed, hovered (a menu's highlighted item) and
 # disabled (a menu item that does nothing).
 
 [default]
+texture = { gradient = "vertical", from = "grey30", to = "grey5" }
 font = { family = "DejaVu Sans", size = 8, weight = "bold" }
 text_effect = { halo = "black" }
 text_color = "white"
 glyph_color = "white"
 justify = "center"
-texture = { gradient = "vertical", from = "grey30", to = "grey5" }
-padding = [0, 0, 0, 0]
-border = { width = 0, color = "grey60" }
-
-[state.focused]
-texture = { gradient = "vertical", from = "grey55", to = "grey5" }
-
-[state.unfocused]
-text_color = "grey55"
-glyph_color = "grey55"
-
-[state.pressed]
-texture = { gradient = "cross-diagonal", from = "grey20", to = "grey40", bevel = "sunken" }
 
 [window.titlebar]
+texture = { solid = "grey55" }
 height = 20
 
+[window.titlebar.unfocused]
+texture = { solid = "grey30" }
+
 [window.label]
+texture = { gradient = "vertical", from = "grey55", to = "grey5" }
 padding = [0, 4, 0, 4]
 
+[window.label.unfocused]
+texture = { gradient = "vertical", from = "grey30", to = "grey5" }
+text_color = "grey55"
+
 [window.button]
+texture = { gradient = "vertical", from = "grey55", to = "grey5" }
 padding = [5, 5, 5, 5]
+
+[window.button.unfocused]
+texture = { gradient = "vertical", from = "grey30", to = "grey5" }
+glyph_color = "grey55"
+
+[window.button.pressed]
+texture = { gradient = "cross-diagonal", from = "grey20", to = "grey40", bevel = "sunken" }
+
+[window.handle]
+texture = { gradient = "vertical", from = "white", to = "grey60", bevel = "raised" }
+height = 1
+
+[window.grip]
+texture = { gradient = "vertical", from = "grey55", to = "grey5", bevel = "raised" }
+
+[window.grip.unfocused]
+texture = { gradient = "vertical", from = "white", to = "grey60", bevel = "raised" }
 
 [window.border]
 border = { width = 1, color = "grey60" }
 
-[window.handle]
-height = 1
-texture = { gradient = "vertical", from = "white", to = "grey60", bevel = "raised" }
-
-[window.grip]
-texture = { gradient = "vertical", from = "white", to = "grey60", bevel = "raised" }
-
 [taskbar]
+border = { width = 0, color = "grey60" }
 height = 20
 
 [taskbar.button]
-# The arrow is two fifths of the button, as Fluxbox draws it: no padding.
 padding = [0, 0, 0, 0]
 
+[taskbar.button.pressed]
+texture = { gradient = "cross-diagonal", from = "grey20", to = "grey40", bevel = "sunken" }
+
 [taskbar.workspace]
-# The widest name plus 2, as Fluxbox's workspace name tool is.
 padding = [0, 1, 0, 1]
 
 [taskbar.clock]
 padding = [0, 8, 0, 8]
 
 [taskbar.window-list.entry]
-# Half of Fluxbox's iconTextPadding (10) each side of the title.
-padding = [0, 5, 0, 5]
-
-[taskbar.window-list.entry.focused]
 texture = { gradient = "vertical", from = "grey55", to = "grey5", bevel = "raised" }
+padding = [0, 5, 0, 5]
 
 [taskbar.window-list.entry.unfocused]
 texture = { gradient = "vertical", from = "grey30", to = "grey5", bevel = "sunken" }
+text_color = "grey55"
 
 [menu.title]
 height = 20
-texture = { gradient = "vertical", from = "grey30", to = "grey5" }
 
 [menu.frame]
+texture = { gradient = "vertical", from = "black", to = "black" }
 font = { family = "DejaVu Sans", size = 8 }
 justify = "left"
-texture = { solid = "black" }
 border = { width = 1, color = "grey60" }
 corner_radius = 8
 
 [menu.item]
-height = 20
-font = { family = "DejaVu Sans", size = 8 }
-justify = "left"
-# The frame shows behind items, as Fluxbox's menu.frame does.
 texture = "parent"
-# An item-high square each side of the text, as Fluxbox keeps: a toggle's
-# or a submenu's mark goes in the right one.
+font = { family = "DejaVu Sans", size = 8 }
+glyph_color = "grey55"
+justify = "left"
 padding = [0, 20, 0, 21]
-# A submenu's bullet: empty, triangle, square or diamond; it, and a chosen
-# toggle's check (in the glyph color), go on the bullet_position side.
+height = 20
 bullet = "triangle"
 bullet_position = "right"
-glyph_color = "grey55"
 
 [menu.item.hovered]
 texture = { gradient = "vertical", from = "grey55", to = "grey5", bevel = "raised" }
-# Bold, as the style's *.font reaches menu.hilite.font in Fluxbox.
 font = { family = "DejaVu Sans", size = 8, weight = "bold" }
 
 [menu.item.disabled]
 text_color = "grey55"
 
 [dialog.field]
-# Black on white, as fbrun and fluxland-run draw their line. Fluxbox styles
-# say nothing of it, so an imported style takes this section as it is.
 texture = { solid = "white" }
 font = { family = "Sans", size = 12 }
 text_effect = "none"
@@ -123,16 +130,12 @@ justify = "left"
 padding = [0, 2, 0, 2]
 
 [wireframe]
-# The outline of a window being resized: white at 80%, two pixels wide, as
-# fluxland draws it. Fluxbox styles say nothing of it either.
 border = { width = 2, color = "#ffffffcc" }
 
 [tooltip]
-# fluxland's tray tooltip: white text on black, a dark grey line around.
-texture = { solid = "black" }
+texture = { solid = "#000000" }
 font = { family = "DejaVu Sans", size = 11 }
-text_effect = "none"
-text_color = "white"
+text_color = "#ffffff"
 justify = "left"
 padding = [8, 14, 8, 13]
 border = { width = 1, color = "#191919" }

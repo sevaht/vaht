@@ -1038,8 +1038,10 @@ exactly what each element gets.
   radius 8, which cuts as much as Fluxbox's fixed 8-pixel shape.
 - Properties, states and elements still to come are refused by name, at
   their line in the file.
-- The built-in style is itself a style file (`vaht-ui`'s
-  `style/built_in.toml`), printed by `vaht config check --print-defaults`.
+- The default style is itself a style file, `vaht` (`data/styles/vaht.toml`
+  in the source): installed as `/usr/share/vaht/styles/vaht.toml` for people to
+  read and copy, and built into vaht, so it needs no file; printed by
+  `vaht config check --print-defaults`.
 - A style file is a whole style: what it leaves out takes vaht's fallback,
   not the built-in style's value.
 

@@ -533,7 +533,7 @@ mod tests {
         assert_eq!(rows.len(), 8, "eight tall: {rows:?}");
     }
 
-    /// Two stacked rows on a background, each with or without a background
+    /// Two stacked rows on a gradient background, each with or without a background
     /// of its own.
     struct Stacked {
         rows_have_background: bool,
@@ -551,7 +551,7 @@ mod tests {
                     row.without_background()
                 }
             };
-            Widget::column(StyleElement::Titlebar, vec![row(), row()])
+            Widget::column(StyleElement::Taskbar, vec![row(), row()])
         }
 
         fn state(&self) -> WidgetState {

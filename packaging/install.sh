@@ -22,6 +22,7 @@
 #   PREFIX/share/xdg-desktop-portal/vaht-portals.conf  portals for XDG_CURRENT_DESKTOP=vaht
 #   PREFIX/lib/systemd/user/vaht-session.target        the session, for the service manager
 #   /etc/xdg/xdg-desktop-portal-wlr/vaht               screen share picks with vaht's menu
+#   PREFIX/share/vaht/styles/vaht.toml                 the default style, to read and copy
 #   PREFIX/share/doc/vaht/                             README and design notes
 #   PREFIX/share/licenses/vaht/LICENSE
 # and for one user (--user):
@@ -45,7 +46,7 @@ build=yes
 action=install
 
 usage() {
-    sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ ${#} -gt 0 ]]; do
@@ -68,6 +69,7 @@ if [[ ${mode} == user ]]; then
     session_dir=
     application_dir=
     doc_dir=
+    styles_dir=
     license_dir=
 else
     bin_dir=${destdir}${prefix}/bin
@@ -78,6 +80,7 @@ else
     session_dir=${destdir}${prefix}/share/wayland-sessions
     application_dir=${destdir}${prefix}/share/applications
     doc_dir=${destdir}${prefix}/share/doc/vaht
+    styles_dir=${destdir}${prefix}/share/vaht/styles
     license_dir=${destdir}${prefix}/share/licenses/vaht
 fi
 
@@ -92,6 +95,7 @@ files=(
 if [[ -n ${session_dir} ]]; then
     files+=(
         "data/vaht.desktop ${session_dir}/vaht.desktop 644"
+        "data/styles/vaht.toml ${styles_dir}/vaht.toml 644"
         "data/vaht-settings.desktop ${application_dir}/vaht-settings.desktop 644"
         "README.md ${doc_dir}/README.md 644"
         "DESIGN.md ${doc_dir}/DESIGN.md 644"
@@ -106,7 +110,7 @@ if [[ ${action} == uninstall ]]; then
             rm -v -- "${destination}"
         fi
     done
-    for directory in "${doc_dir}" "${license_dir}"; do
+    for directory in "${doc_dir}" "${license_dir}" "${styles_dir}"; do
         [[ -n ${directory} && -d ${directory} ]] && rmdir --ignore-fail-on-non-empty -- "${directory}"
     done
     exit 0

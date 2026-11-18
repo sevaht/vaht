@@ -198,7 +198,7 @@ impl Config {
                 .map_err(|message| ConfigError::Changed { message })?
         };
         let style = match &settings.style {
-            Some(name) => StyleFile::find(directory, name)?.read()?,
+            Some(name) => StyleFile::load(directory, name)?,
             None => Style::built_in(),
         };
         let config = Self {

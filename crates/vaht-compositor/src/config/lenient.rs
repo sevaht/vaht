@@ -146,17 +146,15 @@ impl Config {
             &mut problems,
         );
         let style = match &settings.style {
-            Some(name) => StyleFile::find(directory, name)
-                .and_then(|file| file.read())
-                .unwrap_or_else(|error| {
-                    problems.push(ConfigProblem {
-                        file: format!("style {name}"),
-                        key: None,
-                        message: error.to_string(),
-                        instead: Instead::BuiltIn,
-                    });
-                    Style::built_in()
-                }),
+            Some(name) => StyleFile::load(directory, name).unwrap_or_else(|error| {
+                problems.push(ConfigProblem {
+                    file: format!("style {name}"),
+                    key: None,
+                    message: error.to_string(),
+                    instead: Instead::BuiltIn,
+                });
+                Style::built_in()
+            }),
             None => Style::built_in(),
         };
         let mut config = Self {
