@@ -77,11 +77,27 @@ impl<'pixmap> Canvas<'pixmap> {
             }
             match &placed.content {
                 Content::Text(text) => typesetter.draw(self.pixmap, text, &style.text, inner),
-                Content::Glyph(glyph) => match style.glyph_images.get(*glyph) {
-                    // A picture of the style's own is the whole button.
-                    Some(image) => self.draw_stretched(image, placed.rect),
-                    None => self.draw_glyph(*glyph, style.glyph_color, inner),
-                },
+                Content::Glyph(glyph) => {
+                    // A style may keep the maximize button as it is while the
+                    // window is maximized.
+                    let glyph = if *glyph == Glyph::Restore && !style.restore_glyph {
+                        Glyph::Maximize
+                    } else {
+                        *glyph
+                    };
+                    // A style of images that has none for restore keeps the
+                    // maximize one there.
+                    let image = style.glyph_images.get(glyph).or_else(|| {
+                        (glyph == Glyph::Restore)
+                            .then(|| style.glyph_images.get(Glyph::Maximize))
+                            .flatten()
+                    });
+                    match image {
+                        // A picture of the style's own is the whole button.
+                        Some(image) => self.draw_stretched(image, placed.rect),
+                        None => self.draw_glyph(glyph, style.glyph_color, inner),
+                    }
+                }
                 Content::Field(field) => self.draw_field(field, &style.text, inner, typesetter),
                 Content::Background => {}
             }

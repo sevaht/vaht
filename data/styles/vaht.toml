@@ -50,6 +50,9 @@ text_color = "grey55"
 [window.button]
 texture = { gradient = "vertical", from = "grey55", to = "grey5" }
 padding = [5, 5, 5, 5]
+# Whether a maximized window's maximize button is drawn as a restore button
+# (the default); false keeps it the maximize button.
+# restore_glyph = false
 
 [window.button.unfocused]
 texture = { gradient = "vertical", from = "grey30", to = "grey5" }

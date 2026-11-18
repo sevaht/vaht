@@ -342,6 +342,7 @@ impl ElementStylePatch {
             "text_effect" => self.text_effect = Some(map.next_value::<TextEffectFile>()?.0),
             "justify" => self.justify = Some(map.next_value::<JustifyFile>()?.into_justify()),
             "glyph_color" => self.glyph_color = Some(map.next_value::<ColorText>()?.0),
+            "restore_glyph" => self.restore_glyph = Some(map.next_value()?),
             "glyph_images" => self.glyph_images = map.next_value_seed(GlyphImagesSeed(images))?,
             "padding" => {
                 let [top, right, bottom, left] = map.next_value::<[u32; 4]>()?;

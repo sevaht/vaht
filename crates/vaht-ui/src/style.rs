@@ -194,6 +194,9 @@ pub struct ElementStyle {
     pub glyph_color: Color,
     /// The images that take the place of a button's pictures.
     pub glyph_images: GlyphImages,
+    /// Whether a maximized window's maximize button is drawn as a restore
+    /// button; if not, it stays the maximize button.
+    pub restore_glyph: bool,
     /// Space between the edges and the content.
     pub padding: Insets,
     /// The line around it.
@@ -272,6 +275,7 @@ impl ElementStyle {
             },
             glyph_color: Color::WHITE,
             glyph_images: GlyphImages::default(),
+            restore_glyph: true,
             padding: Insets::default(),
             border: BorderStyle::default(),
             height: None,
@@ -302,6 +306,9 @@ pub struct ElementStylePatch {
     /// The images for button pictures, which this layer adds to the ones
     /// before it.
     pub glyph_images: GlyphImages,
+    /// Whether the maximize button shows restore while maximized, if this
+    /// layer says.
+    pub restore_glyph: Option<bool>,
     /// The padding, if this layer sets it.
     pub padding: Option<Insets>,
     /// The border, if this layer sets it.
@@ -340,6 +347,9 @@ impl ElementStylePatch {
         }
         if let Some(color) = self.glyph_color {
             style.glyph_color = color;
+        }
+        if let Some(shows_restore) = self.restore_glyph {
+            style.restore_glyph = shows_restore;
         }
         for (glyph, image) in &self.glyph_images.0 {
             style.glyph_images =

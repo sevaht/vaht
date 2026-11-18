@@ -720,6 +720,54 @@ mod tests {
         );
     }
 
+    /// Paints `glyph` in the style `text`, which may name images in `directory`.
+    fn painted_glyph(
+        glyph: Glyph,
+        text: &str,
+        directory: Option<&std::path::Path>,
+    ) -> Panel<OneGlyph> {
+        let layers = crate::style::StyleLayers::from_toml_in(text, directory).expect("valid");
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(OneGlyph(glyph), Size::new(20, 20));
+        assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
+        panel
+    }
+
+    #[test]
+    fn restore_is_drawn_unless_the_style_keeps_the_maximize_button() {
+        let shown = "[window.button]\ntexture = { solid = \"black\" }\n";
+        let kept = "[window.button]\ntexture = { solid = \"black\" }\nrestore_glyph = false\n";
+        let pixels = |glyph, text| painted_glyph(glyph, text, None).pixels().cloned();
+        assert_ne!(
+            pixels(Glyph::Restore, shown),
+            pixels(Glyph::Maximize, shown),
+            "by default, restore looks like restore"
+        );
+        assert_eq!(
+            pixels(Glyph::Restore, kept),
+            pixels(Glyph::Maximize, kept),
+            "kept, it is the maximize button"
+        );
+    }
+
+    #[test]
+    fn a_style_of_images_without_a_restore_image_keeps_the_maximize_one() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        std::fs::write(
+            directory.path().join("max.xpm"),
+            "\"1 1 1 1\",\n\"a\tc #00ff00\",\n\"a\"",
+        )
+        .expect("written");
+        let text = "[window.button]\ntexture = { solid = \"black\" }\n\
+                    glyph_images = { maximize = \"max.xpm\" }\n";
+        let panel = painted_glyph(Glyph::Restore, text, Some(directory.path()));
+        let pixel = panel
+            .pixels()
+            .and_then(|pixels| pixels.pixel(10, 10))
+            .expect("inside");
+        assert_eq!((pixel.red(), pixel.green()), (0, 255), "the maximize image");
+    }
+
     #[test]
     fn the_stuck_and_menu_glyphs_are_drawn() {
         let layers = crate::style::StyleLayers::from_toml(

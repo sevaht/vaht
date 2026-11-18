@@ -1008,7 +1008,11 @@ exactly what each element gets.
     "file.xpm", minimize, maximize, restore, shade, stick, stuck, menu }` to draw a button
     from an image of the style's own instead (the whole button: stretched over
     it, the state's own in `[window.button.pressed]` and the like). Optional, as
-    every property is: a glyph without an image is drawn as before;
+    every property is: a glyph without an image is drawn as before. A style
+    with a `maximize` image and no `restore` one keeps the maximize image on a
+    maximized window's button, as Fluxbox styles do. `restore_glyph = false`
+    keeps the maximize button as it is while the window is maximized (true,
+    the default, shows restore);
 - **Colors are `#rrggbb`, `#rrggbbaa`, or an X11 color name** such as `grey55`
   or `SteelBlue` (decided).
   - The X11 list (`rgb.txt`) is large, about 750 names, but it has been frozen
