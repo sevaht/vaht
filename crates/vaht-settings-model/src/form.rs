@@ -3,9 +3,11 @@
 //! [`Form::from_schema`] reads the JSON Schema vaht serves. A struct becomes
 //! a [`Section`], and each leaf a [`Setting`] with the kind of value it takes
 //! ([`SettingKind`]), the words to call it, its documentation, its default
-//! and whether it may be unset. What the schema cannot say as a plain kind (a
-//! number or the word "auto", a list of tables) is [`SettingKind::Raw`]: the
-//! window offers its JSON until a purpose-built editor takes it over.
+//! and whether it may be unset. A value that may be written several ways (a
+//! number or the word "auto") is [`SettingKind::Alternatives`], and a table of
+//! tables by name (`input.device`) is [`SettingKind::Scopes`]. What the schema
+//! cannot say as either (a list of tables) is [`SettingKind::Raw`], until a
+//! purpose-built editor takes it over.
 
 use serde_json::Value;
 use vaht_ipc::ConfigPath;
@@ -44,15 +46,12 @@ pub enum SettingKind {
     },
     /// Free text.
     Text,
-    /// A whole number, or one of a few words (`rows`: a number or `auto`).
-    WholeOrWord {
-        /// The least the number may be.
-        minimum: Option<i64>,
-        /// The most the number may be.
-        maximum: Option<i64>,
-        /// The words allowed instead.
-        words: Vec<Choice>,
-    },
+    /// A value written one of several ways: a number or the word `auto`,
+    /// yes, no or `any`, a text or a pattern.
+    Alternatives(Vec<Alternative>),
+    /// Tables of one shape by name, which the user adds and removes (a
+    /// device's name): the shape, with `*` where the name goes.
+    Scopes(Box<Section>),
     /// One of a fixed set of words.
     Choice(Vec<Choice>),
     /// A list of values of one kind.
@@ -71,9 +70,10 @@ impl SettingKind {
     pub fn starting_value(&self) -> Value {
         match self {
             Self::Toggle => Value::Bool(false),
-            Self::Whole { minimum, .. } | Self::WholeOrWord { minimum, .. } => {
-                Value::from(minimum.unwrap_or(0))
-            }
+            Self::Whole { minimum, .. } => Value::from(minimum.unwrap_or(0)),
+            Self::Alternatives(alternatives) => alternatives
+                .first()
+                .map_or(Value::Null, Alternative::starting_value),
             Self::Decimal { minimum, .. } => serde_json::Number::from_f64(minimum.unwrap_or(0.0))
                 .map_or(Value::Null, Value::Number),
             Self::Text => Value::String(String::new()),
@@ -84,7 +84,102 @@ impl SettingKind {
                     .unwrap_or_default(),
             ),
             Self::List(_) => Value::Array(Vec::new()),
-            Self::Mapping(_) | Self::Raw => Value::Object(serde_json::Map::new()),
+            Self::Mapping(_) | Self::Scopes(_) | Self::Raw => Value::Object(serde_json::Map::new()),
+        }
+    }
+
+    /// Returns whether `value` is of this kind (not whether it is within
+    /// the limits).
+    #[must_use]
+    pub fn accepts(&self, value: &Value) -> bool {
+        match self {
+            Self::Toggle => value.is_boolean(),
+            Self::Whole { .. } | Self::Decimal { .. } => value.is_number(),
+            Self::Text | Self::Choice(_) => value.is_string(),
+            Self::Alternatives(alternatives) => {
+                alternatives.iter().any(|alternative| alternative.is(value))
+            }
+            Self::List(_) => value.is_array(),
+            Self::Mapping(_) | Self::Scopes(_) | Self::Raw => value.is_object(),
+        }
+    }
+
+    /// Returns what the word or form `value` is, from the setting's
+    /// documentation, if it says.
+    #[must_use]
+    pub fn note(&self, value: &Value) -> Option<&str> {
+        let text = match self {
+            Self::Choice(choices) => choices
+                .iter()
+                .find(|choice| value.as_str() == Some(choice.value.as_str()))
+                .map(|choice| choice.description.as_str()),
+            Self::Alternatives(alternatives) => alternatives
+                .iter()
+                .find(|alternative| alternative.is(value))
+                .map(|alternative| alternative.description.as_str()),
+            Self::Toggle
+            | Self::Whole { .. }
+            | Self::Decimal { .. }
+            | Self::Text
+            | Self::List(_)
+            | Self::Mapping(_)
+            | Self::Scopes(_)
+            | Self::Raw => None,
+        };
+        text.filter(|text| !text.is_empty())
+    }
+}
+
+/// One way a [`SettingKind::Alternatives`] value may be written.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Alternative {
+    /// What the window calls it.
+    pub label: String,
+    /// What it means, from the setting's documentation; may be empty.
+    pub description: String,
+    /// What it is.
+    pub shape: Shape,
+}
+
+/// What an [`Alternative`] is.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Shape {
+    /// Exactly this value: a word, yes or no.
+    Exact(Value),
+    /// A value of this kind.
+    Value(SettingKind),
+    /// A table with this one key, holding a value of this kind
+    /// (`{ max = 300 }`).
+    Field {
+        /// The key.
+        key: String,
+        /// What it holds.
+        kind: SettingKind,
+    },
+}
+
+impl Alternative {
+    /// Returns whether `value` is written this way.
+    #[must_use]
+    pub fn is(&self, value: &Value) -> bool {
+        match &self.shape {
+            Shape::Exact(exact) => exact == value,
+            Shape::Value(kind) => kind.accepts(value),
+            Shape::Field { key, .. } => value.get(key).is_some(),
+        }
+    }
+
+    /// Returns a value written this way to start from.
+    #[must_use]
+    pub fn starting_value(&self) -> Value {
+        match &self.shape {
+            Shape::Exact(exact) => exact.clone(),
+            Shape::Value(kind) => kind.starting_value(),
+            Shape::Field { key, kind } => {
+                let mut table = serde_json::Map::new();
+                table.insert(key.clone(), kind.starting_value());
+                Value::Object(table)
+            }
         }
     }
 }
@@ -134,6 +229,46 @@ pub struct Section {
 }
 
 impl Section {
+    /// Returns this section as the one called `name`: the part of every
+    /// path where a [`SettingKind::Scopes`] shape has its `*`.
+    #[must_use]
+    pub fn named(&self, name: &str) -> Self {
+        let index = self.path.len().saturating_sub(1);
+        let mut section = self.with_part(index, name);
+        name.clone_into(&mut section.label);
+        section
+    }
+
+    /// Returns this section with part `index` of every path `name`.
+    fn with_part(&self, index: usize, name: &str) -> Self {
+        let swap = |parts: &[String]| {
+            let mut parts = parts.to_vec();
+            if let Some(part) = parts.get_mut(index) {
+                name.clone_into(part);
+            }
+            parts
+        };
+        Self {
+            path: swap(&self.path),
+            label: self.label.clone(),
+            description: self.description.clone(),
+            settings: self
+                .settings
+                .iter()
+                .map(|setting| Setting {
+                    path: ConfigPath::from_parts(swap(setting.path.parts()))
+                        .unwrap_or_else(|| setting.path.clone()),
+                    ..setting.clone()
+                })
+                .collect(),
+            sections: self
+                .sections
+                .iter()
+                .map(|section| section.with_part(index, name))
+                .collect(),
+        }
+    }
+
     /// Returns every setting in this section and those inside it, depth
     /// first.
     #[must_use]
@@ -161,7 +296,7 @@ impl Form {
     /// Returns why the schema is not a form.
     pub fn from_schema(schema: &Value) -> Result<Self, FormError> {
         let reader = SchemaReader { root: schema };
-        let root = reader.section(&[], schema, schema)?;
+        let root = reader.section(&[], schema, schema, 0)?;
         if root.settings.is_empty() && root.sections.is_empty() {
             return Err(FormError::NoSettings);
         }
@@ -205,6 +340,9 @@ struct Resolved<'schema> {
 }
 
 impl<'schema> SchemaReader<'schema> {
+    /// How many tables that may be left out may hold each other.
+    const OPTIONAL_DEPTH: usize = 1;
+
     /// Reads `schema` (a struct's, at `path`) as a section; `outer` is the
     /// node that referred to it, whose documentation wins.
     fn section(
@@ -212,6 +350,7 @@ impl<'schema> SchemaReader<'schema> {
         path: &[String],
         schema: &'schema Value,
         outer: &'schema Value,
+        optional_depth: usize,
     ) -> Result<Section, FormError> {
         let resolved = self.resolve(schema)?;
         let mut section = Section {
@@ -230,10 +369,16 @@ impl<'schema> SchemaReader<'schema> {
             let mut property_path = path.to_vec();
             property_path.push(key.clone());
             let resolved = self.resolve(property)?;
-            if Self::is_struct(resolved.schema) && !resolved.is_optional {
+            if Self::is_struct(resolved.schema) {
+                // A table that may be left out may hold itself (a matcher's
+                // `not`): one level of it is shown, the next is left to the file.
+                if resolved.is_optional && optional_depth >= Self::OPTIONAL_DEPTH {
+                    continue;
+                }
+                let depth = optional_depth + usize::from(resolved.is_optional);
                 section
                     .sections
-                    .push(self.section(&property_path, property, property)?);
+                    .push(self.section(&property_path, property, property, depth)?);
             } else {
                 section
                     .settings
@@ -250,9 +395,13 @@ impl<'schema> SchemaReader<'schema> {
         property: &'schema Value,
         resolved: &Resolved<'_>,
     ) -> Setting {
-        let (label, unit) = path
+        let (key_label, unit) = path
             .last()
             .map_or_else(|| (String::new(), None), |key| label::of_key(key));
+        let label = Self::title_of(property, resolved.schema).unwrap_or(key_label);
+        let kind = self
+            .scopes_of(&path, resolved.schema)
+            .unwrap_or_else(|| self.kind_of(resolved.schema));
         let default = property
             .get("default")
             .or_else(|| resolved.schema.get("default"))
@@ -264,9 +413,34 @@ impl<'schema> SchemaReader<'schema> {
             unit,
             description: Self::description_of(property, resolved.schema),
             default,
-            kind: self.kind_of(resolved.schema),
+            kind,
             is_optional: resolved.is_optional,
         }
+    }
+
+    /// Returns the name `outer` or, failing that, `inner` gives itself.
+    fn title_of(outer: &Value, inner: &Value) -> Option<String> {
+        [outer, inner]
+            .into_iter()
+            .find_map(|node| node.get("title").and_then(Value::as_str))
+            .map(str::to_owned)
+    }
+
+    /// Returns the kind of a table of tables by name, if `schema` is one:
+    /// `path` is where the names go.
+    fn scopes_of(&self, path: &[String], schema: &'schema Value) -> Option<SettingKind> {
+        if Self::is_struct(schema) || schema.get("type") != Some(&Value::from("object")) {
+            return None;
+        }
+        let items = Self::values_of(schema)?;
+        let resolved = self.resolve(items).ok()?;
+        if !Self::is_struct(resolved.schema) {
+            return None;
+        }
+        let mut scope_path = path.to_vec();
+        scope_path.push("*".to_owned());
+        let section = self.section(&scope_path, items, items, 0).ok()?;
+        Some(SettingKind::Scopes(Box::new(section)))
     }
 
     /// Returns what `outer` or, failing that, `inner` says it is for.
@@ -277,6 +451,18 @@ impl<'schema> SchemaReader<'schema> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned()
+    }
+
+    /// Returns the schema of the values of a table by name: its
+    /// `additionalProperties`, or its one pattern of names.
+    fn values_of(schema: &Value) -> Option<&Value> {
+        schema
+            .get("additionalProperties")
+            .filter(|values| values.is_object())
+            .or_else(|| {
+                let patterns = schema.get("patternProperties")?.as_object()?;
+                (patterns.len() == 1).then(|| patterns.values().next())?
+            })
     }
 
     /// Returns whether `schema` is a struct: an object with named keys.
@@ -345,8 +531,8 @@ impl<'schema> SchemaReader<'schema> {
         if let Some(choices) = Self::choices_of(schema) {
             return SettingKind::Choice(choices);
         }
-        if let Some(kind) = Self::whole_or_word_of(schema) {
-            return kind;
+        if let Some(alternatives) = self.alternatives_of(schema) {
+            return SettingKind::Alternatives(alternatives);
         }
         match Self::type_names(schema).find(|name| *name != "null") {
             Some("boolean") => SettingKind::Toggle,
@@ -360,12 +546,9 @@ impl<'schema> SchemaReader<'schema> {
             },
             Some("string") => SettingKind::Text,
             Some("array") => self.container(schema.get("items"), SettingKind::List),
-            Some("object") if !Self::is_struct(schema) => self.container(
-                schema
-                    .get("additionalProperties")
-                    .filter(|values| values.is_object()),
-                SettingKind::Mapping,
-            ),
+            Some("object") if !Self::is_struct(schema) => {
+                self.container(Self::values_of(schema), SettingKind::Mapping)
+            }
             Some(_) | None => SettingKind::Raw,
         }
     }
@@ -391,32 +574,79 @@ impl<'schema> SchemaReader<'schema> {
         }
     }
 
-    /// Returns the kind of a `oneOf` of one whole number and words, if
-    /// `schema` is one.
-    fn whole_or_word_of(schema: &Value) -> Option<SettingKind> {
+    /// Returns the ways `schema`, a `oneOf`, says a value is written, if
+    /// each is one the window can offer.
+    fn alternatives_of(&self, schema: &'schema Value) -> Option<Vec<Alternative>> {
         let members = schema.get("oneOf")?.as_array()?;
-        let mut number = None;
-        let mut words = Vec::new();
+        let mut alternatives = Vec::new();
         for member in members {
-            if member.get("type") == Some(&Value::from("integer")) && number.is_none() {
-                number = Some(member);
-            } else {
-                words.push(Choice {
-                    value: member.get("const")?.as_str()?.to_owned(),
-                    description: member
-                        .get("description")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_owned(),
-                });
-            }
+            alternatives.extend(self.alternative_of(member)?);
         }
-        let number = number?;
-        Some(SettingKind::WholeOrWord {
-            minimum: number.get("minimum").and_then(Value::as_i64),
-            maximum: number.get("maximum").and_then(Value::as_i64),
-            words,
-        })
+        (alternatives.len() > 1).then_some(alternatives)
+    }
+
+    /// Returns the ways `member`, one of a `oneOf`, is written: one, or
+    /// two for a yes or no.
+    fn alternative_of(&self, member: &'schema Value) -> Option<Vec<Alternative>> {
+        let member = self.resolve(member).ok()?.schema;
+        let description = member
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let title = member.get("title").and_then(Value::as_str);
+        let alternative = |label: String, shape: Shape| Alternative {
+            label: title.map_or(label, str::to_owned),
+            description: description.clone(),
+            shape,
+        };
+        if let Some(exact) = member.get("const") {
+            let label = exact.as_str().unwrap_or_default().to_owned();
+            return Some(vec![alternative(label, Shape::Exact(exact.clone()))]);
+        }
+        if let Some(properties) = member
+            .get("properties")
+            .and_then(Value::as_object)
+            .filter(|properties| properties.len() == 1)
+        {
+            let (key, property) = properties.iter().next()?;
+            let kind = self.kind_of(self.resolve(property).ok()?.schema);
+            if kind == SettingKind::Raw {
+                return None;
+            }
+            let shape = Shape::Field {
+                key: key.clone(),
+                kind,
+            };
+            return Some(vec![alternative(label::of_key(key).0, shape)]);
+        }
+        match self.kind_of(member) {
+            SettingKind::Toggle => Some(vec![
+                Alternative {
+                    label: "yes".to_owned(),
+                    description: description.clone(),
+                    shape: Shape::Exact(Value::Bool(true)),
+                },
+                Alternative {
+                    label: "no".to_owned(),
+                    description,
+                    shape: Shape::Exact(Value::Bool(false)),
+                },
+            ]),
+            kind @ (SettingKind::Whole { .. } | SettingKind::Decimal { .. }) => {
+                Some(vec![alternative("a number".to_owned(), Shape::Value(kind))])
+            }
+            kind @ SettingKind::Text => {
+                Some(vec![alternative("text".to_owned(), Shape::Value(kind))])
+            }
+            // Words are written as they are, and nothing else nests.
+            SettingKind::Raw
+            | SettingKind::Choice(_)
+            | SettingKind::Alternatives(_)
+            | SettingKind::List(_)
+            | SettingKind::Mapping(_)
+            | SettingKind::Scopes(_) => None,
+        }
     }
 
     /// Returns the words `schema` allows, if it is a choice among words: an
@@ -615,25 +845,143 @@ mod tests {
         );
     }
 
+    /// Returns the alternatives of the setting `key`.
+    fn alternatives(form: &Form, key: &str) -> Vec<Alternative> {
+        let SettingKind::Alternatives(alternatives) = &setting(form, key).kind else {
+            panic!("{key} is written several ways");
+        };
+        alternatives.clone()
+    }
+
     #[test]
-    fn a_number_or_a_word_is_its_own_kind() {
+    fn a_number_or_a_word_is_written_either_way() {
         let form = form_of(
             &json!({}),
             &json!({
-                "rows": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "const": "auto" }] },
+                "rows": { "oneOf": [
+                    { "type": "integer", "minimum": 1 },
+                    { "const": "auto", "title": "Automatic", "description": "As many as needed." },
+                ] },
             }),
         );
-        let SettingKind::WholeOrWord {
-            minimum,
-            maximum,
-            words,
-        } = &setting(&form, "rows").kind
-        else {
-            panic!("a number or a word");
+        let alternatives = alternatives(&form, "rows");
+        assert_eq!(alternatives.len(), 2);
+        assert_eq!(alternatives[0].label, "a number");
+        assert_eq!(alternatives[1].label, "Automatic");
+        assert!(alternatives[0].is(&json!(3)));
+        assert!(alternatives[1].is(&json!("auto")));
+        assert!(!alternatives[1].is(&json!("fill")));
+        let kind = &setting(&form, "rows").kind;
+        assert_eq!(kind.note(&json!("auto")), Some("As many as needed."));
+        assert_eq!(kind.note(&json!(3)), None);
+        assert_eq!(kind.starting_value(), json!(1));
+    }
+
+    #[test]
+    fn a_table_with_one_key_is_an_alternative_to_a_word() {
+        let form = form_of(
+            &json!({}),
+            &json!({
+                "width": { "oneOf": [
+                    { "const": "fill" },
+                    {
+                        "type": "object", "required": ["max"],
+                        "properties": { "max": { "type": "integer", "minimum": 1 } },
+                    },
+                ] },
+            }),
+        );
+        let alternatives = alternatives(&form, "width");
+        assert_eq!(alternatives[1].label, "Max");
+        assert!(alternatives[1].is(&json!({ "max": 300 })));
+        assert_eq!(alternatives[1].starting_value(), json!({ "max": 1 }));
+    }
+
+    #[test]
+    fn a_yes_or_no_beside_a_word_is_three_ways() {
+        let form = form_of(
+            &json!({}),
+            &json!({ "minimized": { "oneOf": [{ "type": "boolean" }, { "const": "any" }] } }),
+        );
+        let labels: Vec<String> = alternatives(&form, "minimized")
+            .into_iter()
+            .map(|alternative| alternative.label)
+            .collect();
+        assert_eq!(labels, ["yes", "no", "any"]);
+    }
+
+    #[test]
+    fn a_table_of_tables_by_name_is_scopes_to_add_to() {
+        let form = form_of(
+            &json!({}),
+            &json!({
+                "device": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object", "properties": { "tap": { "type": "boolean" } },
+                    },
+                },
+            }),
+        );
+        let SettingKind::Scopes(scope) = &setting(&form, "device").kind else {
+            panic!("scopes");
         };
-        assert_eq!((*minimum, *maximum), (Some(1), None));
-        assert_eq!(words.len(), 1);
-        assert_eq!(words[0].value, "auto");
+        assert_eq!(scope.path, ["device", "*"]);
+        let named = scope.named("My Mouse");
+        assert_eq!(named.label, "My Mouse");
+        assert_eq!(
+            named.settings[0].path.parts(),
+            ["device", "My Mouse", "tap"]
+        );
+    }
+
+    #[test]
+    fn a_table_that_may_hold_itself_is_shown_one_level_deep() {
+        let matcher = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" },
+                "not": { "anyOf": [{ "$ref": "#/$defs/Matcher" }, { "type": "null" }] },
+            },
+        });
+        let form = Form::from_schema(&json!({
+            "type": "object",
+            "properties": { "show": { "$ref": "#/$defs/Matcher" } },
+            "$defs": { "Matcher": matcher },
+        }))
+        .expect("a form");
+        let paths: Vec<String> = form
+            .settings()
+            .into_iter()
+            .map(|setting| setting.path.to_string())
+            .collect();
+        assert_eq!(paths, ["show.title", "show.not.title"]);
+    }
+
+    #[test]
+    fn a_table_by_names_of_one_pattern_is_a_mapping() {
+        let form = form_of(
+            &json!({}),
+            &json!({
+                "images": {
+                    "type": "object",
+                    "patternProperties": { "^\\d+$": { "type": "string" } },
+                },
+            }),
+        );
+        assert_eq!(
+            setting(&form, "images").kind,
+            SettingKind::Mapping(Box::new(SettingKind::Text))
+        );
+    }
+
+    #[test]
+    fn a_title_names_a_setting() {
+        let form = form_of(
+            &json!({}),
+            &json!({ "windows": { "type": "string", "title": "Windows listed" } }),
+        );
+        assert_eq!(setting(&form, "windows").label, "Windows listed");
     }
 
     #[test]
@@ -641,17 +989,11 @@ mod tests {
         let form = form_of(
             &json!({}),
             &json!({
-                "rows": { "oneOf": [{ "type": "string" }, { "const": "auto" }] },
-                "devices": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "object", "properties": { "tap": { "type": "boolean" } },
-                    },
-                },
+                "mixed": { "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "object", "properties": { "x": { "type": "integer" } } } }] },
                 "cells": { "type": "array", "items": { "type": "object", "properties": { "x": { "type": "integer" } } } },
             }),
         );
-        for key in ["rows", "devices", "cells"] {
+        for key in ["mixed", "cells"] {
             assert_eq!(setting(&form, key).kind, SettingKind::Raw, "{key}");
         }
     }

@@ -35,9 +35,13 @@ pub(crate) struct TaskbarSettings {
     pub(crate) edge: TaskbarEdge,
     /// How much of the edge it spans.
     pub(crate) width_percent: WidthPercent,
-    /// How many rows tall it is.
+    /// How many rows tall it is: a number, or `"auto"` for one row and another
+    /// whenever the window list's entries would be narrower than the window
+    /// list's `min_entry_width` (and fewer again when they fit), up to
+    /// `max_rows`.
     pub(crate) rows: TaskbarRows,
     /// The most rows an `"auto"` taskbar grows to.
+    #[schemars(title = "Most rows when automatic")]
     pub(crate) max_rows: NonZeroU32,
     /// Where along the edge it sits, when narrower than the edge.
     pub(crate) align: TaskbarAlign,
@@ -155,8 +159,15 @@ impl schemars::JsonSchema for TaskbarRows {
     fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "oneOf": [
-                { "type": "integer", "minimum": 1 },
-                { "const": "auto" },
+                {
+                    "type": "integer", "minimum": 1,
+                    "title": "A fixed number",
+                    "description": "Always this many rows.",
+                },
+                {
+                    "const": "auto", "title": "Automatic",
+                    "description": "One row, and another whenever the window list's entries would be narrower than its minimum entry width, up to the most rows.",
+                },
             ],
         })
     }
@@ -419,10 +430,14 @@ pub(crate) struct WindowListSettings {
     pub(crate) entry_width: EntryWidth,
     /// Whether entries show their application's icon.
     pub(crate) icons: bool,
-    /// Whose windows a taskbar lists: every output's, or its own output's.
+    /// Whose windows a taskbar lists: every output's, or only those on the
+    /// taskbar's own output (for a taskbar on every output).
+    #[schemars(title = "Windows listed")]
     pub(crate) windows: WindowListScope,
-    /// The narrowest an entry gets before an `"auto"` taskbar takes
-    /// another row, in pixels.
+    /// The narrowest an entry gets before an `"auto"` taskbar takes another
+    /// row, in pixels; the taskbar uses the fewest rows that keep every
+    /// entry at least this wide.
+    #[schemars(title = "Narrowest entry before another row")]
     pub(crate) min_entry_width: u32,
 }
 
@@ -504,10 +519,14 @@ impl schemars::JsonSchema for EntryWidth {
     fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "oneOf": [
-                { "const": "fill" },
                 {
-                    "type": "object",
-                    "properties": { "max": { "type": "integer", "minimum": 1 } },
+                    "const": "fill", "title": "Fill the list",
+                    "description": "Equal shares of the whole list.",
+                },
+                {
+                    "type": "object", "title": "At most",
+                    "description": "Equal shares of the list, each at most this many pixels wide.",
+                    "properties": { "max": { "type": "integer", "minimum": 1, "title": "Pixels" } },
                     "required": ["max"],
                     "additionalProperties": false,
                 },

@@ -234,6 +234,16 @@ fn the_form_built_from_vahts_schema_has_every_setting_vaht_has() {
     };
     let schema = json(&["schema"])["schema"].clone();
     let form = Form::from_schema(&schema).expect("the schema is a form");
+    let needing_json: Vec<String> = form
+        .settings()
+        .into_iter()
+        .filter(|setting| setting.kind == SettingKind::Raw)
+        .map(|setting| setting.path.to_string())
+        .collect();
+    assert!(
+        needing_json.is_empty(),
+        "settings with no control of their own, shown as JSON: {needing_json:?}"
+    );
     let reading = json(&["get"]);
     let mut paths = Vec::new();
     leaf_paths(&reading["value"], &[], &mut paths);
@@ -245,9 +255,25 @@ fn the_form_built_from_vahts_schema_has_every_setting_vaht_has() {
         let inside = (1..path.len()).any(|length| {
             let outer = ConfigPath::from_parts(path[..length].to_vec()).expect("a key");
             form.setting(&outer).is_some_and(|setting| {
-                matches!(setting.kind, SettingKind::Raw | SettingKind::Mapping(_))
+                matches!(
+                    setting.kind,
+                    SettingKind::Raw | SettingKind::Mapping(_) | SettingKind::Scopes(_)
+                )
             })
         });
-        assert!(own || inside, "{parts} is in no form setting");
+        // Or a table whose settings the form has.
+        let holds_settings = form
+            .settings()
+            .into_iter()
+            .any(|setting| setting.path.parts().starts_with(&path));
+        // A matcher's `not` inside a `not` is left to the file: the window
+        // shows one level of it.
+        let is_deep_not = path
+            .windows(2)
+            .any(|pair| pair[0] == "not" && pair[1] == "not");
+        assert!(
+            own || inside || holds_settings || is_deep_not,
+            "{parts} is in no form setting"
+        );
     }
 }

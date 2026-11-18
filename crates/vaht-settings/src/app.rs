@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use eframe::egui::{self, Ui};
 use serde_json::Value;
 use vaht_ipc::{ConfigEdit, ConfigPath};
-use vaht_settings_model::{Form, Section, SettingsEditor};
+use vaht_settings_model::{Form, Section, Setting, SettingKind, SettingsEditor};
 
 use crate::controls::{Drafts, SettingView};
 use crate::link::{Command, Link, Update, VahtLink};
@@ -43,6 +43,9 @@ pub struct SettingsApp<L: Link> {
     drafts: Drafts,
     /// What the search box holds.
     search: String,
+    /// The name being typed for a table to add, by the setting that holds
+    /// the tables.
+    new_names: HashMap<ConfigPath, String>,
     /// How the connection is.
     status: Status,
 }
@@ -86,6 +89,7 @@ impl<L: Link> SettingsApp<L> {
             pending: HashMap::new(),
             drafts: Drafts::default(),
             search: String::new(),
+            new_names: HashMap::new(),
             status: Status::Loading,
         }
     }
@@ -200,13 +204,20 @@ impl<L: Link> SettingsApp<L> {
     }
 
     /// Draws `section`: its settings, then its sections, collapsed.
-    fn section(&mut self, ui: &mut Ui, section: &Section, edits: &mut Vec<ConfigEdit>) {
-        let Some(editor) = &self.editor else {
-            return;
-        };
+    fn section(
+        &mut self,
+        ui: &mut Ui,
+        editor: &SettingsEditor,
+        section: &Section,
+        edits: &mut Vec<ConfigEdit>,
+    ) {
         let is_searching = !self.search.trim().is_empty();
         for setting in &section.settings {
             if !editor.is_shown(setting) {
+                continue;
+            }
+            if let SettingKind::Scopes(_) = &setting.kind {
+                self.scopes(ui, editor, setting, edits);
                 continue;
             }
             let value = match self.pending.get(&setting.path) {
@@ -228,11 +239,7 @@ impl<L: Link> SettingsApp<L> {
             ui.add_space(4.0);
         }
         for inner in &section.sections {
-            if !self
-                .editor
-                .as_ref()
-                .is_some_and(|editor| editor.has_shown_settings(inner))
-            {
+            if !editor.has_shown_settings(inner) {
                 continue;
             }
             egui::CollapsingHeader::new(&inner.label)
@@ -243,9 +250,74 @@ impl<L: Link> SettingsApp<L> {
                     if !inner.description.is_empty() {
                         ui.weak(&inner.description);
                     }
-                    self.section(ui, inner, edits);
+                    self.section(ui, editor, inner, edits);
                 });
         }
+    }
+
+    /// Draws the tables of one shape `setting` holds by name (a device's
+    /// settings): a section for each, to remove, and a name to add one by.
+    fn scopes(
+        &mut self,
+        ui: &mut Ui,
+        editor: &SettingsEditor,
+        setting: &Setting,
+        edits: &mut Vec<ConfigEdit>,
+    ) {
+        let SettingKind::Scopes(template) = &setting.kind else {
+            return;
+        };
+        let scope_path = |name: &str| {
+            ConfigPath::from_parts(
+                setting
+                    .path
+                    .parts()
+                    .iter()
+                    .cloned()
+                    .chain([name.to_owned()])
+                    .collect(),
+            )
+        };
+        let names: Vec<String> = editor
+            .value_of(&setting.path)
+            .and_then(Value::as_object)
+            .map(|scopes| scopes.keys().cloned().collect())
+            .unwrap_or_default();
+        egui::CollapsingHeader::new(&setting.label)
+            .id_salt(setting.path.to_string())
+            .default_open(!names.is_empty())
+            .show(ui, |ui| {
+                if !setting.description.is_empty() {
+                    ui.weak(&setting.description);
+                }
+                for name in &names {
+                    egui::CollapsingHeader::new(name)
+                        .id_salt((setting.path.to_string(), name))
+                        .show(ui, |ui| {
+                            if ui.small_button("Remove").clicked()
+                                && let Some(path) = scope_path(name)
+                            {
+                                edits.push(ConfigEdit::Unset { path });
+                            }
+                            self.section(ui, editor, &template.named(name), edits);
+                        });
+                }
+                let adding = self.new_names.entry(setting.path.clone()).or_default();
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(adding).hint_text("name to add"));
+                    let name = adding.trim().to_owned();
+                    let can_add = !name.is_empty() && !names.contains(&name);
+                    if ui.add_enabled(can_add, egui::Button::new("Add")).clicked()
+                        && let Some(path) = scope_path(&name)
+                    {
+                        edits.push(ConfigEdit::Set {
+                            path,
+                            value: Value::Object(serde_json::Map::new()),
+                        });
+                        adding.clear();
+                    }
+                });
+            });
     }
 }
 
@@ -265,19 +337,24 @@ impl<L: Link> SettingsApp<L> {
             .default_size(220.0)
             .show(ui, |ui| self.sidebar(ui));
         let mut edits = Vec::new();
+        // The editor is held here while the form is drawn, so the drawing
+        // can change the rest of the window.
+        let editor = self.editor.take();
         egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let Some(root) = self
-                    .editor
-                    .as_ref()
-                    .map(|editor| editor.form().root().clone())
-                else {
-                    ui.label("Waiting for vaht…");
-                    return;
-                };
-                self.section(ui, &root, &mut edits);
-            });
+            // Filling the panel puts the scroll bar at its edge, and lets the
+            // mouse wheel scroll anywhere in it.
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let Some(editor) = &editor else {
+                        ui.label("Waiting for vaht…");
+                        return;
+                    };
+                    let root = editor.form().root().clone();
+                    self.section(ui, editor, &root, &mut edits);
+                });
         });
+        self.editor = editor;
         for edit in edits {
             self.send(edit);
         }
@@ -519,5 +596,178 @@ mod tests {
                 value: json!("auto"),
             }]
         );
+    }
+
+    /// Returns a window told `schema` and a reading of `value`.
+    fn window_of(schema: Value, value: Value) -> (SettingsApp<FakeLink>, FakeLink) {
+        let link = FakeLink::default();
+        link.to_tell.borrow_mut().extend([
+            Update::Schema(schema),
+            Update::Reading {
+                defaults: value.clone(),
+                value,
+                changed: Vec::new(),
+                themes: Vec::new(),
+            },
+        ]);
+        (SettingsApp::new(link.clone()), link)
+    }
+
+    #[test]
+    fn a_form_of_words_and_tables_is_edited_without_json() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "width": {
+                    "title": "Entry width",
+                    "oneOf": [
+                        { "const": "fill", "title": "Fill the list" },
+                        {
+                            "type": "object", "title": "At most", "required": ["max"],
+                            "properties": { "max": { "type": "integer", "minimum": 1 } },
+                        },
+                    ],
+                    "default": "fill",
+                },
+            },
+        });
+        let (mut app, link) = window_of(schema, json!({ "width": "fill" }));
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_role(egui::accesskit::Role::ComboBox).click();
+        harness.run();
+        harness.get_by_label("At most").click();
+        harness.run();
+        assert_eq!(
+            edits_sent(&link),
+            [ConfigEdit::Set {
+                path: ConfigPath::parse("width").expect("a key"),
+                value: json!({ "max": 1 }),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_table_by_name_has_tables_added_by_typing_a_name() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "device": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": { "tap": { "type": "boolean" } },
+                    },
+                },
+            },
+        });
+        let (mut app, link) = window_of(schema, json!({ "device": { "Mouse": { "tap": null } } }));
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_label("Mouse");
+        // The search box is the first; the name to add is the last.
+        let click_name_box = |harness: &Harness<'_>| {
+            harness
+                .query_all_by_role(egui::accesskit::Role::TextInput)
+                .last()
+                .expect("a name box")
+                .click();
+        };
+        click_name_box(&harness);
+        harness.run();
+        harness
+            .query_all_by_role(egui::accesskit::Role::TextInput)
+            .last()
+            .expect("a name box")
+            .type_text("Trackball");
+        harness.run();
+        harness.get_by_label("Add").click();
+        harness.run();
+        assert_eq!(
+            edits_sent(&link),
+            [ConfigEdit::Set {
+                path: ConfigPath::from_parts(vec!["device".to_owned(), "Trackball".to_owned()])
+                    .expect("a key"),
+                value: json!({}),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_table_by_name_has_its_tables_removed() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "device": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": { "tap": { "type": "boolean" } },
+                    },
+                },
+            },
+        });
+        let (mut app, link) = window_of(schema, json!({ "device": { "Mouse": { "tap": null } } }));
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_label("Mouse").click();
+        harness.run();
+        harness.get_by_label("Remove").click();
+        harness.run();
+        assert_eq!(
+            edits_sent(&link),
+            [ConfigEdit::Unset {
+                path: ConfigPath::from_parts(vec!["device".to_owned(), "Mouse".to_owned()])
+                    .expect("a key"),
+            }]
+        );
+    }
+
+    /// Returns the schema of a list of whole numbers.
+    fn numbers_schema() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "cell": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+            },
+        })
+    }
+
+    #[test]
+    fn numbers_are_added_to_a_list_in_one_row() {
+        let (mut app, link) = window_of(numbers_schema(), json!({ "cell": [1, 2] }));
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_label("+").click();
+        harness.run();
+        assert_eq!(
+            edits_sent(&link),
+            [ConfigEdit::Set {
+                path: ConfigPath::parse("cell").expect("a key"),
+                value: json!([1, 2, 0]),
+            }]
+        );
+    }
+
+    #[test]
+    fn the_last_number_is_removed_and_an_empty_list_survives_it() {
+        let (mut app, link) = window_of(numbers_schema(), json!({ "cell": [1, 2] }));
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_label("\u{2212}").click();
+        harness.run();
+        assert_eq!(
+            edits_sent(&link),
+            [ConfigEdit::Set {
+                path: ConfigPath::parse("cell").expect("a key"),
+                value: json!([1]),
+            }]
+        );
+        let (mut empty, link) = window_of(numbers_schema(), json!({ "cell": [] }));
+        let mut harness = harness_of(&mut empty);
+        harness.run();
+        harness.get_by_label("\u{2212}").click();
+        harness.run();
+        assert!(link.sent.borrow().is_empty(), "nothing to remove");
     }
 }

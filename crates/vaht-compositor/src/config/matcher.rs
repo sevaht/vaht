@@ -157,10 +157,14 @@ impl schemars::JsonSchema for TextPattern {
     fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "oneOf": [
-                { "type": "string", "description": "Matches the whole text exactly." },
                 {
-                    "type": "object",
-                    "properties": { "regex": { "type": "string" } },
+                    "type": "string", "title": "Is exactly",
+                    "description": "Matches the whole text exactly.",
+                },
+                {
+                    "type": "object", "title": "Matches the regular expression",
+                    "description": "Matches if the regular expression finds the text.",
+                    "properties": { "regex": { "type": "string", "title": "Expression" } },
                     "required": ["regex"],
                     "additionalProperties": false,
                 },
@@ -241,8 +245,11 @@ impl schemars::JsonSchema for WorkspaceSelector {
     fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "oneOf": [
-                { "const": "current" },
-                { "type": "integer", "minimum": 1 },
+                {
+                    "const": "current", "title": "The current one",
+                    "description": "Whichever workspace is shown.",
+                },
+                { "type": "integer", "minimum": 1, "title": "Number" },
             ],
         })
     }
@@ -322,7 +329,10 @@ impl schemars::JsonSchema for StateSelector {
         schemars::json_schema!({
             "oneOf": [
                 { "type": "boolean" },
-                { "const": "any" },
+                {
+                    "const": "any", "title": "either",
+                    "description": "Does not matter.",
+                },
             ],
         })
     }

@@ -17,4 +17,4 @@ mod form;
 mod label;
 
 pub use editor::SettingsEditor;
-pub use form::{Choice, Form, FormError, Section, Setting, SettingKind};
+pub use form::{Alternative, Choice, Form, FormError, Section, Setting, SettingKind, Shape};

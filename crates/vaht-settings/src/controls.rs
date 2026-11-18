@@ -12,15 +12,13 @@ use std::collections::HashMap;
 use eframe::egui::{self, Id, Response, Ui};
 use serde_json::Value;
 use vaht_ipc::{ConfigEdit, ConfigPath};
-use vaht_settings_model::{Choice, Setting, SettingKind};
+use vaht_settings_model::{Alternative, Choice, Setting, SettingKind, Shape};
 
 /// What a control keeps while it is being edited.
 #[derive(Debug, Clone, PartialEq)]
 enum Draft {
     /// A line of text.
     Text(String),
-    /// The words of a list.
-    Words(Vec<String>),
     /// JSON text, and why it is not valid, if it is not.
     Json {
         /// What was typed.
@@ -51,14 +49,11 @@ pub struct SettingView<'setting> {
 }
 
 impl SettingView<'_> {
-    /// What the list of a number or a word calls the number.
-    const NUMBER: &'static str = "a number";
-
     /// Draws the setting; returns the edit the user made, if they made one.
     pub fn show(self, ui: &mut Ui, drafts: &mut Drafts) -> Option<ConfigEdit> {
         let setting = self.setting;
         let mut edit = None;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let name = ui.label(&setting.label);
             if !setting.description.is_empty() {
                 name.clone().on_hover_text(&setting.description);
@@ -81,7 +76,12 @@ impl SettingView<'_> {
             }
             if is_set
                 && let Some(current) = self.value
-                && let Some(value) = self.control(ui, drafts, current, name.id)
+                && let Some(value) = (Control {
+                    path: &setting.path,
+                    kind: &setting.kind,
+                    label: name.id,
+                })
+                .show(ui, drafts, current)
             {
                 edit = Some(ConfigEdit::Set {
                     path: setting.path.clone(),
@@ -105,28 +105,54 @@ impl SettingView<'_> {
                 ui.small("unsaved");
             }
         });
+        // What the chosen form means, then what the setting is for.
+        if let Some(note) = self.value.and_then(|value| setting.kind.note(value)) {
+            ui.weak(note);
+        }
         if !setting.description.is_empty() {
             ui.weak(&setting.description);
         }
         if edit.is_some() {
             // What was typed is superseded: a reset or a new choice shows
             // the setting's own value, not the old draft (or its error).
-            drafts.by_setting.remove(&setting.path);
+            drafts
+                .by_setting
+                .retain(|path, _| !path.parts().starts_with(setting.path.parts()));
         }
         edit
     }
+}
 
-    /// Draws the control for the setting's kind, currently set to `current`;
-    /// returns the value the user chose, if they did.
-    fn control(
+/// The control for a value of one kind.
+#[derive(Debug, Clone, Copy)]
+struct Control<'control> {
+    /// Where the value is (for what is typed into it, and for ids).
+    path: &'control ConfigPath,
+    /// What kind of value it is.
+    kind: &'control SettingKind,
+    /// The label that names it, for a screen reader.
+    label: Id,
+}
+
+impl Control<'_> {
+    /// Returns the control for a value inside this one, at `path`.
+    fn inside<'inner>(
         &self,
-        ui: &mut Ui,
-        drafts: &mut Drafts,
-        current: &Value,
-        label: Id,
-    ) -> Option<Value> {
-        let path = &self.setting.path;
-        match &self.setting.kind {
+        path: &'inner ConfigPath,
+        kind: &'inner SettingKind,
+    ) -> Control<'inner> {
+        Control {
+            path,
+            kind,
+            label: self.label,
+        }
+    }
+
+    /// Draws the control, the value currently `current`; returns the value
+    /// the user chose, if they did.
+    fn show(&self, ui: &mut Ui, drafts: &mut Drafts, current: &Value) -> Option<Value> {
+        let label = self.label;
+        match self.kind {
             SettingKind::Toggle => {
                 let mut is_on = current.as_bool().unwrap_or(false);
                 let response = ui.checkbox(&mut is_on, "").labelled_by(label);
@@ -151,41 +177,150 @@ impl SettingView<'_> {
                     .then(|| serde_json::Number::from_f64(number).map(Value::Number))
                     .flatten()
             }
-            SettingKind::Text => self.text(ui, drafts, current, label),
-            SettingKind::WholeOrWord { .. } => self.whole_or_word(ui, current, label),
+            SettingKind::Text => self.text(ui, drafts, current),
             SettingKind::Choice(choices) => Self::choice(
                 ui,
-                path,
+                self.path,
                 choices,
                 current.as_str().unwrap_or_default(),
                 label,
             ),
-            SettingKind::List(item) => match item.as_ref() {
-                SettingKind::Text | SettingKind::Choice(_) => {
-                    self.words(ui, drafts, current, label)
+            SettingKind::Alternatives(alternatives) => {
+                self.alternatives(ui, drafts, alternatives, current)
+            }
+            SettingKind::List(item) => self.list(ui, drafts, item, current),
+            // Scopes have a section each, which the window draws.
+            SettingKind::Scopes(_) => None,
+            SettingKind::Mapping(item) => self.mapping(ui, drafts, item, current),
+            SettingKind::Raw => self.json(ui, drafts, current),
+        }
+    }
+
+    /// Returns the path of `part`, a name inside the value at this path.
+    fn child(&self, part: &str) -> ConfigPath {
+        ConfigPath::from_parts(
+            self.path
+                .parts()
+                .iter()
+                .cloned()
+                .chain([part.to_owned()])
+                .collect(),
+        )
+        .unwrap_or_else(|| self.path.clone())
+    }
+
+    /// Values of one kind by name: a row for each, to change or remove, and
+    /// a name to add one by. Sends the whole table when it changes.
+    fn mapping(
+        &self,
+        ui: &mut Ui,
+        drafts: &mut Drafts,
+        item: &SettingKind,
+        current: &Value,
+    ) -> Option<Value> {
+        let mut table = current.as_object().cloned().unwrap_or_default();
+        let mut is_changed = false;
+        let mut removed = None;
+        let adding_path = self.child("+");
+        let mut adding = match drafts.by_setting.remove(&adding_path) {
+            Some(Draft::Text(text)) => text,
+            Some(Draft::Json { .. }) | None => String::new(),
+        };
+        ui.vertical(|ui| {
+            for (name, value) in &mut table {
+                ui.horizontal(|ui| {
+                    ui.label(name);
+                    let path = self.child(name);
+                    if let Some(chosen) = self.inside(&path, item).show(ui, drafts, value) {
+                        *value = chosen;
+                        is_changed = true;
+                    }
+                    if ui.small_button("Remove").clicked() {
+                        removed = Some(name.clone());
+                    }
+                });
+            }
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut adding).hint_text("name to add"));
+                let name = adding.trim().to_owned();
+                let can_add = !name.is_empty() && !table.contains_key(&name);
+                if ui.add_enabled(can_add, egui::Button::new("Add")).clicked() {
+                    table.insert(name, item.starting_value());
+                    adding.clear();
+                    is_changed = true;
                 }
-                SettingKind::Toggle
-                | SettingKind::Whole { .. }
-                | SettingKind::WholeOrWord { .. }
-                | SettingKind::Decimal { .. }
-                | SettingKind::List(_)
-                | SettingKind::Mapping(_)
-                | SettingKind::Raw => self.json(ui, drafts, current, label),
-            },
-            SettingKind::Mapping(_) | SettingKind::Raw => self.json(ui, drafts, current, label),
+            });
+        });
+        if let Some(name) = removed {
+            table.remove(&name);
+            is_changed = true;
+        }
+        if !adding.is_empty() {
+            drafts.by_setting.insert(adding_path, Draft::Text(adding));
+        }
+        is_changed.then_some(Value::Object(table))
+    }
+
+    /// A value written one of several ways: a list to say which, and
+    /// beside it the control for the way chosen.
+    fn alternatives(
+        &self,
+        ui: &mut Ui,
+        drafts: &mut Drafts,
+        alternatives: &[Alternative],
+        current: &Value,
+    ) -> Option<Value> {
+        let active = alternatives
+            .iter()
+            .position(|alternative| alternative.is(current));
+        let mut chosen = None;
+        let combo = egui::ComboBox::from_id_salt(self.path.to_string())
+            .selected_text(active.map_or("choose", |index| alternatives[index].label.as_str()))
+            .show_ui(ui, |ui| {
+                for (index, alternative) in alternatives.iter().enumerate() {
+                    let response = ui.selectable_label(active == Some(index), &alternative.label);
+                    if !alternative.description.is_empty() {
+                        response.clone().on_hover_text(&alternative.description);
+                    }
+                    if response.clicked() && active != Some(index) {
+                        chosen = Some(alternative.starting_value());
+                    }
+                }
+            });
+        combo.response.labelled_by(self.label);
+        if chosen.is_some() {
+            return chosen;
+        }
+        let shape = &alternatives[active?].shape;
+        let inner_path = ConfigPath::from_parts(
+            self.path
+                .parts()
+                .iter()
+                .cloned()
+                .chain(["#".to_owned()])
+                .collect(),
+        )
+        .unwrap_or_else(|| self.path.clone());
+        match shape {
+            Shape::Exact(_) => None,
+            Shape::Value(kind) => self.inside(&inner_path, kind).show(ui, drafts, current),
+            Shape::Field { key, kind } => {
+                let inner = current.get(key).unwrap_or(&Value::Null);
+                self.inside(&inner_path, kind)
+                    .show(ui, drafts, inner)
+                    .map(|value| Value::Object(serde_json::Map::from_iter([(key.clone(), value)])))
+            }
         }
     }
 
     /// A line of text, sent when the user leaves it.
-    fn text(&self, ui: &mut Ui, drafts: &mut Drafts, current: &Value, label: Id) -> Option<Value> {
-        let path = &self.setting.path;
+    fn text(&self, ui: &mut Ui, drafts: &mut Drafts, current: &Value) -> Option<Value> {
+        let path = self.path;
         let mut text = match drafts.by_setting.remove(path) {
             Some(Draft::Text(text)) => text,
-            Some(Draft::Words(_) | Draft::Json { .. }) | None => {
-                current.as_str().unwrap_or_default().to_owned()
-            }
+            Some(Draft::Json { .. }) | None => current.as_str().unwrap_or_default().to_owned(),
         };
-        let response = ui.text_edit_singleline(&mut text).labelled_by(label);
+        let response = ui.text_edit_singleline(&mut text).labelled_by(self.label);
         if response.lost_focus() {
             return Some(Value::String(text));
         }
@@ -193,53 +328,6 @@ impl SettingView<'_> {
             drafts.by_setting.insert(path.clone(), Draft::Text(text));
         }
         None
-    }
-
-    /// A whole number, or one of some words: a list to say which, and the
-    /// number beside it when it is one.
-    fn whole_or_word(&self, ui: &mut Ui, current: &Value, label: Id) -> Option<Value> {
-        let SettingKind::WholeOrWord {
-            minimum,
-            maximum,
-            words,
-        } = &self.setting.kind
-        else {
-            return None;
-        };
-        let (minimum, maximum) = (*minimum, *maximum);
-        let path = &self.setting.path;
-        let shown = current.as_str().unwrap_or(Self::NUMBER);
-        let mut chosen = None;
-        let combo = egui::ComboBox::from_id_salt(path.to_string())
-            .selected_text(shown)
-            .show_ui(ui, |ui| {
-                if ui
-                    .selectable_label(current.is_number(), Self::NUMBER)
-                    .clicked()
-                    && !current.is_number()
-                {
-                    chosen = Some(Value::from(minimum.unwrap_or(0).max(1)));
-                }
-                for word in words {
-                    if ui
-                        .selectable_label(current.as_str() == Some(&word.value), &word.value)
-                        .clicked()
-                    {
-                        chosen = Some(Value::String(word.value.clone()));
-                    }
-                }
-            });
-        combo.response.labelled_by(label);
-        if let Some(mut number) = current.as_i64() {
-            let range = minimum.unwrap_or(i64::MIN)..=maximum.unwrap_or(i64::MAX);
-            let response = ui
-                .add(egui::DragValue::new(&mut number).range(range))
-                .labelled_by(label);
-            if response.changed() {
-                chosen = Some(Value::from(number));
-            }
-        }
-        chosen
     }
 
     /// One word of several, chosen from a list.
@@ -266,117 +354,97 @@ impl SettingView<'_> {
         (selected != current).then_some(Value::String(selected))
     }
 
-    /// A list of words, each a line of text or a choice, that can be
-    /// added to, removed from and reordered; sent when an item is left or
-    /// the list's shape changes.
-    fn words(&self, ui: &mut Ui, drafts: &mut Drafts, current: &Value, label: Id) -> Option<Value> {
-        let SettingKind::List(boxed_item) = &self.setting.kind else {
-            return None;
-        };
-        let item = boxed_item.as_ref();
-        let path = &self.setting.path;
-        let mut words = match drafts.by_setting.remove(path) {
-            Some(Draft::Words(words)) => words,
-            Some(Draft::Text(_) | Draft::Json { .. }) | None => current
-                .as_array()
-                .map(|items| {
-                    items
-                        .iter()
-                        .map(|word| word.as_str().unwrap_or_default().to_owned())
-                        .collect()
-                })
-                .unwrap_or_default(),
-        };
-        let (mut is_done, mut is_editing) = (false, false);
+    /// A list of values of one kind: each with the control for its kind,
+    /// and (for all but numbers, which sit in one row) buttons to move and
+    /// remove it, and one to add. Sends the whole list when it changes.
+    fn list(
+        &self,
+        ui: &mut Ui,
+        drafts: &mut Drafts,
+        item: &SettingKind,
+        current: &Value,
+    ) -> Option<Value> {
+        let mut items = current.as_array().cloned().unwrap_or_default();
+        let is_compact = matches!(
+            item,
+            SettingKind::Whole { .. } | SettingKind::Decimal { .. }
+        );
+        let mut is_changed = false;
         let mut shape: Option<(usize, i8)> = None;
-        ui.vertical(|ui| {
-            for (index, word) in words.iter_mut().enumerate() {
-                ui.horizontal(|ui| {
-                    match item {
-                        SettingKind::Choice(choices) => {
-                            let before = word.clone();
-                            let changed = Self::choice(
-                                ui,
-                                &ConfigPath::from_parts(vec![path.to_string(), index.to_string()])
-                                    .unwrap_or_else(|| path.clone()),
-                                choices,
-                                &before,
-                                label,
-                            );
-                            if let Some(Value::String(chosen)) = changed {
-                                *word = chosen;
-                                is_done = true;
-                            }
+        let mut added = false;
+        let mut layout = |ui: &mut Ui| {
+            for (index, value) in items.iter_mut().enumerate() {
+                let mut row = |ui: &mut Ui| {
+                    let path = self.child(&index.to_string());
+                    if let Some(chosen) = self.inside(&path, item).show(ui, drafts, value) {
+                        *value = chosen;
+                        is_changed = true;
+                    }
+                    if !is_compact {
+                        if ui.small_button("Up").clicked() {
+                            shape = Some((index, -1));
                         }
-                        SettingKind::Text
-                        | SettingKind::Toggle
-                        | SettingKind::Whole { .. }
-                        | SettingKind::WholeOrWord { .. }
-                        | SettingKind::Decimal { .. }
-                        | SettingKind::List(_)
-                        | SettingKind::Mapping(_)
-                        | SettingKind::Raw => {
-                            let response = ui.text_edit_singleline(word).labelled_by(label);
-                            is_done |= response.lost_focus();
-                            is_editing |= response.has_focus();
+                        if ui.small_button("Down").clicked() {
+                            shape = Some((index, 1));
+                        }
+                        if ui.small_button("Remove").clicked() {
+                            shape = Some((index, 0));
                         }
                     }
-                    if ui.small_button("Up").clicked() {
-                        shape = Some((index, -1));
-                    }
-                    if ui.small_button("Down").clicked() {
-                        shape = Some((index, 1));
-                    }
-                    if ui.small_button("Remove").clicked() {
-                        shape = Some((index, 0));
-                    }
-                });
-            }
-            if ui.small_button("Add").clicked() {
-                words.push(match item {
-                    SettingKind::Choice(choices) => choices
-                        .first()
-                        .map(|choice| choice.value.clone())
-                        .unwrap_or_default(),
-                    SettingKind::Text
-                    | SettingKind::Toggle
-                    | SettingKind::Whole { .. }
-                    | SettingKind::WholeOrWord { .. }
-                    | SettingKind::Decimal { .. }
-                    | SettingKind::List(_)
-                    | SettingKind::Mapping(_)
-                    | SettingKind::Raw => String::new(),
-                });
-                is_done = true;
-            }
-        });
-        if let Some((index, step)) = shape {
-            match step {
-                0 => {
-                    words.remove(index);
+                };
+                if is_compact {
+                    row(ui);
+                } else {
+                    ui.horizontal(row);
                 }
-                -1 if index > 0 => words.swap(index, index - 1),
-                1 if index + 1 < words.len() => words.swap(index, index + 1),
-                _ => {}
             }
-            is_done = true;
+            if ui
+                .small_button(if is_compact { "+" } else { "Add" })
+                .clicked()
+            {
+                added = true;
+            }
+            if is_compact && ui.small_button("\u{2212}").clicked() {
+                shape = Some((usize::MAX, 0));
+            }
+        };
+        if is_compact {
+            ui.horizontal(&mut layout);
+        } else {
+            ui.vertical(&mut layout);
         }
-        if is_done {
-            return Some(Value::Array(words.into_iter().map(Value::String).collect()));
+        if added {
+            items.push(item.starting_value());
+            is_changed = true;
         }
-        if is_editing {
-            drafts.by_setting.insert(path.clone(), Draft::Words(words));
+        if let Some((index, step)) = shape {
+            let last = items.len().saturating_sub(1);
+            is_changed = match step {
+                0 if !items.is_empty() => {
+                    items.remove(index.min(last));
+                    true
+                }
+                -1 if index > 0 => {
+                    items.swap(index, index - 1);
+                    true
+                }
+                1 if index < last => {
+                    items.swap(index, index + 1);
+                    true
+                }
+                _ => is_changed,
+            };
         }
-        None
+        is_changed.then_some(Value::Array(items))
     }
 
     /// Anything else, as JSON text, sent when the user leaves it if it is
-    /// valid JSON.
-    fn json(&self, ui: &mut Ui, drafts: &mut Drafts, current: &Value, label: Id) -> Option<Value> {
-        let path = &self.setting.path;
+    /// valid JSON. No setting of `settings.toml` is shown this way.
+    fn json(&self, ui: &mut Ui, drafts: &mut Drafts, current: &Value) -> Option<Value> {
+        let path = self.path;
         let (mut text, mut error) = match drafts.by_setting.remove(path) {
             Some(Draft::Json { text, error }) => (text, error),
-            Some(Draft::Text(_) | Draft::Words(_)) | None => (
+            Some(Draft::Text(_)) | None => (
                 serde_json::to_string_pretty(current).unwrap_or_default(),
                 None,
             ),
@@ -387,7 +455,7 @@ impl SettingView<'_> {
                     .code_editor()
                     .desired_rows(2),
             )
-            .labelled_by(label);
+            .labelled_by(self.label);
         let mut chosen = None;
         if response.lost_focus() {
             match serde_json::from_str::<Value>(&text) {

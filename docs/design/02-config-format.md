@@ -1259,9 +1259,16 @@ dialogs use too.
   with the reason and changes nothing. Settings that are optional (`theme`,
   `log.keep_days`...) have a *Set* box; *Reset* puts one back to its
   default. Every control is labelled with the setting's name, so a screen
-  reader announces it. Only `settings.toml` has a page so far; maps (such
-  as `[input.device]`) and lists of tables are edited as JSON text until
-  they have widgets of their own.
+  reader announces it. Only `settings.toml` has a page so far. No
+  setting is typed as JSON: a value that may be written several ways (`rows`,
+  a number or `auto`; `entry_width`; a matcher's text, yes/no/either and
+  workspace) has a list to choose the way and the control for it; tables by
+  name (`[input.device]`) have a section each, with a name to add one by and
+  a *Remove*; plain tables (`[wallpaper.workspaces]`) have a row each. A
+  matcher's `not` shows one level deep (a `not` inside it is for the file). A
+  test fails if a setting of `settings.toml` has no control of its own. The
+  schema names what the window shows: `title` is a setting's or a way's name,
+  and `description` what it does or means (shown beside the chosen way).
 - **`vaht msg pick`** (`pick` request) is a dmenu-style chooser: the lines
   on standard input show as a vaht menu at the pointer (`--title` above
   them), in the user's theme, and the one chosen is printed; closing the
