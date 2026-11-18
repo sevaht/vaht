@@ -27,8 +27,9 @@ depends=(
 )
 makedepends=('cargo' 'git')
 # Not stripped: the line tables the release build keeps make the backtraces
-# vaht logs when it panics readable.
-options=('!strip')
+# vaht logs when it panics readable. Nor given makepkg's full debug info
+# (its debug option adds -C debuginfo=2 to RUSTFLAGS, ten times the binary).
+options=('!strip' '!debug')
 # Kept, if edited, when the package is upgraded.
 backup=('etc/xdg/xdg-desktop-portal-wlr/vaht')
 optdepends=(
