@@ -2967,6 +2967,7 @@ dependencies = [
  "vaht-dialog",
  "vaht-import",
  "vaht-ipc",
+ "vaht-settings-model",
  "vaht-test-support",
  "vaht-ui",
  "xdg",
@@ -3040,6 +3041,16 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "vaht-settings-model"
+version = "0.1.0"
+dependencies = [
+ "rstest",
+ "serde_json",
+ "thiserror 2.0.21",
+ "vaht-ipc",
 ]
 
 [[package]]

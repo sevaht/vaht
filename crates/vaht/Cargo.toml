@@ -31,6 +31,7 @@ xdg.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true
+vaht-settings-model = { path = "../vaht-settings-model" }
 vaht-test-support.workspace = true
 
 [lints]

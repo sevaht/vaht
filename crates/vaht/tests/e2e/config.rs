@@ -203,3 +203,51 @@ fn a_change_in_place_is_made_with_the_set_setting_action_too() {
     assert!(output.status.success(), "{output:?}");
     assert!(config(&vaht, &["get"]).contains("* blur.spread = 3\n"));
 }
+
+/// Collects the dotted path of every setting `value` holds: the leaves, and
+/// a table whose keys are free (an empty one has none to give).
+fn leaf_paths(value: &serde_json::Value, prefix: &[String], paths: &mut Vec<Vec<String>>) {
+    match value {
+        serde_json::Value::Object(table) if !table.is_empty() => {
+            for (key, inner) in table {
+                let mut path = prefix.to_vec();
+                path.push(key.clone());
+                leaf_paths(inner, &path, paths);
+            }
+        }
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_)
+        | serde_json::Value::Array(_)
+        | serde_json::Value::Object(_) => paths.push(prefix.to_vec()),
+    }
+}
+
+#[test]
+fn the_form_built_from_vahts_schema_has_every_setting_vaht_has() {
+    use vaht_settings_model::{Form, SettingKind};
+    let vaht = start("");
+    let json = |arguments: &[&str]| -> serde_json::Value {
+        let output = message(&vaht, &[&["--json", "config"], arguments].concat());
+        serde_json::from_slice(&output.stdout).expect("one JSON reply")
+    };
+    let schema = json(&["schema"])["schema"].clone();
+    let form = Form::from_schema(&schema).expect("the schema is a form");
+    let reading = json(&["get"]);
+    let mut paths = Vec::new();
+    leaf_paths(&reading["value"], &[], &mut paths);
+    assert!(paths.len() > 60, "{} settings", paths.len());
+    for path in paths {
+        let parts = ConfigPath::from_parts(path.clone()).expect("a key");
+        let own = form.setting(&parts).is_some();
+        // Or inside a setting that is a whole table or list.
+        let inside = (1..path.len()).any(|length| {
+            let outer = ConfigPath::from_parts(path[..length].to_vec()).expect("a key");
+            form.setting(&outer).is_some_and(|setting| {
+                matches!(setting.kind, SettingKind::Raw | SettingKind::Mapping(_))
+            })
+        });
+        assert!(own || inside, "{parts} is in no form setting");
+    }
+}
