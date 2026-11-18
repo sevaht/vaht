@@ -101,6 +101,30 @@ impl StyleElement {
         }
     }
 
+    /// Returns whether the element is a bar that holds parts side by side:
+    /// its `padding` is the room kept around them and its `spacing` the room
+    /// between. (For any other element, `padding` is the room inside the
+    /// element round its own text or picture.)
+    #[must_use]
+    pub const fn is_bar_of_parts(self) -> bool {
+        matches!(self, Self::Titlebar | Self::Taskbar)
+    }
+
+    /// Returns whether the element is a part drawn with its own `border`
+    /// line around it: the parts of the taskbar. (A window's, a menu's and
+    /// the taskbar's own borders are drawn as outlines around the whole.)
+    #[must_use]
+    pub const fn has_border_of_its_own(self) -> bool {
+        matches!(
+            self,
+            Self::TaskbarButton
+                | Self::TaskbarWorkspace
+                | Self::TaskbarClock
+                | Self::WindowListEntry
+                | Self::WindowListEmpty
+        )
+    }
+
     /// Returns the element named `path` in style files.
     #[must_use]
     pub fn at_path(path: &str) -> Option<Self> {
@@ -199,6 +223,9 @@ pub struct ElementStyle {
     pub restore_glyph: bool,
     /// Space between the edges and the content.
     pub padding: Insets,
+    /// Space between one part of the content and the next, for an element
+    /// that holds a row or column of them (a titlebar, the taskbar).
+    pub spacing: u32,
     /// The line around it.
     pub border: BorderStyle,
     /// The height of a bar, in pixels; `None` where the element is not a
@@ -277,6 +304,7 @@ impl ElementStyle {
             glyph_images: GlyphImages::default(),
             restore_glyph: true,
             padding: Insets::default(),
+            spacing: 0,
             border: BorderStyle::default(),
             height: None,
             corner_radius: 0,
@@ -311,6 +339,8 @@ pub struct ElementStylePatch {
     pub restore_glyph: Option<bool>,
     /// The padding, if this layer sets it.
     pub padding: Option<Insets>,
+    /// The spacing between contents, if this layer sets it.
+    pub spacing: Option<u32>,
     /// The border, if this layer sets it.
     pub border: Option<BorderStyle>,
     /// The bar height, if this layer sets it.
@@ -357,6 +387,9 @@ impl ElementStylePatch {
         }
         if let Some(padding) = self.padding {
             style.padding = padding;
+        }
+        if let Some(spacing) = self.spacing {
+            style.spacing = spacing;
         }
         if let Some(border) = self.border {
             style.border = border;

@@ -9,11 +9,11 @@ use tiny_skia::{
 };
 
 use crate::color::Color;
-use crate::geometry::Rect;
+use crate::geometry::{Insets, Rect};
 use crate::icon::WidgetIcon;
 use crate::image::Image;
 use crate::layout::{Content, Layout, Placed};
-use crate::style::{Style, WidgetState};
+use crate::style::{BorderStyle, Style, WidgetState};
 use crate::text::{TextStyle, Typesetter};
 use crate::texture::render::{self, GradientImage};
 use crate::texture::{Bevel, Fill, ImageFit, Texture};
@@ -53,6 +53,13 @@ impl<'pixmap> Canvas<'pixmap> {
                 self.fill_texture(&style.texture, placed.rect);
             }
             let mut inner = placed.rect.inset(style.padding);
+            if placed.has_background
+                && placed.element.has_border_of_its_own()
+                && style.border.width > 0
+            {
+                self.draw_border(style.border, placed.rect);
+                inner = inner.inset(Insets::uniform(style.border.width));
+            }
             if let Some(icon) = &placed.icon {
                 self.draw_icon(icon, WidgetIcon::square_in(placed.rect));
                 inner = inner.without_left(WidgetIcon::span(placed.rect.height));
@@ -186,6 +193,41 @@ impl<'pixmap> Canvas<'pixmap> {
                     (rect.width, rect.height),
                 );
                 self.draw_image(&image, rect);
+            }
+        }
+    }
+
+    /// Draws `border`'s line along the inside of `rect`'s edges.
+    fn draw_border(&mut self, border: BorderStyle, rect: Rect) {
+        let width = border.width.min(rect.width / 2).min(rect.height / 2);
+        if width == 0 {
+            return;
+        }
+        let across = rect.width;
+        let down = rect.height.saturating_sub(2 * width);
+        let right = rect.x + i32::try_from(rect.width - width).unwrap_or(0);
+        let bottom = rect.y + i32::try_from(rect.height - width).unwrap_or(0);
+        let mut paint = Paint::default();
+        paint.set_color(border.color.to_skia());
+        for edge in [
+            Rect::new(rect.x, rect.y, across, width),
+            Rect::new(rect.x, bottom, across, width),
+            Rect::new(
+                rect.x,
+                rect.y + i32::try_from(width).unwrap_or(0),
+                width,
+                down,
+            ),
+            Rect::new(
+                right,
+                rect.y + i32::try_from(width).unwrap_or(0),
+                width,
+                down,
+            ),
+        ] {
+            if let Some(area) = edge.to_skia() {
+                self.pixmap
+                    .fill_rect(area, &paint, Transform::identity(), None);
             }
         }
     }
@@ -359,6 +401,7 @@ impl<'pixmap> Canvas<'pixmap> {
             | Glyph::Restore
             | Glyph::Minimize
             | Glyph::Shade
+            | Glyph::Unshade
             | Glyph::Stick
             | Glyph::Stuck
             | Glyph::Menu
@@ -421,6 +464,13 @@ impl<'pixmap> Canvas<'pixmap> {
             Glyph::Shade => {
                 path.move_to(left, top);
                 path.line_to(right, top);
+            }
+            Glyph::Unshade => {
+                // The bar, and the window's body let down under it.
+                path.move_to(left, top);
+                path.line_to(right, top);
+                path.move_to(left, top + side * 0.5);
+                path.line_to(right - side * 0.25, top + side * 0.5);
             }
             Glyph::Stick => {
                 let middle = side / 4.0;

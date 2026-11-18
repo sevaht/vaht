@@ -353,6 +353,7 @@ impl ElementStylePatch {
                     left,
                 });
             }
+            "spacing" => self.spacing = Some(map.next_value()?),
             "border" => self.border = Some(map.next_value::<BorderFile>()?.into_border()),
             "height" => self.height = Some(map.next_value()?),
             "corner_radius" => self.corner_radius = Some(map.next_value()?),
@@ -431,7 +432,7 @@ impl<'de> DeserializeSeed<'de> for GlyphImagesSeed<'_> {
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str(
                     "a table of image files by button: close, maximize, restore, minimize, \
-                     shade, stick, stuck, menu, submenu or check",
+                     shade, unshade, stick, stuck, menu, submenu or check",
                 )
             }
 
@@ -486,6 +487,8 @@ enum GlyphName {
     Minimize,
     /// A high bar.
     Shade,
+    /// A high bar over a lower one.
+    Unshade,
     /// A dot.
     Stick,
     /// A dot, pinned.
@@ -507,6 +510,7 @@ impl GlyphName {
             Self::Restore => &[Glyph::Restore],
             Self::Minimize => &[Glyph::Minimize],
             Self::Shade => &[Glyph::Shade],
+            Self::Unshade => &[Glyph::Unshade],
             Self::Stick => &[Glyph::Stick],
             Self::Stuck => &[Glyph::Stuck],
             Self::Menu => &[Glyph::Menu],

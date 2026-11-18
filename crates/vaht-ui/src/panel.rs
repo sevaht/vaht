@@ -13,7 +13,7 @@ use tiny_skia::Pixmap;
 use crate::canvas::Canvas;
 use crate::corner::CornerRadii;
 use crate::geometry::{Point, Rect, Size};
-use crate::layout::Layout;
+use crate::layout::{Layout, Space};
 use crate::style::{Style, WidgetState};
 use crate::text::Typesetter;
 use crate::widget::Widget;
@@ -237,7 +237,19 @@ impl<Content: PanelContent> Panel<Content> {
             let style = style.element_style(element, content.state());
             typesetter.text_width(text, &style.text.font) + style.padding.horizontal()
         };
-        Layout::new(&root, Rect::from_size(size), &mut fit_width)
+        // A row or column keeps its element's padding free around its parts
+        // and its spacing between them.
+        let mut space = |element: crate::style::StyleElement| {
+            if !element.is_bar_of_parts() {
+                return Space::default();
+            }
+            let style = style.element_style(element, content.state());
+            Space {
+                inset: style.padding,
+                gap: style.spacing,
+            }
+        };
+        Layout::with_space(&root, Rect::from_size(size), &mut fit_width, &mut space)
     }
 
     /// Marks the panel for laying out and painting again.
@@ -417,6 +429,25 @@ mod tests {
             !panel.hover(Some(Point::new(20, 10))),
             "the label is no button"
         );
+    }
+
+    #[test]
+    fn a_titlebars_padding_keeps_its_buttons_off_the_edge_but_a_texts_does_not_move_its_row() {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let plain = Style::built_in();
+        let panel = painted_titlebar_in(&plain, &mut typesetter);
+        assert_eq!(panel.hit_at(Point::new(199, 10)), Some(TitlebarHit::Close));
+        let layers = crate::style::StyleLayers::from_toml(
+            "[window.titlebar]\npadding = [0, 6, 0, 0]\nspacing = 3\n",
+        )
+        .expect("a valid style");
+        let padded = painted_titlebar_in(&Style::resolve(&layers), &mut typesetter);
+        assert_eq!(
+            padded.hit_at(Point::new(199, 10)),
+            None,
+            "the right six pixels are kept free"
+        );
+        assert_eq!(padded.hit_at(Point::new(190, 10)), Some(TitlebarHit::Close));
     }
 
     #[test]
@@ -813,6 +844,45 @@ mod tests {
                 "{glyph:?} is the image"
             );
         }
+    }
+
+    /// A window-list entry filling its panel.
+    struct Entry;
+
+    impl PanelContent for Entry {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            Widget::text(StyleElement::WindowListEntry, String::new())
+        }
+
+        fn state(&self) -> WidgetState {
+            WidgetState::Focused
+        }
+    }
+
+    #[test]
+    fn a_taskbar_part_with_a_border_has_its_line_inside_its_edges() {
+        let layers = crate::style::StyleLayers::from_toml(
+            "[taskbar.window-list.entry]\ntexture = { solid = \"black\" }\n\
+             border = { width = 2, color = \"#ff0000\" }\n",
+        )
+        .expect("a valid style");
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(Entry, Size::new(20, 10));
+        assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
+        let red = |x, y| {
+            let pixel = panel
+                .pixels()
+                .and_then(|pixels| pixels.pixel(x, y))
+                .expect("inside");
+            (pixel.red(), pixel.green())
+        };
+        assert_eq!(red(0, 5), (255, 0), "the left line");
+        assert_eq!(red(1, 5), (255, 0), "two thick");
+        assert_eq!(red(10, 0), (255, 0), "the top line");
+        assert_eq!(red(19, 9), (255, 0), "the far corner");
+        assert_eq!(red(10, 5), (0, 0), "black inside");
     }
 
     #[test]

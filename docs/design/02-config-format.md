@@ -1005,10 +1005,16 @@ exactly what each element gets.
     `glyph_color`), from Fluxbox's `menu.bullet`, `menu.bullet.position`
     and `menu.hilite.color`;
   - box: `border = { width, color }`, `padding = [top, right, bottom, left]`,
-    `corner_radius`, `corners`, `alpha`;
+    `spacing`, `corner_radius`, `corners`, `alpha`. `padding` is the room kept
+    free inside an element's edges, and for a bar that holds parts (`window.titlebar`,
+    `taskbar`) it is the room around them, with `spacing` the gap between one
+    part and the next: Fluxbox's `bevelWidth` for those bars, which `vaht import`
+    writes as both. A border on the taskbar's parts (`taskbar.window-list.entry`,
+    `.workspace`, `.clock`, `.button`) is drawn as a line inside each part;
   - sizes: `height` for bars and items;
   - glyphs: `glyph_color` for button pictures, and `glyph_images = { close =
-    "file.xpm", minimize, maximize, restore, shade, stick, stuck, menu }` to draw a button
+    "file.xpm", minimize, maximize, restore, shade, unshade, stick, stuck,
+    menu, submenu, check }` to draw a button
     from an image of the style's own instead (the whole button: stretched over
     it, the state's own in `[window.button.pressed]` and the like). Optional, as
     every property is: a glyph without an image is drawn as before. A style

@@ -242,6 +242,8 @@ pub enum Glyph {
     Minimize,
     /// A high bar: shade the window to its titlebar.
     Shade,
+    /// The same, while the window is shaded: this rolls it down again.
+    Unshade,
     /// A dot: keep the window on every workspace.
     Stick,
     /// The same, while it is kept there: this takes it off again.

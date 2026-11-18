@@ -5,7 +5,7 @@
 //! parent's background. Hit-testing walks the same list backwards, so the
 //! widget drawn on top is the one that is clicked.
 
-use crate::geometry::{Point, Rect};
+use crate::geometry::{Insets, Point, Rect};
 use crate::icon::WidgetIcon;
 use crate::style::{StyleElement, WidgetState};
 use crate::widget::{Glyph, MarkSide, SizePolicy, TextField, Widget, WidgetKind};
@@ -48,6 +48,16 @@ pub struct Placed<Hit> {
     pub mark_side: MarkSide,
 }
 
+/// The room a row or column keeps around and between its children, as its
+/// element's style says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Space {
+    /// Kept free inside its edges.
+    pub inset: Insets,
+    /// Kept free between one child and the next, in pixels.
+    pub gap: u32,
+}
+
 /// A widget tree placed in an area.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout<Hit> {
@@ -63,8 +73,20 @@ impl<Hit: Copy> Layout<Hit> {
         area: Rect,
         fit_width: &mut dyn FnMut(&str, StyleElement) -> u32,
     ) -> Self {
+        Self::with_space(root, area, fit_width, &mut |_| Space::default())
+    }
+
+    /// Places `root` in `area` as [`Layout::new`] does, with each row and
+    /// column keeping the room `space` gives for its element.
+    pub fn with_space(
+        root: &Widget<Hit>,
+        area: Rect,
+        fit_width: &mut dyn FnMut(&str, StyleElement) -> u32,
+        space: &mut dyn FnMut(StyleElement) -> Space,
+    ) -> Self {
         let mut placer = Placer {
             fit_width,
+            space,
             placed: Vec::new(),
         };
         placer.place(root, area);
@@ -133,6 +155,8 @@ struct Placer<'fit, Hit> {
     /// Returns the room a text widget of an element needs, padding
     /// included.
     fit_width: &'fit mut dyn FnMut(&str, StyleElement) -> u32,
+    /// Returns the room a row or column of an element keeps.
+    space: &'fit mut dyn FnMut(StyleElement) -> Space,
     /// Every widget placed so far.
     placed: Vec<Placed<Hit>>,
 }
@@ -166,11 +190,16 @@ impl<Hit: Copy> Placer<'_, Hit> {
             | WidgetKind::Field(_)
             | WidgetKind::Fill => return,
         };
-        let lengths = self.distribute(axis, area, children);
+        let space = (self.space)(widget.element);
+        let inner = area.inset(space.inset);
+        // The gaps come out of what the children share.
+        let gaps = space.gap * u32::try_from(children.len().saturating_sub(1)).unwrap_or(0);
+        let shared = axis.slice(inner, 0, axis.length(inner).saturating_sub(gaps));
+        let lengths = self.distribute(axis, shared, children);
         let mut start = 0;
         for (child, length) in children.iter().zip(lengths) {
-            self.place(child, axis.slice(area, start, length));
-            start += length;
+            self.place(child, axis.slice(inner, start, length));
+            start += length + space.gap;
         }
     }
 
@@ -259,14 +288,25 @@ impl<Hit: Copy> Placer<'_, Hit> {
                 // give each line a fixed size instead.
                 Axis::Vertical => 0,
             },
-            WidgetKind::Row(children) | WidgetKind::Column(children) => children
-                .iter()
-                .map(|child| match child.size {
-                    SizePolicy::Fixed(length) => length,
-                    SizePolicy::Fit => self.natural_length(child, axis, thickness),
-                    SizePolicy::Square | SizePolicy::Share { .. } | SizePolicy::Fill { .. } => 0,
-                })
-                .sum(),
+            WidgetKind::Row(children) | WidgetKind::Column(children) => {
+                let space = (self.space)(widget.element);
+                let own = match axis {
+                    Axis::Horizontal => space.inset.horizontal(),
+                    Axis::Vertical => space.inset.vertical(),
+                };
+                let gaps = space.gap * u32::try_from(children.len().saturating_sub(1)).unwrap_or(0);
+                own + gaps
+                    + children
+                        .iter()
+                        .map(|child| match child.size {
+                            SizePolicy::Fixed(length) => length,
+                            SizePolicy::Fit => self.natural_length(child, axis, thickness),
+                            SizePolicy::Square
+                            | SizePolicy::Share { .. }
+                            | SizePolicy::Fill { .. } => 0,
+                        })
+                        .sum::<u32>()
+            }
             WidgetKind::Glyph(_) | WidgetKind::Field(_) | WidgetKind::Fill => 0,
         }
     }
@@ -391,5 +431,42 @@ mod tests {
             "room to spare: each at its most"
         );
         assert_eq!(widths(300, 3), [100, 100, 100], "crowded: equal shares");
+    }
+
+    #[test]
+    fn a_rows_space_insets_its_parts_and_goes_between_them() {
+        let row = Widget::row(
+            StyleElement::Titlebar,
+            vec![
+                Widget::fill(StyleElement::Label).with_size(SizePolicy::Square),
+                Widget::fill(StyleElement::Label).with_size(SizePolicy::Fill { weight: 1 }),
+                Widget::fill(StyleElement::Label).with_size(SizePolicy::Square),
+            ],
+        );
+        let space = Space {
+            inset: Insets {
+                top: 2,
+                right: 3,
+                bottom: 2,
+                left: 3,
+            },
+            gap: 4,
+        };
+        let layout = Layout::with_space(
+            &row,
+            Rect::new(0, 0, 100, 20),
+            &mut ten_per_character,
+            &mut |_| space,
+        );
+        // 16 high inside, 94 wide: buttons 16 square, 4 apart from the label,
+        // which has the 94 - 8 - 32 left.
+        assert_eq!(
+            child_rects(&layout),
+            [
+                Rect::new(3, 2, 16, 16),
+                Rect::new(23, 2, 54, 16),
+                Rect::new(81, 2, 16, 16)
+            ]
+        );
     }
 }
