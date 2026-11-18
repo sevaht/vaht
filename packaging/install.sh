@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installs vaht and the files it needs from the system: the executable, the
-# login-screen entry (wayland-sessions/vaht.desktop) and the portal choice
-# (xdg-desktop-portal/vaht-portals.conf). Packages call it with --destdir;
+# login-screen entry (wayland-sessions/vaht.desktop), the portal choice
+# (xdg-desktop-portal/vaht-portals.conf) and the session target
+# (systemd/user/vaht-session.target), which ties the portals to the session. Packages call it with --destdir;
 # a user without root installs with --user.
 #
 #   packaging/install.sh                   build, then install into /usr (as root)
@@ -14,11 +15,13 @@
 #   PREFIX/bin/vaht
 #   PREFIX/share/wayland-sessions/vaht.desktop        display managers list it
 #   PREFIX/share/xdg-desktop-portal/vaht-portals.conf  portals for XDG_CURRENT_DESKTOP=vaht
+#   PREFIX/lib/systemd/user/vaht-session.target        the session, for the service manager
 #   PREFIX/share/doc/vaht/                             README and design notes
 #   PREFIX/share/licenses/vaht/LICENSE
 # and for one user (--user):
 #   ~/.local/bin/vaht
 #   ~/.config/xdg-desktop-portal/vaht-portals.conf
+#   ~/.config/systemd/user/vaht-session.target
 # (no login-screen entry: display managers read only system directories;
 # run vaht from a virtual terminal instead).
 #
@@ -52,12 +55,14 @@ done
 if [[ ${mode} == user ]]; then
     bin_dir=${HOME}/.local/bin
     portal_dir=${XDG_CONFIG_HOME:-${HOME}/.config}/xdg-desktop-portal
+    unit_dir=${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user
     session_dir=
     doc_dir=
     license_dir=
 else
     bin_dir=${destdir}${prefix}/bin
     portal_dir=${destdir}${prefix}/share/xdg-desktop-portal
+    unit_dir=${destdir}${prefix}/lib/systemd/user
     session_dir=${destdir}${prefix}/share/wayland-sessions
     doc_dir=${destdir}${prefix}/share/doc/vaht
     license_dir=${destdir}${prefix}/share/licenses/vaht
@@ -67,6 +72,7 @@ fi
 files=(
     "target/release/vaht ${bin_dir}/vaht 755"
     "data/vaht-portals.conf ${portal_dir}/vaht-portals.conf 644"
+    "data/vaht-session.target ${unit_dir}/vaht-session.target 644"
 )
 if [[ -n ${session_dir} ]]; then
     files+=(

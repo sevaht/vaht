@@ -9,6 +9,12 @@
 //! (on the DRM backend; a nested or headless vaht must not point the
 //! user's services at itself) and empties on exit
 //! (`[session] update_activation_environment`).
+//!
+//! When it does, vaht also starts its session target as the session starts
+//! and stops it as it ends ([`SESSION_TARGET`], `data/vaht-session.target`):
+//! services that are `PartOf=graphical-session.target`, the desktop portals
+//! among them, then live as long as the session, rather than outliving the
+//! vaht they were started for and serving the next one stale.
 
 /// What toolkits are told, unless already told otherwise.
 pub(crate) const TOOLKIT_DEFAULTS: [(&str, &str); 3] = [
@@ -19,6 +25,9 @@ pub(crate) const TOOLKIT_DEFAULTS: [(&str, &str); 3] = [
     // manager unless told it is one.
     ("_JAVA_AWT_WM_NONREPARENTING", "1"),
 ];
+
+/// vaht's session target, binding `graphical-session.target`.
+pub(crate) const SESSION_TARGET: &str = "vaht-session.target";
 
 /// The variables exported to the activation environment.
 const EXPORTED: [&str; 6] = [
@@ -75,6 +84,24 @@ pub(crate) fn update_command(is_clearing: bool, is_set: impl Fn(&str) -> bool) -
     words.join(" ")
 }
 
+/// Returns `export`, the command updating the activation environment as
+/// the session starts, followed by starting the session target afresh:
+/// stopped first, in case a vaht that crashed left it running.
+pub(crate) fn starting_command(export: &str) -> String {
+    format!(
+        "{export} && {{ systemctl --user stop {SESSION_TARGET}; \
+         systemctl --user start {SESSION_TARGET} || \
+         echo 'vaht: {SESSION_TARGET} is not installed; the desktop portals \
+         are not tied to the session' >&2; }}"
+    )
+}
+
+/// Returns `clearing`, the command emptying the activation environment as
+/// the session ends, after stopping the session target.
+pub(crate) fn ending_command(clearing: &str) -> String {
+    format!("systemctl --user stop {SESSION_TARGET}; {clearing}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,6 +121,22 @@ mod tests {
             command,
             "dbus-update-activation-environment --systemd WAYLAND_DISPLAY \
              XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE VAHT_SOCKET"
+        );
+    }
+
+    #[test]
+    fn the_session_target_starts_after_the_export_and_stops_before_the_clearing() {
+        let starting = starting_command("export");
+        assert!(
+            starting.starts_with(
+                "export && { systemctl --user stop vaht-session.target; \
+                 systemctl --user start vaht-session.target"
+            ),
+            "{starting}"
+        );
+        assert_eq!(
+            ending_command("clear"),
+            "systemctl --user stop vaht-session.target; clear"
         );
     }
 

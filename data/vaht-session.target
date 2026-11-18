@@ -1,0 +1,13 @@
+# vaht's graphical session, for the user's service manager (systemd.special(7)).
+#
+# vaht starts this when it runs the session (on the hardware, not nested) and
+# stops it when it exits. Binding graphical-session.target ties to vaht's
+# lifetime the services that declare PartOf=graphical-session.target: the
+# desktop portals among them, which then start afresh, pointed at the new
+# session, rather than outliving the vaht they were started for.
+[Unit]
+Description=vaht graphical session
+Documentation=https://github.com/nacitar/vaht
+BindsTo=graphical-session.target
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target

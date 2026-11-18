@@ -183,6 +183,18 @@ fn the_activation_environment_learns_of_the_session_and_forgets_it_on_exit() {
     .expect("written");
     std::fs::set_permissions(&tool, std::os::unix::fs::PermissionsExt::from_mode(0o755))
         .expect("made runnable");
+    // Never the user's own service manager.
+    let service_manager = directory.path().join("systemctl");
+    std::fs::write(
+        &service_manager,
+        format!("#!/bin/sh\necho \"systemctl $*\" >> {}\n", calls.display()),
+    )
+    .expect("written");
+    std::fs::set_permissions(
+        &service_manager,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .expect("made runnable");
     let path = format!(
         "{}:{}",
         directory.path().display(),
@@ -213,9 +225,21 @@ fn the_activation_environment_learns_of_the_session_and_forgets_it_on_exit() {
         exported.starts_with("--systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP"),
         "{exported}"
     );
+    assert!(
+        exported.contains(
+            "systemctl --user stop vaht-session.target\n\
+             systemctl --user start vaht-session.target\n"
+        ),
+        "the session target starts afresh after the export: {exported}"
+    );
     let _report = vaht.stop();
     let all = vaht_test_support::wait_for_file(&calls, |text| text.contains("WAYLAND_DISPLAY="));
     assert!(all.contains("XDG_CURRENT_DESKTOP= "), "{all}");
+    let ending = &all[all.rfind("systemctl --user stop").expect("stopped at exit")..];
+    assert!(
+        ending.contains("WAYLAND_DISPLAY="),
+        "the target stops before the environment is emptied: {all}"
+    );
 }
 
 #[test]

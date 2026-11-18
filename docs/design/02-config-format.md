@@ -220,7 +220,14 @@ rest by name, so a setting never silently does nothing:
   `XDG_CURRENT_DESKTOP`, `XDG_SESSION_DESKTOP`, `XDG_SESSION_TYPE` and
   `VAHT_SOCKET`, so portals
   and other D-Bus-activated services find the session (the autostart
-  programs run once it is done), and empties them when it exits. Programs vaht starts are also told
+  programs run once it is done), and empties them when it exits. With the
+  first export it also starts `vaht-session.target` afresh (stopped first,
+  in case a crashed vaht left it running), and stops it before emptying:
+  that target binds `graphical-session.target`, so services `PartOf` it,
+  the desktop portals among them, live as long as the session instead of
+  outliving the vaht they were started for (a dead screen-cast portal
+  left OBS and browsers no capture sources). `install.sh` installs it;
+  without it, vaht says so on stderr and carries on. Programs vaht starts are also told
   `QT_QPA_PLATFORM=wayland;xcb`, `SDL_VIDEODRIVER=wayland,x11` and
   `_JAVA_AWT_WM_NONREPARENTING=1`, unless vaht's own environment sets
   them.

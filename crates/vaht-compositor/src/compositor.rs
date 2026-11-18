@@ -138,6 +138,18 @@ enum Autostart {
     Started,
 }
 
+/// What vaht tells the user's service manager of its session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Activation {
+    /// Nothing: nested or headless, or told not to.
+    Left,
+    /// The activation environment, not yet the session target.
+    Exported,
+    /// The environment, and the session target started, so it is stopped
+    /// at exit.
+    SessionStarted,
+}
+
 /// The running compositor.
 pub struct Compositor {
     /// Issues ids, creates globals and inserts clients.
@@ -171,8 +183,9 @@ pub struct Compositor {
     pub(crate) frame_pacing: FramePacing,
     /// Holds clients' frames until the GPU has drawn them.
     pub(crate) fence_waits: FenceWaits,
-    /// Whether the activation environment is told of the session.
-    exports_activation_environment: bool,
+    /// Whether the activation environment is told of the session, and
+    /// whether vaht's session target is started.
+    activation: Activation,
     /// Where the autostart programs are.
     autostart: Autostart,
     /// The log file's limits, which `[logging]` sets; none without a log
@@ -381,7 +394,7 @@ impl Compositor {
             session_lock: SessionLock::default(),
             frame_pacing: FramePacing::default(),
             fence_waits: FenceWaits::default(),
-            exports_activation_environment: false,
+            activation: Activation::Left,
             autostart: Autostart::Started,
             log_rotation: options.log_rotation,
             log_filter: options.log_filter,
@@ -443,12 +456,17 @@ impl Compositor {
         }
         self.start_xwayland(allows_xwayland);
         let owns_seat = matches!(self.backend, Backend::Drm(_));
-        self.exports_activation_environment = self
+        let exports = self
             .config
             .settings
             .session
             .update_activation_environment
             .applies(owns_seat);
+        self.activation = if exports {
+            Activation::Exported
+        } else {
+            Activation::Left
+        };
         if self.xwayland.is_some() {
             self.autostart = Autostart::WaitingForXwayland;
             // Wayland services find the session meanwhile.
@@ -463,8 +481,9 @@ impl Compositor {
     /// autostart programs, which may need the services it starts.
     fn run_autostart(&mut self) {
         self.autostart = Autostart::Started;
+        let update = self.activation_update(false);
         let autostart = &self.config.settings.session.autostart;
-        if let Some(command) = self.activation_update(false) {
+        if let Some(command) = update {
             self.launcher.run_in_order(&command, autostart);
         } else {
             for command_line in autostart {
@@ -1028,15 +1047,34 @@ impl Compositor {
         }
     }
 
+    /// Returns `command`, updating the activation environment, with the
+    /// session target started after it the first time (the session
+    /// starting), or stopped before it when `is_clearing` (ending).
+    fn with_session_target(&mut self, command: String, is_clearing: bool) -> String {
+        match (self.activation, is_clearing) {
+            (Activation::SessionStarted, true) => {
+                self.activation = Activation::Exported;
+                session_environment::ending_command(&command)
+            }
+            (Activation::Exported, false) => {
+                self.activation = Activation::SessionStarted;
+                session_environment::starting_command(&command)
+            }
+            (Activation::Left | Activation::Exported, true)
+            | (Activation::Left | Activation::SessionStarted, false) => command,
+        }
+    }
+
     /// Returns the command that tells the activation environment of the
     /// session, or empties it there (`is_clearing`), if vaht exports it.
-    fn activation_update(&self, is_clearing: bool) -> Option<String> {
-        if !self.exports_activation_environment {
+    fn activation_update(&mut self, is_clearing: bool) -> Option<String> {
+        if self.activation == Activation::Left {
             return None;
         }
         let launcher = &self.launcher;
         let command =
             session_environment::update_command(is_clearing, |name| launcher.is_set(name));
+        let command = self.with_session_target(command, is_clearing);
         tracing::info!(command, "activation environment updated");
         Some(command)
     }
