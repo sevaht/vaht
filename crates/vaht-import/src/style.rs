@@ -37,6 +37,8 @@ enum Property {
     TextColor,
     /// `glyph_color`.
     GlyphColor,
+    /// `glyph_images`.
+    GlyphImages,
     /// `justify`.
     Justify,
     /// `padding`.
@@ -83,6 +85,7 @@ impl Property {
             Self::TextEffect => "text_effect",
             Self::TextColor => "text_color",
             Self::GlyphColor => "glyph_color",
+            Self::GlyphImages => "glyph_images",
             Self::Justify => "justify",
             Self::Padding => "padding",
             Self::Border => "border",
@@ -589,6 +592,9 @@ impl StyleFile {
                     let color = self.color_chain(names, report).unwrap_or_else(white);
                     cell.insert(Property::GlyphColor, Written(Value::from(color)));
                 }
+                if element == StyleElement::Button {
+                    self.add_glyph_images(&mut cell, state);
+                }
                 if let Some(names) = sources.justify {
                     let justify = self.justify(names);
                     cell.insert(Property::Justify, Written(Value::from(justify)));
@@ -967,7 +973,44 @@ impl StyleFile {
     /// style: found beside the Fluxbox style or in its `pixmaps` directory,
     /// and an XPM vaht reads.
     fn pixmap_image(&mut self, name: &str) -> Option<String> {
-        let file = self.database.get(&format!("{name}.pixmap"))?.to_owned();
+        self.image_resource(&format!("{name}.pixmap"))
+    }
+
+    /// Adds to `cell` the pictures the style gives the titlebar buttons in
+    /// `state` (`window.close.pixmap`, `.unfocus.pixmap`, `.pressed.pixmap`):
+    /// each as the vaht glyphs it draws.
+    fn add_glyph_images(&mut self, cell: &mut Cell, state: WidgetState) {
+        // Fluxbox's buttons, and the vaht glyphs each is the picture of.
+        const BUTTONS: [(&str, &[&str]); 5] = [
+            ("close", &["close"]),
+            ("iconify", &["minimize"]),
+            ("maximize", &["maximize", "restore"]),
+            ("shade", &["shade"]),
+            ("stick", &["stick"]),
+        ];
+        let suffix = match state {
+            WidgetState::Focused => "pixmap",
+            WidgetState::Unfocused => "unfocus.pixmap",
+            WidgetState::Pressed => "pressed.pixmap",
+            WidgetState::Hovered | WidgetState::Disabled => return,
+        };
+        let mut images = InlineTable::new();
+        for (button, glyphs) in BUTTONS {
+            if let Some(image) = self.image_resource(&format!("window.{button}.{suffix}")) {
+                for glyph in glyphs {
+                    images.insert(*glyph, Value::from(image.clone()));
+                }
+            }
+        }
+        if !images.is_empty() {
+            cell.insert(Property::GlyphImages, Written(Value::InlineTable(images)));
+        }
+    }
+
+    /// Returns the name the converted style gives the image the resource
+    /// `resource` names (see [`StyleFile::pixmap_image`]).
+    fn image_resource(&mut self, resource: &str) -> Option<String> {
+        let file = self.database.get(resource)?.to_owned();
         let relative = Path::new(&file);
         // Only what is inside the style's own directory is carried along.
         if file.is_empty()
@@ -1456,6 +1499,7 @@ menu.bullet:\tsquare
                     Property::TextEffect => got.text.effect == want.text.effect,
                     Property::TextColor => got.text.color == want.text.color,
                     Property::GlyphColor => got.glyph_color == want.glyph_color,
+                    Property::GlyphImages => got.glyph_images == want.glyph_images,
                     Property::Justify => got.text.justify == want.text.justify,
                     Property::Padding => got.padding == want.padding,
                     Property::Border => got.border == want.border,
