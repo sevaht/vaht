@@ -26,6 +26,9 @@ depends=(
   'xdg-desktop-portal-wlr'
 )
 makedepends=('cargo' 'git')
+# Not stripped: the line tables the release build keeps make the backtraces
+# vaht logs when it panics readable.
+options=('!strip')
 # Kept, if edited, when the package is upgraded.
 backup=('etc/xdg/xdg-desktop-portal-wlr/vaht')
 optdepends=(

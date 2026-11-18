@@ -102,6 +102,9 @@ debug = true
 [profile.release]
 lto = true         # optimize across crate boundaries
 codegen-units = 1   # optimize the crate as one unit
+# File and line numbers in panic backtraces in vaht.log, at a few megabytes
+# and no speed: the installed vaht is the one used day to day.
+debug = "line-tables-only"
 
 # An optimized build with full debug info, for testing on hardware: nearly
 # as fast as a release, with readable backtraces and a debugger's view.

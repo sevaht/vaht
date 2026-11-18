@@ -2,3 +2,7 @@
 .claude/settings.local.json
 # Obsidian rewrites this on every click; the vault settings beside it stay tracked.
 docs/.obsidian/workspace.json
+# What makepkg builds in packaging/arch.
+/packaging/arch/pkg/
+/packaging/arch/src/
+/packaging/arch/*.pkg.tar.*
