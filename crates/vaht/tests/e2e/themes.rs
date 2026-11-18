@@ -110,10 +110,10 @@ fn set_theme_and_set_setting_apply_in_place_and_save_settings_writes_them() {
     client.open_windows(1);
     let run = |command: &str| {
         let output = std::process::Command::new(EXECUTABLE)
-            .args(["msg", "run", command])
+            .args(["run", command])
             .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
             .output()
-            .expect("vaht msg runs");
+            .expect("vaht runs");
         assert!(output.status.success(), "{output:?}");
     };
     run("set-theme mine");

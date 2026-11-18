@@ -4,7 +4,7 @@
 //! or my fluxland one: the format is the same), following the file paths its
 //! `init` names. [`FluxboxSetup::convert`] turns it into vaht's files, and
 //! [`Conversion::write`] writes them, never over existing files unless asked,
-//! and checks the result as `vaht check` would. The source is never changed.
+//! and checks the result as `vaht config check` would. The source is never changed.
 //! Every line that is not converted is in the [`Report`], with why.
 //!
 //! Converted today: `init` to `settings.toml`, `keys` to `bindings.toml`,

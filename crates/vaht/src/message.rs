@@ -1,4 +1,4 @@
-//! `vaht msg`: one request to the running vaht, and its reply printed.
+//! The commands that ask the running vaht: one request, and its reply printed.
 
 use std::fmt::Write as _;
 use std::process::ExitCode;

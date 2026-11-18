@@ -86,9 +86,9 @@ rule can catch.
   increments a relaxed atomic counter for its kind, and dropping it decrements
   the counter. The cost is one atomic increment per object creation, which is
   negligible, so it is **always on**, in release builds too. That means
-  `vaht msg debug resources` works on a real session, not only in a debug
+  `vaht debug resources` works on a real session, not only in a debug
   build.
-- `vaht msg debug resources` reports:
+- `vaht debug resources` reports:
   - live counts per kind, with their peak values;
   - open file descriptors grouped by what they point to (socket, `anon_inode`
     type such as dmabuf, syncfile or eventfd, DRM, pipe, file), read from
@@ -145,7 +145,7 @@ builds skip these checks.
   - If the disk can't keep up, lines are **dropped and counted** rather than
     stalling a frame.
   - The count is logged once the backlog clears, and appears in
-    `vaht msg debug resources`.
+    `vaht debug resources`.
 
 ### 4.2 Choosing what is logged
 
@@ -160,9 +160,9 @@ builds skip these checks.
 - **Filters use the `RUST_LOG` syntax**, for example
   `info,vaht::input=trace,smithay::backend::drm=debug`. They come from
   `--log` or `VAHT_LOG` at startup.
-- **They can change while vaht runs:** `vaht msg log-filter "vaht::focus=debug"`,
+- **They can change while vaht runs:** `vaht log-filter "vaht::focus=debug"`,
   through `tracing-subscriber`'s reload layer. Tracking down a focus bug no
-  longer needs a restart, and `vaht msg log-filter reset` returns to the
+  longer needs a restart, and `vaht log-filter reset` returns to the
   startup filter.
 - **Privacy:** window titles are never logged: they name documents, pages
   and people, and an application id identifies a window as well for
@@ -189,7 +189,7 @@ rolling writer only rotates by time, which doesn't bound disk use.
 - **Panic hook.** It logs the panic message, location and backtrace to every
   sink, flushes the non-blocking writer (it keeps the `WorkerGuard`), restores
   the VT, and exits non-zero.
-- **`vaht msg debug frames`** reports per-output frame statistics: render
+- **`vaht debug frames`** reports per-output frame statistics: render
   time, missed vblanks, direct scanout hits and misses, and whether VRR is
   active. This is the first stop when a game or video stutters.
 - **`tracy` cargo feature (off by default).** `tracing-tracy` streams spans

@@ -3,7 +3,7 @@
 //! part is not a plain word.
 //!
 //! One grammar for everything that names a setting: the `set-setting`
-//! action, `vaht msg config set`, and the edits the settings window sends.
+//! action, `vaht config set`, and the edits the settings window sends.
 
 use std::fmt;
 

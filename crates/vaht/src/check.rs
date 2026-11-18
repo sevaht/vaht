@@ -1,8 +1,9 @@
-//! `vaht check`: validates the configuration without running vaht.
+//! The parts of `vaht config` that need no running vaht: `check`, `check
+//! --print-defaults` and `schema`.
 //!
-//! It reads the files exactly as the compositor does, so a file it accepts
-//! is one a reload applies. It runs without logging: it writes its findings
-//! to the terminal and leaves the compositor's log file alone.
+//! `check` reads the files exactly as the compositor does, and lists every
+//! problem the compositor would leave out. These run without logging: they
+//! write to the terminal and leave the compositor's log file alone.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -41,5 +42,25 @@ pub fn print_defaults() -> ExitCode {
         "# ===== themes/<name>.toml: the built-in theme =====\n{}",
         vaht_ui::Theme::BUILT_IN
     ));
+    ExitCode::SUCCESS
+}
+
+/// Prints the JSON Schema of `file`: every key with its type, documentation,
+/// default and range. It is generated from vaht's code, so it needs no
+/// running vaht.
+///
+/// # Panics
+///
+/// Never: a schema is plain data that always encodes.
+#[must_use]
+pub fn schema(file: vaht_ipc::ConfigFile) -> ExitCode {
+    let Some(schema) = Config::schema(file) else {
+        terminal::report_error(&anyhow::anyhow!("{} has no schema yet", file.file_name()));
+        return ExitCode::FAILURE;
+    };
+    let mut text =
+        serde_json::to_string_pretty(&schema).expect("a schema is plain data, always encodable");
+    text.push('\n');
+    terminal::print(&text);
     ExitCode::SUCCESS
 }

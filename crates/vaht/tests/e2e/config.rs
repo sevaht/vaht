@@ -1,7 +1,7 @@
 //! Editing the configuration while vaht runs: changes made in place apply at
 //! once, stay out of the files until saved, and are refused whole if the
 //! configuration would not be valid. The settings' own values are checked
-//! through the workspaces' names, which `vaht msg workspaces` lists.
+//! through the workspaces' names, which `vaht workspaces` lists.
 
 use std::path::Path;
 use std::process::Output;
@@ -20,17 +20,16 @@ fn start(settings: &str) -> HeadlessVaht {
     HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("settings.toml", settings)])
 }
 
-/// Runs `vaht msg <arguments>` against `vaht`.
+/// Runs `vaht <arguments>` against `vaht`.
 fn message(vaht: &HeadlessVaht, arguments: &[&str]) -> Output {
     std::process::Command::new(EXECUTABLE)
-        .arg("msg")
         .args(arguments)
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs")
+        .expect("vaht runs")
 }
 
-/// Runs `vaht msg config <arguments>`, which must succeed.
+/// Runs `vaht config <arguments>`, which must succeed.
 fn config(vaht: &HeadlessVaht, arguments: &[&str]) -> String {
     let output = message(vaht, &[&["config"], arguments].concat());
     assert!(output.status.success(), "{output:?}");
@@ -232,7 +231,10 @@ fn the_form_built_from_vahts_schema_has_every_setting_vaht_has() {
         let output = message(&vaht, &[&["--json", "config"], arguments].concat());
         serde_json::from_slice(&output.stdout).expect("one JSON reply")
     };
-    let schema = json(&["schema"])["schema"].clone();
+    // Generated from vaht's code: it needs no running vaht, so it is what
+    // `vaht config schema` prints, not a reply.
+    let schema: serde_json::Value =
+        serde_json::from_slice(&message(&vaht, &["config", "schema"]).stdout).expect("a schema");
     let form = Form::from_schema(&schema).expect("the schema is a form");
     let needing_json: Vec<String> = form
         .settings()

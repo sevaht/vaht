@@ -1,7 +1,7 @@
 //! What the settings window shows and decides, without drawing anything.
 //!
-//! vaht describes its settings as JSON Schema (`vaht msg config schema`) and
-//! says what they are now (`vaht msg config get`). This crate turns those
+//! vaht describes its settings as JSON Schema (`vaht config schema`) and
+//! says what they are now (`vaht config get`). This crate turns those
 //! into a form to fill in ([`Form`]: sections of [`Setting`]s, each with the
 //! kind of value it takes), and keeps track of what the user has done with
 //! it ([`SettingsEditor`]): which settings differ from their defaults, which

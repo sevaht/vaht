@@ -1,4 +1,4 @@
-//! Picking one of a list a program sends (`vaht msg pick`): a dmenu-style
+//! Picking one of a list a program sends (`vaht pick`): a dmenu-style
 //! chooser drawn as one of vaht's own menus, in the user's theme, at the
 //! pointer. The screen-share portal (xdg-desktop-portal-wlr) uses it to ask
 //! which output or window to share (`data/xdg-desktop-portal-wlr-vaht`).

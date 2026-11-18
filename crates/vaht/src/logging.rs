@@ -3,7 +3,7 @@
 //!
 //! Events are `tracing` events, filtered by one [`EnvFilter`] that applies to
 //! every destination and can be replaced at runtime through [`LogFilter`]
-//! (`vaht msg log-filter`). The destinations are:
+//! (`vaht log-filter`). The destinations are:
 //!
 //! - **a log file** in the state directory, size-limited by a
 //!   [`LogRotation`] (`[logging]` in the settings) and rotated at every

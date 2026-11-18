@@ -16,13 +16,13 @@ is a draft for discussion. Names follow the glossary in 00. Types are those of
    historical split.
 3. **Defaults live in code, documented in one place.** Every file and every key
    is optional; an empty config directory gives a working desktop.
-   `vaht check --print-defaults` prints the complete effective config, so the
+   `vaht config check --print-defaults` prints the complete effective config, so the
    defaults can be read without opening the source (K3: they are written down
    only once).
 4. **No paths to other config files.** File names are fixed (K3). Fluxbox's
    `session.keyFile`, `session.menuFile` and the rest are gone.
 5. **A bad config is used as far as it can be, and loudly.** What cannot be
-   used is left out, never the rest: see *Partly valid* under §2. `vaht check`
+   used is left out, never the rest: see *Partly valid* under §2. `vaht config check`
    validates without running and lists every problem.
 6. **vaht writes config only on SaveSettings**, through `toml_edit`, which
    keeps comments and layout (00 decision).
@@ -69,9 +69,9 @@ Everything lives under `$XDG_CONFIG_HOME/vaht/` (normally `~/.config/vaht/`):
     file, the setting, what is wrong and what vaht used instead, until the files
     are fixed; a click hides it (until the problems change). The banner is drawn
     from the built-in theme, whatever theme is in use, so a broken theme cannot
-    hide it. `vaht msg config files` and the settings window list the problems
+    hide it. `vaht config files` and the settings window list the problems
     too. Fixing the files triggers the next load by itself. A change made from
-    the settings window or `vaht msg config set` is still refused if it is
+    the settings window or `vaht config set` is still refused if it is
     itself what is not valid; problems the files already had do not stop it.
 
 ---
@@ -596,7 +596,7 @@ lid-close = "exec swaylock"
 
 **How bindings behave (as built).**
 - `bindings.toml` replaces the built-in bindings as a whole, as Fluxbox's
-  `keys` file does. `vaht check --print-defaults` prints the built-in file to
+  `keys` file does. `vaht config check --print-defaults` prints the built-in file to
   start from.
 - A bound key press, and its release, never reach the focused window.
 - A bound button press never reaches the window either: vaht holds the
@@ -638,7 +638,7 @@ lid-close = "exec swaylock"
   cannot repeat. A key mode's bindings, in `[key_modes.<name>]`, are the
   only ones bound while it lasts; keys it leaves unbound reach the
   window. `key-mode default` goes back to `[keys]`, as does the end
-  chord, and a reload that drops the mode. `vaht check` rejects a
+  chord, and a reload that drops the mode. `vaht config check` rejects a
   `key-mode` naming a mode the file does not have.
 - `focus-direction <left|right|up|down>` focuses and raises the nearest
   shown window whose middle lies that way, within 45 degrees, from the
@@ -663,7 +663,7 @@ lid-close = "exec swaylock"
 - `set-setting <key> <value>` changes a setting of `settings.toml` in
   place: the key is dotted (`taskbar.auto_hide`, `input.device."My
   Mouse".accel_speed`), the value TOML (`true`, `300`, `"sloppy"`) or a
-  bare word taken as a string. `vaht check` refuses a key or value
+  bare word taken as a string. `vaht config check` refuses a key or value
   `settings.toml` could not hold, and a change that leaves the whole
   configuration invalid (a theme that is not there) is not made. As with
   `set-theme`, which is `set-setting theme <name>`, the change outlasts
@@ -851,7 +851,7 @@ items = [
 ## 9. `outputs.toml`
 
 ```toml
-# vaht prints a ready-to-paste `match` for each output: vaht msg outputs
+# vaht prints a ready-to-paste `match` for each output: vaht outputs
 [[output]]
 match = { connector = "HDMI-A-1" }    # or { make = "...", model = "...", serial = "..." }
 mode = "1920x1080@60"                 # or "1920x1080": the fastest refresh
@@ -928,7 +928,7 @@ primary_output_changed = "~/bin/on-primary"    # the output's connector as $1
   or the primary output's connector as its one argument (`$1`), as
   av-output-switcher's hooks are: `profile_applied` after a profile is
   applied, `primary_output_changed` after the primary output changes,
-  and both at start. `vaht msg outputs --json` gives the whole layout.
+  and both at start. `vaht outputs --json` gives the whole layout.
 - **How the two sections combine.** `[[output]]` entries are the baseline.
   When `when_connected` selects a profile, that profile overrides the baseline
   for the outputs it lists. With no profiles, the baseline is everything.
@@ -965,7 +965,7 @@ are resolved in four layers, each overriding the one before:
 4. `[<element>.<state>]`: one element, one state.
 
 These four fixed layers replace Fluxbox's wildcard resource matching.
-`vaht check --theme <name>` prints the fully resolved table, so it shows
+`vaht config check --theme <name>` prints the fully resolved table, so it shows
 exactly what each element gets.
 
 - **Elements:**
@@ -1037,7 +1037,7 @@ exactly what each element gets.
 - Properties, states and elements still to come are refused by name, at
   their line in the file.
 - The built-in theme is itself a theme file (`vaht-ui`'s
-  `theme/built_in.toml`), printed by `vaht check --print-defaults`.
+  `theme/built_in.toml`), printed by `vaht config check --print-defaults`.
 - A theme file is a whole theme: what it leaves out takes vaht's fallback,
   not the built-in theme's value.
 
@@ -1208,7 +1208,7 @@ vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/themes/<
   ignored settings, unsupported pattern features.
 - It converts fluxbox styles (resource cascade, X11 color names, XPM and other
   pixmaps to PNG beside the theme).
-- `vaht check` runs on the result before it reports success.
+- `vaht config check` runs on the result before it reports success.
 
 ---
 
@@ -1218,8 +1218,8 @@ vaht listens on a Unix socket beside its Wayland one:
 `$XDG_RUNTIME_DIR/<WAYLAND_DISPLAY>.vaht.sock`. Every program it starts
 finds the path in `VAHT_SOCKET`. The protocol is one JSON object per line
 in each direction. A client writes a request and reads one reply for it,
-in order. The types live in the `vaht-ipc` crate, which `vaht msg` and the
-dialogs use too.
+in order. The types live in the `vaht-ipc` crate, which `vaht`'s commands that
+ask the running vaht and the dialogs use too.
 
 | Request | Fields | Reply |
 |---|---|---|
@@ -1234,13 +1234,15 @@ dialogs use too.
   that is not understood, names an unknown field, or cannot be carried out.
 - **Nothing is held for a client:** a line longer than 64 KiB, or replies
   left unread past 1 MiB, drop the connection.
-- **`vaht msg`** asks from the command line: `vaht msg run workspace 2`,
-  `vaht msg windows`, `vaht msg workspaces`, `vaht msg outputs` (each
+- **The commands that ask the running vaht** are on the command line, with no
+  prefix: `vaht run workspace 2`,
+  `vaht windows`, `vaht workspaces`, `vaht outputs` (each
   output with the `match` lines to paste into `outputs.toml`),
-  `vaht msg version`, `vaht msg subscribe windows workspaces outputs`
+  `vaht version`, `vaht subscribe windows workspaces outputs`
   (each list as it changes, until vaht stops); `--json` prints the reply,
-  or each event, as sent.
-- **`vaht msg config`** reads the configuration as vaht has it, for the
+  or each event, as sent. `vaht config check` and `vaht config schema` need
+  no running vaht.
+- **`vaht config`** reads the configuration as vaht has it, for the
   settings editor and for scripts: `files` (what can be read, whether each
   has changes made in place and not written, and the themes there are),
   `schema <file>` (JSON Schema, draft 2020-12, of the file: every key with
@@ -1262,13 +1264,13 @@ dialogs use too.
   `focus.model`, or `input.device."My Mouse".accel_speed` where a part is
   not a plain word (one grammar, `vaht_ipc::ConfigPath`). Changing is a
   command, so `[ipc] allow_commands = false` refuses it except from vaht's
-  own dialogs and the settings window. `vaht msg subscribe config` sends each file's state whenever
+  own dialogs and the settings window. `vaht subscribe config` sends each file's state whenever
   vaht runs a new configuration (an edit, a save, a revert, a file changed
   on disk), with a counter so a refresh is never mistaken for the last one.
-- **`vaht-settings`** is the settings window (`vaht msg run settings`, the
+- **`vaht-settings`** is the settings window (`vaht run settings`, the
   `settings` command, the root menu's *Settings*, or `vaht-settings` from a
   launcher). It is a separate program (egui, Wayland only) and a client of
-  `vaht msg config`: it draws the form from the schema vaht describes,
+  `vaht config`: it draws the form from the schema vaht describes,
   sends each change as it is made, and so every change runs at once. *Save*
   writes the changes into `settings.toml` and *Revert* drops them; both are
   enabled only while changes are pending. A value vaht refuses is shown
@@ -1290,7 +1292,7 @@ dialogs use too.
   test fails if a setting of `settings.toml` has no control of its own. The
   schema names what the window shows: `title` is a setting's or a way's name,
   and `description` what it does or means (shown beside the chosen way).
-- **`vaht msg pick`** (`pick` request) is a dmenu-style chooser: the lines
+- **`vaht pick`** (`pick` request) is a dmenu-style chooser: the lines
   on standard input show as a vaht menu at the pointer (`--title` above
   them), in the user's theme, and the one chosen is printed; closing the
   menu prints nothing and exits 1. The reply waits for the user; a
@@ -1307,7 +1309,7 @@ dialogs use too.
   (in `XDG_RUNTIME_DIR`, mode 0700), so this guards against the user's
   other programs, which can already type through the virtual keyboard
   protocol.
-- **`vaht schema`** prints the protocol's JSON Schema (draft 2020-12),
+- **`vaht ipc-schema`** prints the protocol's JSON Schema (draft 2020-12),
   made from the message types themselves (`vaht_ipc::schema`), so it
   cannot drift: every message is a request, a reply or an event, each in
   `$defs`.

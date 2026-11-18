@@ -22,17 +22,16 @@ fn start(settings: &str) -> HeadlessVaht {
     HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("settings.toml", settings)])
 }
 
-/// Runs `vaht msg <arguments>` against `vaht`.
+/// Runs `vaht <arguments>` against `vaht`.
 fn message(vaht: &HeadlessVaht, arguments: &[&str]) -> Output {
     std::process::Command::new(EXECUTABLE)
-        .arg("msg")
         .args(arguments)
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs")
+        .expect("vaht runs")
 }
 
-/// Runs `vaht msg config <arguments>`, which must succeed.
+/// Runs `vaht config <arguments>`, which must succeed.
 fn config(vaht: &HeadlessVaht, arguments: &[&str]) -> String {
     let output = message(vaht, &[&["config"], arguments].concat());
     assert!(output.status.success(), "{output:?}");

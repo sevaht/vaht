@@ -2,7 +2,7 @@
 //!
 //! Every key is optional: a missing one keeps its default, which is what
 //! [`Settings::default`] gives and what the built-in `settings.toml` (printed
-//! by `vaht check --print-defaults`) says; a unit test keeps the two equal.
+//! by `vaht config check --print-defaults`) says; a unit test keeps the two equal.
 //! Sections for features vaht does not have yet are not accepted, so a
 //! setting never silently does nothing.
 

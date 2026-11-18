@@ -172,10 +172,10 @@ fn with_strict_sloppy_focus_a_window_moved_under_the_pointer_does_not_take_focus
         client.move_pointer_to(first.0 + 20, content.top + 20);
         let windows = |vaht: &HeadlessVaht| -> Vec<vaht_ipc::WindowInfo> {
             let output = std::process::Command::new(EXECUTABLE)
-                .args(["msg", "--json", "windows"])
+                .args(["--json", "windows"])
                 .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
                 .output()
-                .expect("vaht msg runs");
+                .expect("vaht runs");
             let reply: vaht_ipc::Reply = serde_json::from_slice(&output.stdout).expect("a reply");
             let vaht_ipc::Reply::Windows { windows } = reply else {
                 panic!("not windows: {reply:?}");
@@ -196,10 +196,10 @@ fn with_strict_sloppy_focus_a_window_moved_under_the_pointer_does_not_take_focus
         // The other window comes over the pointer, without it moving.
         for command in ["tile 0 0 500 1000", "raise"] {
             let output = std::process::Command::new(EXECUTABLE)
-                .args(["msg", "run", "--window", &other.to_string(), command])
+                .args(["run", "--window", &other.to_string(), command])
                 .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
                 .output()
-                .expect("vaht msg runs");
+                .expect("vaht runs");
             assert!(output.status.success(), "{output:?}");
         }
         client.move_pointer_to(first.0 + 22, content.top + 22);

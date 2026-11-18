@@ -4,8 +4,8 @@
 //! One JSON message per line, in both directions: a client writes a
 //! [`Request`] and reads one [`Reply`] for it, in order; a client that
 //! subscribed also reads [`Event`]s. The types here are
-//! the single source of the protocol: vaht answers with them, `vaht msg` and
-//! the dialogs ask with them (02 §12).
+//! the single source of the protocol: vaht answers with them, `vaht`'s own
+//! commands and the dialogs ask with them (02 §12).
 //!
 //! vaht listens at [`socket_path`] and tells the programs it starts where,
 //! in [`SOCKET_VARIABLE`].

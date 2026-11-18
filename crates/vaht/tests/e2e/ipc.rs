@@ -1,26 +1,25 @@
-//! IPC tests: `vaht msg` asking a running vaht, and programs vaht starts
+//! IPC tests: the commands that ask a running vaht, and programs vaht starts
 //! finding its socket.
 
 use std::path::Path;
 use std::process::{Command, Output};
 
-use vaht_ipc::{Reply, WindowInfo};
+use vaht_ipc::{Client, ConfigFile, Reply, Request, WindowInfo};
 use vaht_test_support::{HeadlessVaht, TestClient, wait_for_file};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 
-/// Runs `vaht msg` with `arguments` against `vaht`.
+/// Runs `vaht` with `arguments` against the running vaht.
 fn message(vaht: &HeadlessVaht, arguments: &[&str]) -> Output {
     Command::new(EXECUTABLE)
-        .arg("msg")
         .args(arguments)
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs")
+        .expect("vaht runs")
 }
 
-/// Runs `vaht msg --json` with `arguments` and returns the reply.
+/// Runs `vaht --json` with `arguments` and returns the reply.
 fn ask(vaht: &HeadlessVaht, arguments: &[&str]) -> Reply {
     let output = message(vaht, &[&["--json"], arguments].concat());
     serde_json::from_slice(&output.stdout).expect("one JSON reply")
@@ -236,11 +235,11 @@ fn a_subscriber_hears_each_list_at_once_and_whenever_it_changes() {
 
     let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
     let mut follower = Command::new(EXECUTABLE)
-        .args(["msg", "--json", "subscribe", "workspaces", "windows"])
+        .args(["--json", "subscribe", "workspaces", "windows"])
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .expect("vaht msg runs");
+        .expect("vaht runs");
     let (lines, received) = std::sync::mpsc::channel();
     let stdout = follower.stdout.take().expect("piped");
     std::thread::spawn(move || {
@@ -330,17 +329,17 @@ fn a_modal_dialog_is_listed_with_its_parent_and_keeps_the_focus() {
     assert_eq!(focus(parent), Some(dialog), "the modal dialog keeps it");
 }
 
-/// Starts `vaht msg pick --title Share` with `items` on its standard input,
+/// Starts `vaht pick --title Share` with `items` on its standard input,
 /// once vaht shows them, and returns it running.
 fn start_pick(vaht: &HeadlessVaht, items: &str) -> std::process::Child {
     use std::io::Write as _;
     let mut pick = Command::new(EXECUTABLE)
-        .args(["msg", "pick", "--title", "Share"])
+        .args(["pick", "--title", "Share"])
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .expect("vaht msg pick runs");
+        .expect("vaht pick runs");
     pick.stdin
         .take()
         .expect("its input")
@@ -360,7 +359,7 @@ fn a_pick_prints_the_item_chosen_from_vahts_menu() {
     client.release_key(vaht_test_support::keys::DOWN);
     client.press_key(vaht_test_support::keys::ENTER);
     client.release_key(vaht_test_support::keys::ENTER);
-    let output = pick.wait_with_output().expect("vaht msg pick ends");
+    let output = pick.wait_with_output().expect("vaht pick ends");
     assert!(output.status.success(), "{output:?}");
     let chosen = String::from_utf8(output.stdout).expect("UTF-8");
     assert!(
@@ -380,7 +379,7 @@ fn a_pick_closed_without_a_choice_fails_and_prints_nothing() {
     let pick = start_pick(&vaht, "Monitor: HEADLESS-1\n");
     client.press_key(vaht_test_support::keys::ESCAPE);
     client.release_key(vaht_test_support::keys::ESCAPE);
-    let output = pick.wait_with_output().expect("vaht msg pick ends");
+    let output = pick.wait_with_output().expect("vaht pick ends");
     assert!(!output.status.success(), "{output:?}");
     assert!(output.stdout.is_empty(), "{output:?}");
 }
@@ -389,20 +388,29 @@ fn a_pick_closed_without_a_choice_fails_and_prints_nothing() {
 fn nothing_to_pick_fails_at_once() {
     let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
     let output = Command::new(EXECUTABLE)
-        .args(["msg", "pick"])
+        .args(["pick"])
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .stdin(std::process::Stdio::null())
         .output()
-        .expect("vaht msg pick runs");
+        .expect("vaht pick runs");
     assert!(
         !output.status.success() && output.stdout.is_empty(),
         "{output:?}"
     );
 }
 
-/// Runs `vaht msg --json config <arguments>` and returns the reply.
+/// Runs `vaht --json config <arguments>` and returns the reply.
 fn config(vaht: &HeadlessVaht, arguments: &[&str]) -> Reply {
     ask(vaht, &[&["config"], arguments].concat())
+}
+
+/// Sends `request` over the socket, as the settings window does, and returns
+/// the reply.
+fn request(vaht: &HeadlessVaht, request: &Request) -> Reply {
+    Client::connect(&vaht.ipc_socket())
+        .expect("connects")
+        .request(request)
+        .expect("a reply")
 }
 
 #[test]
@@ -422,7 +430,7 @@ fn the_configuration_files_are_listed_with_their_state_and_the_themes() {
     assert_eq!(
         files,
         [vaht_ipc::ConfigFileInfo {
-            file: vaht_ipc::ConfigFile::Settings,
+            file: ConfigFile::Settings,
             state: vaht_ipc::ConfigState::Clean,
         }]
     );
@@ -437,7 +445,12 @@ fn the_configuration_files_are_listed_with_their_state_and_the_themes() {
 #[test]
 fn the_schema_describes_each_setting_with_its_range_and_documentation() {
     let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
-    let Reply::ConfigSchema { schema } = config(&vaht, &["schema", "settings"]) else {
+    let Reply::ConfigSchema { schema } = request(
+        &vaht,
+        &Request::ConfigSchema {
+            file: ConfigFile::Settings,
+        },
+    ) else {
         panic!("not a schema");
     };
     assert_eq!(
@@ -494,7 +507,12 @@ fn what_the_settings_say_now_is_read_with_what_is_changed_in_place() {
 #[test]
 fn a_file_not_described_yet_is_refused_plainly() {
     let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
-    let Reply::Error { message } = config(&vaht, &["schema", "bindings"]) else {
+    let Reply::Error { message } = request(
+        &vaht,
+        &Request::ConfigSchema {
+            file: ConfigFile::Bindings,
+        },
+    ) else {
         panic!("not an error");
     };
     assert!(message.contains("bindings.toml"), "{message}");

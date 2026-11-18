@@ -115,10 +115,10 @@ fn activate_window_list_entry_does_what_clicking_the_entry_does() {
     client.open_windows(2);
     let run = |command: &str| {
         let output = std::process::Command::new(EXECUTABLE)
-            .args(["msg", "run", command])
+            .args(["run", command])
             .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
             .output()
-            .expect("vaht msg runs");
+            .expect("vaht runs");
         assert!(output.status.success(), "{output:?}");
     };
     let entries = |client: &mut TestClient| {

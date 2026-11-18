@@ -14,7 +14,10 @@ pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("VAHT_CO
 
 /// A stacking Wayland compositor descended from Fluxbox.
 ///
-/// Without a subcommand, runs the compositor.
+/// Without a subcommand, runs the compositor. `version` and the commands
+/// after it, and `config files|get|set|unset|save|revert`, ask the running
+/// vaht over its IPC socket (`$VAHT_SOCKET`, or the one beside
+/// `$WAYLAND_DISPLAY`) and fail if none runs; the others need no running vaht.
 #[derive(Debug, clap::Parser)]
 #[command(version = VERSION)]
 pub struct Arguments {
@@ -35,6 +38,11 @@ pub struct Arguments {
     /// `$XDG_CONFIG_HOME/vaht`, normally `~/.config/vaht`.
     #[arg(long, env = "VAHT_CONFIG_DIRECTORY", global = true)]
     pub config_directory: Option<PathBuf>,
+
+    /// For the commands that ask the running vaht: prints its reply as the
+    /// JSON it sent, on one line.
+    #[arg(long, global = true)]
+    pub json: bool,
 
     /// How much diagnostic output to record, and where.
     #[command(flatten)]
@@ -71,15 +79,19 @@ impl Arguments {
 }
 
 /// The subcommands.
+///
+/// `config`, `import`, `dialog` and `ipc-schema` are about vaht's own files
+/// and programs; the rest ([`LiveCommand`]) ask the running vaht something,
+/// or tell it what to do, over its IPC socket (`$VAHT_SOCKET`, or the one
+/// beside `$WAYLAND_DISPLAY`).
 #[derive(Debug, clap::Subcommand)]
 pub enum Subcommand {
-    /// Checks the configuration files without running vaht, and says what
-    /// is wrong with them.
-    Check {
-        /// Prints vaht's built-in configuration files instead: what applies
-        /// when a file does not exist.
-        #[arg(long)]
-        print_defaults: bool,
+    /// The configuration: checks the files, and reads and changes the
+    /// settings of the running vaht.
+    Config {
+        /// What to do.
+        #[command(subcommand)]
+        command: ConfigCommand,
     },
     /// Converts another window manager's configuration to vaht's.
     Import {
@@ -95,19 +107,12 @@ pub enum Subcommand {
         #[command(subcommand)]
         dialog: DialogKind,
     },
-    /// Asks the running vaht something, or tells it what to do, over its
-    /// IPC socket (`$VAHT_SOCKET`, or the one beside `$WAYLAND_DISPLAY`).
-    Msg {
-        /// Prints vaht's reply as the JSON it sent, on one line.
-        #[arg(long)]
-        json: bool,
-        /// What to ask.
-        #[command(subcommand)]
-        request: MessageRequest,
-    },
     /// Prints the JSON Schema of the IPC protocol's messages: requests,
     /// replies and events.
-    Schema,
+    IpcSchema,
+    /// What the running vaht is asked.
+    #[command(flatten)]
+    Live(LiveCommand),
 }
 
 /// The dialogs `vaht dialog` shows.
@@ -121,21 +126,21 @@ pub enum DialogKind {
     /// A window's title, to change; left empty, the window's program's
     /// title comes back.
     Title {
-        /// The window, by id (see `vaht msg windows`).
+        /// The window, by id (see `vaht windows`).
         #[arg(long)]
         window: u64,
     },
 }
 
-/// What `vaht msg` asks.
+/// What the running vaht is asked: each is one request over its IPC socket.
 #[derive(Debug, clap::Subcommand)]
-pub enum MessageRequest {
+pub enum LiveCommand {
     /// Prints the running vaht's version.
     Version,
-    /// Runs a command, written as a binding writes one: `vaht msg run
+    /// Runs a command, written as a binding writes one: `vaht run
     /// workspace 2`.
     Run {
-        /// The window it acts on, by id (see `vaht msg windows`); the
+        /// The window it acts on, by id (see `vaht windows`); the
         /// focused window by default.
         #[arg(long)]
         window: Option<u64>,
@@ -152,30 +157,23 @@ pub enum MessageRequest {
     /// each with matches to paste into `outputs.toml`.
     Outputs,
     /// Prints the lists named now, and again whenever they change, until
-    /// vaht stops: `vaht msg subscribe windows workspaces`.
+    /// vaht stops: `vaht subscribe windows workspaces`.
     Subscribe {
         /// The lists.
         #[arg(required = true, value_enum)]
         events: Vec<EventList>,
     },
     /// Prints which events vaht records, or changes it while vaht runs:
-    /// `vaht msg log-filter info,vaht_compositor::input=trace`, or `vaht
-    /// msg log-filter reset` for the filter vaht started with.
+    /// `vaht log-filter info,vaht_compositor::input=trace`, or `vaht
+    /// log-filter reset` for the filter vaht started with.
     LogFilter {
         /// Tracing filter directives, or `reset`; none prints the filter.
         directives: Option<String>,
     },
-    /// Reads the configuration as vaht has it: which files, their schema, and
-    /// what they say now.
-    Config {
-        /// What to ask.
-        #[command(subcommand)]
-        command: ConfigCommand,
-    },
     /// Shows the lines read from standard input as a vaht menu at the
     /// pointer and prints the one the user chooses; exits with 1, printing
     /// nothing, if they close the menu. A dmenu-style chooser: the
-    /// screen-share portal runs `vaht msg pick --title Share`.
+    /// screen-share portal runs `vaht pick --title Share`.
     Pick {
         /// The menu's title.
         #[arg(long)]
@@ -183,12 +181,18 @@ pub enum MessageRequest {
     },
 }
 
-/// What `vaht msg config` asks.
+/// What `vaht config` does. `check` and `schema` need no running vaht; the
+/// rest ask the running one.
 #[derive(Debug, Clone, PartialEq, Eq, clap::Subcommand)]
 pub enum ConfigCommand {
-    /// Lists the files that can be read, whether each has changes not
-    /// written, and the themes there are.
-    Files,
+    /// Checks the configuration files without running vaht, and lists
+    /// everything wrong with them.
+    Check {
+        /// Prints vaht's built-in configuration files instead: what applies
+        /// when a file does not exist.
+        #[arg(long)]
+        print_defaults: bool,
+    },
     /// Prints a file's schema (JSON Schema): every key with its type,
     /// documentation, default and range.
     Schema {
@@ -196,6 +200,10 @@ pub enum ConfigCommand {
         #[arg(value_enum, default_value_t)]
         file: ConfigFileArgument,
     },
+    /// Lists the files that can be read, whether each has changes not
+    /// written, the themes there are, and what vaht left out of the files
+    /// because it could not use it.
+    Files,
     /// Prints what a file says now, a `key = value` line each, the keys
     /// changed in place and not written marked `*`.
     Get {
@@ -203,8 +211,8 @@ pub enum ConfigCommand {
         #[arg(value_enum, default_value_t)]
         file: ConfigFileArgument,
     },
-    /// Changes a setting in place, until `save` writes it: `vaht msg
-    /// config set blur.spread 7`. The value is JSON (`true`, `7`,
+    /// Changes a setting in place, until `save` writes it: `vaht config
+    /// set blur.spread 7`. The value is JSON (`true`, `7`,
     /// `"sloppy"`, `[1, 2]`), or a bare word taken as a string. Nothing
     /// changes if the whole configuration would not be valid.
     Set {
@@ -239,12 +247,12 @@ pub enum ConfigCommand {
     },
 }
 
-/// Reads a setting's key for `vaht msg config`.
+/// Reads a setting's key for `vaht config`.
 fn parse_config_path(text: &str) -> Result<vaht_ipc::ConfigPath, String> {
     vaht_ipc::ConfigPath::parse(text).map_err(|error| error.to_string())
 }
 
-/// A configuration file `vaht msg config` is about.
+/// A configuration file `vaht config` is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum ConfigFileArgument {
     /// `settings.toml`.
@@ -274,14 +282,14 @@ impl ConfigFileArgument {
     }
 }
 
-/// A list `vaht msg subscribe` follows.
+/// A list `vaht subscribe` follows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum EventList {
-    /// The windows, as `vaht msg windows` lists them.
+    /// The windows, as `vaht windows` lists them.
     Windows,
-    /// The workspaces, as `vaht msg workspaces` lists them.
+    /// The workspaces, as `vaht workspaces` lists them.
     Workspaces,
-    /// The outputs, as `vaht msg outputs` lists them.
+    /// The outputs, as `vaht outputs` lists them.
     Outputs,
     /// The configuration: each file and whether it has changes not written,
     /// whenever vaht runs a new configuration.
@@ -302,12 +310,13 @@ impl EventList {
 }
 
 impl ConfigCommand {
-    /// Returns the request as the protocol writes it.
+    /// Returns the request as the protocol writes it; none for what needs no
+    /// running vaht (`check`, `schema`).
     #[must_use]
-    pub fn to_request(&self) -> vaht_ipc::Request {
-        match self {
+    pub fn to_request(&self) -> Option<vaht_ipc::Request> {
+        Some(match self {
+            Self::Check { .. } | Self::Schema { .. } => return None,
             Self::Files => vaht_ipc::Request::ConfigFiles {},
-            Self::Schema { file } => vaht_ipc::Request::ConfigSchema { file: file.file() },
             Self::Get { file } => vaht_ipc::Request::ConfigRead { file: file.file() },
             Self::Set { key, value, file } => vaht_ipc::Request::ConfigEdit {
                 file: file.file(),
@@ -324,11 +333,11 @@ impl ConfigCommand {
             },
             Self::Save => vaht_ipc::Request::ConfigSave {},
             Self::Revert { file } => vaht_ipc::Request::ConfigRevert { file: file.file() },
-        }
+        })
     }
 }
 
-impl MessageRequest {
+impl LiveCommand {
     /// Returns the request as the protocol writes it.
     #[must_use]
     pub fn to_request(&self) -> vaht_ipc::Request {
@@ -351,7 +360,6 @@ impl MessageRequest {
                     reset,
                 }
             }
-            Self::Config { command } => command.to_request(),
             // The items come from standard input ([`crate::message::pick`]).
             Self::Pick { title } => vaht_ipc::Request::Pick {
                 title: title.clone(),

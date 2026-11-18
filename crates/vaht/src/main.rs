@@ -5,7 +5,48 @@ use std::process::ExitCode;
 
 use clap::Parser as _;
 
-use vaht::{Arguments, ImportSource, Subcommand};
+use vaht::{Arguments, ConfigCommand, ImportSource, LiveCommand, Subcommand};
+
+/// Runs `vaht config`: what needs no running vaht here, the rest by asking
+/// the running one.
+fn run_config(command: &ConfigCommand, arguments: &Arguments) -> ExitCode {
+    match command {
+        ConfigCommand::Check {
+            print_defaults: true,
+        } => vaht::check::print_defaults(),
+        ConfigCommand::Check {
+            print_defaults: false,
+        } => vaht::check::run(&arguments.config_directory()),
+        ConfigCommand::Schema { file } => vaht::check::schema(file.file()),
+        ConfigCommand::Files
+        | ConfigCommand::Get { .. }
+        | ConfigCommand::Set { .. }
+        | ConfigCommand::Unset { .. }
+        | ConfigCommand::Save
+        | ConfigCommand::Revert { .. } => {
+            command.to_request().map_or(ExitCode::FAILURE, |request| {
+                vaht::message::send(&request, arguments.json)
+            })
+        }
+    }
+}
+
+/// Runs a command that asks the running vaht, printing its reply as JSON
+/// when `json`.
+fn run_live(command: &LiveCommand, json: bool) -> ExitCode {
+    match command {
+        LiveCommand::Subscribe { events } => {
+            vaht::message::follow(events.iter().map(|list| list.kind()).collect(), json)
+        }
+        LiveCommand::Pick { title } => vaht::message::pick(title.clone(), json),
+        LiveCommand::Version
+        | LiveCommand::Run { .. }
+        | LiveCommand::Windows
+        | LiveCommand::Workspaces
+        | LiveCommand::Outputs
+        | LiveCommand::LogFilter { .. } => vaht::message::send(&command.to_request(), json),
+    }
+}
 
 /// Runs the application and converts its outcome to an exit code.
 fn main() -> ExitCode {
@@ -13,41 +54,18 @@ fn main() -> ExitCode {
     // The tools run without the compositor's logging, which would rotate
     // its log file.
     match &arguments.command {
-        Some(Subcommand::Check {
-            print_defaults: true,
-        }) => return vaht::check::print_defaults(),
-        Some(Subcommand::Check {
-            print_defaults: false,
-        }) => return vaht::check::run(&arguments.config_directory()),
+        Some(Subcommand::Config { command }) => return run_config(command, &arguments),
         Some(Subcommand::Import {
             source: ImportSource::Fluxbox { from, to, force },
         }) => {
             let to = to.clone().unwrap_or_else(|| arguments.config_directory());
             return vaht::import::fluxbox(from.as_deref(), &to, *force);
         }
-        Some(Subcommand::Schema) => return vaht::message::print_schema(),
+        Some(Subcommand::IpcSchema) => return vaht::message::print_schema(),
         Some(Subcommand::Dialog { dialog }) => {
             return vaht::dialog::show(*dialog, &arguments.config_directory());
         }
-        Some(Subcommand::Msg { json, request }) => {
-            return match request {
-                vaht::arguments::MessageRequest::Subscribe { events } => {
-                    vaht::message::follow(events.iter().map(|list| list.kind()).collect(), *json)
-                }
-                vaht::arguments::MessageRequest::Pick { title } => {
-                    vaht::message::pick(title.clone(), *json)
-                }
-                other @ (vaht::arguments::MessageRequest::Version
-                | vaht::arguments::MessageRequest::Run { .. }
-                | vaht::arguments::MessageRequest::Windows
-                | vaht::arguments::MessageRequest::Workspaces
-                | vaht::arguments::MessageRequest::Outputs
-                | vaht::arguments::MessageRequest::LogFilter { .. }
-                | vaht::arguments::MessageRequest::Config { .. }) => {
-                    vaht::message::send(&other.to_request(), *json)
-                }
-            };
-        }
+        Some(Subcommand::Live(command)) => return run_live(command, arguments.json),
         None => {}
     }
     // Before any thread starts: logging starts the first one.

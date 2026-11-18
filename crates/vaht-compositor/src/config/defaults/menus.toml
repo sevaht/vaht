@@ -1,6 +1,6 @@
 # vaht's built-in menus, used when ~/.config/vaht/menus.toml does not
 # exist. A menus.toml replaces all of them, so copy what you want to keep:
-#     vaht check --print-defaults
+#     vaht config check --print-defaults
 #
 # Each [menu.<name>] has an optional title and its items, top to bottom.
 # root-menu opens [menu.root], window-menu [menu.window], workspace-menu

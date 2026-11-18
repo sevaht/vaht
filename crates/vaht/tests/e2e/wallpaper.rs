@@ -103,10 +103,10 @@ fn a_workspace_with_its_own_image_shows_it_while_shown() {
     let mut client = TestClient::connect(vaht.socket());
     let run = |command: &str| {
         let output = std::process::Command::new(EXECUTABLE)
-            .args(["msg", "run", command])
+            .args(["run", command])
             .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
             .output()
-            .expect("vaht msg runs");
+            .expect("vaht runs");
         assert!(output.status.success(), "{output:?}");
     };
     assert_eq!(client.screenshot().rgb(5, 300), SKY);

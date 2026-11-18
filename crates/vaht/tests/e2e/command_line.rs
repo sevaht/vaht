@@ -25,6 +25,9 @@ fn run_executable(arguments: &[&str], log_directory: &Path) -> Output {
         .env("VAHT_JOURNALD", "off")
         .env_remove("VAHT_LOG")
         .env_remove("WAYLAND_DISPLAY")
+        // Nor a running vaht's socket: the commands that ask one must find
+        // none here, not the vaht of whoever runs the tests.
+        .env_remove("VAHT_SOCKET")
         .env_remove("DISPLAY")
         // A libseat backend that does not exist: the seat is never taken.
         .env("LIBSEAT_BACKEND", "vaht-test-none")
@@ -101,7 +104,7 @@ fn with_no_log_file_or_journal_messages_go_to_standard_error() {
     assert!(errors.contains(NO_BACKEND_MESSAGE), "stderr was: {errors}");
 }
 
-/// Runs `vaht check` (with `extra` arguments) on a configuration directory
+/// Runs `vaht config check` (with `extra` arguments) on a configuration directory
 /// holding `files`, each a path in it and its contents.
 fn check(files: &[(&str, &str)], extra: &[&str]) -> Output {
     let config = tempfile::tempdir().expect("a temporary directory");
@@ -113,7 +116,7 @@ fn check(files: &[(&str, &str)], extra: &[&str]) -> Output {
         std::fs::write(path, contents).expect("written");
     }
     let logs = log_directory();
-    let mut arguments = vec!["check", "--config-directory"];
+    let mut arguments = vec!["config", "check", "--config-directory"];
     let directory = config.path().to_str().expect("temporary paths are UTF-8");
     arguments.push(directory);
     arguments.extend_from_slice(extra);
@@ -123,7 +126,7 @@ fn check(files: &[(&str, &str)], extra: &[&str]) -> Output {
             .expect("the log directory exists")
             .next()
             .is_none(),
-        "vaht check must not touch the compositor's log"
+        "vaht config check must not touch the compositor's log"
     );
     output
 }
@@ -250,7 +253,7 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     let bindings = std::fs::read_to_string(target.path().join("bindings.toml")).expect("written");
     assert!(bindings.contains("[key_modes.moving]"), "{bindings}");
     let checked = run_executable(
-        &["check", "--config-directory", &path(&target)],
+        &["config", "check", "--config-directory", &path(&target)],
         logs.path(),
     );
     assert!(
@@ -260,9 +263,9 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
 }
 
 #[test]
-fn schema_prints_the_ipc_protocols_json_schema() {
+fn ipc_schema_prints_the_ipc_protocols_json_schema() {
     let logs = log_directory();
-    let output = run_executable(&["schema"], logs.path());
+    let output = run_executable(&["ipc-schema"], logs.path());
     assert!(output.status.success(), "{output:?}");
     let schema: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON");
     assert_eq!(
@@ -270,4 +273,39 @@ fn schema_prints_the_ipc_protocols_json_schema() {
         "https://json-schema.org/draft/2020-12/schema"
     );
     assert!(schema["$defs"]["Request"].is_object(), "{schema}");
+}
+
+#[test]
+fn config_schema_describes_the_settings_without_a_running_vaht() {
+    let logs = log_directory();
+    let output = run_executable(&["config", "schema"], logs.path());
+    assert!(output.status.success(), "{output:?}");
+    let schema: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON");
+    let passes = &schema["$defs"]["BlurPasses"];
+    assert_eq!(
+        (&passes["minimum"], &passes["maximum"]),
+        (&1.into(), &6.into())
+    );
+    let other = run_executable(&["config", "schema", "bindings"], logs.path());
+    assert!(
+        !other.status.success(),
+        "a file with no schema yet is refused"
+    );
+    assert!(
+        String::from_utf8_lossy(&other.stderr).contains("bindings.toml"),
+        "{other:?}"
+    );
+}
+
+#[test]
+fn the_commands_that_ask_the_running_vaht_fail_plainly_without_one() {
+    let logs = log_directory();
+    let output = run_executable(&["windows"], logs.path());
+    assert!(!output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("VAHT_SOCKET"),
+        "it says what it needs: {output:?}"
+    );
+    let removed = run_executable(&["msg", "windows"], logs.path());
+    assert!(!removed.status.success(), "there is no `msg` any more");
 }

@@ -48,7 +48,7 @@ standards.
 | `vaht-dialog` | library | Text dialogs as ordinary Wayland client windows: run, command, set title, rename workspace | vaht-ui, vaht-ipc, smithay-client-toolkit |
 | `vaht-import` | library | Converts fluxbox and fluxland setups to vaht TOML | vaht-compositor's `config` types |
 | `vaht-menu-gtk` | library, optional cargo feature | GTK menu helper (§6.4), run as `vaht menu-helper gtk`. **The only crate that depends on GTK.** After the first milestone | gtk4, gtk4-layer-shell, vaht-ipc |
-| `vaht` | **the one binary** | Subcommands (R-A3): `vaht` (run the compositor), `vaht msg …` (IPC client), `vaht dialog run\|command\|title\|workspace-name`, `vaht import`, `vaht check` | all of the above, clap |
+| `vaht` | **the one binary** | Subcommands (R-A3): `vaht` (run the compositor); `vaht config check\|schema` (offline) and `vaht config files\|get\|set\|unset\|save\|revert`; the IPC client commands `vaht run\|windows\|workspaces\|outputs\|subscribe\|log-filter\|pick\|version`; `vaht dialog run\|command\|title\|workspace-name`; `vaht import`; `vaht ipc-schema` | all of the above, clap |
 
 **One binary, several libraries.** There is one thing to install and one
 version to match, and the compositor runs its own dialogs as

@@ -48,13 +48,13 @@ impl XDesktop {
         Self { vaht, x11, wayland }
     }
 
-    /// Returns the windows `vaht msg windows` lists.
+    /// Returns the windows `vaht windows` lists.
     fn windows(&self) -> Vec<WindowInfo> {
         let output = Command::new(EXECUTABLE)
-            .args(["msg", "--json", "windows"])
+            .args(["--json", "windows"])
             .env(vaht_ipc::SOCKET_VARIABLE, self.vaht.ipc_socket())
             .output()
-            .expect("vaht msg runs");
+            .expect("vaht runs");
         let reply: Reply = serde_json::from_slice(&output.stdout).expect("one JSON reply");
         let Reply::Windows { windows } = reply else {
             panic!("not a window list: {reply:?}");
@@ -62,14 +62,14 @@ impl XDesktop {
         windows
     }
 
-    /// Runs `command` on the focused window, as `vaht msg run` does.
+    /// Runs `command` on the focused window, as `vaht run` does.
     fn run(&self, command: &[&str]) {
         let output = Command::new(EXECUTABLE)
-            .args(["msg", "run"])
+            .args(["run"])
             .args(command)
             .env(vaht_ipc::SOCKET_VARIABLE, self.vaht.ipc_socket())
             .output()
-            .expect("vaht msg runs");
+            .expect("vaht runs");
         assert!(output.status.success(), "{output:?}");
     }
 
@@ -538,10 +538,10 @@ fn allowing_input_emulation_from_now_on_is_a_setting_save_settings_keeps() {
     assert!(desktop.x11.wait_for_key_press(window), "allowed now");
 
     let output = Command::new(EXECUTABLE)
-        .args(["msg", "run", "save-settings"])
+        .args(["run", "save-settings"])
         .env(vaht_ipc::SOCKET_VARIABLE, desktop.vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs");
+        .expect("vaht runs");
     assert!(output.status.success(), "{output:?}");
     let settings = std::fs::read_to_string(desktop.vaht.config_directory().join("settings.toml"))
         .expect("the settings are there");

@@ -78,14 +78,14 @@ fn a_workspace_rule_opens_the_window_there() {
     );
 }
 
-/// Returns the workspace of the window `vaht msg windows` lists first: none
+/// Returns the workspace of the window `vaht windows` lists first: none
 /// when it is on every one.
 fn first_window_workspace(vaht: &HeadlessVaht) -> Option<usize> {
     let output = std::process::Command::new(EXECUTABLE)
-        .args(["msg", "--json", "windows"])
+        .args(["--json", "windows"])
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs");
+        .expect("vaht runs");
     let reply: vaht_ipc::Reply = serde_json::from_slice(&output.stdout).expect("one JSON reply");
     let vaht_ipc::Reply::Windows { windows } = reply else {
         panic!("not a window list: {reply:?}");
@@ -111,10 +111,10 @@ fn reapplying_rules_gives_open_windows_the_traits_the_rules_now_say() {
         "rules are for windows opening, until asked"
     );
     let output = std::process::Command::new(EXECUTABLE)
-        .args(["msg", "run", "reapply-rules"])
+        .args(["run", "reapply-rules"])
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs");
+        .expect("vaht runs");
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         first_window_workspace(&vaht),

@@ -220,10 +220,10 @@ fn for_each_runs_on_every_window_matching() {
     // The program starts after every window was minimized.
     let _ = files.wait_for("done");
     let output = std::process::Command::new(EXECUTABLE)
-        .args(["msg", "--json", "windows"])
+        .args(["--json", "windows"])
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs");
+        .expect("vaht runs");
     let windows = String::from_utf8(output.stdout).expect("JSON");
     assert_eq!(
         windows.matches("\"is_minimized\":true").count(),

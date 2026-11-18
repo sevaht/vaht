@@ -3900,7 +3900,7 @@ pub struct RunOptions {
     /// The log file's limits, which `[logging]` sets as it changes; none
     /// when there is no log file.
     pub log_rotation: Option<LogRotation>,
-    /// Which events are recorded, which `vaht msg log-filter` changes; none
+    /// Which events are recorded, which `vaht log-filter` changes; none
     /// when vaht runs without logging of its own (tests).
     pub log_filter: Option<LogFilterHandle>,
 }

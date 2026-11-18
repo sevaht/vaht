@@ -48,10 +48,10 @@ fn a_minimized_window_does_not_keep_the_session_awake() {
     let (vaht, mut client) = desktop();
     client.inhibit_idle();
     let output = Command::new(EXECUTABLE)
-        .args(["msg", "run", "minimize"])
+        .args(["run", "minimize"])
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs");
+        .expect("vaht runs");
     assert!(output.status.success(), "{output:?}");
     client.watch_idle(IDLE_AFTER);
     assert!(client.wait_for_idle(PATIENCE));

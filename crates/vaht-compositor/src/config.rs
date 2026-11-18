@@ -4,9 +4,9 @@
 //! validates all of it, returning the first problem, for a program that needs
 //! a whole configuration or none (`vaht dialog`). A running vaht uses
 //! [`Config::load_lenient`] instead, which uses what is valid and returns what
-//! it left out (02 §2), and `vaht check` lists every problem
+//! it left out (02 §2), and `vaht config check` lists every problem
 //! ([`Config::problems`]). A file that does not exist is replaced by vaht's built-in version of it, the one
-//! `vaht check --print-defaults` prints: defaults are written down once,
+//! `vaht config check --print-defaults` prints: defaults are written down once,
 //! as configuration (K3).
 //!
 //! Today the directory holds `bindings.toml`, `settings.toml`,
@@ -154,6 +154,13 @@ impl Config {
     /// that is not valid, with the line and column of the problem.
     pub fn load(directory: &Path) -> Result<Self, ConfigError> {
         Self::load_with(directory, &SettingOverrides::default())
+    }
+
+    /// Returns the JSON Schema of `file`, or none if it is not described yet
+    /// (only `settings.toml` is).
+    #[must_use]
+    pub fn schema(file: vaht_ipc::ConfigFile) -> Option<serde_json::Value> {
+        schema::schema_of(file)
     }
 
     /// Returns every problem in the configuration in `directory`, a sentence

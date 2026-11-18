@@ -1,6 +1,6 @@
 # vaht's built-in bindings, used when ~/.config/vaht/bindings.toml does not
 # exist. A bindings.toml replaces all of them, so copy what you want to keep:
-#     vaht check --print-defaults
+#     vaht config check --print-defaults
 #
 # Keys: modifiers (Super, Ctrl, Alt, Shift) joined by "+", then an xkb key
 # name, such as "Super+T" or "XF86AudioMute".

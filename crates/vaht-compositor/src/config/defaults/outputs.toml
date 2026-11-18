@@ -1,6 +1,6 @@
 # How each output is set up. An output no entry matches keeps its
 # preferred mode and goes to the right of the others; the first output
-# found is primary unless an entry says otherwise. `vaht msg outputs`
+# found is primary unless an entry says otherwise. `vaht outputs`
 # lists the outputs with a ready-to-paste match for each.
 #
 # [[output]]

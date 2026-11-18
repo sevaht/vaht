@@ -123,7 +123,7 @@ impl ConfigBanner {
         );
         if count > Self::MOST_NAMED {
             lines.push(format!(
-                "...and {} more: vaht msg config files lists them all",
+                "...and {} more: vaht config files lists them all",
                 count - Self::MOST_NAMED
             ));
         }

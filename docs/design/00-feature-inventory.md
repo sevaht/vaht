@@ -43,7 +43,7 @@ target. A ★ marks features it actually uses.
 | **setting** | option, preference, resource | One key of `settings.toml`, with a documented type, range and default |
 | **pending change** | draft, dirty edit | A setting changed while vaht runs and not yet written to its file; it already runs |
 | **revert** | undo, discard | Drop the pending changes, so the files run as they say |
-| **problem** | error, warning | Something in the configuration files vaht could not use: it left that out, used the default or what was in effect, and reports it (log, banner, `vaht msg config files`) |
+| **problem** | error, warning | Something in the configuration files vaht could not use: it left that out, used the default or what was in effect, and reports it (log, banner, `vaht config files`) |
 
 ---
 
@@ -209,7 +209,7 @@ These are structural problems in fluxland that vaht's design should avoid.
 | 132 Fluxbox commands | `keybind.c`, `keyboard_actions.c` | rework | One typed `Action` enum. Prune the alias duplicates (Iconify, Minimize, MinimizeWindow…) |
 | MacroCmd, ToggleCmd, If, Cond, ForEach, Map, Delay | `command.c` | rework | Keep the capabilities in a cleaner syntax, as part of `02-config-format.md` |
 | Client patterns `(name=…) (title!=…) {N}` | `client_pattern.c` | rework | Becomes a typed `WindowMatcher` |
-| SetResourceValue (and its dialog) | `keyboard_actions.c` | keep, renamed **SetSetting** (decided) | Changes a setting while running, by vaht's own setting key (`taskbar.auto_hide true`). Lasts until the settings file says otherwise at that key, or SaveSettings writes it. Also available from `vaht msg`, and by hand in the settings window (`vaht-settings`, the `settings` command), which is a client of vaht's IPC: it holds no configuration logic, shows each setting by the schema vaht describes, runs every change at once and offers Save and Revert |
+| SetResourceValue (and its dialog) | `keyboard_actions.c` | keep, renamed **SetSetting** (decided) | Changes a setting while running, by vaht's own setting key (`taskbar.auto_hide true`). Lasts until the settings file says otherwise at that key, or SaveSettings writes it. Also available from `vaht config set`, and by hand in the settings window (`vaht-settings`, the `settings` command), which is a client of vaht's IPC: it holds no configuration logic, shows each setting by the schema vaht describes, runs every change at once and offers Save and Revert |
 | SaveRC | | keep, renamed **SaveSettings** (decided) | Writes the settings changed at runtime into the settings file. Uses `toml_edit`, so the file's comments, ordering and formatting survive and only the changed keys are touched. This is the only time vaht writes to config, and only when you ask |
 | Export, SetEnv | | keep, merged into **SetEnvironment** (decided) | Sets a variable in vaht's environment, inherited by programs it starts afterwards |
 
@@ -221,7 +221,7 @@ These are structural problems in fluxland that vaht's design should avoid.
 | `keys`, `apps`, `menu`, `windowmenu` files | | rework | New format, possibly one file or several. Converted |
 | Fluxbox style format: textures, gradients, bevels, interlacing, pixmaps, fonts with halo and shadow, button pixmaps, style overlay | `style.c`, `render.c` | rework | New theme format built on cascading *element × state*. My style plus overlay gets converted. A Fluxbox style importer lives in the import tool |
 | Live reload (Mod4+r, SIGHUP) | | keep | |
-| `--check-config` validation | `validate.c` | keep | `vaht check` |
+| `--check-config` validation | `validate.c` | keep | `vaht config check` |
 | libinput settings (`session.input.*`) and switch commands (`session.switch.*`: lid, tablet mode) | `input_config.c`, `input.c` | keep | `[input]` in `settings.toml` and `[switches]` in `bindings.toml`, both converted by `vaht import` |
 | `--import-fluxbox` | `import.c`, `fbcompat.c` | rework | `vaht import`, which converts both fluxbox and fluxland configs |
 | Settings with no effect on Wayland (colorsPerChannel, cacheLife…) | | drop | |
@@ -236,7 +236,7 @@ These are structural problems in fluxland that vaht's design should avoid.
 | How vaht is started | run from a TTY | keep (decided) | Running `vaht` from a TTY is the primary, fully supported path. It also ships a `wayland-sessions/vaht.desktop` for display-manager users, and optionally binds to systemd's `graphical-session.target` (off by default) |
 | D-Bus and systemd activation environment for portals | `session_env.c` | keep ★ | My script also does part of this, so pick one owner |
 | Session lock, idle notify, idle inhibit | | keep ★ | |
-| IPC: JSON over a Unix socket, `-ctl` tool, subscriptions | `ipc*.c`, `tools/fluxland-ctl.c` | rework (decided: own protocol) | One JSON message per line over a Unix socket at `$VAHT_SOCKET`. Usable from any language's standard library, or from `socat`. Requests, replies and events are Rust types in a shared protocol crate, published as JSON Schema so other languages can generate clients. `vaht msg` uses the same crate. Not i3/sway compatible; bars use ext-workspace and foreign-toplevel instead |
+| IPC: JSON over a Unix socket, `-ctl` tool, subscriptions | `ipc*.c`, `tools/fluxland-ctl.c` | rework (decided: own protocol) | One JSON message per line over a Unix socket at `$VAHT_SOCKET`. Usable from any language's standard library, or from `socat`. Requests, replies and events are Rust types in a shared protocol crate, published as JSON Schema so other languages can generate clients. `vaht`'s own commands that ask the running vaht use the same crate. Not i3/sway compatible; bars use ext-workspace and foreign-toplevel instead |
 | Screen capture (screencopy, ext-image-copy-capture, export-dmabuf) | `screencopy.c` | rework (decided) | ext-image-copy-capture only: my xdg-desktop-portal-wlr 0.8.4 and grim 1.5 both speak it. wlr-screencopy and export-dmabuf are dropped |
 | WLCS conformance shim | `wlcs_shim.c` | later | Good for testing; Smithay compositors can use WLCS too |
 | Compile-time performance probes | `perf.c` | rework | Use `tracing` spans with optional Tracy (see 03) |

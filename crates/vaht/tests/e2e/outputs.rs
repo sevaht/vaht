@@ -87,13 +87,13 @@ fn a_window_is_told_the_scale_of_the_output_it_is_on() {
     assert_eq!(client.wait_for_preferred_scale(2), Some(2));
 }
 
-/// Returns the outputs `vaht msg outputs` lists.
+/// Returns the outputs `vaht outputs` lists.
 fn listed_outputs(vaht: &HeadlessVaht) -> Vec<OutputInfo> {
     let output = Command::new(EXECUTABLE)
-        .args(["msg", "--json", "outputs"])
+        .args(["--json", "outputs"])
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs");
+        .expect("vaht runs");
     let reply: Reply = serde_json::from_slice(&output.stdout).expect("one JSON reply");
     let Reply::Outputs { outputs, .. } = reply else {
         panic!("not an output list: {reply:?}");
@@ -101,19 +101,19 @@ fn listed_outputs(vaht: &HeadlessVaht) -> Vec<OutputInfo> {
     outputs
 }
 
-/// Runs the command `command` in `vaht`, as `vaht msg run` does, and
+/// Runs the command `command` in `vaht`, as `vaht run` does, and
 /// waits until it is carried out.
 fn run(vaht: &HeadlessVaht, command: &[&str]) {
     let output = Command::new(EXECUTABLE)
-        .args(["msg", "run"])
+        .args(["run"])
         .args(command)
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs");
+        .expect("vaht runs");
     assert!(output.status.success(), "{command:?}: {output:?}");
 }
 
-/// Returns which outputs `vaht msg outputs` lists as on, by connector,
+/// Returns which outputs `vaht outputs` lists as on, by connector,
 /// the primary one marked with `*`.
 fn outputs_on(vaht: &HeadlessVaht) -> Vec<String> {
     listed_outputs(vaht)

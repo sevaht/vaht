@@ -1,7 +1,7 @@
 //! Loading the configuration as much as can be used (02 §2).
 //!
 //! [`Config::load`] is strict: it returns the first problem and nothing
-//! else, which suits `vaht check` and an edit made in the settings window,
+//! else, which suits `vaht config check` and an edit made in the settings window,
 //! that must be refused whole. A running vaht should instead use what it can
 //! and say loudly what it could not. [`Config::load_lenient`] therefore
 //! takes each file on its own: one that cannot be used is replaced by the

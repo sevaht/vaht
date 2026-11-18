@@ -170,7 +170,7 @@ fit = "fill"
 
 [ipc]
 # Whether programs other than vaht's own dialogs may run commands over the
-# IPC socket (vaht msg run ...). Asking what is open is always allowed.
+# IPC socket (vaht run ...). Asking what is open is always allowed.
 allow_commands = true
 
 [session]

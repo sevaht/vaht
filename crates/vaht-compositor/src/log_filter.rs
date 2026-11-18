@@ -1,4 +1,4 @@
-//! Which events vaht records, changed while it runs (`vaht msg
+//! Which events vaht records, changed while it runs (`vaht
 //! log-filter`): the filter lives with the logging, which the compositor
 //! reaches through [`LogFilterControl`], since logging is set up first.
 

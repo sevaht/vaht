@@ -9,8 +9,8 @@ compositor, or headless for tests. The design documents are in
 [`docs/design/`](docs/design/), and [`DESIGN.md`](DESIGN.md) is the guide
 to them.
 
-`vaht check` validates the configuration in `~/.config/vaht`, and
-`vaht check --print-defaults` prints the built-in files.
+`vaht config check` validates the configuration in `~/.config/vaht`, and
+`vaht config check --print-defaults` prints the built-in files.
 `vaht import fluxbox --from ~/.fluxbox` converts a Fluxbox setup, and
 reports every line it could not convert.
 
@@ -24,7 +24,7 @@ target that ties the portals to vaht's session
 settings for vaht sessions (`/etc/xdg/xdg-desktop-portal-wlr/vaht`), which
 ask which screen or window to share with vaht's own menu. It installs
 `vaht-settings` too, the window that edits the settings of a running vaht
-(`vaht msg run settings`, or *Settings* in the root menu).
+(`vaht run settings`, or *Settings* in the root menu).
 
 ```console
 $ sudo packaging/install.sh                 # into /usr (--prefix to change)

@@ -122,10 +122,10 @@ fn the_title_dialog_retitles_the_window() {
     client.type_chord(&[keys::ENTER]);
     vaht.wait_for_logged("window closed", 1);
     let listed = std::process::Command::new(EXECUTABLE)
-        .args(["msg", "windows"])
+        .args(["windows"])
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
-        .expect("vaht msg runs");
+        .expect("vaht runs");
     let listed = String::from_utf8(listed.stdout).expect("UTF-8");
     assert!(listed.trim_end().ends_with("\tnotes"), "{listed}");
 }
@@ -140,10 +140,10 @@ fn what_a_dialog_writes_to_its_errors_reaches_vahts_log() {
     );
     let mut client = TestClient::connect(vaht.socket());
     let shown = std::process::Command::new(EXECUTABLE)
-        .args(["msg", "run", "run-dialog"])
+        .args(["run", "run-dialog"])
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .status()
-        .expect("vaht msg runs");
+        .expect("vaht runs");
     assert!(shown.success());
     vaht.wait_for_logged("placed first", 1);
     vaht.wait_for_logged("dialog=\"run\"", 1);

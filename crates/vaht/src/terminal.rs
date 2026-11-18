@@ -1,4 +1,4 @@
-//! Writing to the terminal: what the tools (`vaht check`, `vaht import`)
+//! Writing to the terminal: what the tools (`vaht config check`, `vaht import`)
 //! print, and failures that happen while the compositor's logging is not
 //! running.
 //!
