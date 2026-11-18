@@ -322,7 +322,9 @@ rest by name, so a setting never silently does nothing:
   (1 to 100), `rows` (new: a number of rows, each as tall as the theme's
   taskbar, 1 by default; or `"auto"`: one, and another whenever the window
   list's entries would be narrower than `[taskbar.window_list]
-  min_entry_width` (100 pixels), up to `max_rows` (3). The window list's
+  min_entry_width` (a share of the output's width, `{ percent = 15 }`
+  by default, so it suits a laptop's screen and a television alike; or a
+  number of pixels, `min_entry_width = 100`), up to `max_rows` (3). The window list's
   entries fill the rows in order, each as wide as the rest; the tray wraps
   across the rows but never adds one; the arrows stay a row wide; the clock
   and workspace name span the rows. Windows keep off every row, and

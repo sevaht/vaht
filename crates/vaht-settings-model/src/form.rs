@@ -139,6 +139,9 @@ pub struct Alternative {
     pub description: String,
     /// What it is.
     pub shape: Shape,
+    /// The value to start from when this way is chosen, if the schema
+    /// suggests one (its `default`); else the least it may be.
+    pub suggested: Option<Value>,
 }
 
 /// What an [`Alternative`] is.
@@ -172,6 +175,9 @@ impl Alternative {
     /// Returns a value written this way to start from.
     #[must_use]
     pub fn starting_value(&self) -> Value {
+        if let Some(suggested) = &self.suggested {
+            return suggested.clone();
+        }
         match &self.shape {
             Shape::Exact(exact) => exact.clone(),
             Shape::Value(kind) => kind.starting_value(),
@@ -595,10 +601,12 @@ impl<'schema> SchemaReader<'schema> {
             .unwrap_or_default()
             .to_owned();
         let title = member.get("title").and_then(Value::as_str);
+        let suggested = member.get("default").cloned();
         let alternative = |label: String, shape: Shape| Alternative {
             label: title.map_or(label, str::to_owned),
             description: description.clone(),
             shape,
+            suggested: suggested.clone(),
         };
         if let Some(exact) = member.get("const") {
             let label = exact.as_str().unwrap_or_default().to_owned();
@@ -626,11 +634,13 @@ impl<'schema> SchemaReader<'schema> {
                     label: "yes".to_owned(),
                     description: description.clone(),
                     shape: Shape::Exact(Value::Bool(true)),
+                    suggested: None,
                 },
                 Alternative {
                     label: "no".to_owned(),
                     description,
                     shape: Shape::Exact(Value::Bool(false)),
+                    suggested: None,
                 },
             ]),
             kind @ (SettingKind::Whole { .. } | SettingKind::Decimal { .. }) => {
@@ -895,6 +905,26 @@ mod tests {
         assert_eq!(alternatives[1].label, "Max");
         assert!(alternatives[1].is(&json!({ "max": 300 })));
         assert_eq!(alternatives[1].starting_value(), json!({ "max": 1 }));
+    }
+
+    #[test]
+    fn a_way_starts_from_the_value_the_schema_suggests() {
+        let form = form_of(
+            &json!({}),
+            &json!({
+                "width": { "oneOf": [
+                    { "type": "integer", "title": "Pixels", "default": 200 },
+                    {
+                        "type": "object", "required": ["percent"],
+                        "properties": { "percent": { "type": "integer", "minimum": 1 } },
+                        "default": { "percent": 15 },
+                    },
+                ] },
+            }),
+        );
+        let alternatives = alternatives(&form, "width");
+        assert_eq!(alternatives[0].starting_value(), json!(200));
+        assert_eq!(alternatives[1].starting_value(), json!({ "percent": 15 }));
     }
 
     #[test]

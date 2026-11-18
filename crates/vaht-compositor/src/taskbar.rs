@@ -450,7 +450,11 @@ impl Taskbar {
         let width = u32::try_from(self.area_in(view.whole, row_height).size.w).unwrap_or(0);
         if *self.panel.content() != content || self.panel.size().width != width {
             let (fewest, most) = view.settings.row_range();
-            let min_entry_width = view.settings.window_list.min_entry_width;
+            let min_entry_width = view
+                .settings
+                .window_list
+                .min_entry_width
+                .pixels(view.whole.size.w);
             self.rows = (fewest..most)
                 .find(|rows| {
                     content.rows = *rows;

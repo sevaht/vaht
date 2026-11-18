@@ -133,14 +133,23 @@ mod tests {
     }
 
     /// Returns the schema of the setting at `path`, if the schema describes
-    /// it: through `properties`, and through `additionalProperties` for
-    /// tables whose keys are free (a device's name).
+    /// it: through `properties`, through the `properties` of any way a
+    /// setting may be written (`oneOf`), and through `additionalProperties`
+    /// for tables whose keys are free (a device's name).
     fn setting_schema<'schema>(root: &'schema Value, path: &[&str]) -> Option<&'schema Value> {
         let mut node = root;
         for part in path {
             let current = resolved(root, node);
+            let pointer = format!("/properties/{part}");
             node = current
-                .pointer(&format!("/properties/{part}"))
+                .pointer(&pointer)
+                .or_else(|| {
+                    current
+                        .get("oneOf")?
+                        .as_array()?
+                        .iter()
+                        .find_map(|way| way.pointer(&pointer))
+                })
                 .or_else(|| current.get("additionalProperties"))?;
         }
         Some(resolved(root, node))

@@ -310,6 +310,28 @@ fn an_auto_taskbar_takes_a_row_when_entries_get_too_narrow() {
 }
 
 #[test]
+fn an_auto_taskbar_takes_a_row_at_a_share_of_the_outputs_width() {
+    // 1920 pixels wide, so 36% is 691 pixels: two entries of 960 fit, three
+    // of 640 do not.
+    let (_vaht, mut client) = start_with(
+        "[\"window-list\"]\nrows = \"auto\"",
+        "min_entry_width = { percent = 36 }",
+    );
+    client.open_windows(2);
+    assert_eq!(taskbar_height(&client.screenshot()), HEIGHT);
+    let one_row = maximize_and_find_bottom(&mut client);
+    client.open_windows(1);
+    let screenshot = client.screenshot();
+    assert_eq!(taskbar_height(&screenshot), 2 * HEIGHT, "a second row");
+    assert_eq!(
+        lowest_window_row(&mut client),
+        one_row - HEIGHT,
+        "the maximized window shrinks to keep off it"
+    );
+    client.close_windows();
+}
+
+#[test]
 fn a_taskbar_never_takes_a_row_for_its_tray() {
     let (_vaht, mut client) = start_with("[\"window-list\", \"tray\"]\nrows = \"auto\"", "");
     client.open_windows(1);

@@ -121,9 +121,10 @@ entry_width = "fill"
 icons = true
 # Whose windows each taskbar lists: "all" outputs', or its "own-output"'s.
 windows = "all"
-# With rows = "auto", the narrowest an entry gets, in pixels, before the
-# taskbar takes another row.
-min_entry_width = 100
+# With rows = "auto", the narrowest an entry gets before the taskbar takes
+# another row: a number of pixels, or { percent = <1 to 100> } of the width
+# of the output the taskbar is on.
+min_entry_width = { percent = 15 }
 
 [taskbar.tray]
 # Programs' status icons named here (by their id, in any case) go first,

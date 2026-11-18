@@ -435,10 +435,11 @@ pub(crate) struct WindowListSettings {
     #[schemars(title = "Windows listed")]
     pub(crate) windows: WindowListScope,
     /// The narrowest an entry gets before an `"auto"` taskbar takes another
-    /// row, in pixels; the taskbar uses the fewest rows that keep every
+    /// row: a number of pixels, or a share of the output's width
+    /// (`{ percent = 15 }`). The taskbar uses the fewest rows that keep every
     /// entry at least this wide.
     #[schemars(title = "Narrowest entry before another row")]
-    pub(crate) min_entry_width: u32,
+    pub(crate) min_entry_width: MinEntryWidth,
 }
 
 impl Default for WindowListSettings {
@@ -448,7 +449,7 @@ impl Default for WindowListSettings {
             entry_width: EntryWidth::default(),
             icons: true,
             windows: WindowListScope::default(),
-            min_entry_width: 100,
+            min_entry_width: MinEntryWidth::default(),
         }
     }
 }
@@ -559,6 +560,113 @@ impl<'de> serde::Deserialize<'de> for EntryWidth {
             Ok(Given::Keyword(_)) | Err(_) => Err(de::Error::custom(
                 "entry_width is \"fill\" or { max = <pixels> }",
             )),
+        }
+    }
+}
+
+/// How narrow a window list's entries get before an `"auto"` taskbar takes
+/// another row: a number of pixels (`min_entry_width = 100`), or a share of
+/// the width of the output the taskbar is on (`{ percent = 15 }`), so the same
+/// setting suits a laptop's screen and a television.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MinEntryWidth {
+    /// This many pixels.
+    Pixels(u32),
+    /// This share of the output's width.
+    Percent(WidthPercent),
+}
+
+impl MinEntryWidth {
+    /// The share of the output's width that is the default.
+    const DEFAULT_PERCENT: u32 = 15;
+
+    /// Returns the width in pixels, on an output `output_width` wide.
+    pub(crate) fn pixels(self, output_width: i32) -> u32 {
+        match self {
+            Self::Pixels(pixels) => pixels,
+            Self::Percent(percent) => u32::try_from(percent.of(output_width)).unwrap_or(0),
+        }
+    }
+}
+
+impl Default for MinEntryWidth {
+    fn default() -> Self {
+        Self::Percent(
+            WidthPercent::new(Self::DEFAULT_PERCENT).expect("the default share is from 1 to 100"),
+        )
+    }
+}
+
+impl serde::Serialize for MinEntryWidth {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap as _;
+        match self {
+            Self::Pixels(pixels) => serializer.serialize_u32(*pixels),
+            Self::Percent(percent) => {
+                let mut share = serializer.serialize_map(Some(1))?;
+                share.serialize_entry("percent", percent)?;
+                share.end()
+            }
+        }
+    }
+}
+
+impl schemars::JsonSchema for MinEntryWidth {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "MinEntryWidth".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "oneOf": [
+                {
+                    "type": "object", "title": "Percent of the output's width",
+                    "description": "This share of the width of the output the taskbar is on, so the setting suits a small screen and a large one alike.",
+                    "properties": {
+                        "percent": {
+                            "type": "integer", "title": "Percent",
+                            "minimum": 1, "maximum": WidthPercent::WHOLE.0,
+                        },
+                    },
+                    "required": ["percent"],
+                    "additionalProperties": false,
+                    "default": { "percent": Self::DEFAULT_PERCENT },
+                },
+                {
+                    "type": "integer", "minimum": 0, "title": "Pixels",
+                    "description": "This many pixels, whatever the output.",
+                    "default": 200,
+                },
+            ],
+        })
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MinEntryWidth {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// What `min_entry_width` may say.
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Given {
+            /// A number of pixels.
+            Pixels(u32),
+            /// A share of the output's width.
+            Share(Share),
+        }
+        /// `{ percent = <1 to 100> }`.
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Share {
+            /// The share, as a whole percentage.
+            percent: u32,
+        }
+        let message = "min_entry_width is a number of pixels, or { percent = <1 to 100> }";
+        match Given::deserialize(deserializer) {
+            Ok(Given::Pixels(pixels)) => Ok(Self::Pixels(pixels)),
+            Ok(Given::Share(Share { percent })) => WidthPercent::new(percent)
+                .map(Self::Percent)
+                .ok_or_else(|| de::Error::custom(message)),
+            Err(_) => Err(de::Error::custom(message)),
         }
     }
 }
@@ -705,6 +813,40 @@ mod tests {
     #[case::auto_to_five("rows = \"auto\"\nmax_rows = 5\n", (1, 5))]
     fn rows_are_fixed_or_grow_up_to_a_limit(#[case] text: &str, #[case] range: (u32, u32)) {
         assert_eq!(taskbar(text).expect("valid").row_range(), range);
+    }
+
+    #[rstest]
+    #[case::a_share_by_default("", 288)]
+    #[case::pixels("[window_list]\nmin_entry_width = 100\n", 100)]
+    #[case::a_share("[window_list]\nmin_entry_width = { percent = 25 }\n", 480)]
+    #[case::the_whole_width("[window_list]\nmin_entry_width = { percent = 100 }\n", 1920)]
+    fn the_narrowest_entry_is_pixels_or_a_share_of_the_output(
+        #[case] text: &str,
+        #[case] pixels: u32,
+    ) {
+        let width = taskbar(text).expect("valid").window_list.min_entry_width;
+        assert_eq!(width.pixels(1920), pixels);
+    }
+
+    #[test]
+    fn the_narrowest_entry_follows_the_width_of_the_output() {
+        let width = MinEntryWidth::default();
+        assert_eq!(width.pixels(1920), 288, "15% of a 1080p output");
+        assert_eq!(width.pixels(1280), 192, "15% of a smaller one");
+        assert_eq!(MinEntryWidth::Pixels(100).pixels(1280), 100);
+    }
+
+    #[rstest]
+    #[case::no_share("[window_list]\nmin_entry_width = { percent = 0 }\n")]
+    #[case::too_much("[window_list]\nmin_entry_width = { percent = 101 }\n")]
+    #[case::a_word("[window_list]\nmin_entry_width = \"wide\"\n")]
+    #[case::another_key("[window_list]\nmin_entry_width = { max = 5 }\n")]
+    fn a_share_outside_one_to_a_hundred_is_refused(#[case] text: &str) {
+        let error = taskbar(text).expect_err(text);
+        assert!(
+            error.contains("min_entry_width is a number of pixels"),
+            "{error}"
+        );
     }
 
     #[rstest]
