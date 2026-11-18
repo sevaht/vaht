@@ -7,6 +7,10 @@
 //! and checks the result as `vaht config check` would. The source is never changed.
 //! Every line that is not converted is in the [`Report`], with why.
 //!
+//! [`convert_style`] converts a Fluxbox style on its own (colors, fonts,
+//! textures: nothing else of a setup), and [`find_styles`] finds the styles in
+//! a directory of them.
+//!
 //! Converted today: `init` to `settings.toml`, `keys` to `bindings.toml`,
 //! `apps` to `rules.toml`, `menu` and `windowmenu` to `menus.toml`, and the
 //! style `init` names to `styles/<name>.toml`, which `settings.toml` then
@@ -138,7 +142,7 @@ impl FluxboxSetup {
             });
         }
         if let Some((path, text)) = &self.style {
-            let name = Self::style_name(path);
+            let name = style_name(path);
             let mut vaht_style = StyleFile::new(path, text).convert(&mut report);
             Self::place_alphas(&init.alphas, Some(&mut vaht_style), &init_path, &mut report);
             settings.insert("style", toml_edit::value(name.clone()));
@@ -251,35 +255,6 @@ impl FluxboxSetup {
         }
     }
 
-    /// Returns the name the vaht style converted from the style at `path` gets:
-    /// the style's own (its directory's, for a `theme.cfg`), with anything
-    /// but letters, digits, `-` and `_` made `-`.
-    fn style_name(path: &Path) -> String {
-        let named = if path.file_name().is_some_and(|name| name == "theme.cfg") {
-            path.parent().unwrap_or(path)
-        } else {
-            path
-        };
-        let name: String = named
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default()
-            .chars()
-            .map(|character| {
-                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
-                    character
-                } else {
-                    '-'
-                }
-            })
-            .collect();
-        if name.is_empty() {
-            "imported".to_owned()
-        } else {
-            name
-        }
-    }
-
     /// Expands a leading `~/` to the home directory, as Fluxbox does; a
     /// relative result is then taken from the setup's directory.
     fn expand_home(path: &str) -> PathBuf {
@@ -288,6 +263,197 @@ impl FluxboxSetup {
             (Some(_) | None, _) => PathBuf::from(path),
         }
     }
+}
+
+/// Returns the name the vaht style converted from the style at `path` gets:
+/// the style's own (its directory's, for a `theme.cfg`, and without a
+/// `.style` extension), with anything but letters, digits, `-` and `_` made
+/// `-`.
+fn style_name(path: &Path) -> String {
+    let named = if path.file_name().is_some_and(|name| name == "theme.cfg") {
+        path.parent().unwrap_or(path)
+    } else {
+        path
+    };
+    let file_name = named
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let name: String = file_name
+        .strip_suffix(".style")
+        .unwrap_or(&file_name)
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if name.is_empty() {
+        "imported".to_owned()
+    } else {
+        name
+    }
+}
+
+/// Returns whether `text` reads as a Fluxbox style: some line sets a
+/// `window.`, `toolbar.` or `menu.` resource (or the toolbar's own texture).
+fn looks_like_style(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim_start();
+        ["window.", "toolbar.", "menu.", "toolbar:", "menu.frame:"]
+            .iter()
+            .any(|start| line.starts_with(start))
+            && line.contains(':')
+    })
+}
+
+/// Finds the Fluxbox styles at `path`: the style it is (a file, or a directory
+/// holding `theme.cfg`), or, for a directory of styles, every style in it,
+/// searched through (a directory that is not itself a style is searched in
+/// turn). A file counts as a style when it reads as one, so a `README` among
+/// them is left alone. Sorted.
+///
+/// # Errors
+///
+/// Returns an error if `path`, or a directory in it, cannot be read.
+pub fn find_styles(path: &Path) -> Result<Vec<PathBuf>, ImportError> {
+    let metadata = std::fs::metadata(path).map_err(|error| ImportError::Read {
+        path: path.to_path_buf(),
+        error,
+    })?;
+    if metadata.is_file() {
+        // Named directly: the user says it is a style.
+        return Ok(vec![path.to_path_buf()]);
+    }
+    if path.join("theme.cfg").is_file() {
+        return Ok(vec![path.to_path_buf()]);
+    }
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(path)
+        .map_err(|error| ImportError::Read {
+            path: path.to_path_buf(),
+            error,
+        })?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|entry| {
+            !entry
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+        })
+        .collect();
+    entries.sort();
+    let mut styles = Vec::new();
+    for entry in entries {
+        if entry.is_dir() {
+            styles.extend(find_styles(&entry)?);
+        } else if std::fs::read_to_string(&entry).is_ok_and(|text| looks_like_style(&text)) {
+            styles.push(entry);
+        }
+    }
+    Ok(styles)
+}
+
+/// A Fluxbox style, converted to a vaht style file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConvertedStyle {
+    /// The style converted: a file, or the directory holding its `theme.cfg`.
+    source: PathBuf,
+    /// The name the vaht style gets: `styles/<name>.toml`.
+    name: String,
+    /// The vaht style file.
+    text: String,
+    /// What was not converted.
+    report: Report,
+}
+
+impl ConvertedStyle {
+    /// Returns where the style came from.
+    #[must_use]
+    pub fn source(&self) -> &Path {
+        &self.source
+    }
+
+    /// Returns the name the vaht style gets.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the vaht style file.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Returns what was not converted, and why.
+    #[must_use]
+    pub const fn report(&self) -> &Report {
+        &self.report
+    }
+
+    /// Writes the style to `<directory>/<name>.toml`, creating the directory;
+    /// returns the path. An existing file is replaced only with `replace`.
+    /// The style is read as vaht reads one first, so nothing invalid is
+    /// written.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists and `replace` is false, the style is
+    /// not valid (a bug in the conversion), or the file cannot be written.
+    pub fn write(&self, directory: &Path, replace: bool) -> Result<PathBuf, ImportError> {
+        let path = directory.join(format!("{}.toml", self.name));
+        if !replace && path.exists() {
+            return Err(ImportError::Exists(path));
+        }
+        vaht_ui::style::StyleLayers::from_toml(&self.text).map_err(|error| {
+            ImportError::InvalidStyle {
+                name: self.name.clone(),
+                message: error.to_string(),
+            }
+        })?;
+        std::fs::create_dir_all(directory).map_err(|error| ImportError::Write {
+            path: directory.to_path_buf(),
+            error,
+        })?;
+        std::fs::write(&path, &self.text).map_err(|error| ImportError::Write {
+            path: path.clone(),
+            error,
+        })?;
+        Ok(path)
+    }
+}
+
+/// Converts the Fluxbox style at `path` (a file, or a directory holding
+/// `theme.cfg`) to a vaht style, and nothing else of a setup: its colors,
+/// fonts, textures and sizes. Every line not converted is in the report.
+///
+/// # Errors
+///
+/// Returns an error if the style cannot be read.
+pub fn convert_style(path: &Path) -> Result<ConvertedStyle, ImportError> {
+    let file = if path.is_dir() {
+        path.join("theme.cfg")
+    } else {
+        path.to_path_buf()
+    };
+    let text = std::fs::read_to_string(&file).map_err(|error| ImportError::Read {
+        path: file.clone(),
+        error,
+    })?;
+    let mut report = Report::default();
+    let converted = StyleFile::new(&file, &text).convert(&mut report);
+    Ok(ConvertedStyle {
+        source: path.to_path_buf(),
+        name: style_name(&file),
+        text: format!(
+            "# Converted from {} by vaht import fluxbox-style.\n\n{converted}",
+            path.display()
+        ),
+        report,
+    })
 }
 
 /// One file of vaht's configuration, converted.
@@ -396,6 +562,14 @@ pub enum ImportError {
     /// The written configuration is not valid: a bug in the conversion.
     #[error("the converted configuration is not valid (a bug in vaht import)")]
     Invalid(#[source] vaht_compositor::ConfigError),
+    /// A converted style is not valid: a bug in the conversion.
+    #[error("the converted style {name} is not valid (a bug in vaht import): {message}")]
+    InvalidStyle {
+        /// The style's name.
+        name: String,
+        /// What is wrong.
+        message: String,
+    },
 }
 
 #[cfg(test)]
@@ -526,5 +700,116 @@ mod tests {
         );
         let target = tempfile::tempdir().expect("a temporary directory");
         conversion.write(target.path(), false).expect("valid");
+    }
+
+    /// A small Fluxbox style.
+    const SAMPLE_STYLE: &str = "toolbar: Raised Gradient Vertical\n\
+        toolbar.color: grey30\ntoolbar.colorTo: grey5\n\
+        window.title.focus: Raised Gradient Vertical\n\
+        window.title.focus.color: grey55\nwindow.title.focus.colorTo: grey5\n\
+        window.label.focus.textColor: white\n\
+        menu.frame: Flat Solid\nmenu.frame.color: black\nmenu.frame.textColor: white\n";
+
+    #[test]
+    fn a_style_is_named_for_its_file_or_directory() {
+        let name = |path: &str| style_name(Path::new(path));
+        assert_eq!(name("/styles/Artwiz"), "Artwiz");
+        assert_eq!(
+            name("/styles/wave.style"),
+            "wave",
+            "the extension is not part of the name"
+        );
+        assert_eq!(
+            name("/styles/green tea/theme.cfg"),
+            "green-tea",
+            "a directory's name"
+        );
+        assert_eq!(name("/styles/bloe"), "bloe");
+        assert_eq!(name("/"), "imported");
+    }
+
+    #[test]
+    fn a_style_converts_on_its_own_and_is_written_without_replacing() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let source = directory.path().join("Mine");
+        std::fs::write(&source, SAMPLE_STYLE).expect("written");
+        let converted = convert_style(&source).expect("converts");
+        assert_eq!(converted.name(), "Mine");
+        assert!(
+            converted.text().starts_with("# Converted from"),
+            "{}",
+            converted.text()
+        );
+        let styles = directory.path().join("out");
+        let written = converted.write(&styles, false).expect("written");
+        assert_eq!(written, styles.join("Mine.toml"));
+        assert!(
+            vaht_ui::style::StyleLayers::from_toml(
+                &std::fs::read_to_string(&written).expect("read")
+            )
+            .is_ok(),
+            "what is written is a style vaht reads"
+        );
+        assert!(matches!(
+            converted.write(&styles, false),
+            Err(ImportError::Exists(_))
+        ));
+        converted.write(&styles, true).expect("replaced on request");
+    }
+
+    #[test]
+    fn a_style_directory_is_read_from_its_theme_cfg() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let style = directory.path().join("arch");
+        std::fs::create_dir(&style).expect("a directory");
+        std::fs::write(style.join("theme.cfg"), SAMPLE_STYLE).expect("written");
+        let converted = convert_style(&style).expect("converts");
+        assert_eq!(converted.name(), "arch");
+    }
+
+    #[test]
+    fn a_style_that_cannot_be_read_is_an_error() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        assert!(matches!(
+            convert_style(&directory.path().join("missing")),
+            Err(ImportError::Read { .. })
+        ));
+    }
+
+    #[test]
+    fn a_directory_of_styles_is_searched_for_the_files_that_read_as_styles() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let root = directory.path();
+        std::fs::write(root.join("Alpha"), SAMPLE_STYLE).expect("written");
+        std::fs::write(
+            root.join("README"),
+            "Styles for fluxbox.\nSee the licenses.\n",
+        )
+        .expect("written");
+        std::fs::write(root.join(".hidden"), SAMPLE_STYLE).expect("written");
+        std::fs::create_dir(root.join("community")).expect("a directory");
+        std::fs::write(root.join("community").join("Beta.style"), SAMPLE_STYLE).expect("written");
+        std::fs::create_dir(root.join("gamma")).expect("a directory");
+        std::fs::write(root.join("gamma").join("theme.cfg"), SAMPLE_STYLE).expect("written");
+        std::fs::create_dir(root.join("gamma").join("pixmaps")).expect("a directory");
+        let found: Vec<String> = find_styles(root)
+            .expect("searched")
+            .iter()
+            .map(|path| {
+                path.strip_prefix(root)
+                    .expect("inside")
+                    .display()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(found, ["Alpha", "community/Beta.style", "gamma"]);
+    }
+
+    #[test]
+    fn a_style_named_directly_is_one_even_if_it_does_not_read_as_a_style() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let file = directory.path().join("odd");
+        std::fs::write(&file, "nothing here\n").expect("written");
+        assert_eq!(find_styles(&file).expect("found"), [file]);
     }
 }

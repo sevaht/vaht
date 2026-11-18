@@ -385,6 +385,27 @@ pub enum ImportSource {
         #[arg(long)]
         force: bool,
     },
+    /// Fluxbox styles (colors, fonts, textures), converted to vaht styles on
+    /// their own: nothing else of a setup is read or written. Each is a style
+    /// file, a style directory (holding `theme.cfg`), or a directory of
+    /// styles, searched through: `vaht import fluxbox-style
+    /// /usr/share/fluxbox/styles`.
+    FluxboxStyle {
+        /// What to convert; any number.
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+        /// The directory to write the styles into, each as `<name>.toml`
+        /// [default: `styles` in the configuration directory].
+        #[arg(long)]
+        to: Option<PathBuf>,
+        /// Replaces styles that exist already.
+        #[arg(long)]
+        force: bool,
+        /// Prints every line not converted of every style (one style prints
+        /// them anyway; several print how many).
+        #[arg(long)]
+        notes: bool,
+    },
 }
 
 /// The `--backend` values.

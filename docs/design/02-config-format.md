@@ -1142,7 +1142,7 @@ corner_radius = 5
 
 ```
 vaht import fluxbox  [--from ~/.fluxbox] [--to ~/.config/vaht] [--force]
-vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/styles/<name>.toml
+vaht import fluxbox-style <path>... [--to ~/.config/vaht/styles] [--force] [--notes]
 ```
 
 - **There is one importer, for the Fluxbox format (decided).** fluxland was
@@ -1157,6 +1157,21 @@ vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/styles/<
     `PseudoTransparent`, `FocusProtection`, `RunDialog`) are understood as
     extensions of it.
 
+- **`fluxbox-style` converts styles alone.** It reads and writes nothing but
+  styles: no `init`, keys, menus or `settings.toml`, so it cannot disturb the
+  rest of a configuration. Each path is a style file, a style directory (one
+  holding `theme.cfg`), or a directory of styles, which is searched through,
+  nested directories included: a file in it counts when it reads as a Fluxbox
+  style (a line setting a `window.`, `toolbar.` or `menu.` resource), so a
+  `README` is left alone. A style `Name` (or `Name.style`, or a directory
+  `Name/`) becomes `<to>/Name.toml`, `--to` being a directory, by default the
+  configuration directory's `styles`. Nothing is replaced without `--force`
+  (so a second run over the same styles leaves the ones already there alone),
+  a style that fails does not stop the others, and each is read as vaht reads
+  a style before it is written. One style prints every line not converted;
+  several print how many, and `--notes` lists them. Two styles of one run with
+  the same name are not both written. Choosing the result is `vaht config set
+  style Name`.
 - **Built so far:** `init` to `settings.toml`, `keys` to `bindings.toml`,
   `apps` to `rules.toml`, and the style `session.styleFile` names (a file,
   or a directory with `theme.cfg`) to `styles/<name>.toml`, which the

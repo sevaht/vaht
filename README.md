@@ -12,7 +12,10 @@ to them.
 `vaht config check` validates the configuration in `~/.config/vaht`, and
 `vaht config check --print-defaults` prints the built-in files.
 `vaht import fluxbox --from ~/.fluxbox` converts a Fluxbox setup, and
-reports every line it could not convert.
+reports every line it could not convert. `vaht import fluxbox-style <path>...`
+converts just styles (colors, fonts, textures), from a style, a style
+directory, or a whole directory of them such as `/usr/share/fluxbox/styles`,
+without touching the rest of your configuration.
 
 ## Installing
 

@@ -61,6 +61,20 @@ fn main() -> ExitCode {
             let to = to.clone().unwrap_or_else(|| arguments.config_directory());
             return vaht::import::fluxbox(from.as_deref(), &to, *force);
         }
+        Some(Subcommand::Import {
+            source:
+                ImportSource::FluxboxStyle {
+                    paths,
+                    to,
+                    force,
+                    notes,
+                },
+        }) => {
+            let to = to
+                .clone()
+                .unwrap_or_else(|| arguments.config_directory().join("styles"));
+            return vaht::import::fluxbox_styles(paths, &to, (*force, *notes));
+        }
         Some(Subcommand::IpcSchema) => return vaht::message::print_schema(),
         Some(Subcommand::Dialog { dialog }) => {
             return vaht::dialog::show(*dialog, &arguments.config_directory());

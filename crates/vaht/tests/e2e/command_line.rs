@@ -35,6 +35,11 @@ fn run_executable(arguments: &[&str], log_directory: &Path) -> Output {
         .expect("cargo builds the executable before running integration tests")
 }
 
+/// Returns `path` as an argument.
+fn path(path: &Path) -> String {
+    path.display().to_string()
+}
+
 /// A fresh directory for one test's logs.
 fn log_directory() -> tempfile::TempDir {
     tempfile::tempdir().expect("a temporary directory")
@@ -308,4 +313,177 @@ fn the_commands_that_ask_the_running_vaht_fail_plainly_without_one() {
     );
     let removed = run_executable(&["msg", "windows"], logs.path());
     assert!(!removed.status.success(), "there is no `msg` any more");
+}
+
+/// A small Fluxbox style.
+const FLUXBOX_STYLE: &str = "toolbar: Raised Gradient Vertical\n\
+    toolbar.color: grey30\ntoolbar.colorTo: grey5\n\
+    window.title.focus: Raised Gradient Vertical\n\
+    window.title.focus.color: grey55\nwindow.title.focus.colorTo: grey5\n\
+    window.label.focus.textColor: white\n\
+    menu.frame: Flat Solid\nmenu.frame.color: black\nmenu.frame.textColor: white\n";
+
+#[test]
+fn a_fluxbox_style_converts_on_its_own_and_vaht_accepts_it() {
+    let logs = log_directory();
+    let work = tempfile::tempdir().expect("a temporary directory");
+    let source = work.path().join("Mine");
+    std::fs::write(&source, FLUXBOX_STYLE).expect("written");
+    let configuration = work.path().join("config");
+    let styles = configuration.join("styles");
+    let output = run_executable(
+        &[
+            "import",
+            "fluxbox-style",
+            &path(&source),
+            "--to",
+            &path(&styles),
+        ],
+        logs.path(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("Mine.toml"),
+        "{output:?}"
+    );
+    let written: Vec<_> = std::fs::read_dir(&configuration)
+        .expect("the configuration directory")
+        .flatten()
+        .map(|entry| entry.file_name())
+        .collect();
+    assert_eq!(
+        written,
+        ["styles"],
+        "only a style is written, no settings.toml or the like"
+    );
+    // vaht takes it as the style a configuration chooses.
+    std::fs::write(configuration.join("settings.toml"), "style = \"Mine\"\n").expect("written");
+    let checked = run_executable(
+        &[
+            "config",
+            "check",
+            "--config-directory",
+            &path(&configuration),
+        ],
+        logs.path(),
+    );
+    assert!(checked.status.success(), "{checked:?}");
+}
+
+#[test]
+fn a_style_is_written_to_the_configuration_directorys_styles_unless_told_where() {
+    let logs = log_directory();
+    let work = tempfile::tempdir().expect("a temporary directory");
+    let source = work.path().join("Mine");
+    std::fs::write(&source, FLUXBOX_STYLE).expect("written");
+    let configuration = work.path().join("config");
+    let output = run_executable(
+        &[
+            "import",
+            "fluxbox-style",
+            &path(&source),
+            "--config-directory",
+            &path(&configuration),
+        ],
+        logs.path(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(configuration.join("styles").join("Mine.toml").is_file());
+}
+
+#[test]
+fn a_style_is_not_replaced_without_force() {
+    let logs = log_directory();
+    let work = tempfile::tempdir().expect("a temporary directory");
+    let source = work.path().join("Mine");
+    std::fs::write(&source, FLUXBOX_STYLE).expect("written");
+    let styles = work.path().join("styles");
+    let (source_argument, styles_argument) = (path(&source), path(&styles));
+    let convert = |extra: &[&str]| {
+        let mut arguments = vec![
+            "import",
+            "fluxbox-style",
+            source_argument.as_str(),
+            "--to",
+            styles_argument.as_str(),
+        ];
+        arguments.extend_from_slice(extra);
+        run_executable(&arguments, logs.path())
+    };
+    assert!(convert(&[]).status.success());
+    std::fs::write(styles.join("Mine.toml"), "# mine, edited\n").expect("edited");
+    let refused = convert(&[]);
+    assert!(!refused.status.success(), "{refused:?}");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("--force"),
+        "{refused:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(styles.join("Mine.toml")).expect("read"),
+        "# mine, edited\n",
+        "the edited style is untouched"
+    );
+    assert!(convert(&["--force"]).status.success());
+    assert!(
+        std::fs::read_to_string(styles.join("Mine.toml"))
+            .expect("read")
+            .starts_with("# Converted from"),
+        "replaced on request"
+    );
+}
+
+#[test]
+fn a_directory_of_styles_converts_each_style_and_leaves_the_rest() {
+    let logs = log_directory();
+    let work = tempfile::tempdir().expect("a temporary directory");
+    let collection = work.path().join("styles");
+    std::fs::create_dir_all(collection.join("more")).expect("directories");
+    std::fs::write(collection.join("One"), FLUXBOX_STYLE).expect("written");
+    std::fs::write(collection.join("more").join("Two.style"), FLUXBOX_STYLE).expect("written");
+    std::fs::write(collection.join("README"), "About these styles.\n").expect("written");
+    let out = work.path().join("out");
+    let output = run_executable(
+        &[
+            "import",
+            "fluxbox-style",
+            &path(&collection),
+            "--to",
+            &path(&out),
+        ],
+        logs.path(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let mut names: Vec<_> = std::fs::read_dir(&out)
+        .expect("the output directory")
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["One.toml", "Two.toml"]);
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("Converted 2 of 2 styles"),
+        "{output:?}"
+    );
+}
+
+#[test]
+fn a_directory_with_no_styles_in_it_is_an_error() {
+    let logs = log_directory();
+    let work = tempfile::tempdir().expect("a temporary directory");
+    std::fs::write(work.path().join("README"), "Nothing to convert.\n").expect("written");
+    let output = run_executable(
+        &[
+            "import",
+            "fluxbox-style",
+            &path(work.path()),
+            "--to",
+            &path(&work.path().join("out")),
+        ],
+        logs.path(),
+    );
+    assert!(!output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("no Fluxbox styles"),
+        "{output:?}"
+    );
 }
