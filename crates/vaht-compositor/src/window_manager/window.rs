@@ -442,6 +442,10 @@ impl Window {
         theme: &Theme,
         typesetter: &mut Typesetter,
     ) {
+        // Its maximize button is a restore button while the window fills the
+        // usable area; read here, where every placement change has landed.
+        self.frame
+            .set_maximized(self.placement.is_fully_maximized());
         let geometry = self.frame_geometry(metrics);
         self.frame.paint(&geometry, theme, typesetter);
     }

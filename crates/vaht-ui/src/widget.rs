@@ -235,6 +235,9 @@ pub enum Glyph {
     Close,
     /// A box: maximize the window.
     Maximize,
+    /// Two boxes, one behind the other: the window is maximized, and this
+    /// puts it back.
+    Restore,
     /// A low bar: minimize the window.
     Minimize,
     /// A high bar: shade the window to its titlebar.

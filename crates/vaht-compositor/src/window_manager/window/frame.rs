@@ -83,12 +83,14 @@ impl TitlebarButton {
         }
     }
 
-    /// Returns the button's picture.
-    const fn glyph(self) -> Glyph {
+    /// Returns the button's picture, for a window that is `is_maximized` or
+    /// not: the maximize button shows what clicking it would do.
+    const fn glyph(self, is_maximized: bool) -> Glyph {
         match self {
             Self::Shade => Glyph::Shade,
             Self::Stick => Glyph::Stick,
             Self::Minimize => Glyph::Minimize,
+            Self::Maximize if is_maximized => Glyph::Restore,
             Self::Maximize => Glyph::Maximize,
             Self::Close => Glyph::Close,
         }
@@ -444,6 +446,7 @@ impl Frame {
                     title: String::new(),
                     icon: None,
                     is_focused: false,
+                    is_maximized: false,
                     buttons,
                 },
                 vaht_ui::Size::default(),
@@ -532,6 +535,21 @@ impl Frame {
         }
     }
 
+    /// Returns whether the frame shows its window as maximized.
+    #[cfg(test)]
+    pub(crate) fn shows_maximized(&self) -> bool {
+        self.titlebar.content().is_maximized
+    }
+
+    /// Shows the window as maximized or not, which its maximize button
+    /// shows by being a restore button.
+    pub(crate) fn set_maximized(&mut self, is_maximized: bool) {
+        if self.titlebar.content().is_maximized != is_maximized {
+            self.titlebar
+                .update(|content| content.is_maximized = is_maximized);
+        }
+    }
+
     /// Marks the frame for painting again, as when the theme changed.
     pub(crate) fn invalidate(&mut self) {
         self.titlebar.invalidate();
@@ -575,6 +593,8 @@ pub(crate) struct Titlebar {
     icon: Option<Icon>,
     /// Whether the window has keyboard focus.
     is_focused: bool,
+    /// Whether the window is maximized, so its maximize button restores it.
+    is_maximized: bool,
     /// The buttons either side of the title.
     buttons: TitlebarLayout,
 }
@@ -584,7 +604,7 @@ impl PanelContent for Titlebar {
 
     fn build(&self) -> Widget<TitlebarHit> {
         let button = |button: &TitlebarButton| {
-            Widget::glyph(ThemeElement::Button, button.glyph())
+            Widget::glyph(ThemeElement::Button, button.glyph(self.is_maximized))
                 .with_button(TitlebarHit::Button(*button))
         };
         let label = Widget::text(ThemeElement::Label, self.title.clone())
@@ -918,6 +938,7 @@ mod tests {
             title: "a window".to_owned(),
             icon: None,
             is_focused: true,
+            is_maximized: false,
             buttons: TitlebarLayout {
                 left: vec![TitlebarButton::Stick],
                 right: vec![
@@ -944,5 +965,49 @@ mod tests {
                 Some(TitlebarHit::Button(TitlebarButton::Close)),
             ]
         );
+    }
+
+    /// Returns the picture of the button for `button` in a titlebar of a
+    /// window that is `is_maximized` or not.
+    fn glyph_of(button: TitlebarButton, is_maximized: bool) -> Glyph {
+        let titlebar = Titlebar {
+            title: String::new(),
+            icon: None,
+            is_focused: true,
+            is_maximized,
+            buttons: TitlebarLayout {
+                left: Vec::new(),
+                right: vec![button],
+            },
+        };
+        let vaht_ui::widget::WidgetKind::Row(children) = titlebar.build().kind else {
+            panic!("a titlebar is a row");
+        };
+        let vaht_ui::widget::WidgetKind::Glyph(glyph) = children[1].kind else {
+            panic!("a button is a glyph");
+        };
+        glyph
+    }
+
+    #[test]
+    fn the_maximize_button_is_a_restore_button_while_the_window_is_maximized() {
+        assert_eq!(glyph_of(TitlebarButton::Maximize, false), Glyph::Maximize);
+        assert_eq!(glyph_of(TitlebarButton::Maximize, true), Glyph::Restore);
+    }
+
+    #[test]
+    fn the_other_buttons_look_the_same_whether_or_not_the_window_is_maximized() {
+        for button in [
+            TitlebarButton::Shade,
+            TitlebarButton::Stick,
+            TitlebarButton::Minimize,
+            TitlebarButton::Close,
+        ] {
+            assert_eq!(
+                glyph_of(button, false),
+                glyph_of(button, true),
+                "{button:?}"
+            );
+        }
     }
 }

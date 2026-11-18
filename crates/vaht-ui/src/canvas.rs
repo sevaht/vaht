@@ -242,6 +242,7 @@ impl<'pixmap> Canvas<'pixmap> {
             }
             Glyph::Close
             | Glyph::Maximize
+            | Glyph::Restore
             | Glyph::Minimize
             | Glyph::Shade
             | Glyph::Stick
@@ -301,6 +302,25 @@ impl<'pixmap> Canvas<'pixmap> {
                 );
                 // Fluxbox's maximize box has a heavier top edge, like a titlebar.
                 path.move_to(left, top + 1.0);
+                path.line_to(right, top + 1.0);
+            }
+            Glyph::Restore => {
+                // Two boxes, the one behind up and to the right: the front
+                // box whole, the back one only where it shows, each with the
+                // heavier top edge the maximize box has.
+                let offset = (side * 0.3).round().max(2.0);
+                path.push_rect(
+                    SkiaRect::from_ltrb(left, top + offset, right - offset, bottom)
+                        .expect("a box of positive size"),
+                );
+                path.move_to(left, top + offset + 1.0);
+                path.line_to(right - offset, top + offset + 1.0);
+                path.move_to(left + offset, top + offset);
+                path.line_to(left + offset, top);
+                path.line_to(right, top);
+                path.line_to(right, bottom - offset);
+                path.line_to(right - offset, bottom - offset);
+                path.move_to(left + offset, top + 1.0);
                 path.line_to(right, top + 1.0);
             }
             Glyph::Minimize => {

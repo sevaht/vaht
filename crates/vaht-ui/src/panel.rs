@@ -591,4 +591,94 @@ mod tests {
         let (first, second) = tops_of_two_rows(false);
         assert_ne!(first, second, "one gradient runs behind both rows");
     }
+
+    /// A panel that is one glyph.
+    struct OneGlyph(Glyph);
+
+    impl PanelContent for OneGlyph {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            Widget::glyph(ThemeElement::Button, self.0)
+        }
+
+        fn state(&self) -> WidgetState {
+            WidgetState::Focused
+        }
+    }
+
+    /// Returns which pixels of a 40 by 40 panel `glyph` marks, as rows of
+    /// text: `#` where it shows.
+    fn drawing_of(glyph: Glyph) -> Vec<String> {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(OneGlyph(glyph), Size::new(40, 40));
+        assert!(panel.paint(&Theme::built_in(), &mut typesetter));
+        let pixels = panel.pixels().expect("a painted panel");
+        // The glyph is white on the theme's grey gradient.
+        (0..40)
+            .map(|y| {
+                (0..40)
+                    .map(|x| {
+                        let pixel = pixels.pixel(x, y).expect("inside");
+                        if pixel.red() > 200 { '#' } else { '.' }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Returns whether the three by three pixels at each of the four corners
+    /// of `drawing`'s footprint (its marked pixels' bounds) have a mark:
+    /// top left, top right, bottom left, bottom right.
+    fn corners_marked(drawing: &[String]) -> [bool; 4] {
+        let marks: Vec<(usize, usize)> = drawing
+            .iter()
+            .enumerate()
+            .flat_map(|(y, row)| {
+                row.chars()
+                    .enumerate()
+                    .filter(|(_, mark)| *mark == '#')
+                    .map(move |(x, _)| (x, y))
+            })
+            .collect();
+        let (left, right) = (
+            marks
+                .iter()
+                .map(|&(column, _)| column)
+                .min()
+                .expect("marks"),
+            marks
+                .iter()
+                .map(|&(column, _)| column)
+                .max()
+                .expect("marks"),
+        );
+        let (top, bottom) = (
+            marks.iter().map(|&(_, row)| row).min().expect("marks"),
+            marks.iter().map(|&(_, row)| row).max().expect("marks"),
+        );
+        let near = |corner_x: usize, corner_y: usize| {
+            marks
+                .iter()
+                .any(|(x, y)| x.abs_diff(corner_x) < 3 && y.abs_diff(corner_y) < 3)
+        };
+        [
+            near(left, top),
+            near(right, top),
+            near(left, bottom),
+            near(right, bottom),
+        ]
+    }
+
+    #[test]
+    fn the_restore_glyph_is_two_offset_boxes_unlike_the_maximize_box() {
+        // One box has all four corners; two boxes, the back one up and to the
+        // right, leave the top left and the bottom right of the footprint
+        // empty.
+        assert_eq!(corners_marked(&drawing_of(Glyph::Maximize)), [true; 4]);
+        assert_eq!(
+            corners_marked(&drawing_of(Glyph::Restore)),
+            [false, true, true, false]
+        );
+    }
 }

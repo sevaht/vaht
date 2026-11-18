@@ -216,7 +216,9 @@ rest by name, so a setting never silently does nothing:
   window takes the size when the drag ends; from Fluxbox's
   `opaqueResize`), and `[windows.frame]`
   with `titlebar_left` and `titlebar_right` (buttons `shade`, `stick`,
-  `minimize`, `maximize`, `close`) and `handle` (the strip along the
+  `minimize`, `maximize`, `close`; the `maximize` button is a box, and
+  while its window is maximized, two boxes: a restore button, as that is what
+  clicking it does) and `handle` (the strip along the
   bottom with a grip at each end, 20 pixels wide as Fluxbox's; dragging
   it resizes the bottom edge, and a grip its corner, unless the `handle`
   and `grip-*` mouse contexts bind something). `vaht import` reads it from

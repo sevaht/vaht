@@ -1926,6 +1926,25 @@ mod tests {
     }
 
     #[test]
+    fn a_maximized_windows_frame_shows_it_so_and_restoring_shows_it_back() {
+        let mut desk = Desk::new();
+        let window = desk.open();
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut icons = IconStore::from_environment();
+        let theme = Theme::built_in();
+        let mut shows_maximized = |desk: &mut Desk| {
+            desk.manager
+                .paint_frames(&theme, (&mut typesetter, &mut icons));
+            desk.window(window).frame().shows_maximized()
+        };
+        assert!(!shows_maximized(&mut desk), "floating");
+        desk.run(&action("maximize"));
+        assert!(shows_maximized(&mut desk), "maximized");
+        desk.run(&action("maximize"));
+        assert!(!shows_maximized(&mut desk), "restored");
+    }
+
+    #[test]
     fn a_window_drawing_its_own_frame_gets_none_and_maximizes_its_content() {
         let mut desk = Desk::new();
         let window = desk.open_self_decorated();
