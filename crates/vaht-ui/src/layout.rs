@@ -38,6 +38,8 @@ pub struct Placed<Hit> {
     pub is_button: bool,
     /// The state it is drawn in, when not its panel's.
     pub state: Option<WidgetState>,
+    /// Whether it paints its element's background.
+    pub has_background: bool,
     /// The icon shown left of its text, if any.
     pub icon: Option<WidgetIcon>,
     /// The mark shown at one end, if any.
@@ -151,6 +153,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
             hit: widget.hit,
             is_button: widget.is_button,
             state: widget.state,
+            has_background: widget.has_background,
             icon: widget.icon.clone(),
             mark: widget.mark,
             mark_side: widget.mark_side,

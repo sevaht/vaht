@@ -532,4 +532,63 @@ mod tests {
         );
         assert_eq!(rows.len(), 8, "eight tall: {rows:?}");
     }
+
+    /// Two stacked rows on a background, each with or without a background
+    /// of its own.
+    struct Stacked {
+        rows_have_background: bool,
+    }
+
+    impl PanelContent for Stacked {
+        type Hit = TitlebarHit;
+
+        fn build(&self) -> Widget<TitlebarHit> {
+            let row = || {
+                let row = Widget::row(ThemeElement::Label, Vec::new());
+                if self.rows_have_background {
+                    row
+                } else {
+                    row.without_background()
+                }
+            };
+            Widget::column(ThemeElement::Titlebar, vec![row(), row()])
+        }
+
+        fn state(&self) -> WidgetState {
+            WidgetState::Focused
+        }
+    }
+
+    /// Returns the colors at the top of a stack's first and second rows
+    /// (each 20 pixels tall).
+    fn tops_of_two_rows(rows_have_background: bool) -> ((u8, u8, u8), (u8, u8, u8)) {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(
+            Stacked {
+                rows_have_background,
+            },
+            Size::new(40, 40),
+        );
+        assert!(panel.paint(&Theme::built_in(), &mut typesetter));
+        let top = |y| {
+            let pixel = panel
+                .pixels()
+                .and_then(|pixels| pixels.pixel(20, y))
+                .expect("a pixel inside the panel");
+            (pixel.red(), pixel.green(), pixel.blue())
+        };
+        (top(1), top(21))
+    }
+
+    #[test]
+    fn a_widget_with_a_background_starts_the_gradient_again() {
+        let (first, second) = tops_of_two_rows(true);
+        assert_eq!(first, second, "each row has a gradient of its own");
+    }
+
+    #[test]
+    fn a_widget_without_a_background_shows_its_parents_unbroken() {
+        let (first, second) = tops_of_two_rows(false);
+        assert_ne!(first, second, "one gradient runs behind both rows");
+    }
 }

@@ -722,9 +722,11 @@ impl TaskbarContent {
             self.per_row(self.entries.len())
         };
         let entry_row = |entries: &[WindowListEntry]| {
-            let gap = Widget::fill(ThemeElement::WindowListEmpty).with_size(SizePolicy::Share {
-                max: self.entry_max_width,
-            });
+            let gap = Widget::fill(ThemeElement::WindowListEmpty)
+                .with_size(SizePolicy::Share {
+                    max: self.entry_max_width,
+                })
+                .without_background();
             let mut widgets: Vec<Widget<TaskbarHit>> = entries
                 .iter()
                 .map(|entry| entry.widget(self.entry_max_width))
@@ -735,6 +737,9 @@ impl TaskbarContent {
         if self.rows <= 1 {
             return entry_row(&self.entries);
         }
+        // The list as a whole has the background; its rows sit on it, so the
+        // empty ones are not a stripe each.
+        let entry_row = |entries: &[WindowListEntry]| entry_row(entries).without_background();
         let mut rows: Vec<Widget<TaskbarHit>> =
             self.entries.chunks(per_row).map(entry_row).collect();
         let count = usize::try_from(self.rows).unwrap_or(usize::MAX);
@@ -777,7 +782,9 @@ impl TaskbarContent {
             return Widget::fill(ThemeElement::Taskbar).with_size(SizePolicy::Fixed(0));
         }
         let margin = || {
-            Widget::fill(ThemeElement::Taskbar).with_size(SizePolicy::Fixed(Self::TRAY_END_MARGIN))
+            Widget::fill(ThemeElement::Taskbar)
+                .with_size(SizePolicy::Fixed(Self::TRAY_END_MARGIN))
+                .without_background()
         };
         let slots: Vec<Widget<TaskbarHit>> = self
             .tray
@@ -785,7 +792,8 @@ impl TaskbarContent {
             .map(|entry| {
                 let slot = Widget::fill(ThemeElement::Taskbar)
                     .with_size(SizePolicy::Fixed(self.tray_slot))
-                    .with_hit(TaskbarHit::TrayItem(entry.key));
+                    .with_hit(TaskbarHit::TrayItem(entry.key))
+                    .without_background();
                 match &entry.icon {
                     Some(icon) => slot.with_icon(WidgetIcon {
                         icon: icon.clone(),
@@ -800,18 +808,23 @@ impl TaskbarContent {
         let width = columns
             .saturating_mul(self.tray_slot)
             .saturating_add(2 * Self::TRAY_END_MARGIN);
+        // The tray as a whole has the background, as the taskbar does; the
+        // rows, margins and slots sit on it.
         let tray_row = |row: &[Widget<TaskbarHit>]| {
             Widget::row(
                 ThemeElement::Taskbar,
                 std::iter::once(margin())
                     .chain(row.iter().cloned())
-                    .chain(std::iter::once(Widget::fill(ThemeElement::Taskbar)))
+                    .chain(std::iter::once(
+                        Widget::fill(ThemeElement::Taskbar).without_background(),
+                    ))
                     .collect(),
             )
+            .without_background()
         };
         let rows: Vec<Widget<TaskbarHit>> = slots.chunks(per_row).map(tray_row).collect();
         let tray = match <[_; 1]>::try_from(rows) {
-            Ok([row]) => row,
+            Ok([row]) => row.with_background(),
             Err(rows) => {
                 let mut rows = rows;
                 let count = usize::try_from(self.rows).unwrap_or(usize::MAX);

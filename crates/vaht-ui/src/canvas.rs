@@ -45,7 +45,9 @@ impl<'pixmap> Canvas<'pixmap> {
     ) {
         for placed in layout.placed() {
             let style = theme.style(placed.element, state_of(placed));
-            self.fill_texture(style.texture, placed.rect);
+            if placed.has_background {
+                self.fill_texture(style.texture, placed.rect);
+            }
             let mut inner = placed.rect.inset(style.padding);
             if let Some(icon) = &placed.icon {
                 self.draw_icon(icon, WidgetIcon::square_in(placed.rect));

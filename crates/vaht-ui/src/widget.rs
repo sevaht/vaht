@@ -26,6 +26,10 @@ pub struct Widget<Hit> {
     /// The state it is drawn in, when not its panel's: a focused window's
     /// entry among unfocused ones.
     pub state: Option<WidgetState>,
+    /// Whether it paints its element's background: not when it sits on its
+    /// parent's, so a gradient runs unbroken behind several widgets rather
+    /// than starting again in each.
+    pub has_background: bool,
     /// The icon shown left of its text, if any.
     pub icon: Option<WidgetIcon>,
     /// The mark shown at one end, in a square as tall as it: a submenu's
@@ -124,6 +128,23 @@ impl<Hit> Widget<Hit> {
         self
     }
 
+    /// Returns the widget without a background of its own: what it shows
+    /// (its text, icon or children) goes on what is behind it. A container's
+    /// children still paint theirs.
+    #[must_use]
+    pub const fn without_background(mut self) -> Self {
+        self.has_background = false;
+        self
+    }
+
+    /// Returns the widget painting its element's background again, as
+    /// every widget does until told otherwise.
+    #[must_use]
+    pub const fn with_background(mut self) -> Self {
+        self.has_background = true;
+        self
+    }
+
     /// Returns the widget drawn in `state` rather than its panel's.
     #[must_use]
     pub const fn with_state(mut self, state: WidgetState) -> Self {
@@ -149,6 +170,7 @@ impl<Hit> Widget<Hit> {
             hit: None,
             is_button: false,
             state: None,
+            has_background: true,
             icon: None,
             mark: None,
             mark_side: MarkSide::Right,
