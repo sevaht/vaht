@@ -981,12 +981,14 @@ impl StyleFile {
     /// each as the vaht glyphs it draws.
     fn add_glyph_images(&mut self, cell: &mut Cell, state: WidgetState) {
         // Fluxbox's buttons, and the vaht glyphs each is the picture of.
-        const BUTTONS: [(&str, &[&str]); 5] = [
+        const BUTTONS: [(&str, &[&str]); 7] = [
             ("close", &["close"]),
             ("iconify", &["minimize"]),
             ("maximize", &["maximize", "restore"]),
             ("shade", &["shade"]),
             ("stick", &["stick"]),
+            ("stuck", &["stuck"]),
+            ("menuicon", &["menu"]),
         ];
         let suffix = match state {
             WidgetState::Focused => "pixmap",
