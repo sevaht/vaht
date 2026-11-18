@@ -533,6 +533,58 @@ mod tests {
         assert_eq!(rows.len(), 8, "eight tall: {rows:?}");
     }
 
+    /// A close button, 20 pixels square, drawn in whatever state is asked.
+    struct CloseButton(WidgetState);
+
+    impl PanelContent for CloseButton {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            Widget::glyph(StyleElement::Button, Glyph::Close)
+        }
+
+        fn state(&self) -> WidgetState {
+            self.0
+        }
+    }
+
+    #[test]
+    fn a_button_picture_from_the_style_replaces_the_glyph_by_state() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        for (name, color) in [("up.xpm", "#ff0000"), ("down.xpm", "#0000ff")] {
+            let xpm = format!("\"1 1 1 1\",\n\"a\tc {color}\",\n\"a\"");
+            std::fs::write(directory.path().join(name), xpm).expect("written");
+        }
+        let layers = crate::style::StyleLayers::from_toml_in(
+            "[window.button]\ntexture = { solid = \"black\" }\n\
+             glyph_images = { close = \"up.xpm\" }\n\
+             [window.button.pressed]\nglyph_images = { close = \"down.xpm\" }\n",
+            Some(directory.path()),
+        )
+        .expect("a valid style");
+        let style = Style::resolve(&layers);
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut center = |state| {
+            let mut panel = Panel::new(CloseButton(state), Size::new(20, 20));
+            assert!(panel.paint(&style, &mut typesetter));
+            let pixel = panel
+                .pixels()
+                .and_then(|pixels| pixels.pixel(10, 10))
+                .expect("inside the panel");
+            (pixel.red(), pixel.blue())
+        };
+        assert_eq!(
+            center(WidgetState::Focused),
+            (255, 0),
+            "the picture, not an X"
+        );
+        assert_eq!(
+            center(WidgetState::Pressed),
+            (0, 255),
+            "a state has its own"
+        );
+    }
+
     /// Two stacked rows on a gradient background, each with or without a background
     /// of its own.
     struct Stacked {

@@ -18,14 +18,16 @@ use std::sync::Arc;
 
 use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 
-use super::{BorderStyle, Bullet, ElementStylePatch, StyleElement, StyleLayers, WidgetState};
+use super::{
+    BorderStyle, Bullet, ElementStylePatch, GlyphImages, StyleElement, StyleLayers, WidgetState,
+};
 use crate::color::Color;
 use crate::corner::{Corner, CornerSet};
 use crate::geometry::Insets;
 use crate::image::Image;
 use crate::text::{Font, FontWeight, Justify, TextEffect};
 use crate::texture::{Bevel, GradientDirection, Texture};
-use crate::widget::MarkSide;
+use crate::widget::{Glyph, MarkSide};
 
 /// Style properties of 02 §10.1 that vaht does not have yet.
 const PLANNED_PROPERTIES: [&str; 2] = ["submenu_indicator", "interlaced"];
@@ -340,6 +342,7 @@ impl ElementStylePatch {
             "text_effect" => self.text_effect = Some(map.next_value::<TextEffectFile>()?.0),
             "justify" => self.justify = Some(map.next_value::<JustifyFile>()?.into_justify()),
             "glyph_color" => self.glyph_color = Some(map.next_value::<ColorText>()?.0),
+            "glyph_images" => self.glyph_images = map.next_value_seed(GlyphImagesSeed(images))?,
             "padding" => {
                 let [top, right, bottom, left] = map.next_value::<[u32; 4]>()?;
                 self.padding = Some(Insets {
@@ -408,6 +411,73 @@ impl<'de> serde::Deserialize<'de> for Color {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
         text.parse().map_err(de::Error::custom)
+    }
+}
+
+/// A table of button pictures: each glyph's name and its image file.
+struct GlyphImagesSeed<'directory>(Images<'directory>);
+
+impl<'de> DeserializeSeed<'de> for GlyphImagesSeed<'_> {
+    type Value = GlyphImages;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<GlyphImages, D::Error> {
+        /// Reads the table.
+        struct GlyphImagesVisitor<'directory>(Images<'directory>);
+
+        impl<'de> Visitor<'de> for GlyphImagesVisitor<'_> {
+            type Value = GlyphImages;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(
+                    "a table of image files by button: close, maximize, restore, minimize, \
+                     shade or stick",
+                )
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<GlyphImages, A::Error> {
+                let mut images = GlyphImages::default();
+                while let Some(glyph) = map.next_key::<GlyphName>()? {
+                    let name = map.next_value::<String>()?;
+                    let image = self.0.load(&name).map_err(de::Error::custom)?;
+                    images = images.with(glyph.into_glyph(), image);
+                }
+                Ok(images)
+            }
+        }
+
+        deserializer.deserialize_map(GlyphImagesVisitor(self.0))
+    }
+}
+
+/// A titlebar button's picture as named in a style file.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum GlyphName {
+    /// An X.
+    Close,
+    /// A box.
+    Maximize,
+    /// Two boxes.
+    Restore,
+    /// A low bar.
+    Minimize,
+    /// A high bar.
+    Shade,
+    /// A dot.
+    Stick,
+}
+
+impl GlyphName {
+    /// Returns the glyph.
+    const fn into_glyph(self) -> Glyph {
+        match self {
+            Self::Close => Glyph::Close,
+            Self::Maximize => Glyph::Maximize,
+            Self::Restore => Glyph::Restore,
+            Self::Minimize => Glyph::Minimize,
+            Self::Shade => Glyph::Shade,
+            Self::Stick => Glyph::Stick,
+        }
     }
 }
 

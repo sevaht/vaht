@@ -75,7 +75,11 @@ impl<'pixmap> Canvas<'pixmap> {
             }
             match &placed.content {
                 Content::Text(text) => typesetter.draw(self.pixmap, text, &style.text, inner),
-                Content::Glyph(glyph) => self.draw_glyph(*glyph, style.glyph_color, inner),
+                Content::Glyph(glyph) => match style.glyph_images.get(*glyph) {
+                    // A picture of the style's own is the whole button.
+                    Some(image) => self.draw_stretched(image, placed.rect),
+                    None => self.draw_glyph(*glyph, style.glyph_color, inner),
+                },
                 Content::Field(field) => self.draw_field(field, &style.text, inner, typesetter),
                 Content::Background => {}
             }

@@ -17,10 +17,12 @@
 mod file;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::color::Color;
 use crate::corner::{CornerRadii, CornerSet};
 use crate::geometry::Insets;
+use crate::image::Image;
 use crate::text::{Font, FontWeight, Justify, TextEffect, TextStyle};
 use crate::texture::Texture;
 use crate::widget::{Glyph, MarkSide};
@@ -150,6 +152,36 @@ pub struct BorderStyle {
     pub color: Color,
 }
 
+/// The pictures drawn in place of a button's own: an image for each glyph
+/// that has one (Fluxbox's `window.close.pixmap` and the like).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct GlyphImages(Vec<(Glyph, Arc<Image>)>);
+
+impl GlyphImages {
+    /// Returns the image for `glyph`, if it has one.
+    #[must_use]
+    pub fn get(&self, glyph: Glyph) -> Option<&Arc<Image>> {
+        self.0
+            .iter()
+            .find(|(known, _)| *known == glyph)
+            .map(|(_, image)| image)
+    }
+
+    /// Returns these with `glyph` drawn as `image`.
+    #[must_use]
+    pub fn with(mut self, glyph: Glyph, image: Arc<Image>) -> Self {
+        self.0.retain(|(known, _)| *known != glyph);
+        self.0.push((glyph, image));
+        self
+    }
+
+    /// Returns whether no glyph has an image.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// How one element looks in one state, every property decided.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ElementStyle {
@@ -159,6 +191,8 @@ pub struct ElementStyle {
     pub text: TextStyle,
     /// The color of a button's picture.
     pub glyph_color: Color,
+    /// The images that take the place of a button's pictures.
+    pub glyph_images: GlyphImages,
     /// Space between the edges and the content.
     pub padding: Insets,
     /// The line around it.
@@ -236,6 +270,7 @@ impl ElementStyle {
                 justify: Justify::Left,
             },
             glyph_color: Color::WHITE,
+            glyph_images: GlyphImages::default(),
             padding: Insets::default(),
             border: BorderStyle::default(),
             height: None,
@@ -263,6 +298,9 @@ pub struct ElementStylePatch {
     pub justify: Option<Justify>,
     /// The button picture color, if this layer sets it.
     pub glyph_color: Option<Color>,
+    /// The images for button pictures, which this layer adds to the ones
+    /// before it.
+    pub glyph_images: GlyphImages,
     /// The padding, if this layer sets it.
     pub padding: Option<Insets>,
     /// The border, if this layer sets it.
@@ -301,6 +339,10 @@ impl ElementStylePatch {
         }
         if let Some(color) = self.glyph_color {
             style.glyph_color = color;
+        }
+        for (glyph, image) in &self.glyph_images.0 {
+            style.glyph_images =
+                std::mem::take(&mut style.glyph_images).with(*glyph, Arc::clone(image));
         }
         if let Some(padding) = self.padding {
             style.padding = padding;
