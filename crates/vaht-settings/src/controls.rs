@@ -51,6 +51,9 @@ pub struct SettingView<'setting> {
 }
 
 impl SettingView<'_> {
+    /// What the list of a number or a word calls the number.
+    const NUMBER: &'static str = "a number";
+
     /// Draws the setting; returns the edit the user made, if they made one.
     pub fn show(self, ui: &mut Ui, drafts: &mut Drafts) -> Option<ConfigEdit> {
         let setting = self.setting;
@@ -105,6 +108,11 @@ impl SettingView<'_> {
         if !setting.description.is_empty() {
             ui.weak(&setting.description);
         }
+        if edit.is_some() {
+            // What was typed is superseded: a reset or a new choice shows
+            // the setting's own value, not the old draft (or its error).
+            drafts.by_setting.remove(&setting.path);
+        }
         edit
     }
 
@@ -144,6 +152,7 @@ impl SettingView<'_> {
                     .flatten()
             }
             SettingKind::Text => self.text(ui, drafts, current, label),
+            SettingKind::WholeOrWord { .. } => self.whole_or_word(ui, current, label),
             SettingKind::Choice(choices) => Self::choice(
                 ui,
                 path,
@@ -157,6 +166,7 @@ impl SettingView<'_> {
                 }
                 SettingKind::Toggle
                 | SettingKind::Whole { .. }
+                | SettingKind::WholeOrWord { .. }
                 | SettingKind::Decimal { .. }
                 | SettingKind::List(_)
                 | SettingKind::Mapping(_)
@@ -183,6 +193,53 @@ impl SettingView<'_> {
             drafts.by_setting.insert(path.clone(), Draft::Text(text));
         }
         None
+    }
+
+    /// A whole number, or one of some words: a list to say which, and the
+    /// number beside it when it is one.
+    fn whole_or_word(&self, ui: &mut Ui, current: &Value, label: Id) -> Option<Value> {
+        let SettingKind::WholeOrWord {
+            minimum,
+            maximum,
+            words,
+        } = &self.setting.kind
+        else {
+            return None;
+        };
+        let (minimum, maximum) = (*minimum, *maximum);
+        let path = &self.setting.path;
+        let shown = current.as_str().unwrap_or(Self::NUMBER);
+        let mut chosen = None;
+        let combo = egui::ComboBox::from_id_salt(path.to_string())
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(current.is_number(), Self::NUMBER)
+                    .clicked()
+                    && !current.is_number()
+                {
+                    chosen = Some(Value::from(minimum.unwrap_or(0).max(1)));
+                }
+                for word in words {
+                    if ui
+                        .selectable_label(current.as_str() == Some(&word.value), &word.value)
+                        .clicked()
+                    {
+                        chosen = Some(Value::String(word.value.clone()));
+                    }
+                }
+            });
+        combo.response.labelled_by(label);
+        if let Some(mut number) = current.as_i64() {
+            let range = minimum.unwrap_or(i64::MIN)..=maximum.unwrap_or(i64::MAX);
+            let response = ui
+                .add(egui::DragValue::new(&mut number).range(range))
+                .labelled_by(label);
+            if response.changed() {
+                chosen = Some(Value::from(number));
+            }
+        }
+        chosen
     }
 
     /// One word of several, chosen from a list.
@@ -254,6 +311,7 @@ impl SettingView<'_> {
                         SettingKind::Text
                         | SettingKind::Toggle
                         | SettingKind::Whole { .. }
+                        | SettingKind::WholeOrWord { .. }
                         | SettingKind::Decimal { .. }
                         | SettingKind::List(_)
                         | SettingKind::Mapping(_)
@@ -283,6 +341,7 @@ impl SettingView<'_> {
                     SettingKind::Text
                     | SettingKind::Toggle
                     | SettingKind::Whole { .. }
+                    | SettingKind::WholeOrWord { .. }
                     | SettingKind::Decimal { .. }
                     | SettingKind::List(_)
                     | SettingKind::Mapping(_)

@@ -483,4 +483,41 @@ mod tests {
         harness.run();
         harness.get_by_label("vaht cannot be reached: closed");
     }
+
+    #[test]
+    fn a_number_or_a_word_is_chosen_from_a_list() {
+        let (mut app, link) = window();
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "rows": {
+                    "oneOf": [{ "type": "integer", "minimum": 1 }, { "const": "auto" }],
+                    "default": 1,
+                },
+            },
+        });
+        link.to_tell.borrow_mut().clear();
+        link.to_tell.borrow_mut().extend([
+            Update::Schema(schema),
+            Update::Reading {
+                value: json!({ "rows": 1 }),
+                defaults: json!({ "rows": 1 }),
+                changed: Vec::new(),
+                themes: Vec::new(),
+            },
+        ]);
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_role(egui::accesskit::Role::ComboBox).click();
+        harness.run();
+        harness.get_by_label("auto").click();
+        harness.run();
+        assert_eq!(
+            edits_sent(&link),
+            [ConfigEdit::Set {
+                path: ConfigPath::parse("rows").expect("a key"),
+                value: json!("auto"),
+            }]
+        );
+    }
 }

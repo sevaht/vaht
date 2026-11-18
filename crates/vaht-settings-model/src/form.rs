@@ -44,6 +44,15 @@ pub enum SettingKind {
     },
     /// Free text.
     Text,
+    /// A whole number, or one of a few words (`rows`: a number or `auto`).
+    WholeOrWord {
+        /// The least the number may be.
+        minimum: Option<i64>,
+        /// The most the number may be.
+        maximum: Option<i64>,
+        /// The words allowed instead.
+        words: Vec<Choice>,
+    },
     /// One of a fixed set of words.
     Choice(Vec<Choice>),
     /// A list of values of one kind.
@@ -62,7 +71,9 @@ impl SettingKind {
     pub fn starting_value(&self) -> Value {
         match self {
             Self::Toggle => Value::Bool(false),
-            Self::Whole { minimum, .. } => Value::from(minimum.unwrap_or(0)),
+            Self::Whole { minimum, .. } | Self::WholeOrWord { minimum, .. } => {
+                Value::from(minimum.unwrap_or(0))
+            }
             Self::Decimal { minimum, .. } => serde_json::Number::from_f64(minimum.unwrap_or(0.0))
                 .map_or(Value::Null, Value::Number),
             Self::Text => Value::String(String::new()),
@@ -334,6 +345,9 @@ impl<'schema> SchemaReader<'schema> {
         if let Some(choices) = Self::choices_of(schema) {
             return SettingKind::Choice(choices);
         }
+        if let Some(kind) = Self::whole_or_word_of(schema) {
+            return kind;
+        }
         match Self::type_names(schema).find(|name| *name != "null") {
             Some("boolean") => SettingKind::Toggle,
             Some("integer") => SettingKind::Whole {
@@ -375,6 +389,34 @@ impl<'schema> SchemaReader<'schema> {
         } else {
             wrap(Box::new(inner))
         }
+    }
+
+    /// Returns the kind of a `oneOf` of one whole number and words, if
+    /// `schema` is one.
+    fn whole_or_word_of(schema: &Value) -> Option<SettingKind> {
+        let members = schema.get("oneOf")?.as_array()?;
+        let mut number = None;
+        let mut words = Vec::new();
+        for member in members {
+            if member.get("type") == Some(&Value::from("integer")) && number.is_none() {
+                number = Some(member);
+            } else {
+                words.push(Choice {
+                    value: member.get("const")?.as_str()?.to_owned(),
+                    description: member
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                });
+            }
+        }
+        let number = number?;
+        Some(SettingKind::WholeOrWord {
+            minimum: number.get("minimum").and_then(Value::as_i64),
+            maximum: number.get("maximum").and_then(Value::as_i64),
+            words,
+        })
     }
 
     /// Returns the words `schema` allows, if it is a choice among words: an
@@ -574,11 +616,32 @@ mod tests {
     }
 
     #[test]
+    fn a_number_or_a_word_is_its_own_kind() {
+        let form = form_of(
+            &json!({}),
+            &json!({
+                "rows": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "const": "auto" }] },
+            }),
+        );
+        let SettingKind::WholeOrWord {
+            minimum,
+            maximum,
+            words,
+        } = &setting(&form, "rows").kind
+        else {
+            panic!("a number or a word");
+        };
+        assert_eq!((*minimum, *maximum), (Some(1), None));
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].value, "auto");
+    }
+
+    #[test]
     fn what_has_no_plain_kind_is_raw() {
         let form = form_of(
             &json!({}),
             &json!({
-                "rows": { "oneOf": [{ "type": "integer" }, { "const": "auto" }] },
+                "rows": { "oneOf": [{ "type": "string" }, { "const": "auto" }] },
                 "devices": {
                     "type": "object",
                     "additionalProperties": {
