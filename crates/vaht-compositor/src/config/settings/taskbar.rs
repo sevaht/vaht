@@ -13,7 +13,9 @@ use serde::de::{self, Deserializer};
 use crate::config::WindowMatcher;
 
 /// The taskbar.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -136,6 +138,30 @@ impl Default for TaskbarRows {
     }
 }
 
+impl serde::Serialize for TaskbarRows {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Fixed(rows) => serializer.serialize_u32(rows.get()),
+            Self::Auto => serializer.serialize_str("auto"),
+        }
+    }
+}
+
+impl schemars::JsonSchema for TaskbarRows {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TaskbarRows".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "oneOf": [
+                { "type": "integer", "minimum": 1 },
+                { "const": "auto" },
+            ],
+        })
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for TaskbarRows {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         /// What `rows` may say.
@@ -188,6 +214,22 @@ impl WidthPercent {
     }
 }
 
+impl serde::Serialize for WidthPercent {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u32(self.0)
+    }
+}
+
+impl schemars::JsonSchema for WidthPercent {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "WidthPercent".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        crate::config::schema::bounded_integer(1, i64::from(Self::WHOLE.0))
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for WidthPercent {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let percent = u32::deserialize(deserializer)?;
@@ -198,7 +240,9 @@ impl<'de> serde::Deserialize<'de> for WidthPercent {
 }
 
 /// The tray: which items go first and last.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct TraySettings {
     /// Items first, in this order, named by their id in any case.
@@ -230,7 +274,18 @@ impl TraySettings {
 }
 
 /// Where along its edge a taskbar narrower than the edge sits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum TaskbarAlign {
     /// At the left end.
@@ -255,7 +310,18 @@ impl TaskbarAlign {
 }
 
 /// The output edge the taskbar runs along.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum TaskbarEdge {
     /// The top.
@@ -302,6 +368,28 @@ impl TaskbarWidget {
     ];
 }
 
+impl serde::Serialize for TaskbarWidget {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let name = Self::NAMES
+            .iter()
+            .find(|(_, widget)| widget == self)
+            .map(|(name, _)| *name)
+            .expect("every widget is in NAMES");
+        serializer.serialize_str(name)
+    }
+}
+
+impl schemars::JsonSchema for TaskbarWidget {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TaskbarWidget".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let names: Vec<&str> = Self::NAMES.iter().map(|(name, _)| *name).collect();
+        schemars::json_schema!({ "enum": names })
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for TaskbarWidget {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let name = String::deserialize(deserializer)?;
@@ -320,7 +408,9 @@ impl<'de> serde::Deserialize<'de> for TaskbarWidget {
 }
 
 /// The taskbar's window list.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct WindowListSettings {
     /// Which windows have an entry.
@@ -349,7 +439,17 @@ impl Default for WindowListSettings {
 }
 
 /// Whose windows a taskbar's window list lists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum WindowListScope {
     /// Every output's.
@@ -382,6 +482,40 @@ impl EntryWidth {
     }
 }
 
+impl serde::Serialize for EntryWidth {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap as _;
+        match self {
+            Self::Fill => serializer.serialize_str("fill"),
+            Self::AtMost(max) => {
+                let mut limit = serializer.serialize_map(Some(1))?;
+                limit.serialize_entry("max", max)?;
+                limit.end()
+            }
+        }
+    }
+}
+
+impl schemars::JsonSchema for EntryWidth {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "EntryWidth".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "oneOf": [
+                { "const": "fill" },
+                {
+                    "type": "object",
+                    "properties": { "max": { "type": "integer", "minimum": 1 } },
+                    "required": ["max"],
+                    "additionalProperties": false,
+                },
+            ],
+        })
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for EntryWidth {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         /// What `entry_width` may say.
@@ -411,7 +545,9 @@ impl<'de> serde::Deserialize<'de> for EntryWidth {
 }
 
 /// The taskbar's clock.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct ClockSettings {
     /// What it shows.
@@ -451,6 +587,23 @@ impl Default for ClockFormat {
 impl fmt::Display for ClockFormat {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
+    }
+}
+
+impl serde::Serialize for ClockFormat {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl schemars::JsonSchema for ClockFormat {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ClockFormat".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        // Checked as it is read, against `strftime`'s conversions.
+        schemars::json_schema!({ "type": "string", "description": "A strftime format, such as %k:%M." })
     }
 }
 
@@ -548,7 +701,9 @@ mod tests {
 }
 
 /// The taskbar's tooltips.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct TooltipSettings {
     /// Whether resting the pointer on an entry whose title does not fit,

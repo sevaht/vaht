@@ -55,16 +55,11 @@ impl XDesktop {
             .env(vaht_ipc::SOCKET_VARIABLE, self.vaht.ipc_socket())
             .output()
             .expect("vaht msg runs");
-        match serde_json::from_slice(&output.stdout).expect("one JSON reply") {
-            Reply::Windows { windows } => windows,
-            other @ (Reply::Version { .. }
-            | Reply::Done {}
-            | Reply::Workspaces { .. }
-            | Reply::Outputs { .. }
-            | Reply::LogFilter { .. }
-            | Reply::Picked { .. }
-            | Reply::Error { .. }) => panic!("not a window list: {other:?}"),
-        }
+        let reply: Reply = serde_json::from_slice(&output.stdout).expect("one JSON reply");
+        let Reply::Windows { windows } = reply else {
+            panic!("not a window list: {reply:?}");
+        };
+        windows
     }
 
     /// Runs `command` on the focused window, as `vaht msg run` does.

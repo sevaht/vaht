@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 
 pub use client::{Client, ClientError};
 pub use message::{
-    Event, EventKind, ModeInfo, OutputInfo, Reply, Request, WindowInfo, WorkspaceInfo,
+    ConfigFile, ConfigFileInfo, ConfigState, Event, EventKind, ModeInfo, OutputInfo, Reply,
+    Request, WindowInfo, WorkspaceInfo,
 };
 
 /// The environment variable that names vaht's IPC socket, set for every

@@ -18,6 +18,7 @@ mod menus;
 mod outputs;
 mod overrides;
 mod rules;
+pub(crate) mod schema;
 mod settings;
 mod source;
 mod theme;

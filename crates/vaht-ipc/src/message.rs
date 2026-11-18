@@ -56,6 +56,23 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reset: bool,
     },
+    /// Which configuration files can be read, and whether each has changes
+    /// not written yet, with the themes available.
+    ConfigFiles {},
+    /// What `file` holds, described as JSON Schema (draft 2020-12): every
+    /// key with its type, documentation, default and range, and vaht's own
+    /// `x-vaht-*` hints.
+    ConfigSchema {
+        /// The file.
+        file: ConfigFile,
+    },
+    /// What `file` says now: its effective value (the file with the
+    /// changes made in place on top), what vaht defaults to, and which
+    /// keys are changed.
+    ConfigRead {
+        /// The file.
+        file: ConfigFile,
+    },
     /// Shows `items` as a vaht menu at the pointer, titled `title`, and
     /// answers with the one the user chooses, or none if they close the
     /// menu: a dmenu-style picker (the screen-share portal's chooser). The
@@ -129,6 +146,60 @@ impl Event {
     }
 }
 
+/// One of the files vaht reads its configuration from.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConfigFile {
+    /// `settings.toml`: the settings.
+    Settings,
+    /// `outputs.toml`: monitors and display profiles.
+    Outputs,
+    /// `bindings.toml`: keys and mouse buttons.
+    Bindings,
+    /// `rules.toml`: what happens to particular windows.
+    Rules,
+    /// `menus.toml`: the menus.
+    Menus,
+}
+
+impl ConfigFile {
+    /// Returns the file's name in the configuration directory.
+    #[must_use]
+    pub const fn file_name(self) -> &'static str {
+        match self {
+            Self::Settings => "settings.toml",
+            Self::Outputs => "outputs.toml",
+            Self::Bindings => "bindings.toml",
+            Self::Rules => "rules.toml",
+            Self::Menus => "menus.toml",
+        }
+    }
+}
+
+/// Whether a configuration file has changes not written to it yet.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConfigState {
+    /// Vaht runs what the file says.
+    Clean,
+    /// Vaht runs changes made in place, which saving writes into the file.
+    Changed,
+}
+
+/// A configuration file vaht can describe and read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigFileInfo {
+    /// Which file.
+    pub file: ConfigFile,
+    /// Whether it has changes not written.
+    pub state: ConfigState,
+}
+
 /// What vaht answers a request with.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "reply", rename_all = "kebab-case", deny_unknown_fields)]
@@ -161,6 +232,30 @@ pub enum Reply {
     LogFilter {
         /// Its directives.
         directives: String,
+    },
+    /// The files that can be read and the themes, for
+    /// [`Request::ConfigFiles`].
+    ConfigFiles {
+        /// Each file.
+        files: Vec<ConfigFileInfo>,
+        /// The themes that can be chosen: those in the configuration
+        /// directory's `themes/` and the system's, and the built-in one.
+        themes: Vec<String>,
+    },
+    /// A file's schema, for [`Request::ConfigSchema`].
+    ConfigSchema {
+        /// JSON Schema (draft 2020-12) of the file.
+        schema: serde_json::Value,
+    },
+    /// What a file says now, for [`Request::ConfigRead`].
+    ConfigRead {
+        /// The effective value, in the file's own shape, every key present.
+        value: serde_json::Value,
+        /// What vaht defaults to, in the same shape.
+        defaults: serde_json::Value,
+        /// The keys changed in place and not written, each as a path
+        /// (`["focus", "model"]`).
+        changed: Vec<Vec<String>>,
     },
     /// The item chosen, for [`Request::Pick`]: none if the menu was closed
     /// without a choice.

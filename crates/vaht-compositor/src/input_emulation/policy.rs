@@ -7,7 +7,17 @@
 //! program that found the socket.
 
 /// What happens to a program no list names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum EmulationDefault {
     /// The user is asked, the first time it tries.
@@ -21,7 +31,9 @@ pub(crate) enum EmulationDefault {
 
 /// Which X programs may move the pointer and press keys through XTest
 /// (Steam Input's desktop controls, xdotool, remote desktop servers).
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct InputEmulationSettings {
     /// What happens to a program no list names.

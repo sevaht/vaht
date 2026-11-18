@@ -176,16 +176,11 @@ fn with_strict_sloppy_focus_a_window_moved_under_the_pointer_does_not_take_focus
                 .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
                 .output()
                 .expect("vaht msg runs");
-            match serde_json::from_slice(&output.stdout).expect("a reply") {
-                vaht_ipc::Reply::Windows { windows } => windows,
-                other @ (vaht_ipc::Reply::Version { .. }
-                | vaht_ipc::Reply::Done { .. }
-                | vaht_ipc::Reply::Workspaces { .. }
-                | vaht_ipc::Reply::Outputs { .. }
-                | vaht_ipc::Reply::LogFilter { .. }
-                | vaht_ipc::Reply::Picked { .. }
-                | vaht_ipc::Reply::Error { .. }) => panic!("not windows: {other:?}"),
-            }
+            let reply: vaht_ipc::Reply = serde_json::from_slice(&output.stdout).expect("a reply");
+            let vaht_ipc::Reply::Windows { windows } = reply else {
+                panic!("not windows: {reply:?}");
+            };
+            windows
         };
         let listed = windows(&vaht);
         let entered = listed

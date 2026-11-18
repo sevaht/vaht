@@ -7,7 +7,17 @@
 //! blurs softer.
 
 /// Whether and how strongly backgrounds are blurred.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct BlurSettings {
     /// Whether programs may have what is behind them blurred.
@@ -29,7 +39,7 @@ impl Default for BlurSettings {
 }
 
 /// How many times a blurred background is halved: from 1 to 6.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
 #[serde(try_from = "u8")]
 pub(crate) struct BlurPasses(u8);
 
@@ -40,6 +50,16 @@ impl BlurPasses {
     /// Returns the number of passes.
     pub(crate) const fn get(self) -> u8 {
         self.0
+    }
+}
+
+impl schemars::JsonSchema for BlurPasses {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "BlurPasses".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        crate::config::schema::bounded_integer(1, i64::from(Self::MAX))
     }
 }
 
@@ -55,7 +75,7 @@ impl TryFrom<u8> for BlurPasses {
 }
 
 /// How far apart a blur step's samples are, in pixels: from 1 to 10.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
 #[serde(try_from = "u8")]
 pub(crate) struct BlurSpread(u8);
 
@@ -67,6 +87,16 @@ impl BlurSpread {
     /// Returns the spread, in pixels.
     pub(crate) const fn get(self) -> u8 {
         self.0
+    }
+}
+
+impl schemars::JsonSchema for BlurSpread {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "BlurSpread".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        crate::config::schema::bounded_integer(1, i64::from(Self::MAX))
     }
 }
 

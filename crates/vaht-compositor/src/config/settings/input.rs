@@ -12,7 +12,9 @@
 use std::collections::BTreeMap;
 
 /// Every scope's settings.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct InputSettings {
     /// Every device's.
@@ -54,7 +56,9 @@ impl InputSettings {
 
 /// One scope's settings; each unset keeps the less specific scope's, or
 /// libinput's default.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct DeviceSettings {
     /// Whether tapping clicks.
@@ -112,7 +116,9 @@ impl DeviceSettings {
 }
 
 /// Which button a tap with two and three fingers is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum TapButtonMap {
     /// Two fingers right, three middle.
@@ -122,7 +128,9 @@ pub(crate) enum TapButtonMap {
 }
 
 /// How motion is accelerated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum AccelProfile {
     /// Not at all: the pointer moves as far as the device does, times the
@@ -144,6 +152,22 @@ impl AccelSpeed {
     }
 }
 
+impl serde::Serialize for AccelSpeed {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_f64(self.value())
+    }
+}
+
+impl schemars::JsonSchema for AccelSpeed {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "AccelSpeed".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({ "type": "number", "minimum": -1.0, "maximum": 1.0 })
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for AccelSpeed {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let speed = f64::deserialize(deserializer)?;
@@ -162,7 +186,9 @@ impl<'de> serde::Deserialize<'de> for AccelSpeed {
 }
 
 /// How a device scrolls.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ScrollMethod {
     /// It does not, but by its wheel.
@@ -176,7 +202,9 @@ pub(crate) enum ScrollMethod {
 }
 
 /// How a clickpad's click is a button.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ClickMethod {
     /// By where it is pressed: the bottom right is the right button.
@@ -186,7 +214,9 @@ pub(crate) enum ClickMethod {
 }
 
 /// Whether a device is used.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum SendEvents {
     /// It is.

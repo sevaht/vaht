@@ -42,7 +42,8 @@ fn main() -> ExitCode {
                 | vaht::arguments::MessageRequest::Windows
                 | vaht::arguments::MessageRequest::Workspaces
                 | vaht::arguments::MessageRequest::Outputs
-                | vaht::arguments::MessageRequest::LogFilter { .. }) => {
+                | vaht::arguments::MessageRequest::LogFilter { .. }
+                | vaht::arguments::MessageRequest::Config { .. }) => {
                     vaht::message::send(&other.to_request(), *json)
                 }
             };

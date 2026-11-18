@@ -37,7 +37,9 @@ use crate::window_manager::{
 };
 
 /// Every setting.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Settings {
     /// The theme: `themes/<name>.toml`; the built-in theme when absent.
@@ -85,7 +87,9 @@ impl Settings {
 }
 
 /// Which window gets keyboard focus, and when windows rise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct FocusSettings {
     /// How focus moves.
@@ -121,7 +125,18 @@ impl Default for FocusSettings {
 }
 
 /// How keyboard focus moves between windows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum FocusModel {
     /// A window takes focus when clicked (Fluxbox's `ClickFocus`).
@@ -145,7 +160,17 @@ impl FocusModel {
 }
 
 /// Where new windows go.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct PlacementSettings {
     /// How a place is chosen.
@@ -166,7 +191,9 @@ impl PlacementSettings {
 }
 
 /// How windows behave and look.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct WindowSettings {
     /// How close, in pixels, a moved window's edge must come to an
@@ -219,7 +246,9 @@ impl Default for WindowSettings {
 
 /// Snapping a dragged window to the output's edges (fluxland's snap
 /// zones and layout picker).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct SnapSettings {
     /// Whether a window dragged to an edge takes that half, quarter or
@@ -313,7 +342,9 @@ impl Default for SnapSettings {
 }
 
 /// What a window's frame shows.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct FrameSettings {
     /// The buttons left of the title, left to right.
@@ -366,7 +397,9 @@ impl Default for FrameSettings {
 }
 
 /// The workspaces.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct WorkspaceSettings {
     /// Their names, which also say how many there are; never empty.
@@ -405,7 +438,9 @@ impl Default for WorkspaceSettings {
 }
 
 /// Menus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct MenuSettings {
     /// How long the pointer rests on a submenu's item before it opens.
@@ -417,7 +452,17 @@ pub(crate) struct MenuSettings {
 }
 
 /// How typing in an open menu finds an item (Fluxbox's `menuSearch`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum MenuSearch {
     /// Typing finds nothing.
@@ -460,7 +505,9 @@ impl Default for MenuSettings {
 }
 
 /// The wallpaper.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct WallpaperSettings {
     /// The image (any common format), as written: `~/` is the home directory, and a
@@ -517,7 +564,9 @@ impl WallpaperSettings {
 }
 
 /// vaht's IPC socket.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct IpcSettings {
     /// Whether programs other than vaht's own dialogs may run commands
@@ -534,7 +583,9 @@ impl Default for IpcSettings {
 }
 
 /// X11 programs, through Xwayland.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct XwaylandSettings {
     /// Whether vaht starts Xwayland, so X11 programs run; read at start.
@@ -575,7 +626,9 @@ pub(super) fn file_path(path: &str, config_directory: &Path) -> Option<PathBuf> 
 }
 
 /// Starting the session.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct SessionSettings {
     /// Command lines run once when vaht starts, as `exec` runs them.

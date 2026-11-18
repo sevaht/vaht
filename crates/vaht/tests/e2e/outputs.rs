@@ -94,16 +94,11 @@ fn listed_outputs(vaht: &HeadlessVaht) -> Vec<OutputInfo> {
         .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
         .output()
         .expect("vaht msg runs");
-    match serde_json::from_slice(&output.stdout).expect("one JSON reply") {
-        Reply::Outputs { outputs, .. } => outputs,
-        other @ (Reply::Version { .. }
-        | Reply::Done {}
-        | Reply::Windows { .. }
-        | Reply::Workspaces { .. }
-        | Reply::LogFilter { .. }
-        | Reply::Picked { .. }
-        | Reply::Error { .. }) => panic!("not an output list: {other:?}"),
-    }
+    let reply: Reply = serde_json::from_slice(&output.stdout).expect("one JSON reply");
+    let Reply::Outputs { outputs, .. } = reply else {
+        panic!("not an output list: {reply:?}");
+    };
+    outputs
 }
 
 /// Runs the command `command` in `vaht`, as `vaht msg run` does, and

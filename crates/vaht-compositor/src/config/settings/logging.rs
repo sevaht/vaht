@@ -6,7 +6,9 @@
 //! can also be deleted after a number of days.
 
 /// How big the log file may grow, and how many are kept.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct LoggingSettings {
     /// The size, in megabytes, past which the file starts anew.
@@ -48,13 +50,23 @@ impl LoggingSettings {
 }
 
 /// A number of days: from 1 to 3650 (ten years).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(try_from = "u32")]
 pub(crate) struct Days(u32);
 
 impl Days {
     /// The most days: ten years.
     const MAX: u32 = 3650;
+}
+
+impl schemars::JsonSchema for Days {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Days".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        crate::config::schema::bounded_integer(1, i64::from(Self::MAX))
+    }
 }
 
 impl TryFrom<u32> for Days {
@@ -69,13 +81,23 @@ impl TryFrom<u32> for Days {
 }
 
 /// A log file's size in megabytes: from 1 to 1024.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(try_from = "u32")]
 pub(crate) struct FileSizeMegabytes(u32);
 
 impl FileSizeMegabytes {
     /// The largest size: a gigabyte per file is plenty.
     const MAX: u32 = 1024;
+}
+
+impl schemars::JsonSchema for FileSizeMegabytes {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "FileSizeMegabytes".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        crate::config::schema::bounded_integer(1, i64::from(Self::MAX))
+    }
 }
 
 impl TryFrom<u32> for FileSizeMegabytes {
@@ -90,7 +112,7 @@ impl TryFrom<u32> for FileSizeMegabytes {
 }
 
 /// How many log files are kept: from 1 to 100.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(try_from = "u32")]
 pub(crate) struct FileCount(u32);
 
@@ -98,6 +120,16 @@ impl FileCount {
     /// The most files kept, which rotation also clears older files up to,
     /// when the count is lowered.
     pub(crate) const MAX: u32 = 100;
+}
+
+impl schemars::JsonSchema for FileCount {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "FileCount".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        crate::config::schema::bounded_integer(1, i64::from(Self::MAX))
+    }
 }
 
 impl TryFrom<u32> for FileCount {

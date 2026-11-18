@@ -22,6 +22,7 @@ regex.workspace = true
 reis.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+schemars.workspace = true
 smithay.workspace = true
 smithay-drm-extras.workspace = true
 libdisplay-info.workspace = true

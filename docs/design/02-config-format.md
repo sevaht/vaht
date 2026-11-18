@@ -1224,6 +1224,17 @@ dialogs use too.
   `vaht msg version`, `vaht msg subscribe windows workspaces outputs`
   (each list as it changes, until vaht stops); `--json` prints the reply,
   or each event, as sent.
+- **`vaht msg config`** reads the configuration as vaht has it, for the
+  settings editor and for scripts: `files` (what can be read, whether each
+  has changes made in place and not written, and the themes there are),
+  `schema <file>` (JSON Schema, draft 2020-12, of the file: every key with
+  its type, its doc comment as `description`, its default, enum values and
+  ranges; the ranges are the constants vaht's own validation uses), and
+  `get <file>` (what the file says now, its defaults filled in, a
+  `key = value` line each, `*` marking the keys changed in place; `--json`
+  gives the value, the defaults and the changed keys as data). Only
+  `settings.toml` is described so far; the other files follow as their
+  editors do. Reads are open to every client, as `windows` is.
 - **`vaht msg pick`** (`pick` request) is a dmenu-style chooser: the lines
   on standard input show as a vaht menu at the pointer (`--title` above
   them), in the user's theme, and the one chosen is printed; closing the

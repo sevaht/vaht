@@ -1,11 +1,14 @@
 //! What the compositor answers each IPC request with.
 
-use vaht_ipc::{Event, EventKind, ModeInfo, OutputInfo, Reply, Request, WindowInfo, WorkspaceInfo};
+use vaht_ipc::{
+    ConfigFile, ConfigFileInfo, ConfigState, Event, EventKind, ModeInfo, OutputInfo, Reply,
+    Request, WindowInfo, WorkspaceInfo,
+};
 
 use super::{Answer, IpcClient, IpcHandler, IpcServer};
 use crate::Compositor;
 use crate::WindowId;
-use crate::config::{Action, Command};
+use crate::config::{Action, Command, Settings, ThemeFile, schema};
 use crate::execution::ExecutionContext;
 use crate::outputs::Outputs;
 
@@ -19,6 +22,13 @@ impl IpcHandler for Compositor {
 }
 
 impl Compositor {
+    /// Returns the error for a file that cannot be described yet.
+    fn undescribed(file: ConfigFile) -> Reply {
+        Reply::Error {
+            message: format!("{} cannot be read through IPC yet", file.file_name()),
+        }
+    }
+
     /// Carries out `request`, from the process `peer` (none if unknown),
     /// and returns the reply.
     fn answer_now(&mut self, request: Request, peer: Option<i32>) -> Reply {
@@ -78,6 +88,32 @@ impl Compositor {
                 None => Reply::Error {
                     message: "this vaht has no log filter to change".to_owned(),
                 },
+            },
+            Request::ConfigFiles {} => Reply::ConfigFiles {
+                files: vec![ConfigFileInfo {
+                    file: ConfigFile::Settings,
+                    state: if self.overrides.is_empty() {
+                        ConfigState::Clean
+                    } else {
+                        ConfigState::Changed
+                    },
+                }],
+                themes: ThemeFile::available(self.config_source.directory()),
+            },
+            Request::ConfigSchema { file } => match schema::schema_of(file) {
+                Some(schema) => Reply::ConfigSchema { schema },
+                None => Self::undescribed(file),
+            },
+            Request::ConfigRead { file } => match file {
+                ConfigFile::Settings => Reply::ConfigRead {
+                    value: schema::settings_value(&self.config.settings),
+                    defaults: schema::settings_value(&Settings::default()),
+                    changed: self.overrides.keys(),
+                },
+                ConfigFile::Outputs
+                | ConfigFile::Bindings
+                | ConfigFile::Rules
+                | ConfigFile::Menus => Self::undescribed(file),
             },
             // A connection answers this itself, and a pick comes later.
             Request::Subscribe { .. } | Request::Pick { .. } => Reply::Error {

@@ -333,6 +333,30 @@ pub(crate) struct TileCell {
     height: u16,
 }
 
+impl serde::Serialize for TileCell {
+    /// Writes the cell as `[x, y, width, height]`, as a layout lists it.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        [self.x, self.y, self.width, self.height].serialize(serializer)
+    }
+}
+
+impl schemars::JsonSchema for TileCell {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TileCell".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let whole = i64::from(Self::WHOLE);
+        schemars::json_schema!({
+            "type": "array",
+            "description": "[x, y, width, height], in thousandths of the usable area.",
+            "items": { "type": "integer", "minimum": 0, "maximum": whole },
+            "minItems": 4,
+            "maxItems": 4,
+        })
+    }
+}
+
 impl TileCell {
     /// The whole of an axis, in the thousandths cells are measured in.
     const WHOLE: u16 = 1000;

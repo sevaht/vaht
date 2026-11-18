@@ -28,16 +28,11 @@ fn ask(vaht: &HeadlessVaht, arguments: &[&str]) -> Reply {
 
 /// Returns the windows vaht lists.
 fn windows(vaht: &HeadlessVaht) -> Vec<WindowInfo> {
-    match ask(vaht, &["windows"]) {
-        Reply::Windows { windows } => windows,
-        other @ (Reply::Version { .. }
-        | Reply::Done {}
-        | Reply::Workspaces { .. }
-        | Reply::Outputs { .. }
-        | Reply::LogFilter { .. }
-        | Reply::Picked { .. }
-        | Reply::Error { .. }) => panic!("not a window list: {other:?}"),
-    }
+    let reply = ask(vaht, &["windows"]);
+    let Reply::Windows { windows } = reply else {
+        panic!("not a window list: {reply:?}");
+    };
+    windows
 }
 
 #[test]
@@ -98,15 +93,12 @@ fn a_command_vaht_does_not_know_fails_with_its_reason() {
 #[test]
 fn the_log_filter_is_told_changed_and_reset_while_vaht_runs() {
     let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
-    let filter = |arguments: &[&str]| match ask(&vaht, &[&["log-filter"], arguments].concat()) {
-        Reply::LogFilter { directives } => directives,
-        other @ (Reply::Version { .. }
-        | Reply::Done { .. }
-        | Reply::Windows { .. }
-        | Reply::Workspaces { .. }
-        | Reply::Outputs { .. }
-        | Reply::Picked { .. }
-        | Reply::Error { .. }) => panic!("not a filter: {other:?}"),
+    let filter = |arguments: &[&str]| {
+        let reply = ask(&vaht, &[&["log-filter"], arguments].concat());
+        let Reply::LogFilter { directives } = reply else {
+            panic!("not a filter: {reply:?}");
+        };
+        directives
     };
     let started = filter(&[]);
     // A single directive: tracing prints several in an order of its own.
@@ -403,5 +395,111 @@ fn nothing_to_pick_fails_at_once() {
     assert!(
         !output.status.success() && output.stdout.is_empty(),
         "{output:?}"
+    );
+}
+
+/// Runs `vaht msg --json config <arguments>` and returns the reply.
+fn config(vaht: &HeadlessVaht, arguments: &[&str]) -> Reply {
+    ask(vaht, &[&["config"], arguments].concat())
+}
+
+#[test]
+fn the_configuration_files_are_listed_with_their_state_and_the_themes() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("themes/mine.toml", "[default]\ntext_color = \"white\"\n")],
+    );
+    let Reply::ConfigFiles { files, themes } = config(&vaht, &["files"]) else {
+        panic!("not a file list");
+    };
+    assert_eq!(
+        files,
+        [vaht_ipc::ConfigFileInfo {
+            file: vaht_ipc::ConfigFile::Settings,
+            state: vaht_ipc::ConfigState::Clean,
+        }]
+    );
+    assert!(themes.contains(&"mine".to_owned()), "{themes:?}");
+}
+
+#[test]
+fn the_schema_describes_each_setting_with_its_range_and_documentation() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let Reply::ConfigSchema { schema } = config(&vaht, &["schema", "settings"]) else {
+        panic!("not a schema");
+    };
+    assert_eq!(
+        schema["$schema"], "https://json-schema.org/draft/2020-12/schema",
+        "{schema}"
+    );
+    let passes = &schema["$defs"]["BlurPasses"];
+    assert_eq!(
+        (&passes["minimum"], &passes["maximum"]),
+        (&1.into(), &6.into()),
+        "{passes}"
+    );
+    assert!(
+        schema["$defs"]["BlurSettings"]["properties"]["enabled"]["description"]
+            .as_str()
+            .is_some_and(|text| text.contains("blur")),
+        "the documentation is the doc comment's"
+    );
+}
+
+#[test]
+fn what_the_settings_say_now_is_read_with_what_is_changed_in_place() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[blur]\npasses = 5\n")],
+    );
+    let Reply::ConfigRead {
+        value,
+        defaults,
+        changed,
+    } = config(&vaht, &["get", "settings"])
+    else {
+        panic!("not a reading");
+    };
+    assert_eq!(value["blur"]["passes"], 5, "the file's value");
+    assert_eq!(defaults["blur"]["passes"], 3, "vaht's default");
+    assert_eq!(
+        value["blur"]["spread"], 3,
+        "what the file leaves out, as defaulted"
+    );
+    assert!(changed.is_empty(), "{changed:?}");
+    let run = |command: &str| {
+        let output = message(&vaht, &["run", "set-setting", command]);
+        assert!(output.status.success(), "{output:?}");
+    };
+    run("blur.spread 7");
+    let Reply::ConfigRead { value, changed, .. } = config(&vaht, &["get", "settings"]) else {
+        panic!("not a reading");
+    };
+    assert_eq!(value["blur"]["spread"], 7, "a change made in place shows");
+    assert_eq!(changed, [["blur".to_owned(), "spread".to_owned()]]);
+}
+
+#[test]
+fn a_file_not_described_yet_is_refused_plainly() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let Reply::Error { message } = config(&vaht, &["schema", "bindings"]) else {
+        panic!("not an error");
+    };
+    assert!(message.contains("bindings.toml"), "{message}");
+}
+
+#[test]
+fn what_msg_config_get_prints_is_a_line_per_setting() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[blur]\npasses = 5\n")],
+    );
+    let output = message(&vaht, &["config", "get"]);
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).expect("UTF-8");
+    assert!(text.contains("  blur.passes = 5\n"), "{text}");
+    assert!(
+        text.contains("  logging.delete_after_days = unset\n"),
+        "{text}"
     );
 }

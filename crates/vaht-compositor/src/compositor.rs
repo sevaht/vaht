@@ -259,7 +259,7 @@ pub struct Compositor {
     /// Where the configuration comes from, and when it is read again.
     pub(crate) config_source: ConfigSource,
     /// Settings changed in place, not yet saved.
-    overrides: SettingOverrides,
+    pub(crate) overrides: SettingOverrides,
     /// Starts programs and reaps them.
     pub(crate) launcher: Launcher,
     /// Registers timers and other sources with the event loop.

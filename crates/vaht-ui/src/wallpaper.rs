@@ -16,7 +16,19 @@ use crate::color::Color;
 use crate::geometry::Size;
 
 /// How a wallpaper fills an output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize, strum::EnumIter)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+    strum::EnumIter,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum WallpaperFit {
     /// Scaled to cover the output, keeping its shape; what overflows is

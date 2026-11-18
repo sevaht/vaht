@@ -46,7 +46,17 @@ pub(crate) enum TitlebarHit {
 }
 
 /// A titlebar button.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum TitlebarButton {
     /// Rolls the window up into its titlebar, or down again.

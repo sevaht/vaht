@@ -88,7 +88,10 @@ impl Client {
             | Reply::Workspaces { .. }
             | Reply::Outputs { .. }
             | Reply::LogFilter { .. }
-            | Reply::Picked { .. }) => Err(ClientError::Unexpected(format!("{other:?}"))),
+            | Reply::Picked { .. }
+            | Reply::ConfigFiles { .. }
+            | Reply::ConfigSchema { .. }
+            | Reply::ConfigRead { .. }) => Err(ClientError::Unexpected(format!("{other:?}"))),
         }
     }
 

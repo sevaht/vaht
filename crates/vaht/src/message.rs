@@ -162,6 +162,27 @@ fn readable(reply: &Reply) -> String {
                 output_lines(&mut text, output);
             }
         }
+        Reply::ConfigFiles { files, themes } => {
+            for info in files {
+                let state = match info.state {
+                    vaht_ipc::ConfigState::Clean => "clean",
+                    vaht_ipc::ConfigState::Changed => "changed",
+                };
+                let _ = writeln!(text, "{}\t{state}", info.file.file_name());
+            }
+            let _ = writeln!(text, "\nthemes: {}", themes.join(", "));
+        }
+        Reply::ConfigSchema { schema } => {
+            let _ = writeln!(
+                text,
+                "{}",
+                serde_json::to_string_pretty(schema).unwrap_or_default()
+            );
+        }
+        Reply::ConfigRead { value, changed, .. } => {
+            let mut path = Vec::new();
+            setting_lines(&mut text, value, &mut path, changed);
+        }
         Reply::Picked { choice } => {
             if let Some(choice) = choice {
                 let _ = writeln!(text, "{choice}");
@@ -172,6 +193,42 @@ fn readable(reply: &Reply) -> String {
         }
     }
     text
+}
+
+/// Appends a `key = value` line to `text` for each setting in `value`,
+/// reached through `path`, `*` marking those in `changed`; a setting with
+/// no value is written `unset`.
+fn setting_lines(
+    text: &mut String,
+    value: &serde_json::Value,
+    path: &mut Vec<String>,
+    changed: &[Vec<String>],
+) {
+    match value {
+        serde_json::Value::Object(table) if !table.is_empty() => {
+            for (key, inner) in table {
+                path.push(key.clone());
+                setting_lines(text, inner, path, changed);
+                path.pop();
+            }
+        }
+        serde_json::Value::Null => write_setting(text, path, "unset", changed),
+        scalar @ (serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_)
+        | serde_json::Value::Array(_)
+        | serde_json::Value::Object(_)) => write_setting(text, path, &scalar.to_string(), changed),
+    }
+}
+
+/// Appends the line of the setting at `path`, whose value is `shown`.
+fn write_setting(text: &mut String, path: &[String], shown: &str, changed: &[Vec<String>]) {
+    let mark = if changed.iter().any(|key| key == path) {
+        '*'
+    } else {
+        ' '
+    };
+    let _ = writeln!(text, "{mark} {} = {shown}", path.join("."));
 }
 
 /// Appends `output`'s lines to `text`: a line about it, then each `match`

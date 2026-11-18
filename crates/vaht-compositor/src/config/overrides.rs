@@ -211,6 +211,15 @@ impl SettingOverrides {
         });
     }
 
+    /// Returns the key of each change, as its parts (`["focus", "model"]`),
+    /// oldest first.
+    pub(crate) fn keys(&self) -> Vec<Vec<String>> {
+        self.changes
+            .iter()
+            .map(|made| made.change.key.clone())
+            .collect()
+    }
+
     /// Returns whether nothing is changed.
     pub(crate) fn is_empty(&self) -> bool {
         self.changes.is_empty()

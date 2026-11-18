@@ -165,6 +165,13 @@ pub enum MessageRequest {
         /// Tracing filter directives, or `reset`; none prints the filter.
         directives: Option<String>,
     },
+    /// Reads the configuration as vaht has it: which files, their schema, and
+    /// what they say now.
+    Config {
+        /// What to ask.
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
     /// Shows the lines read from standard input as a vaht menu at the
     /// pointer and prints the one the user chooses; exits with 1, printing
     /// nothing, if they close the menu. A dmenu-style chooser: the
@@ -174,6 +181,58 @@ pub enum MessageRequest {
         #[arg(long)]
         title: Option<String>,
     },
+}
+
+/// What `vaht msg config` asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::Subcommand)]
+pub enum ConfigCommand {
+    /// Lists the files that can be read, whether each has changes not
+    /// written, and the themes there are.
+    Files,
+    /// Prints a file's schema (JSON Schema): every key with its type,
+    /// documentation, default and range.
+    Schema {
+        /// The file.
+        #[arg(value_enum, default_value_t)]
+        file: ConfigFileArgument,
+    },
+    /// Prints what a file says now, a `key = value` line each, the keys
+    /// changed in place and not written marked `*`.
+    Get {
+        /// The file.
+        #[arg(value_enum, default_value_t)]
+        file: ConfigFileArgument,
+    },
+}
+
+/// A configuration file `vaht msg config` is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum ConfigFileArgument {
+    /// `settings.toml`.
+    #[default]
+    Settings,
+    /// `outputs.toml`.
+    Outputs,
+    /// `bindings.toml`.
+    Bindings,
+    /// `rules.toml`.
+    Rules,
+    /// `menus.toml`.
+    Menus,
+}
+
+impl ConfigFileArgument {
+    /// Returns the file as the protocol names it.
+    #[must_use]
+    pub const fn file(self) -> vaht_ipc::ConfigFile {
+        match self {
+            Self::Settings => vaht_ipc::ConfigFile::Settings,
+            Self::Outputs => vaht_ipc::ConfigFile::Outputs,
+            Self::Bindings => vaht_ipc::ConfigFile::Bindings,
+            Self::Rules => vaht_ipc::ConfigFile::Rules,
+            Self::Menus => vaht_ipc::ConfigFile::Menus,
+        }
+    }
 }
 
 /// A list `vaht msg subscribe` follows.
@@ -222,6 +281,13 @@ impl MessageRequest {
                     reset,
                 }
             }
+            Self::Config { command } => match command {
+                ConfigCommand::Files => vaht_ipc::Request::ConfigFiles {},
+                ConfigCommand::Schema { file } => {
+                    vaht_ipc::Request::ConfigSchema { file: file.file() }
+                }
+                ConfigCommand::Get { file } => vaht_ipc::Request::ConfigRead { file: file.file() },
+            },
             // The items come from standard input ([`crate::message::pick`]).
             Self::Pick { title } => vaht_ipc::Request::Pick {
                 title: title.clone(),

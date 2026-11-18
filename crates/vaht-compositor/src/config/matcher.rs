@@ -20,7 +20,9 @@ use serde::de::{self, Deserializer, MapAccess, Visitor};
 use crate::window_manager::{Exemption, Window, Workspace};
 
 /// Which windows something is about.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WindowMatcher {
     /// The Wayland app id (or X11 class).
@@ -127,6 +129,46 @@ impl PartialEq for TextPattern {
 
 impl Eq for TextPattern {}
 
+impl serde::Serialize for TextPattern {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap as _;
+        match self {
+            Self::Exact(text) => serializer.serialize_str(text),
+            Self::Regex(regex) => {
+                // Compiled as `^(?:<pattern>)$` ([`TextPattern::regex`]): written back as read.
+                let compiled = regex.as_str();
+                let pattern = compiled
+                    .strip_prefix("^(?:")
+                    .and_then(|rest| rest.strip_suffix(")$"))
+                    .unwrap_or(compiled);
+                let mut table = serializer.serialize_map(Some(1))?;
+                table.serialize_entry("regex", pattern)?;
+                table.end()
+            }
+        }
+    }
+}
+
+impl schemars::JsonSchema for TextPattern {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TextPattern".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "oneOf": [
+                { "type": "string", "description": "Matches the whole text exactly." },
+                {
+                    "type": "object",
+                    "properties": { "regex": { "type": "string" } },
+                    "required": ["regex"],
+                    "additionalProperties": false,
+                },
+            ],
+        })
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for TextPattern {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         /// Reads a string or a `{ regex = ".." }` table.
@@ -182,6 +224,30 @@ impl WorkspaceSelector {
     }
 }
 
+impl serde::Serialize for WorkspaceSelector {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Current => serializer.serialize_str("current"),
+            Self::Numbered(number) => serializer.serialize_u64(number.get() as u64),
+        }
+    }
+}
+
+impl schemars::JsonSchema for WorkspaceSelector {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "WorkspaceSelector".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "oneOf": [
+                { "const": "current" },
+                { "type": "integer", "minimum": 1 },
+            ],
+        })
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for WorkspaceSelector {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         /// Reads `"current"` or a number.
@@ -234,6 +300,31 @@ impl StateSelector {
             Self::No => !is_in_state,
             Self::Any => true,
         }
+    }
+}
+
+impl serde::Serialize for StateSelector {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Yes => serializer.serialize_bool(true),
+            Self::No => serializer.serialize_bool(false),
+            Self::Any => serializer.serialize_str("any"),
+        }
+    }
+}
+
+impl schemars::JsonSchema for StateSelector {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "StateSelector".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "oneOf": [
+                { "type": "boolean" },
+                { "const": "any" },
+            ],
+        })
     }
 }
 

@@ -65,7 +65,17 @@ const EXPORTED: [&str; 6] = [
 ];
 
 /// When vaht updates the activation environment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ActivationUpdate {
     /// When it runs the session: on the DRM backend.

@@ -12,7 +12,18 @@ use smithay::utils::{Logical, Point, Rectangle, Size};
 use super::window::Area;
 
 /// How a place for a new window is chosen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum PlacementStrategy {
     /// The first place, row by row, where it overlaps nothing; failing
@@ -38,7 +49,18 @@ pub(crate) enum PlacementStrategy {
 }
 
 /// Which way rows are scanned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum RowDirection {
     /// From the left.
@@ -49,7 +71,18 @@ pub(crate) enum RowDirection {
 }
 
 /// Which way columns are scanned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ColumnDirection {
     /// From the top.
