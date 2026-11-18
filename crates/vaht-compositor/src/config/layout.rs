@@ -44,11 +44,24 @@ pub(crate) struct LayoutState {
     pub(crate) keys: Vec<Vec<String>>,
 }
 
+/// The default layout, `data/layouts/vaht.toml`: installed for people to
+/// read and copy, and built in so that it needs no file.
+const BUILT_IN: &str = include_str!("../../../../data/layouts/vaht.toml");
+
+/// Where a layout is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Source {
+    /// A file.
+    File(PathBuf),
+    /// The default layout's copy in vaht.
+    BuiltIn,
+}
+
 /// A layout file, found by name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LayoutFile {
     /// Where it is.
-    path: PathBuf,
+    source: Source,
 }
 
 impl LayoutFile {
@@ -60,9 +73,18 @@ impl LayoutFile {
     /// Returns an error if `name` is not a plain name, or no such layout
     /// exists.
     pub(crate) fn find(directory: &Path, name: &str) -> Result<Self, ConfigError> {
-        Library::LAYOUTS
-            .find(directory, name)
-            .map(|path| Self { path })
+        match Library::LAYOUTS.find(directory, name) {
+            Ok(path) => Ok(Self {
+                source: Source::File(path),
+            }),
+            // The default layout needs no file.
+            Err(ConfigError::MissingInLibrary { .. }) if name == Library::DEFAULT_NAME => {
+                Ok(Self {
+                    source: Source::BuiltIn,
+                })
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Returns the names of the layouts there are, sorted, each once.
@@ -77,12 +99,19 @@ impl LayoutFile {
     /// Returns an error if the file cannot be read or is not TOML, with the
     /// line and column of the problem.
     pub(crate) fn read_table(&self) -> Result<toml::Table, ConfigError> {
-        let text = std::fs::read_to_string(&self.path).map_err(|error| ConfigError::Read {
-            path: self.path.clone(),
+        let path = match &self.source {
+            Source::File(path) => path,
+            Source::BuiltIn => {
+                return Ok(
+                    toml::from_str(BUILT_IN).expect("the built-in layout is valid TOML (tested)")
+                );
+            }
+        };
+        let text = std::fs::read_to_string(path).map_err(|error| ConfigError::Read {
+            path: path.clone(),
             error,
         })?;
-        toml::from_str(&text)
-            .map_err(|error| ConfigError::invalid(self.path.clone(), &text, &error))
+        toml::from_str(&text).map_err(|error| ConfigError::invalid(path.clone(), &text, &error))
     }
 
     /// Returns the layout's name for a message: its file, as the user knows it.
@@ -267,5 +296,24 @@ mod tests {
         );
         assert!(sets(&layout, &keys[1]));
         assert!(!sets(&layout, &["taskbar".to_owned(), "edge".to_owned()]));
+    }
+
+    #[test]
+    fn the_built_in_layout_is_the_defaults_presentation_and_nothing_else() {
+        let mut table = LayoutFile::find(Path::new("/nonexistent"), "vaht")
+            .expect("the default layout needs no file")
+            .read_table()
+            .expect("valid");
+        assert_eq!(
+            leave_out_other_settings(&mut table),
+            Vec::<String>::new(),
+            "only presentation"
+        );
+        let settings = super::super::Settings::from_table(table).expect("valid settings");
+        assert_eq!(
+            super::super::schema::settings_value(&settings),
+            super::super::schema::settings_value(&super::super::Settings::default()),
+            "it says what the defaults say, so choosing it changes nothing"
+        );
     }
 }

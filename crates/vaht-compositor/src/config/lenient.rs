@@ -818,4 +818,13 @@ mod tests {
         let error = Config::load(directory(&files).path()).expect_err("an odd theme");
         assert!(error.to_string().contains("odd.toml"), "{error}");
     }
+
+    #[test]
+    fn the_default_theme_and_layout_are_there_without_files() {
+        let loaded = load(&directory(&[("settings.toml", "theme = \"vaht\"\n")]));
+        assert_eq!(loaded.problems, []);
+        assert_eq!(loaded.config.layout.name.as_deref(), Some("vaht"));
+        let chosen = load(&directory(&[("settings.toml", "layout = \"vaht\"\n")]));
+        assert_eq!(chosen.problems, []);
+    }
 }

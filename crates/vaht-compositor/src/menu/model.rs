@@ -528,7 +528,7 @@ impl<'state> MenuBuilder<'state> {
         current: Option<&str>,
         action: fn(String) -> Action,
     ) -> Vec<MenuItem> {
-        names
+        let mut items: Vec<MenuItem> = names
             .iter()
             .map(|name| MenuItem::Choice {
                 label: name.clone(),
@@ -539,7 +539,15 @@ impl<'state> MenuBuilder<'state> {
                 mark: Some(current == Some(name.as_str())),
                 icon: None,
             })
-            .collect()
+            .collect();
+        // The default (vaht's own) comes first, a line between it and the
+        // others if there are others.
+        if names.first().map(String::as_str) == Some(vaht_ui::Style::DEFAULT_NAME)
+            && items.len() > 1
+        {
+            items.insert(1, MenuItem::Separator);
+        }
+        items
     }
 
     /// Returns the items of the list `generator` makes.
@@ -677,6 +685,39 @@ mod tests {
                     pipe: None,
                 },
             ]
+        );
+    }
+
+    /// Returns what the items of a list of `names` are: a label for a choice,
+    /// none for a line.
+    fn labels(names: &[&str]) -> Vec<Option<String>> {
+        let names: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
+        MenuBuilder::named_items(&names, None, Action::SetStyle)
+            .into_iter()
+            .map(|item| match item {
+                MenuItem::Choice { label, .. } => Some(label),
+                MenuItem::Separator => None,
+                MenuItem::Inert { .. } | MenuItem::Submenu { .. } => Some("?".to_owned()),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_default_comes_first_with_a_line_under_it_only_when_others_follow() {
+        let named = |name: &str| Some(name.to_owned());
+        assert_eq!(
+            labels(&["vaht", "a", "b"]),
+            [named("vaht"), None, named("a"), named("b")]
+        );
+        assert_eq!(
+            labels(&["vaht"]),
+            [named("vaht")],
+            "nothing to divide it from"
+        );
+        assert_eq!(
+            labels(&["a", "b"]),
+            [named("a"), named("b")],
+            "no default listed"
         );
     }
 }

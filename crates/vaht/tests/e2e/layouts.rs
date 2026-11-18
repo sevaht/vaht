@@ -161,7 +161,7 @@ fn the_layouts_there_are_listed_and_a_layout_that_is_missing_is_reported() {
         ("layouts/slim.toml", SLIM),
     ]);
     let files = String::from_utf8(run(&vaht, &["config", "files"]).stdout).expect("UTF-8");
-    assert!(files.contains("layouts: slim"), "{files}");
+    assert!(files.contains("layouts: vaht, slim"), "{files}");
     assert!(
         files.contains("layout nowhere"),
         "the missing one is a problem: {files}"
@@ -213,5 +213,5 @@ fn choosing_a_theme_puts_back_the_style_and_layout_that_would_win_over_it() {
         "now the theme's"
     );
     let files = String::from_utf8(run(&vaht, &["config", "files"]).stdout).expect("UTF-8");
-    assert!(files.contains("themes: calm"), "{files}");
+    assert!(files.contains("themes: vaht, calm"), "{files}");
 }

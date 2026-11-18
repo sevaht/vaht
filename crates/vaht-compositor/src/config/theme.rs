@@ -40,11 +40,24 @@ impl ThemeParts {
     }
 }
 
+/// The default theme, `data/themes/vaht.toml`: installed for people to read
+/// and copy, and built in so that it needs no file.
+const BUILT_IN: &str = include_str!("../../../../data/themes/vaht.toml");
+
+/// Where a theme is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Source {
+    /// A file.
+    File(PathBuf),
+    /// The default theme's copy in vaht.
+    BuiltIn,
+}
+
 /// A theme file, found by name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThemeFile {
     /// Where it is.
-    path: PathBuf,
+    source: Source,
 }
 
 impl ThemeFile {
@@ -56,9 +69,18 @@ impl ThemeFile {
     /// Returns an error if `name` is not a plain name, or no such theme
     /// exists.
     pub(crate) fn find(directory: &Path, name: &str) -> Result<Self, ConfigError> {
-        Library::THEMES
-            .find(directory, name)
-            .map(|path| Self { path })
+        match Library::THEMES.find(directory, name) {
+            Ok(path) => Ok(Self {
+                source: Source::File(path),
+            }),
+            // The default theme needs no file.
+            Err(ConfigError::MissingInLibrary { .. }) if name == Library::DEFAULT_NAME => {
+                Ok(Self {
+                    source: Source::BuiltIn,
+                })
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Returns the names of the themes there are, sorted, each once.
@@ -73,12 +95,19 @@ impl ThemeFile {
     /// Returns an error if the file cannot be read, is not TOML, or says
     /// anything but a style and a layout, with the line and column.
     pub(crate) fn read(&self) -> Result<ThemeParts, ConfigError> {
-        let text = std::fs::read_to_string(&self.path).map_err(|error| ConfigError::Read {
-            path: self.path.clone(),
+        let path = match &self.source {
+            Source::File(path) => path,
+            Source::BuiltIn => {
+                return Ok(
+                    toml::from_str(BUILT_IN).expect("the built-in theme is valid TOML (tested)")
+                );
+            }
+        };
+        let text = std::fs::read_to_string(path).map_err(|error| ConfigError::Read {
+            path: path.clone(),
             error,
         })?;
-        toml::from_str(&text)
-            .map_err(|error| ConfigError::invalid(self.path.clone(), &text, &error))
+        toml::from_str(&text).map_err(|error| ConfigError::invalid(path.clone(), &text, &error))
     }
 }
 
@@ -107,5 +136,15 @@ mod tests {
         let one: ThemeParts = toml::from_str("style = \"nord\"").expect("valid");
         assert_eq!(one.layout, None);
         assert!(toml::from_str::<ThemeParts>("colour = 1").is_err());
+    }
+
+    #[test]
+    fn the_built_in_theme_is_the_default_style_and_layout() {
+        let parts = ThemeFile::find(Path::new("/nonexistent"), "vaht")
+            .expect("the default theme needs no file")
+            .read()
+            .expect("valid");
+        assert_eq!(parts.style.as_deref(), Some("vaht"));
+        assert_eq!(parts.layout.as_deref(), Some("vaht"));
     }
 }

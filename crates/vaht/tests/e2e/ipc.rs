@@ -437,7 +437,11 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
         }]
     );
     assert!(styles.contains(&"mine".to_owned()), "{styles:?}");
-    assert_eq!(layouts, Vec::<String>::new(), "no layout files yet");
+    assert_eq!(
+        layouts,
+        ["vaht"],
+        "only the default layout, which needs no file"
+    );
     assert_eq!(
         problems,
         Vec::<String>::new(),

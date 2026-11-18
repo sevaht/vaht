@@ -55,11 +55,7 @@ impl StyleFile {
     /// user's, in the configuration `directory`, and the system's, and the
     /// default style, which is always there.
     pub(crate) fn available(directory: &Path) -> Vec<String> {
-        let mut names = Library::STYLES.available(directory);
-        names.push(Style::DEFAULT_NAME.to_owned());
-        names.sort();
-        names.dedup();
-        names
+        Library::STYLES.available(directory)
     }
 
     /// Reads and resolves the style.

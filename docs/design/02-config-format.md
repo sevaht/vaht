@@ -806,7 +806,8 @@ items = [
   - `command` (with a `label`; a missing label defaults to the action's name);
   - `submenu`;
   - `toggle` (a window state shown with a check mark);
-  - `generate`: `styles`, `layouts`, `themes`, `workspaces`, `window-list`,
+  - `generate`: `styles`, `layouts` and `themes` (the default, `vaht`, first and
+    a line under it if others follow), `workspaces`, `window-list`,
     `send-to-workspace`, `layer`, `alpha`, `outputs`, `profiles`;
   - `pipe` (a command whose output is a menu in this same TOML form);
   - `separator`;
@@ -1177,7 +1178,10 @@ widgets = ["window-list", "clock"]
 ```
 
 `settings.toml` chooses one with `layout = "slim"`, found like a style: the
-configuration directory's `layouts/`, then `/usr/share/vaht/layouts`.
+configuration directory's `layouts/`, then `/usr/share/vaht/layouts`. The
+default layout, `vaht`, is what vaht does without one (its presentation
+settings, `data/layouts/vaht.toml`): installed to read and copy, and built in,
+so it needs no file.
 
 **Precedence, lowest to highest:** vaht's defaults, the layout, `settings.toml`,
 then changes made in place (`set-setting`, the settings window). `settings.toml`
@@ -1208,7 +1212,9 @@ style = "nord"
 layout = "slim"
 ```
 
-Either part may be left out. `settings.toml` picks one with `theme = "calm"`,
+Either part may be left out. The default theme, `vaht`, is the default style and
+the default layout (`data/themes/vaht.toml`, installed and built in as they are).
+`settings.toml` picks one with `theme = "calm"`,
 found like styles and layouts (`themes/`, then `/usr/share/vaht/themes`). A
 `style` or `layout` `settings.toml` sets itself wins over the theme's, so a
 theme can be taken with another style or layout. A theme that is missing or says

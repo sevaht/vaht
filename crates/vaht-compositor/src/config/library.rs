@@ -76,8 +76,13 @@ impl Library {
             })
     }
 
-    /// Returns the names there are, sorted, each once: the user's, in the
-    /// configuration `directory`, and the installed ones.
+    /// The name of the one of each kind that is built in, whose file is
+    /// optional: the default style, layout and theme.
+    pub(crate) const DEFAULT_NAME: &'static str = vaht_ui::Style::DEFAULT_NAME;
+
+    /// Returns the names there are, each once: the default first (always
+    /// there, file or not), then the user's, in the configuration
+    /// `directory`, and the installed ones, sorted.
     pub(crate) fn available(self, directory: &Path) -> Vec<String> {
         let directories = [
             directory.join(self.directory),
@@ -96,8 +101,10 @@ impl Library {
                 is_file.then(|| path.file_stem()?.to_str().map(ToOwned::to_owned))?
             })
             .collect();
+        names.retain(|name| name != Self::DEFAULT_NAME);
         names.sort();
         names.dedup();
+        names.insert(0, Self::DEFAULT_NAME.to_owned());
         names
     }
 }
@@ -155,6 +162,28 @@ mod tests {
             !Library::LAYOUTS
                 .available(configuration.path())
                 .contains(&"a".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_default_is_always_listed_and_first() {
+        let configuration = tempfile::tempdir().expect("a temporary directory");
+        assert_eq!(
+            Library::THEMES.available(configuration.path())[0],
+            "vaht",
+            "listed with no files at all"
+        );
+        let themes = configuration.path().join("themes");
+        std::fs::create_dir(&themes).expect("a directory");
+        for name in ["zebra", "apple", "vaht"] {
+            std::fs::write(themes.join(format!("{name}.toml")), "").expect("written");
+        }
+        let names = Library::THEMES.available(configuration.path());
+        assert_eq!(&names[..3], ["vaht", "apple", "zebra"], "{names:?}");
+        assert_eq!(
+            names.iter().filter(|name| *name == "vaht").count(),
+            1,
+            "once, though a file has the name too"
         );
     }
 }

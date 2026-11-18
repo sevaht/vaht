@@ -341,7 +341,11 @@ impl<'control> Control<'control> {
         let combo = egui::ComboBox::from_id_salt(path.to_string())
             .selected_text(now.unwrap_or("(default)"))
             .show_ui(ui, |ui| {
-                for name in names {
+                for (index, name) in names.iter().enumerate() {
+                    // The default (vaht's own) is first, a line below it.
+                    if index == 1 && names.first().is_some_and(|first| first == "vaht") {
+                        ui.separator();
+                    }
                     if ui
                         .selectable_label(now == Some(name.as_str()), name)
                         .clicked()
