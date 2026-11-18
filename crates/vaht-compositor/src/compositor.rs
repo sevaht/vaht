@@ -3738,7 +3738,7 @@ impl Compositor {
             }
             ButtonState::Pressed => {}
             ButtonState::Released => {
-                self.window_manager.release_titlebar_button(location);
+                let menu_of = self.window_manager.release_titlebar_button(location);
                 self.release_taskbar_button(location);
                 if self.menus.is_open() {
                     // The middle button, or Shift, chooses without closing the
@@ -3760,6 +3760,11 @@ impl Compositor {
                             self.reopen_menus(&snapshot);
                         }
                     }
+                }
+                // Opened after the menus above took this release, or it would
+                // choose the item the menu opens under.
+                if let Some(window) = menu_of {
+                    self.open_menu(&MenuRequest::Window, Some(window));
                 }
             }
         }

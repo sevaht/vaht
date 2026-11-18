@@ -69,26 +69,33 @@ pub(crate) enum TitlebarButton {
     Maximize,
     /// Closes the window.
     Close,
+    /// Opens the window's menu.
+    Menu,
 }
 
 impl TitlebarButton {
-    /// Returns what clicking the button does.
-    pub(crate) const fn action(self) -> WindowManagerAction {
+    /// Returns what clicking the button does to the window; none for the
+    /// menu button, which opens a menu instead.
+    pub(crate) const fn action(self) -> Option<WindowManagerAction> {
         match self {
-            Self::Shade => WindowManagerAction::Shade,
-            Self::Stick => WindowManagerAction::Stick,
-            Self::Minimize => WindowManagerAction::Minimize,
-            Self::Maximize => WindowManagerAction::Maximize(Axes::Both),
-            Self::Close => WindowManagerAction::Close,
+            Self::Shade => Some(WindowManagerAction::Shade),
+            Self::Stick => Some(WindowManagerAction::Stick),
+            Self::Minimize => Some(WindowManagerAction::Minimize),
+            Self::Maximize => Some(WindowManagerAction::Maximize(Axes::Both)),
+            Self::Close => Some(WindowManagerAction::Close),
+            Self::Menu => None,
         }
     }
 
     /// Returns the button's picture, for a window that is `is_maximized` or
-    /// not: the maximize button shows what clicking it would do.
-    const fn glyph(self, is_maximized: bool) -> Glyph {
+    /// not and `is_sticky` or not: the maximize and stick buttons show what
+    /// clicking them would do.
+    const fn glyph(self, (is_maximized, is_sticky): (bool, bool)) -> Glyph {
         match self {
             Self::Shade => Glyph::Shade,
+            Self::Stick if is_sticky => Glyph::Stuck,
             Self::Stick => Glyph::Stick,
+            Self::Menu => Glyph::Menu,
             Self::Minimize => Glyph::Minimize,
             Self::Maximize if is_maximized => Glyph::Restore,
             Self::Maximize => Glyph::Maximize,
@@ -447,6 +454,7 @@ impl Frame {
                     icon: None,
                     is_focused: false,
                     is_maximized: false,
+                    is_sticky: false,
                     buttons,
                 },
                 vaht_ui::Size::default(),
@@ -550,6 +558,15 @@ impl Frame {
         }
     }
 
+    /// Shows the window as on every workspace or not, which its stick button
+    /// shows by being an unstick button.
+    pub(crate) fn set_sticky(&mut self, is_sticky: bool) {
+        if self.titlebar.content().is_sticky != is_sticky {
+            self.titlebar
+                .update(|content| content.is_sticky = is_sticky);
+        }
+    }
+
     /// Marks the frame for painting again, as when the style changed.
     pub(crate) fn invalidate(&mut self) {
         self.titlebar.invalidate();
@@ -595,6 +612,8 @@ pub(crate) struct Titlebar {
     is_focused: bool,
     /// Whether the window is maximized, so its maximize button restores it.
     is_maximized: bool,
+    /// Whether the window is on every workspace, so its stick button unsticks.
+    is_sticky: bool,
     /// The buttons either side of the title.
     buttons: TitlebarLayout,
 }
@@ -604,8 +623,11 @@ impl PanelContent for Titlebar {
 
     fn build(&self) -> Widget<TitlebarHit> {
         let button = |button: &TitlebarButton| {
-            Widget::glyph(StyleElement::Button, button.glyph(self.is_maximized))
-                .with_button(TitlebarHit::Button(*button))
+            Widget::glyph(
+                StyleElement::Button,
+                button.glyph((self.is_maximized, self.is_sticky)),
+            )
+            .with_button(TitlebarHit::Button(*button))
         };
         let label = Widget::text(StyleElement::Label, self.title.clone())
             .with_size(SizePolicy::Fill { weight: 1 })
@@ -939,6 +961,7 @@ mod tests {
             icon: None,
             is_focused: true,
             is_maximized: false,
+            is_sticky: false,
             buttons: TitlebarLayout {
                 left: vec![TitlebarButton::Stick],
                 right: vec![
@@ -975,6 +998,7 @@ mod tests {
             icon: None,
             is_focused: true,
             is_maximized,
+            is_sticky: false,
             buttons: TitlebarLayout {
                 left: Vec::new(),
                 right: vec![button],
@@ -993,6 +1017,28 @@ mod tests {
     fn the_maximize_button_is_a_restore_button_while_the_window_is_maximized() {
         assert_eq!(glyph_of(TitlebarButton::Maximize, false), Glyph::Maximize);
         assert_eq!(glyph_of(TitlebarButton::Maximize, true), Glyph::Restore);
+    }
+
+    /// Returns the picture of `button` for a window that is `is_sticky` or not.
+    fn glyph_when_sticky(button: TitlebarButton, is_sticky: bool) -> Glyph {
+        button.glyph((false, is_sticky))
+    }
+
+    #[test]
+    fn the_stick_button_shows_stuck_while_the_window_is_on_every_workspace() {
+        assert_eq!(
+            glyph_when_sticky(TitlebarButton::Stick, false),
+            Glyph::Stick
+        );
+        assert_eq!(glyph_when_sticky(TitlebarButton::Stick, true), Glyph::Stuck);
+        assert_eq!(glyph_when_sticky(TitlebarButton::Close, true), Glyph::Close);
+    }
+
+    #[test]
+    fn the_menu_button_opens_a_menu_rather_than_acting_on_the_window() {
+        assert_eq!(TitlebarButton::Menu.action(), None);
+        assert_eq!(glyph_when_sticky(TitlebarButton::Menu, false), Glyph::Menu);
+        assert!(TitlebarButton::Close.action().is_some());
     }
 
     #[test]

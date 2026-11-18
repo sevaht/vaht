@@ -860,19 +860,24 @@ impl WindowManager {
     }
 
     /// Lets go of a held titlebar button with the pointer at `location`,
-    /// running its action if the pointer is still on it.
-    pub(crate) fn release_titlebar_button(&mut self, location: Point<f64, Logical>) {
-        let Some(window) = self.held_titlebar.take() else {
-            return;
-        };
+    /// running its action if the pointer is still on it. Returns the window
+    /// whose menu button was clicked, which is the compositor's to open.
+    pub(crate) fn release_titlebar_button(
+        &mut self,
+        location: Point<f64, Logical>,
+    ) -> Option<WindowId> {
+        let window = self.held_titlebar.take()?;
         let metrics = self.metrics;
         let clicked = self
             .window_mut(window)
             .and_then(|target| target.release_titlebar_button(location, metrics));
-        if let Some(button) = clicked {
-            let action = button.action();
-            tracing::debug!(%action, %window, "titlebar button clicked");
-            self.run(&action, Some(window));
+        match clicked?.action() {
+            Some(action) => {
+                tracing::debug!(%action, %window, "titlebar button clicked");
+                self.run(&action, Some(window));
+                None
+            }
+            None => Some(window),
         }
     }
 
