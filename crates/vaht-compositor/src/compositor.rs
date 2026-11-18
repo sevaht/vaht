@@ -106,7 +106,7 @@ use crate::resources::{self, ResourceKind, ResourceLedger};
 use crate::scene::{
     Backdrop, Drawn, FrameTextures, Outline, PointerTarget, Scene, SnapOverlay, WindowTarget,
 };
-use crate::session_environment;
+use crate::session_environment::{self, LiveSessionSettings};
 use crate::session_lock::SessionLock;
 use crate::signals::ProcessSignals;
 use crate::tablet;
@@ -125,7 +125,7 @@ use crate::window_manager::{
     Window, WindowDrag, WindowId, WindowManager, WorkspaceTarget,
 };
 use crate::workspace_pager::{WorkspaceFacts, WorkspaceRequest};
-use crate::xwayland::XwaylandServer;
+use crate::xwayland::{XwaylandLifecycle, XwaylandServer};
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::xwayland::{X11Surface, X11Wm};
 
@@ -170,6 +170,8 @@ pub struct Compositor {
     /// Xwayland, for X11 programs, unless the settings turn it off or it
     /// could not start.
     pub(crate) xwayland: Option<XwaylandServer>,
+    /// Whether Xwayland may run, and what an Xwayland turned off leaves.
+    pub(crate) xwayland_lifecycle: XwaylandLifecycle,
     /// Where a game holding the pointer locked last said it is, on its
     /// surface: where the pointer goes when the lock ends.
     pub(crate) pointer_lock_hint: Option<(WlSurface, Point<f64, Logical>)>,
@@ -392,6 +394,7 @@ impl Compositor {
             outputs,
             cursor: Cursor::from_environment(),
             xwayland: None,
+            xwayland_lifecycle: XwaylandLifecycle::new(allows_xwayland),
             pointer_lock_hint: None,
             dragged_source: None,
             idle_inhibitors: IdleInhibitors::default(),
@@ -460,14 +463,7 @@ impl Compositor {
             backend.set_input_settings(&self.config.settings.input);
         }
         self.start_xwayland(allows_xwayland);
-        let owns_seat = matches!(self.backend, Backend::Drm(_));
-        let exports = self
-            .config
-            .settings
-            .session
-            .update_activation_environment
-            .applies(owns_seat);
-        self.activation = if exports {
+        self.activation = if self.exports_activation_environment() {
             Activation::Exported
         } else {
             Activation::Left
@@ -657,6 +653,7 @@ impl Compositor {
 
     /// Makes `config` the configuration in effect, changing what differs.
     fn apply_config(&mut self, config: Config) {
+        let session_before = LiveSessionSettings::of(&self.config.settings);
         if let Some(rotation) = &self.log_rotation {
             rotation.follow(config.settings.logging);
         }
@@ -684,6 +681,7 @@ impl Compositor {
         }
         self.input.bindings_changed(&config.bindings);
         self.config = config;
+        self.follow_session_settings(&session_before);
         self.start_taskbar_services();
         if let Some(changes) = output_changes {
             self.follow_output_changes(&changes);
@@ -974,6 +972,84 @@ impl Compositor {
             .idle_inhibitors
             .is_inhibiting(WlSurface::is_alive, is_visible);
         self.protocols.idle_notifier.set_is_inhibited(is_inhibited);
+    }
+
+    /// Returns whether vaht tells the activation environment of the
+    /// session: when it runs the session, or the settings say always.
+    fn exports_activation_environment(&self) -> bool {
+        let owns_seat = matches!(self.backend, Backend::Drm(_));
+        self.config
+            .settings
+            .session
+            .update_activation_environment
+            .applies(owns_seat)
+    }
+
+    /// Makes what the session settings control follow a change of them,
+    /// with vaht running: Xwayland starts or stops, its X resources load
+    /// again, and the activation environment is told of the session or
+    /// forgets it. `before` is what they were.
+    fn follow_session_settings(&mut self, before: &LiveSessionSettings) {
+        let now = LiveSessionSettings::of(&self.config.settings);
+        if now.xwayland_enabled != before.xwayland_enabled {
+            if now.xwayland_enabled {
+                self.start_xwayland(self.xwayland_lifecycle.is_allowed);
+            } else {
+                self.stop_xwayland();
+            }
+        } else if now.x_resources != before.x_resources
+            && let Some(number) = self
+                .xwayland
+                .as_ref()
+                .and_then(XwaylandServer::display_number)
+        {
+            self.load_x_resources(number);
+        }
+        if now.update_activation != before.update_activation {
+            self.follow_activation_setting();
+        }
+    }
+
+    /// Tells the activation environment of the session, or has it forget
+    /// the session, as `[session] update_activation_environment` now says.
+    fn follow_activation_setting(&mut self) {
+        match (self.activation, self.exports_activation_environment()) {
+            (Activation::Left, true) => {
+                self.activation = Activation::Exported;
+                self.update_activation_environment(false);
+            }
+            (Activation::Exported | Activation::SessionStarted, false) => {
+                self.update_activation_environment(true);
+                self.activation = Activation::Left;
+            }
+            (Activation::Left, false)
+            | (Activation::Exported | Activation::SessionStarted, true) => {}
+        }
+    }
+
+    /// Turns Xwayland off with vaht running: the X11 windows go, as do
+    /// their programs' connections, and programs started from now on find
+    /// no `DISPLAY`.
+    fn stop_xwayland(&mut self) {
+        if self.xwayland.is_none() {
+            return;
+        }
+        tracing::info!("turning Xwayland off");
+        for surface in self.toplevels.x11_surfaces() {
+            self.forget_x11_window(&surface);
+        }
+        // Dropping the server ends Xwayland's connection to vaht, and so
+        // Xwayland; its window manager stays until the X connection closes.
+        if let Some(mut server) = self.xwayland.take() {
+            self.xwayland_lifecycle.retired_wm = server.take_wm();
+        }
+        self.input_emulation = None;
+        self.launcher.unset_environment("DISPLAY");
+        if self.activation != Activation::Left {
+            self.launcher
+                .run(session_environment::forget_display_command());
+        }
+        self.schedule_render();
     }
 
     /// Starts Xwayland, unless the settings, or `allows`, turn it off.
@@ -2870,6 +2946,11 @@ impl Compositor {
             Action::StartMoving => self.start_drag(None, context),
             Action::StartResizing(from) => self.start_drag(Some(*from), context),
             Action::Reload => self.reload_configuration(),
+            Action::ReapplyRules => {
+                self.window_manager.reapply_rule_traits(&self.config);
+                self.settle();
+                self.schedule_render();
+            }
             Action::RunDialog => self
                 .launcher
                 .show_dialog("run", self.config_source.directory()),

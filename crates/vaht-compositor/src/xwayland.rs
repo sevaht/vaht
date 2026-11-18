@@ -46,6 +46,27 @@ use crate::focus_target::FocusTarget;
 use crate::resources::ResourceLedger;
 use crate::window_manager::{ClientRequest, HorizontalEdge, ResizeEdges, VerticalEdge, WindowDrag};
 
+/// Whether Xwayland may run, and what one turned off leaves behind.
+#[derive(Debug)]
+pub(crate) struct XwaylandLifecycle {
+    /// Whether Xwayland may run at all: not with `--no-xwayland`.
+    pub(crate) is_allowed: bool,
+    /// The window manager of an Xwayland just turned off, kept until its
+    /// connection reports closed: Smithay sends it events still queued.
+    pub(crate) retired_wm: Option<X11Wm>,
+}
+
+impl XwaylandLifecycle {
+    /// Returns the lifecycle of an Xwayland that `is_allowed` or not,
+    /// which has not run.
+    pub(crate) const fn new(is_allowed: bool) -> Self {
+        Self {
+            is_allowed,
+            retired_wm: None,
+        }
+    }
+}
+
 /// Xwayland, and vaht as its window manager.
 #[derive(Debug)]
 pub(crate) struct XwaylandServer {
@@ -276,6 +297,17 @@ impl XwaylandServer {
             .is_some_and(|shapes| shapes.follow_changes(size_of))
     }
 
+    /// Returns the number of the X display programs connect to, once
+    /// Xwayland is ready.
+    pub(crate) const fn display_number(&self) -> Option<u32> {
+        self.display_number
+    }
+
+    /// Takes the window manager out of the server, which is about to go.
+    pub(crate) fn take_wm(&mut self) -> Option<X11Wm> {
+        self.wm.take()
+    }
+
     /// Returns the X display programs connect to, such as `:0`, once
     /// Xwayland is ready.
     pub(crate) fn display_name(&self) -> Option<String> {
@@ -328,6 +360,7 @@ impl XwmHandler for Compositor {
         self.xwayland
             .as_mut()
             .and_then(|server| server.wm.as_mut())
+            .or(self.xwayland_lifecycle.retired_wm.as_mut())
             .expect("Smithay asks for the window manager only once it runs")
     }
 
@@ -336,6 +369,10 @@ impl XwmHandler for Compositor {
     fn new_override_redirect_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
 
     fn map_window_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        // Xwayland was turned off: this window goes with it.
+        if self.xwayland.is_none() {
+            return;
+        }
         if let Err(error) = window.set_mapped(true) {
             tracing::warn!(%error, "an X11 window could not be mapped");
             return;
@@ -530,6 +567,7 @@ impl XwmHandler for Compositor {
 
     fn disconnected(&mut self, _xwm: XwmId) {
         tracing::warn!("Xwayland's window manager connection closed");
+        self.xwayland_lifecycle.retired_wm = None;
         if let Some(server) = &mut self.xwayland {
             server.wm = None;
             server.unmanaged.clear();

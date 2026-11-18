@@ -169,37 +169,58 @@ fn programs_are_told_to_prefer_wayland() {
     assert_eq!(toolkits, "wayland;xcb|wayland,x11\n");
 }
 
+/// Fake `dbus-update-activation-environment` and `systemctl` programs that
+/// record what they are told, so a test never touches the user's own
+/// service manager.
+struct FakeSessionTools {
+    /// Holds the programs.
+    directory: tempfile::TempDir,
+    /// What they were told, a line each.
+    calls: std::path::PathBuf,
+}
+
+impl FakeSessionTools {
+    /// Makes the programs; `delay` is how long the first one sleeps.
+    fn new(delay: &str) -> Self {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let calls = directory.path().join("calls");
+        let tool = directory.path().join("dbus-update-activation-environment");
+        std::fs::write(
+            &tool,
+            format!(
+                "#!/bin/sh\nsleep {delay}\necho \"$*\" >> {}\n",
+                calls.display()
+            ),
+        )
+        .expect("written");
+        let service_manager = directory.path().join("systemctl");
+        std::fs::write(
+            &service_manager,
+            format!("#!/bin/sh\necho \"systemctl $*\" >> {}\n", calls.display()),
+        )
+        .expect("written");
+        for program in [&tool, &service_manager] {
+            std::fs::set_permissions(program, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .expect("made runnable");
+        }
+        Self { directory, calls }
+    }
+
+    /// Returns the `PATH` vaht is started with: the programs first.
+    fn path(&self) -> String {
+        format!(
+            "{}:{}",
+            self.directory.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        )
+    }
+}
+
 #[test]
 fn the_activation_environment_learns_of_the_session_and_forgets_it_on_exit() {
-    let directory = tempfile::tempdir().expect("a temporary directory");
-    let calls = directory.path().join("calls");
-    let seen = directory.path().join("seen");
-    let tool = directory.path().join("dbus-update-activation-environment");
     // Slow, so autostart racing it would find nothing.
-    std::fs::write(
-        &tool,
-        format!("#!/bin/sh\nsleep 0.2\necho \"$*\" >> {}\n", calls.display()),
-    )
-    .expect("written");
-    std::fs::set_permissions(&tool, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-        .expect("made runnable");
-    // Never the user's own service manager.
-    let service_manager = directory.path().join("systemctl");
-    std::fs::write(
-        &service_manager,
-        format!("#!/bin/sh\necho \"systemctl $*\" >> {}\n", calls.display()),
-    )
-    .expect("written");
-    std::fs::set_permissions(
-        &service_manager,
-        std::os::unix::fs::PermissionsExt::from_mode(0o755),
-    )
-    .expect("made runnable");
-    let path = format!(
-        "{}:{}",
-        directory.path().display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
+    let tools = FakeSessionTools::new("0.2");
+    let (calls, seen) = (tools.calls.clone(), tools.directory.path().join("seen"));
     let vaht = HeadlessVaht::start_with_environment(
         Path::new(EXECUTABLE),
         &[(
@@ -212,7 +233,7 @@ fn the_activation_environment_learns_of_the_session_and_forgets_it_on_exit() {
             )
             .as_bytes(),
         )],
-        &[("PATH", &path)],
+        &[("PATH", &tools.path())],
     );
     let autostarted = vaht_test_support::wait_for_file(&seen, |_| true);
     assert!(
@@ -239,6 +260,42 @@ fn the_activation_environment_learns_of_the_session_and_forgets_it_on_exit() {
     assert!(
         ending.contains("WAYLAND_DISPLAY="),
         "the target stops before the environment is emptied: {all}"
+    );
+}
+
+#[test]
+fn the_activation_environment_follows_its_setting_while_vaht_runs() {
+    let tools = FakeSessionTools::new("0");
+    let vaht = HeadlessVaht::start_with_environment(
+        Path::new(EXECUTABLE),
+        &[(
+            "settings.toml",
+            b"[session]\nupdate_activation_environment = \"never\"\n",
+        )],
+        &[("PATH", &tools.path())],
+    );
+    let rewrite = |value: &str| {
+        let reloads = vaht.logged_count("configuration reloaded");
+        std::fs::write(
+            vaht.config_directory().join("settings.toml"),
+            format!("[session]\nupdate_activation_environment = \"{value}\"\n"),
+        )
+        .expect("the settings are written");
+        vaht.wait_for_logged("configuration reloaded", reloads + 1);
+    };
+    rewrite("always");
+    let told = vaht_test_support::wait_for_file(&tools.calls, |text| {
+        text.contains("systemctl --user start vaht-session.target")
+    });
+    assert!(told.contains("WAYLAND_DISPLAY"), "{told}");
+    rewrite("never");
+    let forgotten =
+        vaht_test_support::wait_for_file(&tools.calls, |text| text.contains("WAYLAND_DISPLAY="));
+    assert!(
+        forgotten
+            .rfind("systemctl --user stop")
+            .is_some_and(|stop| { forgotten[stop..].contains("WAYLAND_DISPLAY=") }),
+        "the session target stops, then the environment is emptied: {forgotten}"
     );
 }
 

@@ -37,10 +37,12 @@ struct XDesktop {
 impl XDesktop {
     /// Starts vaht with Xwayland, windows cascading from the top left.
     fn new() -> Self {
-        let vaht = HeadlessVaht::start_with_xwayland(
-            Path::new(EXECUTABLE),
-            &[("settings.toml", b"[placement]\nstrategy = \"cascade\"\n")],
-        );
+        Self::with_files(&[("settings.toml", b"[placement]\nstrategy = \"cascade\"\n")])
+    }
+
+    /// Starts vaht with Xwayland and the configuration `files`.
+    fn with_files(files: &[(&str, &[u8])]) -> Self {
+        let vaht = HeadlessVaht::start_with_xwayland(Path::new(EXECUTABLE), files);
         let x11 = X11Client::connect(&vaht.x_display());
         let wayland = TestClient::connect(vaht.socket());
         Self { vaht, x11, wayland }
@@ -552,4 +554,54 @@ fn allowing_input_emulation_from_now_on_is_a_setting_save_settings_keeps() {
         settings.contains("[xwayland.input_emulation]\ndefault = \"ask\"\nallow = ["),
         "{settings}"
     );
+}
+
+/// Rewrites `settings.toml` of `desktop`'s vaht with `text`, and waits
+/// until vaht has read it.
+fn rewrite_settings(desktop: &XDesktop, text: &str) {
+    let reloads = desktop.vaht.logged_count("configuration reloaded");
+    std::fs::write(desktop.vaht.config_directory().join("settings.toml"), text)
+        .expect("the settings are written");
+    desktop
+        .vaht
+        .wait_for_logged("configuration reloaded", reloads + 1);
+}
+
+#[test]
+fn xwayland_turns_off_and_on_again_while_vaht_runs() {
+    let mut desktop = XDesktop::new();
+    let _window = desktop.open_window();
+    assert_eq!(desktop.windows().len(), 1);
+    rewrite_settings(
+        &desktop,
+        "[placement]\nstrategy = \"cascade\"\n[xwayland]\nenabled = false\n",
+    );
+    assert!(
+        desktop.windows().is_empty(),
+        "the X11 window goes with Xwayland"
+    );
+    rewrite_settings(
+        &desktop,
+        "[placement]\nstrategy = \"cascade\"\n[xwayland]\nenabled = true\n",
+    );
+    let mut x11 = X11Client::connect(&desktop.vaht.x_display_of_start(2));
+    let _again = x11.open_window(X_SIZE, X_COLOR, "an X program again", "xprogram");
+    desktop.vaht.wait_for_logged("placed first", 2);
+    let windows = desktop.windows();
+    assert_eq!(windows.len(), 1, "{windows:?}");
+    assert_eq!(windows[0].title, "an X program again");
+}
+
+#[test]
+fn x_resources_load_again_when_the_setting_changes() {
+    let desktop = XDesktop::with_files(&[
+        ("settings.toml", b"[xwayland]\nresources = \"First\"\n"),
+        ("First", b"Program*setting: first\n"),
+        ("Second", b"Program*setting: second\n"),
+    ]);
+    assert!(desktop.x11.resources().contains("Program*setting: first"));
+    rewrite_settings(&desktop, "[xwayland]\nresources = \"Second\"\n");
+    let resources = desktop.x11.resources();
+    assert!(resources.contains("Program*setting: second"), "{resources}");
+    assert!(!resources.contains("first"), "{resources}");
 }

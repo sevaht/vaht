@@ -205,7 +205,7 @@ These are structural problems in fluxland that vaht's design should avoid.
 | 132 Fluxbox commands | `keybind.c`, `keyboard_actions.c` | rework | One typed `Action` enum. Prune the alias duplicates (Iconify, Minimize, MinimizeWindow…) |
 | MacroCmd, ToggleCmd, If, Cond, ForEach, Map, Delay | `command.c` | rework | Keep the capabilities in a cleaner syntax, as part of `02-config-format.md` |
 | Client patterns `(name=…) (title!=…) {N}` | `client_pattern.c` | rework | Becomes a typed `WindowMatcher` |
-| SetResourceValue (and its dialog) | `keyboard_actions.c` | keep, renamed **SetSetting** (decided) | Changes a setting while running, by vaht's own setting key (`taskbar.auto_hide true`). Lasts until reload or SaveSettings. Also available from `vaht msg` |
+| SetResourceValue (and its dialog) | `keyboard_actions.c` | keep, renamed **SetSetting** (decided) | Changes a setting while running, by vaht's own setting key (`taskbar.auto_hide true`). Lasts until the settings file says otherwise at that key, or SaveSettings writes it. Also available from `vaht msg` |
 | SaveRC | | keep, renamed **SaveSettings** (decided) | Writes the settings changed at runtime into the settings file. Uses `toml_edit`, so the file's comments, ordering and formatting survive and only the changed keys are touched. This is the only time vaht writes to config, and only when you ask |
 | Export, SetEnv | | keep, merged into **SetEnvironment** (decided) | Sets a variable in vaht's environment, inherited by programs it starts afterwards |
 

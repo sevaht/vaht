@@ -386,6 +386,10 @@ pub(crate) enum Action {
     StartResizing(ResizeFrom),
     /// Reads the configuration again.
     Reload,
+    /// Gives the windows open the traits the rules say now: frame, layer,
+    /// stickiness, opacity and the like. Where a window goes, and how large
+    /// it is, are only for a window opening (`reapply-rules`).
+    ReapplyRules,
     /// Shows the run dialog: a command line to type and run.
     RunDialog,
     /// Shows the command dialog: a vaht command to type and run.
@@ -727,6 +731,7 @@ impl Action {
             }
             "set-theme" => Ok(Self::SetTheme(arguments.to_owned())),
             "save-settings" => without_arguments(Self::SaveSettings),
+            "reapply-rules" => without_arguments(Self::ReapplyRules),
             "set-setting" => SettingChange::parse(arguments).map(Self::SetSetting),
             "apply-profile" if arguments.is_empty() => {
                 Err("`apply-profile` needs a profile's name".to_owned())
@@ -860,6 +865,7 @@ impl fmt::Display for Action {
             Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
             Self::SetTheme(name) => write!(formatter, "set-theme {name}"),
             Self::SaveSettings => formatter.write_str("save-settings"),
+            Self::ReapplyRules => formatter.write_str("reapply-rules"),
             Self::SetSetting(change) => write!(formatter, "set-setting {change}"),
             Self::ApplyProfile(name) => write!(formatter, "apply-profile {name}"),
             Self::CycleProfile => formatter.write_str("cycle-profile"),
@@ -1258,6 +1264,7 @@ mod tests {
             Action::StartMoving,
             Action::StartResizing(ResizeFrom::NearestCorner),
             Action::Reload,
+            Action::ReapplyRules,
             Action::Exit,
             Action::SetEnvironment {
                 name: "GDK_SCALE".to_owned(),

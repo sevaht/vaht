@@ -69,6 +69,14 @@ impl Toplevels {
         Some(window)
     }
 
+    /// Returns every managed X11 window.
+    pub(crate) fn x11_surfaces(&self) -> Vec<X11Surface> {
+        self.by_window
+            .values()
+            .filter_map(|(toplevel, _)| toplevel.x11().cloned())
+            .collect()
+    }
+
     /// Returns every toplevel's root surface, shown or not.
     pub(crate) fn surfaces(&self) -> impl Iterator<Item = WlSurface> {
         self.by_window

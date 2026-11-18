@@ -26,6 +26,31 @@ pub(crate) const TOOLKIT_DEFAULTS: [(&str, &str); 3] = [
     ("_JAVA_AWT_WM_NONREPARENTING", "1"),
 ];
 
+use crate::config::Settings;
+
+/// The settings that start and stop the parts of a session, so a change of
+/// them while vaht runs is noticed ([`crate::Compositor`] acts on it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LiveSessionSettings {
+    /// Whether Xwayland runs.
+    pub(crate) xwayland_enabled: bool,
+    /// The X resources file, as written.
+    pub(crate) x_resources: Option<String>,
+    /// When the activation environment is told of the session.
+    pub(crate) update_activation: ActivationUpdate,
+}
+
+impl LiveSessionSettings {
+    /// Returns what `settings` say of the session.
+    pub(crate) fn of(settings: &Settings) -> Self {
+        Self {
+            xwayland_enabled: settings.xwayland.enabled,
+            x_resources: settings.xwayland.resources.clone(),
+            update_activation: settings.session.update_activation_environment,
+        }
+    }
+}
+
 /// vaht's session target, binding `graphical-session.target`.
 pub(crate) const SESSION_TARGET: &str = "vaht-session.target";
 
@@ -82,6 +107,13 @@ pub(crate) fn update_command(is_clearing: bool, is_set: impl Fn(&str) -> bool) -
         }
     }
     words.join(" ")
+}
+
+/// Returns the command that empties `DISPLAY` in the activation
+/// environment: Xwayland was turned off, so services started from now on
+/// must not look for it.
+pub(crate) const fn forget_display_command() -> &'static str {
+    "dbus-update-activation-environment --systemd DISPLAY="
 }
 
 /// Returns `export`, the command updating the activation environment as

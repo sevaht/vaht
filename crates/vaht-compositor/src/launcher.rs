@@ -17,7 +17,7 @@
 //! vaht is told of exits by SIGCHLD (see `signals`), so no zombie outlives
 //! its program.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{CString, OsStr, OsString};
 use std::fs::File;
 use std::io::Read as _;
@@ -57,6 +57,9 @@ pub(crate) struct Launcher {
     /// `WAYLAND_DISPLAY`, `VAHT_SOCKET`, and whatever `set-environment`
     /// set.
     environment: BTreeMap<OsString, OsString>,
+    /// Variables vaht's own environment has that programs do not get
+    /// (`DISPLAY`, once Xwayland is turned off).
+    removed: BTreeSet<OsString>,
     /// vaht's own program, which shows its dialogs.
     executable: PathBuf,
     /// Counts running programs.
@@ -95,6 +98,7 @@ impl Launcher {
             error_outputs: BTreeMap::new(),
             ended_outputs: Vec::new(),
             loop_handle: loop_handle.clone(),
+            removed: BTreeSet::new(),
             environment: BTreeMap::from([
                 (OsString::from("WAYLAND_DISPLAY"), socket_name),
                 // Portals and toolkits choose by these: vaht's own
@@ -132,7 +136,8 @@ impl Launcher {
 
     /// Returns whether the programs vaht starts find `name` set.
     pub(crate) fn is_set(&self, name: &str) -> bool {
-        self.environment.contains_key(OsStr::new(name)) || std::env::var_os(name).is_some()
+        !self.removed.contains(OsStr::new(name))
+            && (self.environment.contains_key(OsStr::new(name)) || std::env::var_os(name).is_some())
     }
 
     /// Starts `command_line` with the shell.
@@ -331,7 +336,15 @@ impl Launcher {
 
     /// Sets `name` to `value` for every program started from now on.
     pub(crate) fn set_environment(&mut self, name: String, value: String) {
+        self.removed.remove(OsStr::new(&name));
         self.environment.insert(name.into(), value.into());
+    }
+
+    /// Takes `name` out of the environment of every program started from
+    /// now on, whether vaht's own environment or `set-environment` set it.
+    pub(crate) fn unset_environment(&mut self, name: &str) {
+        self.environment.remove(OsStr::new(name));
+        self.removed.insert(OsString::from(name));
     }
 
     /// Reaps every program that has exited.
@@ -440,6 +453,7 @@ impl Launcher {
     fn environment_block(&self) -> Vec<CString> {
         let mut variables: BTreeMap<OsString, OsString> = std::env::vars_os().collect();
         variables.extend(self.environment.clone());
+        variables.retain(|name, _| !self.removed.contains(name));
         variables
             .iter()
             .filter_map(|(name, value)| {

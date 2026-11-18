@@ -173,10 +173,22 @@ impl HeadlessVaht {
     /// Panics if Xwayland is not ready in time.
     #[must_use]
     pub fn x_display(&self) -> String {
+        self.x_display_of_start(1)
+    }
+
+    /// Returns the X display of the `start`th Xwayland vaht ran (from 1),
+    /// once it is ready: it runs again after being turned off and on.
+    ///
+    /// # Panics
+    ///
+    /// Panics if that Xwayland is not ready in time.
+    #[must_use]
+    pub fn x_display_of_start(&self, start: usize) -> String {
         self.wait_for_log(|log| {
             let line = log
                 .lines()
-                .find(|line| line.contains("Xwayland is ready"))?;
+                .filter(|line| line.contains("Xwayland is ready"))
+                .nth(start.checked_sub(1)?)?;
             let number = line.split("display=").nth(1)?.split_whitespace().next()?;
             Some(format!(":{number}"))
         })

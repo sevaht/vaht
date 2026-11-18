@@ -57,6 +57,12 @@ feature = "blur (vaht's own BlurElement in crates/vaht-compositor/src/scene/blur
 modules = []
 issues = [1363]
 
+# A gap in Smithay's own implementation of something vaht uses.
+
+[[waiting]]
+feature = "ext-background-effect: telling bound clients when the blur capability changes (Smithay keeps no list of manager objects, so [blur] enabled reaches only clients that bind afterwards)"
+modules = []
+
 # Features vaht does not have, waiting on Smithay.
 
 [[waiting]]

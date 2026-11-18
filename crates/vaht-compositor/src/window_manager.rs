@@ -1089,6 +1089,47 @@ impl WindowManager {
         }
     }
 
+    /// Gives every open window the traits `config`'s rules say now: frame,
+    /// layer, stickiness, opacity, pseudo-transparency, exemptions and
+    /// focus stealing. Where a window goes and how large it is, its
+    /// workspace and its state are for a window opening, and are left.
+    pub(crate) fn reapply_rule_traits(&mut self, config: &Config) {
+        let current = self.workspaces.current();
+        let ids: Vec<WindowId> = self.windows.top_down().map(Window::id).collect();
+        for id in ids {
+            let Some(window) = self.windows.get(id) else {
+                continue;
+            };
+            let rule = config.rules.for_window(window, current);
+            if let Some(layer) = rule.layer {
+                self.windows.set_layer(id, layer);
+            }
+            let Some(window) = self.window_mut(id) else {
+                continue;
+            };
+            if let Some(frame) = rule.frame {
+                window.set_framed(frame == RuleFrame::Full);
+            }
+            if let Some(is_sticky) = rule.sticky {
+                window.set_sticky(is_sticky);
+            }
+            if let Some(is_pseudo_transparent) = rule.pseudo_transparent {
+                window.set_pseudo_transparent(is_pseudo_transparent);
+            }
+            if let Some(alpha) = rule.alpha {
+                window.set_alpha(alpha.alpha());
+            }
+            for (exemption, is_exempt) in &rule.exemptions {
+                window.set_exempt(*exemption, *is_exempt);
+            }
+            if let Some(focus_stealing) = rule.focus_stealing {
+                window.set_focus_stealing(focus_stealing);
+            }
+        }
+        // A frame may have come or gone: content stays, or fills its place.
+        self.refit_placed_windows();
+    }
+
     /// Moves `window`, floating, so its content's corner is at `corner`;
     /// returns whether it moved.
     pub(crate) fn move_content_to(

@@ -215,7 +215,9 @@ rest by name, so a setting never silently does nothing:
 - `[session]`: `autostart`, and `update_activation_environment` (from
   fluxland's `session.updateActivationEnvironment`): `auto` (when vaht
   runs the session from a terminal, not nested or headless), `always` or
-  `never`. vaht then runs `dbus-update-activation-environment --systemd`
+  `never` (a change is followed while vaht runs: turned on, vaht tells the
+  environment of the session at once; turned off, it forgets it). vaht then
+  runs `dbus-update-activation-environment --systemd`
   with `WAYLAND_DISPLAY`, `DISPLAY` (once Xwayland is ready),
   `XDG_CURRENT_DESKTOP`, `XDG_SESSION_DESKTOP`, `XDG_SESSION_TYPE` and
   `VAHT_SOCKET`, so portals
@@ -242,9 +244,12 @@ rest by name, so a setting never silently does nothing:
   `session.screen0.workspaceN.wallpaper`, which `vaht import` converts,
   N + 1 being the number); each image is painted for an output the first
   time it shows there and kept, so switching workspaces paints nothing.
-- `[xwayland]` `enabled` (on by default; read at start): vaht starts
-  Xwayland and is its window manager, and programs it starts find it in
-  `DISPLAY`. X11 windows are windows like any other (rules match their
+- `[xwayland]` `enabled` (on by default; follows a change while vaht runs):
+  vaht starts Xwayland and is its window manager, and programs it starts
+  find it in `DISPLAY`. Turning it off closes the X11 windows' programs'
+  connections (their windows go), stops Xwayland and takes `DISPLAY` out
+  of the environment and the activation environment; turning it on starts
+  it again. X11 windows are windows like any other (rules match their
   class as `app_id`, `close` sends `WM_DELETE_WINDOW`, `kill` ends the
   process their `_NET_WM_PID` names); their menus and tooltips
   (override-redirect windows) show over every window. The clipboard and
@@ -648,7 +653,10 @@ lid-close = "exec swaylock"
   `set-theme`, which is `set-setting theme <name>`, the change outlasts
   reloads until the file says otherwise at that key, and `save-settings`
   writes every change into `settings.toml`, keeping the rest of the file.
-  `restart` and `reload-theme` are refused with a pointer to `reload`,
+  `reapply-rules` gives the windows open the traits `rules.toml` now says
+  (frame, layer, stickiness, opacity, pseudo-transparency, exemptions,
+  focus stealing); where a window goes and how large it is are only for a
+  window opening. `restart` and `reload-theme` are refused with a pointer to `reload`,
   which reads every file, the theme too; a Wayland compositor cannot
   restart without closing every window.
 - `tile` takes a cell in thousandths of the usable area:
