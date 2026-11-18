@@ -216,9 +216,10 @@ rest by name, so a setting never silently does nothing:
   window takes the size when the drag ends; from Fluxbox's
   `opaqueResize`), and `[windows.frame]`
   with `titlebar_left` and `titlebar_right` (buttons `shade`, `stick`,
-  `minimize`, `maximize`, `close`; the `maximize` button is a box, and
+  `minimize`, `maximize`, `close`, `menu`; the `maximize` button is a box, and
   while its window is maximized, two boxes: a restore button, as that is what
-  clicking it does) and `handle` (the strip along the
+  clicking it does; `stick` is a pinned square while the window is on every
+  workspace; `menu` opens the window menu) and `handle` (the strip along the
   bottom with a grip at each end, 20 pixels wide as Fluxbox's; dragging
   it resizes the bottom edge, and a grip its corner, unless the `handle`
   and `grip-*` mouse contexts bind something). `vaht import` reads it from
@@ -984,8 +985,9 @@ exactly what each element gets.
 - **Style keys:**
   - `texture`: `{ solid = "#rrggbb" }`, or
     `{ gradient = "vertical", from, to, bevel = "raised"|"sunken", interlaced }`,
-    or `{ image = "file.xpm" }` (an XPM beside the style file, as Fluxbox styles
-    use, stretched to fill the element; `fit = "tile"` is not built yet), or
+    or `{ image = "file.xpm", fit = "stretch"|"tile" }` (an XPM beside the style
+    file, as Fluxbox styles use; stretched to fill the element, or with `tile`
+    repeated at its own size), or
     `"parent"`;
   - text: `font = { family, size, weight, style }`, `text_color`,
     `text_effect` (`{ halo = color }` or `{ shadow = color, offset = [x, y] }`),
@@ -999,7 +1001,7 @@ exactly what each element gets.
     `corner_radius`, `corners`, `alpha`;
   - sizes: `height` for bars and items;
   - glyphs: `glyph_color` for button pictures, and `glyph_images = { close =
-    "file.xpm", minimize, maximize, restore, shade, stick }` to draw a button
+    "file.xpm", minimize, maximize, restore, shade, stick, stuck, menu }` to draw a button
     from an image of the style's own instead (the whole button: stretched over
     it, the state's own in `[window.button.pressed]` and the like). Optional, as
     every property is: a glyph without an image is drawn as before;

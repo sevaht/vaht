@@ -16,7 +16,7 @@ use crate::layout::{Content, Layout, Placed};
 use crate::style::{Style, WidgetState};
 use crate::text::{TextStyle, Typesetter};
 use crate::texture::render::{self, GradientImage};
-use crate::texture::{Bevel, Fill, Texture};
+use crate::texture::{Bevel, Fill, ImageFit, Texture};
 use crate::widget::{Glyph, MarkSide, TextField};
 
 /// A button picture's stroke width relative to its box: thin enough to stay
@@ -132,7 +132,14 @@ impl<'pixmap> Canvas<'pixmap> {
     fn fill_texture(&mut self, texture: &Texture, rect: Rect) {
         match &texture.fill {
             Fill::Parent => {}
-            Fill::Image(image) => self.draw_stretched(image, rect),
+            Fill::Image {
+                image,
+                fit: ImageFit::Stretch,
+            } => self.draw_stretched(image, rect),
+            Fill::Image {
+                image,
+                fit: ImageFit::Tile,
+            } => self.draw_tiled(image, rect),
             &Fill::Solid(color) => {
                 if let Some(area) = rect.to_skia() {
                     let mut paint = Paint::default();
@@ -180,6 +187,30 @@ impl<'pixmap> Canvas<'pixmap> {
                 1.0,
                 Transform::from_scale(scale_x, scale_y)
                     .post_translate(rect.x as f32, rect.y as f32),
+            ),
+            ..Paint::default()
+        };
+        self.pixmap
+            .fill_rect(area, &paint, Transform::identity(), None);
+    }
+
+    /// Draws `picture` at its own size, repeated across `rect` from its top
+    /// left corner.
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "panel coordinates are far below 2^24"
+    )]
+    fn draw_tiled(&mut self, picture: &Image, rect: Rect) {
+        let (Some(source), Some(area)) = (Self::pixmap_of(picture), rect.to_skia()) else {
+            return;
+        };
+        let paint = Paint {
+            shader: Pattern::new(
+                source.as_ref(),
+                SpreadMode::Repeat,
+                FilterQuality::Nearest,
+                1.0,
+                Transform::from_translate(rect.x as f32, rect.y as f32),
             ),
             ..Paint::default()
         };
@@ -289,6 +320,8 @@ impl<'pixmap> Canvas<'pixmap> {
             | Glyph::Minimize
             | Glyph::Shade
             | Glyph::Stick
+            | Glyph::Stuck
+            | Glyph::Menu
             | Glyph::BulletSquare => {
                 return None;
             }
@@ -301,35 +334,10 @@ impl<'pixmap> Canvas<'pixmap> {
         path.finish()
     }
 
-    /// Strokes `glyph` in `color`, centered in the largest square inside `rect`.
-    fn draw_glyph(&mut self, glyph: Glyph, color: Color, rect: Rect) {
-        let side = rect.width.min(rect.height);
-        if side == 0 {
-            return;
-        }
-        #[expect(
-            clippy::cast_precision_loss,
-            reason = "panel coordinates are far below 2^24"
-        )]
-        let (left, top, side) = (
-            rect.x as f32 + (rect.width - side) as f32 / 2.0,
-            rect.y as f32 + (rect.height - side) as f32 / 2.0,
-            side as f32,
-        );
+    /// Returns the lines that stroke `glyph` in the square of `side` at
+    /// `left`, `top`; empty for a glyph that is filled instead.
+    fn strokes(glyph: Glyph, left: f32, top: f32, side: f32) -> PathBuilder {
         let (right, bottom) = (left + side, top + side);
-        if let Some(arrow) = Self::filled(glyph, left, top, side) {
-            let mut paint = Paint::default();
-            paint.set_color(color.to_skia());
-            paint.anti_alias = true;
-            self.pixmap.fill_path(
-                &arrow,
-                &paint,
-                tiny_skia::FillRule::Winding,
-                Transform::identity(),
-                None,
-            );
-            return;
-        }
         let mut path = PathBuilder::new();
         match glyph {
             Glyph::Close => {
@@ -380,6 +388,25 @@ impl<'pixmap> Canvas<'pixmap> {
                         .expect("a square of positive side"),
                 );
             }
+            Glyph::Stuck => {
+                // The square of the stick button, crossed: it is pinned.
+                let middle = side / 4.0;
+                let (near, far) = (middle, side - middle);
+                path.push_rect(
+                    SkiaRect::from_xywh(left + middle, top + middle, side / 2.0, side / 2.0)
+                        .expect("a square of positive side"),
+                );
+                path.move_to(left + near, top + near);
+                path.line_to(left + far, top + far);
+                path.move_to(left + far, top + near);
+                path.line_to(left + near, top + far);
+            }
+            Glyph::Menu => {
+                for row in [0.0, 0.5, 1.0] {
+                    path.move_to(left, top + side * row);
+                    path.line_to(right, top + side * row);
+                }
+            }
             Glyph::BulletSquare => {
                 // A one-pixel outline, half the square, as Fluxbox's.
                 let quarter = (side / 4.0).floor() + 0.5;
@@ -396,6 +423,38 @@ impl<'pixmap> Canvas<'pixmap> {
             | Glyph::BulletLeft
             | Glyph::BulletDiamond => {}
         }
+        path
+    }
+
+    /// Strokes `glyph` in `color`, centered in the largest square inside `rect`.
+    fn draw_glyph(&mut self, glyph: Glyph, color: Color, rect: Rect) {
+        let side = rect.width.min(rect.height);
+        if side == 0 {
+            return;
+        }
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "panel coordinates are far below 2^24"
+        )]
+        let (left, top, side) = (
+            rect.x as f32 + (rect.width - side) as f32 / 2.0,
+            rect.y as f32 + (rect.height - side) as f32 / 2.0,
+            side as f32,
+        );
+        if let Some(arrow) = Self::filled(glyph, left, top, side) {
+            let mut paint = Paint::default();
+            paint.set_color(color.to_skia());
+            paint.anti_alias = true;
+            self.pixmap.fill_path(
+                &arrow,
+                &paint,
+                tiny_skia::FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
+            return;
+        }
+        let path = Self::strokes(glyph, left, top, side);
         if let Some(path) = path.finish() {
             let mut paint = Paint::default();
             paint.set_color(color.to_skia());

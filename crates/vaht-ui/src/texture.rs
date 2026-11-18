@@ -44,11 +44,11 @@ impl Texture {
         }
     }
 
-    /// Returns an image, stretched to fill the area.
+    /// Returns an image, laid over the area as `fit` says.
     #[must_use]
-    pub const fn image(image: Arc<Image>) -> Self {
+    pub const fn image(image: Arc<Image>, fit: ImageFit) -> Self {
         Self {
-            fill: Fill::Image(image),
+            fill: Fill::Image { image, fit },
             bevel: Bevel::Flat,
         }
     }
@@ -84,11 +84,26 @@ pub enum Fill {
         /// The ending color.
         to: Color,
     },
-    /// A picture, stretched to the area; it carries its own shading, so the
+    /// A picture, fitted to the area; it carries its own shading, so the
     /// bevel is not drawn over it.
-    Image(Arc<Image>),
+    Image {
+        /// The picture.
+        image: Arc<Image>,
+        /// How it covers the area.
+        fit: ImageFit,
+    },
     /// Nothing: what is behind shows.
     Parent,
+}
+
+/// How an image covers an area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ImageFit {
+    /// Scaled, smoothly, to the area's size.
+    #[default]
+    Stretch,
+    /// At its own size, repeated from the area's top left corner.
+    Tile,
 }
 
 /// Which way a gradient runs.

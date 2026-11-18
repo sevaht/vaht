@@ -585,6 +585,81 @@ mod tests {
         );
     }
 
+    /// A pair of pixels, one black and one white, to tile.
+    const TWO_PIXELS: &str = "\"2 1 2 1\",\n\"a\tc #000000\",\n\"b\tc #ffffff\",\n\"ab\"";
+
+    /// An element of the titlebar button's texture alone.
+    struct Plain;
+
+    impl PanelContent for Plain {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            Widget::glyph(StyleElement::Button, Glyph::Minimize)
+        }
+
+        fn state(&self) -> WidgetState {
+            WidgetState::Focused
+        }
+    }
+
+    #[test]
+    fn a_tiled_image_repeats_at_its_own_size_and_a_stretched_one_scales() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        std::fs::write(directory.path().join("two.xpm"), TWO_PIXELS).expect("written");
+        let paint = |fit: &str| {
+            let layers = crate::style::StyleLayers::from_toml_in(
+                &format!(
+                    "[window.button]\ntexture = {{ image = \"two.xpm\", fit = \"{fit}\" }}\n\
+                     glyph_color = \"#00000000\"\n"
+                ),
+                Some(directory.path()),
+            )
+            .expect("a valid style");
+            let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+            let mut panel = Panel::new(Plain, Size::new(8, 2));
+            assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
+            let pixels = panel.pixels().expect("painted");
+            (0..8)
+                .map(|x| pixels.pixel(x, 0).expect("inside").red())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(paint("tile"), [0, 255, 0, 255, 0, 255, 0, 255], "repeated");
+        let stretched = paint("stretch");
+        assert!(
+            stretched[0] < 64 && stretched[7] > 192,
+            "scaled across: {stretched:?}"
+        );
+    }
+
+    #[test]
+    fn the_stuck_and_menu_glyphs_are_drawn() {
+        let layers = crate::style::StyleLayers::from_toml(
+            "[default]\ntexture = { solid = \"black\" }\nglyph_color = \"white\"\n",
+        )
+        .expect("a valid style");
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        for glyph in [Glyph::Stuck, Glyph::Menu] {
+            struct One(Glyph);
+            impl PanelContent for One {
+                type Hit = ();
+                fn build(&self) -> Widget<()> {
+                    Widget::glyph(StyleElement::Button, self.0)
+                }
+                fn state(&self) -> WidgetState {
+                    WidgetState::Focused
+                }
+            }
+            let mut panel = Panel::new(One(glyph), Size::new(20, 20));
+            assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
+            let pixels = panel.pixels().expect("painted");
+            let lit = (0..20)
+                .flat_map(|y| (0..20).map(move |x| (x, y)))
+                .any(|(x, y)| pixels.pixel(x, y).is_some_and(|pixel| pixel.red() > 128));
+            assert!(lit, "{glyph:?} draws something");
+        }
+    }
+
     /// Two stacked rows on a gradient background, each with or without a background
     /// of its own.
     struct Stacked {

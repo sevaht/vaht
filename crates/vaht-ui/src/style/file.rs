@@ -26,7 +26,7 @@ use crate::corner::{Corner, CornerSet};
 use crate::geometry::Insets;
 use crate::image::Image;
 use crate::text::{Font, FontWeight, Justify, TextEffect};
-use crate::texture::{Bevel, GradientDirection, Texture};
+use crate::texture::{Bevel, GradientDirection, ImageFit, Texture};
 use crate::widget::{Glyph, MarkSide};
 
 /// Style properties of 02 §10.1 that vaht does not have yet.
@@ -430,7 +430,7 @@ impl<'de> DeserializeSeed<'de> for GlyphImagesSeed<'_> {
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str(
                     "a table of image files by button: close, maximize, restore, minimize, \
-                     shade or stick",
+                     shade, stick, stuck or menu",
                 )
             }
 
@@ -446,6 +446,26 @@ impl<'de> DeserializeSeed<'de> for GlyphImagesSeed<'_> {
         }
 
         deserializer.deserialize_map(GlyphImagesVisitor(self.0))
+    }
+}
+
+/// How an image covers an element, as named in a style file.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum FitName {
+    /// Scaled to fit.
+    Stretch,
+    /// Repeated at its own size.
+    Tile,
+}
+
+impl FitName {
+    /// Returns the fit.
+    const fn into_fit(self) -> ImageFit {
+        match self {
+            Self::Stretch => ImageFit::Stretch,
+            Self::Tile => ImageFit::Tile,
+        }
     }
 }
 
@@ -465,6 +485,10 @@ enum GlyphName {
     Shade,
     /// A dot.
     Stick,
+    /// A dot, pinned.
+    Stuck,
+    /// Three bars.
+    Menu,
 }
 
 impl GlyphName {
@@ -477,6 +501,8 @@ impl GlyphName {
             Self::Minimize => Glyph::Minimize,
             Self::Shade => Glyph::Shade,
             Self::Stick => Glyph::Stick,
+            Self::Stuck => Glyph::Stuck,
+            Self::Menu => Glyph::Menu,
         }
     }
 }
@@ -503,7 +529,7 @@ impl<'de> DeserializeSeed<'de> for TextureSeed<'_> {
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str(
                     "\"parent\", { solid = color }, { gradient = direction, from = color, \
-                     to = color } or { image = \"file.xpm\" }",
+                     to = color } or { image = \"file.xpm\", fit = stretch|tile }",
                 )
             }
 
@@ -542,6 +568,8 @@ struct TextureFile {
     to: Option<Color>,
     /// An image file, relative to the style's directory.
     image: Option<String>,
+    /// How the image covers the element (stretched, if not said).
+    fit: Option<FitName>,
     /// The edge shading.
     #[serde(default)]
     bevel: BevelName,
@@ -551,15 +579,19 @@ impl TextureFile {
     /// Returns the texture written, or why it is not one.
     fn texture(self, images: Images<'_>) -> Result<Texture, String> {
         let bevel = self.bevel.into_bevel();
+        if self.fit.is_some() && self.image.is_none() {
+            return Err("`fit` is how an image covers an element: it goes with `image`".to_owned());
+        }
+        let fit = self.fit.map_or(ImageFit::Stretch, FitName::into_fit);
         match (self.solid, self.gradient, self.from, self.to, self.image) {
             (Some(color), None, None, None, None) => Ok(Texture::solid(color).with_bevel(bevel)),
             (None, Some(direction), Some(from), Some(to), None) => {
                 Ok(Texture::gradient(direction.into_direction(), from, to).with_bevel(bevel))
             }
-            (None, None, None, None, Some(name)) => Ok(Texture::image(images.load(&name)?)),
+            (None, None, None, None, Some(name)) => Ok(Texture::image(images.load(&name)?, fit)),
             _ => Err(
                 "a texture is { solid = color }, { gradient = direction, from = color, \
-                      to = color } (either with a bevel) or { image = \"file.xpm\" }"
+                      to = color } (either with a bevel) or { image = \"file.xpm\", fit = stretch|tile }"
                     .to_owned(),
             ),
         }
@@ -962,7 +994,34 @@ mod tests {
             .get(&StyleElement::Titlebar)
             .and_then(|patch| patch.texture.clone())
             .expect("a texture");
-        assert!(matches!(texture.fill, crate::texture::Fill::Image(_)));
+        assert!(matches!(
+            texture.fill,
+            crate::texture::Fill::Image {
+                fit: ImageFit::Stretch,
+                ..
+            }
+        ));
+        let tiled = StyleLayers::from_toml_in(
+            "[window.titlebar]\ntexture = { image = \"dot.xpm\", fit = \"tile\" }\n",
+            Some(directory.path()),
+        )
+        .expect("valid");
+        assert!(matches!(
+            tiled.by_element[&StyleElement::Titlebar]
+                .texture
+                .as_ref()
+                .map(|texture| &texture.fill),
+            Some(crate::texture::Fill::Image {
+                fit: ImageFit::Tile,
+                ..
+            })
+        ));
+        let misplaced = StyleLayers::from_toml(
+            "[window.titlebar]\ntexture = { solid = \"red\", fit = \"tile\" }\n",
+        )
+        .expect_err("fit needs an image")
+        .to_string();
+        assert!(misplaced.contains("goes with `image`"), "{misplaced}");
     }
 
     #[test]

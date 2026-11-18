@@ -244,6 +244,10 @@ pub enum Glyph {
     Shade,
     /// A dot: keep the window on every workspace.
     Stick,
+    /// The same, while it is kept there: this takes it off again.
+    Stuck,
+    /// Three bars: open the window's menu.
+    Menu,
     /// A triangle pointing left: the previous one.
     ArrowLeft,
     /// A triangle pointing right: the next one, or a submenu.
