@@ -22,7 +22,8 @@ pub fn send(request: &Request, json: bool) -> ExitCode {
             ExitCode::FAILURE
         }
         Ok(reply) => {
-            let failed = matches!(reply, Reply::Error { .. });
+            // A pick closed without a choice fails too, as dmenu does.
+            let failed = matches!(reply, Reply::Error { .. } | Reply::Picked { choice: None });
             terminal::print(&if json {
                 let mut line = serde_json::to_string(&reply)
                     .expect("replies are plain data, always encodable");
@@ -42,6 +43,27 @@ pub fn send(request: &Request, json: bool) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Reads lines from standard input and asks vaht to show them as a menu
+/// titled `title`, printing the line the user chooses (as JSON when
+/// `json`): a dmenu-style chooser. Empty lines are left out. Fails,
+/// printing nothing, if the user closed the menu, or there was nothing to
+/// pick.
+#[must_use]
+pub fn pick(title: Option<String>, json: bool) -> ExitCode {
+    let items: Vec<String> = match std::io::read_to_string(std::io::stdin()) {
+        Ok(text) => text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(str::to_owned)
+            .collect(),
+        Err(error) => {
+            terminal::report_error(&anyhow::Error::new(error).context("could not read the items"));
+            return ExitCode::FAILURE;
+        }
+    };
+    send(&Request::Pick { title, items }, json)
 }
 
 /// Subscribes to the lists `events` and prints each as vaht sends it, as
@@ -138,6 +160,11 @@ fn readable(reply: &Reply) -> String {
             }
             for output in outputs {
                 output_lines(&mut text, output);
+            }
+        }
+        Reply::Picked { choice } => {
+            if let Some(choice) = choice {
+                let _ = writeln!(text, "{choice}");
             }
         }
         Reply::Error { message } => {

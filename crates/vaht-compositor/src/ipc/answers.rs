@@ -2,7 +2,7 @@
 
 use vaht_ipc::{Event, EventKind, ModeInfo, OutputInfo, Reply, Request, WindowInfo, WorkspaceInfo};
 
-use super::{IpcHandler, IpcServer};
+use super::{Answer, IpcClient, IpcHandler, IpcServer};
 use crate::Compositor;
 use crate::WindowId;
 use crate::config::{Action, Command};
@@ -10,7 +10,18 @@ use crate::execution::ExecutionContext;
 use crate::outputs::Outputs;
 
 impl IpcHandler for Compositor {
-    fn answer(&mut self, request: Request, peer: Option<i32>) -> Reply {
+    fn answer(&mut self, request: Request, client: IpcClient) -> Answer {
+        if let Request::Pick { title, items } = request {
+            return self.start_pick(client.number, title, items);
+        }
+        Answer::Now(self.answer_now(request, client.peer))
+    }
+}
+
+impl Compositor {
+    /// Carries out `request`, from the process `peer` (none if unknown),
+    /// and returns the reply.
+    fn answer_now(&mut self, request: Request, peer: Option<i32>) -> Reply {
         match request {
             Request::Version {} => Reply::Version {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -68,8 +79,8 @@ impl IpcHandler for Compositor {
                     message: "this vaht has no log filter to change".to_owned(),
                 },
             },
-            // A connection answers this itself.
-            Request::Subscribe { .. } => Reply::Error {
+            // A connection answers this itself, and a pick comes later.
+            Request::Subscribe { .. } | Request::Pick { .. } => Reply::Error {
                 message: "subscriptions are kept by the connection".to_owned(),
             },
         }

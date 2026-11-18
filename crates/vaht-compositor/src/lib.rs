@@ -43,6 +43,7 @@ mod output_management;
 mod output_memory;
 mod output_power;
 mod outputs;
+mod picker;
 mod pointer_lock;
 mod pointing_devices;
 mod presentation;

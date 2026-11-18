@@ -99,6 +99,7 @@ use crate::menu::{
 use crate::output_management::{HeadRequest, HeadState};
 use crate::output_memory::OutputMemory;
 use crate::outputs::{OutputChanges, Outputs};
+use crate::picker::Pick;
 use crate::pointer_lock::{self, PointerHold};
 use crate::protocols::{OutputControls, ProtocolStates};
 use crate::resources::{self, ResourceKind, ResourceLedger};
@@ -272,6 +273,8 @@ pub struct Compositor {
     pub(crate) sandbox_listeners: Vec<EndingSource<Self>>,
     /// The IPC socket, unless it could not be opened.
     pub(crate) ipc: Option<IpcServer>,
+    /// The pick an IPC client asked for, while the user has not answered.
+    pub(crate) pick: Option<Pick>,
     /// The signals vaht handles, registered with the event loop.
     _signals: EventSource<Self>,
 }
@@ -302,6 +305,7 @@ impl Compositor {
             }
             compositor.launcher.release_ended_outputs();
             compositor.follow_input_emulation_question();
+            compositor.follow_pick();
             compositor.settle();
             display
                 .dispatch_clients(&mut compositor)
@@ -434,6 +438,7 @@ impl Compositor {
             listener,
             sandbox_listeners: Vec::new(),
             ipc,
+            pick: None,
             _signals: signals,
         };
         compositor.start(allows_xwayland, &output_changes);
@@ -2617,6 +2622,12 @@ impl Compositor {
                 choice("Deny from now on", false, true),
             ],
         };
+        self.open_menu_at_pointer(model);
+    }
+
+    /// Opens `model` as a menu with its corner at the pointer, kept on the
+    /// usable part of the output there: a question for the user.
+    pub(crate) fn open_menu_at_pointer(&mut self, model: MenuModel) {
         let at = self.pointer_location().to_i32_round();
         let bounds = self.output_areas().at(at).usable;
         self.menus.open(
@@ -3187,6 +3198,7 @@ impl Compositor {
             MenuChoice::TrayMenuEntry { item, id } => {
                 self.taskbars.choose_tray_menu_entry(item, id);
             }
+            MenuChoice::AnswerPick(index) => self.answer_pick(Some(index)),
             MenuChoice::AnswerInputEmulation {
                 client,
                 is_allowed,

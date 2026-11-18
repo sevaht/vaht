@@ -7,7 +7,7 @@ use std::os::unix::net::UnixStream;
 
 use vaht_ipc::{EventKind, MAX_MESSAGE_BYTES, Reply, Request};
 
-use super::IpcHandler;
+use super::{Answer, IpcClient, IpcHandler};
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 
 /// Whether a connection goes on.
@@ -26,8 +26,12 @@ pub(super) struct Connection {
     input: Vec<u8>,
     /// Replies not yet written.
     output: Vec<u8>,
+    /// Its number, by which a reply that came later finds it.
+    number: u64,
     /// The process at the other end, if known.
     peer: Option<i32>,
+    /// Whether a reply is to come later: requests after it wait.
+    is_waiting: bool,
     /// Each list subscribed to, and the line last sent of it, if any.
     subscriptions: BTreeMap<EventKind, Option<Vec<u8>>>,
     /// Counts the connection while it lives.
@@ -40,13 +44,15 @@ impl Connection {
     /// without bound (03 §1).
     const MAX_UNSENT_BYTES: usize = 16 * MAX_MESSAGE_BYTES;
 
-    /// Creates an empty connection to the process `peer`, counted in
+    /// Creates empty connection `number` to the process `peer`, counted in
     /// `ledger`.
-    pub(super) fn new(peer: Option<i32>, ledger: &ResourceLedger) -> Self {
+    pub(super) fn new(number: u64, peer: Option<i32>, ledger: &ResourceLedger) -> Self {
         Self {
             input: Vec::new(),
             output: Vec::new(),
+            number,
             peer,
+            is_waiting: false,
             subscriptions: BTreeMap::new(),
             _tracked: ledger.track(ResourceKind::IpcConnection),
         }
@@ -96,26 +102,50 @@ impl Connection {
         self.send(stream)
     }
 
+    /// Takes the reply that was to come later, then answers the requests
+    /// that waited for it.
+    pub(super) fn resume(&mut self, reply: &Reply, handler: &mut impl IpcHandler) -> Progress {
+        self.is_waiting = false;
+        self.queue(reply);
+        self.receive(&[], handler)
+    }
+
+    /// Adds `reply` to what is to be written.
+    fn queue(&mut self, reply: &Reply) {
+        let mut encoded =
+            serde_json::to_vec(reply).expect("replies are plain data, always encodable");
+        encoded.push(b'\n');
+        self.output.extend(encoded);
+    }
+
     /// Takes `bytes` read from the client, answering each request they
-    /// complete.
+    /// complete, until one is to be answered later.
     fn receive(&mut self, bytes: &[u8], handler: &mut impl IpcHandler) -> Progress {
         self.input.extend_from_slice(bytes);
-        while let Some(end) = self.input.iter().position(|byte| *byte == b'\n') {
+        while !self.is_waiting
+            && let Some(end) = self.input.iter().position(|byte| *byte == b'\n')
+        {
             let line: Vec<u8> = self.input.drain(..=end).collect();
-            let reply = match serde_json::from_slice::<Request>(&line) {
+            let answer = match serde_json::from_slice::<Request>(&line) {
                 Ok(Request::Subscribe { events }) => {
                     self.subscriptions = events.into_iter().map(|kind| (kind, None)).collect();
-                    Reply::Done {}
+                    Answer::Now(Reply::Done {})
                 }
-                Ok(request) => handler.answer(request, self.peer),
-                Err(error) => Reply::Error {
+                Ok(request) => handler.answer(
+                    request,
+                    IpcClient {
+                        number: self.number,
+                        peer: self.peer,
+                    },
+                ),
+                Err(error) => Answer::Now(Reply::Error {
                     message: format!("not a request: {error}"),
-                },
+                }),
             };
-            let mut encoded =
-                serde_json::to_vec(&reply).expect("replies are plain data, always encodable");
-            encoded.push(b'\n');
-            self.output.extend(encoded);
+            match answer {
+                Answer::Now(reply) => self.queue(&reply),
+                Answer::Later => self.is_waiting = true,
+            }
         }
         if self.input.len() >= MAX_MESSAGE_BYTES {
             return Progress::Ended("sent a request longer than the protocol allows");
@@ -127,7 +157,7 @@ impl Connection {
     }
 
     /// Writes as much of the waiting replies as `stream` takes.
-    fn send(&mut self, stream: &UnixStream) -> Progress {
+    pub(super) fn send(&mut self, stream: &UnixStream) -> Progress {
         while !self.output.is_empty() {
             match (&mut &*stream).write(&self.output) {
                 Ok(written) => {
@@ -150,10 +180,13 @@ mod tests {
     struct Echo;
 
     impl IpcHandler for Echo {
-        fn answer(&mut self, request: Request, _: Option<i32>) -> Reply {
-            Reply::Error {
-                message: format!("{request:?}"),
+        fn answer(&mut self, request: Request, _: IpcClient) -> Answer {
+            if matches!(request, Request::Pick { .. }) {
+                return Answer::Later;
             }
+            Answer::Now(Reply::Error {
+                message: format!("{request:?}"),
+            })
         }
     }
 
@@ -164,7 +197,7 @@ mod tests {
 
     #[test]
     fn each_complete_line_gets_one_reply_in_order() {
-        let mut connection = Connection::new(None, &ResourceLedger::new());
+        let mut connection = Connection::new(0, None, &ResourceLedger::new());
         let progress =
             connection.receive(b"{\"request\":\"version\"}\n{\"request\":\"win", &mut Echo);
         assert_eq!(progress, Progress::Open);
@@ -177,8 +210,35 @@ mod tests {
     }
 
     #[test]
+    fn requests_after_one_answered_later_wait_for_it_in_order() {
+        let mut connection = Connection::new(0, None, &ResourceLedger::new());
+        connection.receive(
+            b"{\"request\":\"pick\",\"items\":[\"a\"]}\n{\"request\":\"version\"}\n",
+            &mut Echo,
+        );
+        assert_eq!(
+            unsent(&connection),
+            "",
+            "nothing until the pick is answered"
+        );
+        connection.resume(
+            &Reply::Picked {
+                choice: Some("a".to_owned()),
+            },
+            &mut Echo,
+        );
+        let replies = unsent(&connection);
+        let lines: Vec<&str> = replies.lines().collect();
+        assert!(lines[0].contains("picked"), "{replies}");
+        assert!(
+            lines[1].contains("Version"),
+            "then the request that waited: {replies}"
+        );
+    }
+
+    #[test]
     fn a_line_that_is_not_a_request_gets_an_error_reply() {
-        let mut connection = Connection::new(None, &ResourceLedger::new());
+        let mut connection = Connection::new(0, None, &ResourceLedger::new());
         connection.receive(b"hello\n", &mut Echo);
         assert!(unsent(&connection).contains("not a request"));
     }
@@ -187,7 +247,7 @@ mod tests {
     fn a_subscriber_is_sent_a_list_only_when_it_changed() {
         let (stream, mut peer) = UnixStream::pair().expect("a socket pair");
         stream.set_nonblocking(true).expect("non-blocking");
-        let mut connection = Connection::new(None, &ResourceLedger::new());
+        let mut connection = Connection::new(0, None, &ResourceLedger::new());
         connection.receive(
             b"{\"request\":\"subscribe\",\"events\":[\"windows\"]}\n",
             &mut Echo,
@@ -212,14 +272,14 @@ mod tests {
 
     #[test]
     fn an_endless_line_ends_the_connection() {
-        let mut connection = Connection::new(None, &ResourceLedger::new());
+        let mut connection = Connection::new(0, None, &ResourceLedger::new());
         let progress = connection.receive(&vec![b'x'; MAX_MESSAGE_BYTES], &mut Echo);
         assert!(matches!(progress, Progress::Ended(_)));
     }
 
     #[test]
     fn a_client_that_never_reads_is_dropped() {
-        let mut connection = Connection::new(None, &ResourceLedger::new());
+        let mut connection = Connection::new(0, None, &ResourceLedger::new());
         let requests = "{\"request\":\"version\"}\n".repeat(Connection::MAX_UNSENT_BYTES / 10);
         let progress = connection.receive(requests.as_bytes(), &mut Echo);
         assert!(matches!(progress, Progress::Ended(_)));

@@ -154,6 +154,8 @@ pub(crate) enum MenuChoice {
         /// The item's id for the entry.
         id: i32,
     },
+    /// Answers an IPC client's pick with item `index` of its list.
+    AnswerPick(usize),
     /// Answers whether an X program (its emulating client `client`) may
     /// emulate input.
     AnswerInputEmulation {

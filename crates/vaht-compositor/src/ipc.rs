@@ -30,9 +30,28 @@ use crate::resources::ResourceLedger;
 
 /// What answers IPC requests: the compositor.
 pub(crate) trait IpcHandler {
-    /// Carries out `request`, from the process `peer` (none if unknown),
-    /// and returns the reply.
-    fn answer(&mut self, request: Request, peer: Option<i32>) -> Reply;
+    /// Carries out `request`, from `client`, and returns the reply, or
+    /// that it comes later ([`IpcServer::answer_later`]).
+    fn answer(&mut self, request: Request, client: IpcClient) -> Answer;
+}
+
+/// An IPC client asking something.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IpcClient {
+    /// Its connection's number, to answer it later by.
+    pub(crate) number: u64,
+    /// Its process, if known.
+    pub(crate) peer: Option<i32>,
+}
+
+/// How a request is answered.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Answer {
+    /// With this reply, now.
+    Now(Reply),
+    /// Later, once the user has answered: the connection's further
+    /// requests wait meanwhile, so replies stay in order.
+    Later,
 }
 
 /// A client connected.
@@ -137,6 +156,39 @@ impl IpcServer {
         });
     }
 
+    /// Returns whether connection `number` is still open.
+    pub(crate) fn is_connected(&self, number: u64) -> bool {
+        self.connections.contains_key(&number) && !self.ended.contains(&number)
+    }
+
+    /// Sends connection `number`, of `compositor`'s server, the reply it
+    /// was told comes later, then answers what it asked meanwhile. Nothing
+    /// is sent to a connection gone.
+    pub(crate) fn answer_later(compositor: &mut Compositor, number: u64, reply: &Reply) {
+        let Some(mut connection) = compositor
+            .ipc
+            .as_mut()
+            .and_then(|server| server.take(number))
+        else {
+            return;
+        };
+        let progress = connection.resume(reply, compositor);
+        let Some(server) = &mut compositor.ipc else {
+            return;
+        };
+        let progress = match (progress, server.connections.get(&number)) {
+            (Progress::Open, Some(client)) => connection.send(&client.stream),
+            (progress, _) => progress,
+        };
+        match progress {
+            Progress::Open => server.put_back(number, connection),
+            Progress::Ended(reason) => {
+                tracing::debug!(number, reason, "IPC client dropped");
+                server.ended.push(number);
+            }
+        }
+    }
+
     /// Takes connection `number` out to serve it.
     fn take(&mut self, number: u64) -> Option<Connection> {
         self.connections.get_mut(&number)?.connection.take()
@@ -185,7 +237,7 @@ impl IpcServer {
             nix::sys::socket::getsockopt(&stream, nix::sys::socket::sockopt::PeerCredentials)
                 .ok()
                 .map(|credentials| credentials.pid());
-        let connection = Connection::new(peer, ledger);
+        let connection = Connection::new(number, peer, ledger);
         let pushing = match stream.try_clone() {
             Ok(pushing) => pushing,
             Err(error) => {

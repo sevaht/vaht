@@ -35,6 +35,7 @@ fn windows(vaht: &HeadlessVaht) -> Vec<WindowInfo> {
         | Reply::Workspaces { .. }
         | Reply::Outputs { .. }
         | Reply::LogFilter { .. }
+        | Reply::Picked { .. }
         | Reply::Error { .. }) => panic!("not a window list: {other:?}"),
     }
 }
@@ -104,6 +105,7 @@ fn the_log_filter_is_told_changed_and_reset_while_vaht_runs() {
         | Reply::Windows { .. }
         | Reply::Workspaces { .. }
         | Reply::Outputs { .. }
+        | Reply::Picked { .. }
         | Reply::Error { .. }) => panic!("not a filter: {other:?}"),
     };
     let started = filter(&[]);
@@ -332,4 +334,74 @@ fn a_modal_dialog_is_listed_with_its_parent_and_keeps_the_focus() {
     };
     assert_eq!(focus(other), Some(other));
     assert_eq!(focus(parent), Some(dialog), "the modal dialog keeps it");
+}
+
+/// Starts `vaht msg pick --title Share` with `items` on its standard input,
+/// once vaht shows them, and returns it running.
+fn start_pick(vaht: &HeadlessVaht, items: &str) -> std::process::Child {
+    use std::io::Write as _;
+    let mut pick = Command::new(EXECUTABLE)
+        .args(["msg", "pick", "--title", "Share"])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("vaht msg pick runs");
+    pick.stdin
+        .take()
+        .expect("its input")
+        .write_all(items.as_bytes())
+        .expect("the items are written");
+    vaht.wait_for_logged("asking the user to pick", 1);
+    pick
+}
+
+#[test]
+fn a_pick_prints_the_item_chosen_from_vahts_menu() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    let items = ["Monitor: HEADLESS-1", "Window: notes"];
+    let pick = start_pick(&vaht, &format!("{}\n\n{}\n", items[0], items[1]));
+    client.press_key(vaht_test_support::keys::DOWN);
+    client.release_key(vaht_test_support::keys::DOWN);
+    client.press_key(vaht_test_support::keys::ENTER);
+    client.release_key(vaht_test_support::keys::ENTER);
+    let output = pick.wait_with_output().expect("vaht msg pick ends");
+    assert!(output.status.success(), "{output:?}");
+    let chosen = String::from_utf8(output.stdout).expect("UTF-8");
+    assert!(
+        items.contains(&chosen.trim_end()),
+        "one of the items: {chosen:?}"
+    );
+    assert!(
+        chosen.ends_with('\n') && chosen.lines().count() == 1,
+        "{chosen:?}"
+    );
+}
+
+#[test]
+fn a_pick_closed_without_a_choice_fails_and_prints_nothing() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    let pick = start_pick(&vaht, "Monitor: HEADLESS-1\n");
+    client.press_key(vaht_test_support::keys::ESCAPE);
+    client.release_key(vaht_test_support::keys::ESCAPE);
+    let output = pick.wait_with_output().expect("vaht msg pick ends");
+    assert!(!output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+}
+
+#[test]
+fn nothing_to_pick_fails_at_once() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let output = Command::new(EXECUTABLE)
+        .args(["msg", "pick"])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("vaht msg pick runs");
+    assert!(
+        !output.status.success() && output.stdout.is_empty(),
+        "{output:?}"
+    );
 }

@@ -101,6 +101,7 @@ fn listed_outputs(vaht: &HeadlessVaht) -> Vec<OutputInfo> {
         | Reply::Windows { .. }
         | Reply::Workspaces { .. }
         | Reply::LogFilter { .. }
+        | Reply::Picked { .. }
         | Reply::Error { .. }) => panic!("not an output list: {other:?}"),
     }
 }

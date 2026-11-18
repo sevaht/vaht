@@ -60,6 +60,7 @@ impl XDesktop {
             | Reply::Workspaces { .. }
             | Reply::Outputs { .. }
             | Reply::LogFilter { .. }
+            | Reply::Picked { .. }
             | Reply::Error { .. }) => panic!("not a window list: {other:?}"),
         }
     }

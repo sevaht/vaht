@@ -30,10 +30,21 @@ fn main() -> ExitCode {
             return vaht::dialog::show(*dialog, &arguments.config_directory());
         }
         Some(Subcommand::Msg { json, request }) => {
-            return if let vaht::arguments::MessageRequest::Subscribe { events } = request {
-                vaht::message::follow(events.iter().map(|list| list.kind()).collect(), *json)
-            } else {
-                vaht::message::send(&request.to_request(), *json)
+            return match request {
+                vaht::arguments::MessageRequest::Subscribe { events } => {
+                    vaht::message::follow(events.iter().map(|list| list.kind()).collect(), *json)
+                }
+                vaht::arguments::MessageRequest::Pick { title } => {
+                    vaht::message::pick(title.clone(), *json)
+                }
+                other @ (vaht::arguments::MessageRequest::Version
+                | vaht::arguments::MessageRequest::Run { .. }
+                | vaht::arguments::MessageRequest::Windows
+                | vaht::arguments::MessageRequest::Workspaces
+                | vaht::arguments::MessageRequest::Outputs
+                | vaht::arguments::MessageRequest::LogFilter { .. }) => {
+                    vaht::message::send(&other.to_request(), *json)
+                }
             };
         }
         None => {}

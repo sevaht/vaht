@@ -1,0 +1,12 @@
+# xdg-desktop-portal-wlr in vaht sessions: it reads this, as
+# /etc/xdg/xdg-desktop-portal-wlr/vaht, only when XDG_CURRENT_DESKTOP is
+# vaht. A file of the user's own in ~/.config/xdg-desktop-portal-wlr/ wins
+# over it.
+#
+# When a program asks to share the screen, the portal lists the outputs and
+# windows that can be shared and lets the user pick one with vaht's own menu,
+# in the user's vaht theme, at the pointer (`vaht msg pick`). Closing the
+# menu cancels the share.
+[screencast]
+chooser_type=dmenu
+chooser_cmd=vaht msg pick --title=Share

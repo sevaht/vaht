@@ -1216,6 +1216,16 @@ dialogs use too.
   `vaht msg version`, `vaht msg subscribe windows workspaces outputs`
   (each list as it changes, until vaht stops); `--json` prints the reply,
   or each event, as sent.
+- **`vaht msg pick`** (`pick` request) is a dmenu-style chooser: the lines
+  on standard input show as a vaht menu at the pointer (`--title` above
+  them), in the user's theme, and the one chosen is printed; closing the
+  menu prints nothing and exits 1. The reply waits for the user; a
+  connection's later requests are answered after it, in order. One pick
+  shows at a time (a new one answers the one before with nothing), and
+  none while the session is locked. The screen-share portal uses it in
+  vaht sessions (`data/xdg-desktop-portal-wlr-vaht`, installed as
+  `/etc/xdg/xdg-desktop-portal-wlr/vaht`), so sharing asks with vaht's
+  menu rather than whichever launcher happens to be installed.
 - **`[ipc] allow_commands`** (on by default; from Fluxbox's
   `allowRemoteActions`): off, only vaht's own dialogs may run commands,
   known by the process at the other end of the socket. Asking for windows

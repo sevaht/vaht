@@ -17,8 +17,12 @@ reports every line it could not convert.
 ## Installing
 
 `packaging/install.sh` builds vaht and installs it with the files it needs
-from the system: the login-screen entry (`wayland-sessions/vaht.desktop`)
-and the choice of portals (`xdg-desktop-portal/vaht-portals.conf`).
+from the system: the login-screen entry (`wayland-sessions/vaht.desktop`),
+the choice of portals (`xdg-desktop-portal/vaht-portals.conf`), the session
+target that ties the portals to vaht's session
+(`systemd/user/vaht-session.target`), and the screen-share portal's
+settings for vaht sessions (`/etc/xdg/xdg-desktop-portal-wlr/vaht`), which
+ask which screen or window to share with vaht's own menu.
 
 ```console
 $ sudo packaging/install.sh                 # into /usr (--prefix to change)
@@ -27,9 +31,9 @@ $ sudo packaging/install.sh --uninstall     # removes what it installed
 ```
 
 On Arch Linux, `cd packaging/arch && makepkg -si` builds a package that
-installs the same files. vaht needs logind or seatd for the seat, and,
-for screen sharing and file choosers in programs, `xdg-desktop-portal-wlr`
-and `xdg-desktop-portal-gtk`.
+installs the same files. vaht needs logind or seatd for the seat, and
+`xdg-desktop-portal-wlr` for screen sharing in programs (the package
+depends on it); `xdg-desktop-portal-gtk` gives programs file choosers.
 
 To start vaht, log in on a virtual terminal and run `vaht`, or choose
 *vaht* at a display manager's login screen. Ctrl+Alt+F1…F12 switch

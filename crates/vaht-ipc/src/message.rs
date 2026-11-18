@@ -56,6 +56,18 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reset: bool,
     },
+    /// Shows `items` as a vaht menu at the pointer, titled `title`, and
+    /// answers with the one the user chooses, or none if they close the
+    /// menu: a dmenu-style picker (the screen-share portal's chooser). The
+    /// reply waits for the user; requests sent meanwhile on the
+    /// connection are answered after it, in order.
+    Pick {
+        /// The menu's title, if any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        /// The items, top to bottom.
+        items: Vec<String>,
+    },
 }
 
 /// A list a client may subscribe to.
@@ -149,6 +161,12 @@ pub enum Reply {
     LogFilter {
         /// Its directives.
         directives: String,
+    },
+    /// The item chosen, for [`Request::Pick`]: none if the menu was closed
+    /// without a choice.
+    Picked {
+        /// The item, as sent.
+        choice: Option<String>,
     },
     /// The request could not be carried out, or was not understood.
     Error {

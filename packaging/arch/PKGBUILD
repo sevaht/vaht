@@ -21,10 +21,14 @@ depends=(
   'seatd'     # libseat; logind is used when it runs, seatd otherwise
   'systemd-libs'
   'wayland'
+  # Screen sharing and screenshots in programs (OBS, browsers): the portal
+  # backend vaht-portals.conf picks, which asks with vaht's own menu.
+  'xdg-desktop-portal-wlr'
 )
 makedepends=('cargo' 'git')
+# Kept, if edited, when the package is upgraded.
+backup=('etc/xdg/xdg-desktop-portal-wlr/vaht')
 optdepends=(
-  'xdg-desktop-portal-wlr: screen sharing and screenshots in programs'
   'xdg-desktop-portal-gtk: file chooser and other desktop portals'
   'grim: screenshots'
   'wl-clipboard: clipboard on the command line'

@@ -161,6 +161,15 @@ pub enum MessageRequest {
         /// Tracing filter directives, or `reset`; none prints the filter.
         directives: Option<String>,
     },
+    /// Shows the lines read from standard input as a vaht menu at the
+    /// pointer and prints the one the user chooses; exits with 1, printing
+    /// nothing, if they close the menu. A dmenu-style chooser: the
+    /// screen-share portal runs `vaht msg pick --title Share`.
+    Pick {
+        /// The menu's title.
+        #[arg(long)]
+        title: Option<String>,
+    },
 }
 
 /// A list `vaht msg subscribe` follows.
@@ -209,6 +218,11 @@ impl MessageRequest {
                     reset,
                 }
             }
+            // The items come from standard input ([`crate::message::pick`]).
+            Self::Pick { title } => vaht_ipc::Request::Pick {
+                title: title.clone(),
+                items: Vec::new(),
+            },
         }
     }
 }
