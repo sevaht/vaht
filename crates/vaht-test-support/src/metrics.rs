@@ -2,14 +2,14 @@
 //! draws them, which tests measure windows by.
 //!
 //! [`BUILT_IN_METRICS`] states them once for every test; a unit test checks
-//! them against the built-in theme itself, so a theme change that moves
+//! them against the built-in style itself, so a style change that moves
 //! them fails here first, with the new values.
 
 use crate::Bounds;
 
 /// Sizes, in pixels, that window frames and the taskbar take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ThemeMetrics {
+pub struct StyleMetrics {
     /// A titlebar's height.
     pub titlebar_height: u32,
     /// A frame line's width.
@@ -22,14 +22,14 @@ pub struct ThemeMetrics {
 
 /// The built-in configuration's sizes: frames have no handle, as the
 /// built-in settings leave it out.
-pub const BUILT_IN_METRICS: ThemeMetrics = ThemeMetrics {
+pub const BUILT_IN_METRICS: StyleMetrics = StyleMetrics {
     titlebar_height: 20,
     border_width: 1,
     handle_height: 0,
     taskbar_height: 20,
 };
 
-impl ThemeMetrics {
+impl StyleMetrics {
     /// Returns how much frame is above a window's content: a line, the
     /// titlebar and the line under it.
     #[must_use]
@@ -65,16 +65,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_built_in_metrics_are_the_built_in_theme_s() {
-        let theme = vaht_ui::Theme::built_in().metrics();
+    fn the_built_in_metrics_are_the_built_in_style_s() {
+        let style = vaht_ui::Style::built_in().metrics();
         assert_eq!(
             BUILT_IN_METRICS,
-            ThemeMetrics {
-                titlebar_height: theme.titlebar_height,
-                border_width: theme.border_width,
+            StyleMetrics {
+                titlebar_height: style.titlebar_height,
+                border_width: style.border_width,
                 // The built-in settings show no handle, whatever its height.
                 handle_height: 0,
-                taskbar_height: theme.taskbar_height,
+                taskbar_height: style.taskbar_height,
             }
         );
     }

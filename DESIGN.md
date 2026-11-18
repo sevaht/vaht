@@ -8,7 +8,7 @@ repeating them.
 |---|---|
 | [00 Feature inventory](docs/design/00-feature-inventory.md) | Every feature fluxland has, with its verdict for vaht; **decisions so far**; the **glossary** (N6) |
 | [01 Object model](docs/design/01-object-model.md) | Crates, the ownership tree, windows, outputs, the panel system, input, commands, scene composition |
-| [02 Configuration format](docs/design/02-config-format.md) | The TOML files, commands, matchers, bindings, rules, menus, outputs, themes, `vaht import` |
+| [02 Configuration format](docs/design/02-config-format.md) | The TOML files, commands, matchers, bindings, rules, menus, outputs, styles, `vaht import` |
 | [03 Resources and logging](docs/design/03-resources-logging.md) | Ownership guarantees, leak detection, logging and rotation |
 | [04 Smithay mapping](docs/design/04-smithay-mapping.md) | What Smithay provides, what vaht implements, games and media, spike results |
 

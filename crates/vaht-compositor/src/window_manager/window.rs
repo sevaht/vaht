@@ -24,8 +24,8 @@ mod resize;
 use std::fmt;
 
 use smithay::utils::{Logical, Point, Rectangle, Size};
-use vaht_ui::theme::Metrics;
-use vaht_ui::{Theme, Typesetter};
+use vaht_ui::style::Metrics;
+use vaht_ui::{Style, Typesetter};
 
 pub(crate) use alpha::{AlphaChange, WindowAlpha};
 pub(crate) use client::{ClientIcon, CommittedState, Ending, PlacementKind, RequestedState};
@@ -376,7 +376,7 @@ impl Window {
         }
     }
 
-    /// Returns where each part of the frame goes with the theme's `metrics`;
+    /// Returns where each part of the frame goes with the style's `metrics`;
     /// a shaded window's frame closes up beneath its titlebar.
     pub(crate) fn frame_geometry(&self, metrics: Metrics) -> FrameGeometry {
         let shape = if self.shows_content() {
@@ -430,7 +430,7 @@ impl Window {
         self.frame.set_buttons(buttons);
     }
 
-    /// Marks the frame for painting again, as when the theme changed.
+    /// Marks the frame for painting again, as when the style changed.
     pub(crate) fn invalidate_frame(&mut self) {
         self.frame.invalidate();
     }
@@ -439,7 +439,7 @@ impl Window {
     pub(crate) fn paint_frame(
         &mut self,
         metrics: Metrics,
-        theme: &Theme,
+        style: &Style,
         typesetter: &mut Typesetter,
     ) {
         // Its maximize button is a restore button while the window fills the
@@ -447,7 +447,7 @@ impl Window {
         self.frame
             .set_maximized(self.placement.is_fully_maximized());
         let geometry = self.frame_geometry(metrics);
-        self.frame.paint(&geometry, theme, typesetter);
+        self.frame.paint(&geometry, style, typesetter);
     }
 
     /// Shows its icon at `size` pixels, looked up in `store`, on its

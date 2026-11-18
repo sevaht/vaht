@@ -1,8 +1,8 @@
 //! What every themable thing looks like in every state.
 //!
-//! A [`Theme`] answers one question: the [`Style`] of a [`ThemeElement`] in
-//! a [`WidgetState`]. It is resolved once from [`ThemeLayers`], the four
-//! layers a theme file writes (02 §10.1), each overriding the one before:
+//! A [`Style`] answers one question: the [`ElementStyle`] of a [`StyleElement`] in
+//! a [`WidgetState`]. It is resolved once from [`StyleLayers`], the four
+//! layers a style file writes (02 §10.1), each overriding the one before:
 //!
 //! 1. the default, for everything;
 //! 2. one state, for every element;
@@ -10,8 +10,8 @@
 //! 4. one element in one state.
 //!
 //! These replace Fluxbox's wildcard resource matching. Drawing never cascades:
-//! it looks the resolved style up. Theme files are TOML (`theme/file.rs`
-//! reads them); the built-in theme is one too, `theme/built_in.toml`, after
+//! it looks the resolved style up. Style files are TOML (`style/file.rs`
+//! reads them); the built-in style is one too, `style/built_in.toml`, after
 //! the `nacitar_fbstyle` Fluxbox style.
 
 mod file;
@@ -25,9 +25,9 @@ use crate::text::{Font, FontWeight, Justify, TextEffect, TextStyle};
 use crate::texture::Texture;
 use crate::widget::{Glyph, MarkSide};
 
-/// Something a theme styles.
+/// Something a style describes the look of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::EnumIter)]
-pub enum ThemeElement {
+pub enum StyleElement {
     /// The background of a window's titlebar.
     Titlebar,
     /// The area showing a window's title.
@@ -66,13 +66,13 @@ pub enum ThemeElement {
     /// A tooltip: a title too long for its place, or a tray item's text.
     Tooltip,
     /// vaht's warning about its own configuration. vaht draws it with the
-    /// built-in theme whatever the user's says, so a broken theme cannot hide
+    /// built-in style whatever the user's says, so a broken style cannot hide
     /// what is broken.
     Warning,
 }
 
-impl ThemeElement {
-    /// Returns the element's name in theme files, a dotted path.
+impl StyleElement {
+    /// Returns the element's name in style files, a dotted path.
     #[must_use]
     pub const fn path(self) -> &'static str {
         match self {
@@ -98,7 +98,7 @@ impl ThemeElement {
         }
     }
 
-    /// Returns the element named `path` in theme files.
+    /// Returns the element named `path` in style files.
     #[must_use]
     pub fn at_path(path: &str) -> Option<Self> {
         <Self as strum::IntoEnumIterator>::iter().find(|element| element.path() == path)
@@ -122,7 +122,7 @@ pub enum WidgetState {
 }
 
 impl WidgetState {
-    /// Returns the state's name in theme files.
+    /// Returns the state's name in style files.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -134,7 +134,7 @@ impl WidgetState {
         }
     }
 
-    /// Returns the state named `name` in theme files.
+    /// Returns the state named `name` in style files.
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
         <Self as strum::IntoEnumIterator>::iter().find(|state| state.name() == name)
@@ -152,7 +152,7 @@ pub struct BorderStyle {
 
 /// How one element looks in one state, every property decided.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Style {
+pub struct ElementStyle {
     /// The background.
     pub texture: Texture,
     /// How text is drawn.
@@ -207,7 +207,7 @@ impl Bullet {
     }
 }
 
-impl Style {
+impl ElementStyle {
     /// Returns how opaque the whole of it is drawn, 0.0 to 1.0.
     #[must_use]
     pub fn opacity(&self) -> f32 {
@@ -220,7 +220,7 @@ impl Style {
         CornerRadii::of(self.corner_radius, self.rounded_corners.iter())
     }
 
-    /// The style of an element nothing in the theme mentions.
+    /// The style of an element nothing in the style mentions.
     fn fallback() -> Self {
         Self {
             texture: Texture::solid(Color::rgb(64, 64, 64)),
@@ -248,9 +248,9 @@ impl Style {
     }
 }
 
-/// Part of a style: the properties one layer of a theme sets.
+/// Part of a style: the properties one layer of a style sets.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct StylePatch {
+pub struct ElementStylePatch {
     /// The background, if this layer sets it.
     pub texture: Option<Texture>,
     /// The typeface, if this layer sets it.
@@ -281,9 +281,9 @@ pub struct StylePatch {
     pub alpha: Option<u8>,
 }
 
-impl StylePatch {
+impl ElementStylePatch {
     /// Overrides in `style` every property this patch sets.
-    fn apply_to(&self, style: &mut Style) {
+    fn apply_to(&self, style: &mut ElementStyle) {
         if let Some(texture) = self.texture {
             style.texture = texture;
         }
@@ -329,7 +329,7 @@ impl StylePatch {
     }
 }
 
-/// Sizes the compositor lays windows and bars out by, from the theme.
+/// Sizes the compositor lays windows and bars out by, from the style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Metrics {
     /// The height of a window's titlebar.
@@ -346,7 +346,7 @@ pub struct Metrics {
     pub menu: MenuMetrics,
 }
 
-/// Sizes menus are laid out by, from the theme.
+/// Sizes menus are laid out by, from the style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MenuMetrics {
     /// The height of a menu's title.
@@ -363,40 +363,40 @@ pub struct MenuMetrics {
     pub bullet_side: MarkSide,
 }
 
-/// A theme as written: four layers of patches, not yet resolved.
+/// A style as written: four layers of patches, not yet resolved.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ThemeLayers {
+pub struct StyleLayers {
     /// Applies to everything.
-    pub default: StylePatch,
+    pub default: ElementStylePatch,
     /// Applies to every element in one state.
-    pub by_state: HashMap<WidgetState, StylePatch>,
+    pub by_state: HashMap<WidgetState, ElementStylePatch>,
     /// Applies to one element in every state.
-    pub by_element: HashMap<ThemeElement, StylePatch>,
+    pub by_element: HashMap<StyleElement, ElementStylePatch>,
     /// Applies to one element in one state.
-    pub by_element_state: HashMap<(ThemeElement, WidgetState), StylePatch>,
+    pub by_element_state: HashMap<(StyleElement, WidgetState), ElementStylePatch>,
 }
 
-/// A resolved theme: a complete style for every element in every state.
+/// A resolved style: a complete style for every element in every state.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Theme {
+pub struct Style {
     /// The style of each element in each state.
-    styles: HashMap<(ThemeElement, WidgetState), Style>,
+    styles: HashMap<(StyleElement, WidgetState), ElementStyle>,
 }
 
-impl Theme {
-    /// The height of a bar whose theme sets none, in pixels.
+impl Style {
+    /// The height of a bar whose style sets none, in pixels.
     pub const DEFAULT_BAR_HEIGHT: u32 = 20;
 
-    /// The built-in theme, as a theme file.
-    pub const BUILT_IN: &str = include_str!("theme/built_in.toml");
+    /// The built-in style, as a style file.
+    pub const BUILT_IN: &str = include_str!("style/built_in.toml");
 
     /// Resolves `layers`, applying them in cascade order.
     #[must_use]
-    pub fn resolve(layers: &ThemeLayers) -> Self {
+    pub fn resolve(layers: &StyleLayers) -> Self {
         let mut styles = HashMap::new();
-        for element in <ThemeElement as strum::IntoEnumIterator>::iter() {
+        for element in <StyleElement as strum::IntoEnumIterator>::iter() {
             for state in <WidgetState as strum::IntoEnumIterator>::iter() {
-                let mut style = Style::fallback();
+                let mut style = ElementStyle::fallback();
                 layers.default.apply_to(&mut style);
                 let patches = [
                     layers.by_state.get(&state),
@@ -412,17 +412,17 @@ impl Theme {
         Self { styles }
     }
 
-    /// Returns the built-in theme: dark grey gradients with white, haloed
+    /// Returns the built-in style: dark grey gradients with white, haloed
     /// text, after the `nacitar_fbstyle` Fluxbox style.
     ///
     /// # Panics
     ///
-    /// Panics if the built-in theme file is invalid; a unit test makes sure
+    /// Panics if the built-in style file is invalid; a unit test makes sure
     /// it is not.
     #[must_use]
     pub fn built_in() -> Self {
         Self::resolve(
-            &ThemeLayers::from_toml(Self::BUILT_IN).expect("the built-in theme is valid (tested)"),
+            &StyleLayers::from_toml(Self::BUILT_IN).expect("the built-in style is valid (tested)"),
         )
     }
 
@@ -432,7 +432,7 @@ impl Theme {
     ///
     /// Never: resolution gives every element a style in every state.
     #[must_use]
-    pub fn style(&self, element: ThemeElement, state: WidgetState) -> &Style {
+    pub fn element_style(&self, element: StyleElement, state: WidgetState) -> &ElementStyle {
         self.styles
             .get(&(element, state))
             .expect("resolution styles every element in every state")
@@ -442,21 +442,21 @@ impl Theme {
     /// focused styles' heights and border width.
     #[must_use]
     pub fn metrics(&self) -> Metrics {
-        let focused = |element| self.style(element, WidgetState::Focused);
+        let focused = |element| self.element_style(element, WidgetState::Focused);
         let bar = |element| focused(element).height.unwrap_or(Self::DEFAULT_BAR_HEIGHT);
         Metrics {
-            titlebar_height: bar(ThemeElement::Titlebar),
-            border_width: focused(ThemeElement::Border).border.width,
-            handle_height: focused(ThemeElement::Handle).height.unwrap_or(0),
-            taskbar_height: bar(ThemeElement::Taskbar),
-            frame_corners: focused(ThemeElement::Border).corner_radii(),
+            titlebar_height: bar(StyleElement::Titlebar),
+            border_width: focused(StyleElement::Border).border.width,
+            handle_height: focused(StyleElement::Handle).height.unwrap_or(0),
+            taskbar_height: bar(StyleElement::Taskbar),
+            frame_corners: focused(StyleElement::Border).corner_radii(),
             menu: MenuMetrics {
-                title_height: bar(ThemeElement::MenuTitle),
-                item_height: bar(ThemeElement::MenuItem),
-                border_width: focused(ThemeElement::MenuFrame).border.width,
-                corners: focused(ThemeElement::MenuFrame).corner_radii(),
-                bullet: focused(ThemeElement::MenuItem).bullet,
-                bullet_side: focused(ThemeElement::MenuItem).bullet_side,
+                title_height: bar(StyleElement::MenuTitle),
+                item_height: bar(StyleElement::MenuItem),
+                border_width: focused(StyleElement::MenuFrame).border.width,
+                corners: focused(StyleElement::MenuFrame).corner_radii(),
+                bullet: focused(StyleElement::MenuItem).bullet,
+                bullet_side: focused(StyleElement::MenuItem).bullet_side,
             },
         }
     }
@@ -467,11 +467,11 @@ mod tests {
     use super::*;
 
     /// Layers whose only setting is the default text color, to build on.
-    fn layers_with_default_red_text() -> ThemeLayers {
-        ThemeLayers {
-            default: StylePatch {
+    fn layers_with_default_red_text() -> StyleLayers {
+        StyleLayers {
+            default: ElementStylePatch {
                 text_color: Some(Color::rgb(255, 0, 0)),
-                ..StylePatch::default()
+                ..ElementStylePatch::default()
             },
             by_state: HashMap::new(),
             by_element: HashMap::new(),
@@ -480,10 +480,10 @@ mod tests {
     }
 
     /// A patch setting only the text color.
-    fn text_color(color: Color) -> StylePatch {
-        StylePatch {
+    fn text_color(color: Color) -> ElementStylePatch {
+        ElementStylePatch {
             text_color: Some(color),
-            ..StylePatch::default()
+            ..ElementStylePatch::default()
         }
     }
 
@@ -496,30 +496,30 @@ mod tests {
             .insert(WidgetState::Unfocused, text_color(green));
         layers
             .by_element
-            .insert(ThemeElement::Label, text_color(blue));
+            .insert(StyleElement::Label, text_color(blue));
         layers.by_element_state.insert(
-            (ThemeElement::Label, WidgetState::Pressed),
+            (StyleElement::Label, WidgetState::Pressed),
             text_color(white),
         );
-        let theme = Theme::resolve(&layers);
-        let color = |element, state| theme.style(element, state).text.color;
+        let style = Style::resolve(&layers);
+        let color = |element, state| style.element_style(element, state).text.color;
 
         assert_eq!(
-            color(ThemeElement::Button, WidgetState::Focused),
+            color(StyleElement::Button, WidgetState::Focused),
             Color::rgb(255, 0, 0)
         );
         assert_eq!(
-            color(ThemeElement::Button, WidgetState::Unfocused),
+            color(StyleElement::Button, WidgetState::Unfocused),
             green,
             "state beats default"
         );
         assert_eq!(
-            color(ThemeElement::Label, WidgetState::Unfocused),
+            color(StyleElement::Label, WidgetState::Unfocused),
             blue,
             "element beats state"
         );
         assert_eq!(
-            color(ThemeElement::Label, WidgetState::Pressed),
+            color(StyleElement::Label, WidgetState::Pressed),
             white,
             "element and state beat all"
         );
@@ -529,14 +529,14 @@ mod tests {
     fn a_patch_changes_only_what_it_sets() {
         let mut layers = layers_with_default_red_text();
         layers.by_element.insert(
-            ThemeElement::Button,
-            StylePatch {
+            StyleElement::Button,
+            ElementStylePatch {
                 glyph_color: Some(Color::BLACK),
-                ..StylePatch::default()
+                ..ElementStylePatch::default()
             },
         );
-        let style = Theme::resolve(&layers)
-            .style(ThemeElement::Button, WidgetState::Focused)
+        let style = Style::resolve(&layers)
+            .element_style(StyleElement::Button, WidgetState::Focused)
             .clone();
         assert_eq!(style.glyph_color, Color::BLACK);
         assert_eq!(
@@ -547,9 +547,9 @@ mod tests {
     }
 
     #[test]
-    fn the_built_in_theme_styles_focus_and_pressing_differently() {
-        let theme = Theme::built_in();
-        let texture = |state| theme.style(ThemeElement::Button, state).texture;
+    fn the_built_in_style_styles_focus_and_pressing_differently() {
+        let style = Style::built_in();
+        let texture = |state| style.element_style(StyleElement::Button, state).texture;
         assert_ne!(
             texture(WidgetState::Focused),
             texture(WidgetState::Unfocused)
@@ -562,7 +562,7 @@ mod tests {
 
     #[test]
     fn the_metrics_come_from_the_bars_and_the_border() {
-        let metrics = Theme::built_in().metrics();
+        let metrics = Style::built_in().metrics();
         assert_eq!(
             metrics,
             Metrics {
@@ -585,8 +585,8 @@ mod tests {
 
     #[test]
     fn every_element_and_state_has_a_name_that_finds_it() {
-        for element in <ThemeElement as strum::IntoEnumIterator>::iter() {
-            assert_eq!(ThemeElement::at_path(element.path()), Some(element));
+        for element in <StyleElement as strum::IntoEnumIterator>::iter() {
+            assert_eq!(StyleElement::at_path(element.path()), Some(element));
         }
         for state in <WidgetState as strum::IntoEnumIterator>::iter() {
             assert_eq!(WidgetState::named(state.name()), Some(state));

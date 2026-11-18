@@ -2,14 +2,14 @@
 //!
 //! From the top, as Fluxbox draws it: a border line, the titlebar, a line,
 //! the content, a line, the handle (a strip with a grip at each end, when
-//! the theme gives it a height), and a last line; lines run down both
+//! the style gives it a height), and a last line; lines run down both
 //! sides. The titlebar and the handle are [`Panel`]s; vaht-ui lays them
 //! out, paints them and hit-tests them, and this module only says what they
 //! show (01 §4.3). The lines are plain colored rectangles, which cost no
 //! pixel buffers. The frame is never one big buffer around the window,
 //! which would cost megabytes per window.
 //!
-//! A theme can round the frame's corners (`window.border`'s
+//! A style can round the frame's corners (`window.border`'s
 //! `corner_radius`). A top corner is rounded within the titlebar and a
 //! bottom one within the handle, so the window's content is never cut, as
 //! Fluxbox rounds bottom corners only when there is a handle. The lines
@@ -20,14 +20,14 @@
 //! geometry into render elements.
 //!
 //! Geometry is derived, never stored: [`FrameGeometry::around`] computes every
-//! part from the window's content area and the theme's metrics, so the frame
+//! part from the window's content area and the style's metrics, so the frame
 //! cannot drift from the window it surrounds.
 
 use smithay::utils::{Logical, Point, Rectangle};
-use vaht_ui::theme::Metrics;
+use vaht_ui::style::Metrics;
 use vaht_ui::{
-    Corner, CornerRadii, Glyph, Icon, IconEmphasis, Panel, PanelContent, SizePolicy, Theme,
-    ThemeElement, Typesetter, Widget, WidgetIcon, WidgetState,
+    Corner, CornerRadii, Glyph, Icon, IconEmphasis, Panel, PanelContent, SizePolicy, Style,
+    StyleElement, Typesetter, Widget, WidgetIcon, WidgetState,
 };
 
 use super::WindowDrag;
@@ -190,7 +190,7 @@ impl FrameGeometry {
     /// look as they did.
     const GRIP_WIDTH: u32 = 20;
 
-    /// Returns the frame around `content` with the theme's `metrics`, in
+    /// Returns the frame around `content` with the style's `metrics`, in
     /// `shape`: a shaded frame has no content and no handle.
     pub(crate) fn around(
         content: Rectangle<i32, Logical>,
@@ -398,17 +398,17 @@ impl FrameGeometry {
         })
     }
 
-    /// Returns the theme's corner radii as a frame `width` wide takes
+    /// Returns the style's corner radii as a frame `width` wide takes
     /// them: a top corner no rounder than `room`'s first part (the
     /// titlebar and the line above it) is tall, a bottom one than its
     /// second (the handle and the line below it; nothing without a handle),
     /// and none rounder than half the width.
-    fn corner_radii(theme: CornerRadii, room: (i32, i32), width: i32) -> CornerRadii {
+    fn corner_radii(style: CornerRadii, room: (i32, i32), width: i32) -> CornerRadii {
         let (top, bottom) = room;
-        <Corner as strum::IntoEnumIterator>::iter().fold(theme, |radii, corner| {
+        <Corner as strum::IntoEnumIterator>::iter().fold(style, |radii, corner| {
             let room = if corner.is_top() { top } else { bottom };
             let most = to_u32(room.min(width / 2));
-            radii.with(corner, theme.radius(corner).min(most))
+            radii.with(corner, style.radius(corner).min(most))
         })
     }
 
@@ -550,7 +550,7 @@ impl Frame {
         }
     }
 
-    /// Marks the frame for painting again, as when the theme changed.
+    /// Marks the frame for painting again, as when the style changed.
     pub(crate) fn invalidate(&mut self) {
         self.titlebar.invalidate();
         self.handle.invalidate();
@@ -561,13 +561,13 @@ impl Frame {
     pub(crate) fn paint(
         &mut self,
         geometry: &FrameGeometry,
-        theme: &Theme,
+        style: &Style,
         typesetter: &mut Typesetter,
     ) {
         let size = geometry.titlebar.size;
         self.titlebar
             .resize(vaht_ui::Size::new(to_u32(size.w), to_u32(size.h)));
-        self.titlebar.paint(theme, typesetter);
+        self.titlebar.paint(style, typesetter);
         self.titlebar.set_corners(geometry.titlebar_corners());
         self.handle.set_corners(geometry.handle_corners());
         let grips = geometry.grip_width.map(|width| GripLayout {
@@ -580,7 +580,7 @@ impl Frame {
         let size = geometry.handle.size;
         self.handle
             .resize(vaht_ui::Size::new(to_u32(size.w), to_u32(size.h)));
-        self.handle.paint(theme, typesetter);
+        self.handle.paint(style, typesetter);
     }
 }
 
@@ -604,10 +604,10 @@ impl PanelContent for Titlebar {
 
     fn build(&self) -> Widget<TitlebarHit> {
         let button = |button: &TitlebarButton| {
-            Widget::glyph(ThemeElement::Button, button.glyph(self.is_maximized))
+            Widget::glyph(StyleElement::Button, button.glyph(self.is_maximized))
                 .with_button(TitlebarHit::Button(*button))
         };
-        let label = Widget::text(ThemeElement::Label, self.title.clone())
+        let label = Widget::text(StyleElement::Label, self.title.clone())
             .with_size(SizePolicy::Fill { weight: 1 })
             .with_hit(TitlebarHit::Label);
         let label = match &self.icon {
@@ -625,7 +625,7 @@ impl PanelContent for Titlebar {
             .chain([label])
             .chain(self.buttons.right.iter().map(button))
             .collect();
-        Widget::row(ThemeElement::Titlebar, children)
+        Widget::row(StyleElement::Titlebar, children)
     }
 
     fn state(&self) -> WidgetState {
@@ -662,19 +662,19 @@ impl PanelContent for HandleBar {
     fn build(&self) -> Widget<()> {
         let children = self.grips.map_or_else(Vec::new, |grips| {
             let grip =
-                || Widget::fill(ThemeElement::Grip).with_size(SizePolicy::Fixed(grips.width));
+                || Widget::fill(StyleElement::Grip).with_size(SizePolicy::Fixed(grips.width));
             let line = || {
-                Widget::fill(ThemeElement::Handle).with_size(SizePolicy::Fixed(grips.line_width))
+                Widget::fill(StyleElement::Handle).with_size(SizePolicy::Fixed(grips.line_width))
             };
             vec![
                 grip(),
                 line(),
-                Widget::fill(ThemeElement::Handle),
+                Widget::fill(StyleElement::Handle),
                 line(),
                 grip(),
             ]
         });
-        Widget::row(ThemeElement::Handle, children)
+        Widget::row(StyleElement::Handle, children)
     }
 
     fn state(&self) -> WidgetState {
@@ -707,12 +707,12 @@ mod tests {
         handle_height: 1,
         taskbar_height: 20,
         frame_corners: CornerRadii::SQUARE,
-        menu: vaht_ui::theme::MenuMetrics {
+        menu: vaht_ui::style::MenuMetrics {
             title_height: 20,
             item_height: 20,
             border_width: 1,
             corners: CornerRadii::SQUARE,
-            bullet: vaht_ui::theme::Bullet::Triangle,
+            bullet: vaht_ui::style::Bullet::Triangle,
             bullet_side: vaht_ui::MarkSide::Right,
         },
     };
@@ -839,7 +839,7 @@ mod tests {
         );
     }
 
-    /// The test frame, its theme rounding every corner by 8 pixels.
+    /// The test frame, its style rounding every corner by 8 pixels.
     fn rounded(shape: FrameShape) -> FrameGeometry {
         let metrics = Metrics {
             frame_corners: CornerRadii::of(8, <Corner as strum::IntoEnumIterator>::iter()),

@@ -13,7 +13,7 @@ use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::backend::renderer::{ImportMem, Renderer};
 use smithay::utils::Scale;
-use vaht_ui::{Color, Corner, CornerArc, Theme, ThemeElement};
+use vaht_ui::{Color, Corner, CornerArc, Style, StyleElement};
 
 use super::{CornerTexture, PanelTexture, SceneElement};
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
@@ -28,11 +28,11 @@ pub(crate) struct FrameTextures {
 
 impl FrameTextures {
     /// Brings every window's buffers up to date with its frame, colored by
-    /// `theme`, and forgets the buffers of windows that are gone.
+    /// `style`, and forgets the buffers of windows that are gone.
     pub(crate) fn update(
         &mut self,
         window_manager: &WindowManager,
-        theme: &Theme,
+        style: &Style,
         ledger: &ResourceLedger,
     ) {
         self.by_window
@@ -45,7 +45,7 @@ impl FrameTextures {
                 .update(
                     window,
                     &window.frame_geometry(metrics),
-                    theme,
+                    style,
                     window_manager.opacity(window),
                 );
         }
@@ -104,13 +104,13 @@ impl FrameTexture {
     /// Copies `window`'s titlebar and handle pixels if they are newer than
     /// the last copy, sizes and colors the lines for `geometry`, and takes
     /// the window's `opacity`.
-    fn update(&mut self, window: &Window, geometry: &FrameGeometry, theme: &Theme, opacity: f32) {
+    fn update(&mut self, window: &Window, geometry: &FrameGeometry, style: &Style, opacity: f32) {
         self.opacity = opacity;
         let frame = window.frame();
         self.titlebar.upload(frame.titlebar());
         self.handle.upload(frame.handle());
-        let color = theme
-            .style(ThemeElement::Border, frame.state())
+        let color = style
+            .element_style(StyleElement::Border, frame.state())
             .border
             .color;
         for (buffer, rectangle) in self.borders.iter_mut().zip(geometry.borders) {

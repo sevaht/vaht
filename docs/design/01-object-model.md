@@ -28,7 +28,7 @@ standards.
    them, hit-tests them, and tracks hover, pressed state and tooltips.
    Content types contain **no** drawing and **no** hit-testing code
    (00 §1.1).
-4. **Closed sets are enums** (M8, R-M10): placement state, actions, theme
+4. **Closed sets are enums** (M8, R-M10): placement state, actions, style
    elements, widget kinds, pointer targets, grabs, backends. Matches are
    exhaustive, so a new variant makes the compiler list every place that must
    handle it.
@@ -42,7 +42,7 @@ standards.
 
 | Crate | Kind | Contents | Depends on |
 |---|---|---|---|
-| `vaht-ui` | library | Panel toolkit: widgets, layout, `Canvas` (tiny-skia), `Typesetter` (cosmic-text), `Theme` model. **Knows nothing about Wayland or windows** (M14) | tiny-skia, cosmic-text, image, resvg |
+| `vaht-ui` | library | Panel toolkit: widgets, layout, `Canvas` (tiny-skia), `Typesetter` (cosmic-text), `Style` model. **Knows nothing about Wayland or windows** (M14) | tiny-skia, cosmic-text, image, resvg |
 | `vaht-ipc` | library | IPC message types (serde) plus a JSON Schema export (schemars), and a small blocking client | serde, serde_json |
 | `vaht-compositor` | library | The compositor | smithay, vaht-ui, vaht-ipc, zbus, toml, toml_edit |
 | `vaht-dialog` | library | Text dialogs as ordinary Wayland client windows: run, command, set title, rename workspace | vaht-ui, vaht-ipc, smithay-client-toolkit |
@@ -100,7 +100,7 @@ Compositor                      (the Smithay state; routes events, carries out d
 ├── overlays: Overlays          menus (MenuStack), tooltip, snap picker,
 │                               wireframe, position overlay
 ├── config: Config              the validated configuration, plus runtime overrides
-├── theme: Theme                (vaht-ui) element × state → Style
+├── style: Style                (vaht-ui) element × state → Style
 ├── typesetter: Typesetter      (vaht-ui) the one font system, lent to panels while painting
 └── services
     ├── ipc: IpcServer          socket listener, IpcConnection per client
@@ -260,19 +260,19 @@ one place that performs modesets.
 
 | Type | Role | Responsibility |
 |---|---|---|
-| `Widget` | value | One node of a panel: `kind: WidgetKind`, `element: ThemeElement`, `size: SizePolicy`, `hit: Option<HitId>`, `tooltip: Option<String>` |
+| `Widget` | value | One node of a panel: `kind: WidgetKind`, `element: StyleElement`, `size: SizePolicy`, `hit: Option<HitId>`, `tooltip: Option<String>` |
 | `WidgetKind` | enum | `Text(String)`, `Glyph(Glyph)`, `Icon(ImageRef)`, `Fill`, `TextField(TextFieldState)` (used only by `vaht-dialog`), `Row(Vec<Widget>)`, `Column(Vec<Widget>)`, `Grid { rows, children }` |
 | `SizePolicy` | enum | `Fixed(px)`, `Fit` (measured), `Fill { weight }` |
 | `PanelContent` | trait | Implemented by Frame strips, Taskbar, Menu, Tooltip and SnapPicker (and by `vaht-dialog`'s windows): `fn build(&self) -> Widget`, plus an associated `Hit` type that `HitId` maps back to |
 | `Panel<C: PanelContent>` | entity | Owns its content, size, laid-out tree, `Canvas`, hover and pressed `HitId`, and a dirty flag. `layout`, `paint_if_dirty`, `hit_at(point) → Option<C::Hit>`, `tooltip_at`, `pointer_motion`, `press`, `release` |
 | `Canvas` | entity | A tiny-skia pixmap. Paints textures, text, glyphs and icons for a laid-out tree |
 | `Typesetter` | entity | The one cosmic-text `FontSystem` plus glyph cache. Measures and shapes text; creating one takes 55 ms, so it is shared |
-| `Theme` | value | `style(ThemeElement, WidgetState) → &Style`, with the cascade resolved at load |
+| `Style` | value | `style(StyleElement, WidgetState) → &Style`, with the cascade resolved at load |
 | `Style` | value | `texture: Texture`, `text: TextStyle`, `border: Border`, `padding: Insets` |
 | `Texture` | enum | `Solid(Color)`, `Gradient { direction, from, to, bevel, interlaced }`, `Image { path, fit }`, `ParentRelative` |
 | `TextStyle` | value | `font: FontSpec`, `color`, `effect: TextEffect` (`None`, `Shadow`, `Halo`), `justify` |
 
-`ThemeElement` is one enum covering every themable thing: `TitlebarLabel`,
+`StyleElement` is one enum covering every themable thing: `TitlebarLabel`,
 `TitlebarButton`, `Handle`, `Grip`, `TaskbarBackground`, `WindowListEntry`,
 `Clock`, `MenuTitle`, `MenuItem`, `Tooltip`, `DialogField` and so on.
 `WidgetState` is `Focused`, `Unfocused`, `Hovered`, `Pressed`, `Active` or
@@ -317,7 +317,7 @@ be swapped in without touching the root menu, the window menu or the tray.
   config, the window menu and `Tray` (from dbusmenu) alike.
 - **`MenuPresenter`** (enum, rung 2) has two variants:
   - **`BuiltIn`**: a `Panel<MenuContent>` stack in `Overlays`, using vaht's
-    theme, with keyboard navigation and type-to-search. This is the default and
+    style, with keyboard navigation and type-to-search. This is the default and
     is in the first milestone.
   - **`External(MenuHelper)`**: a helper process (`vaht menu-helper gtk`,
     later perhaps `qt`) that shows the model with a real toolkit.
@@ -515,7 +515,7 @@ disagree.
 | §7 Menus and dialogs | `overlays/` (`MenuStack`, `Menu`, `Tooltip`, `SnapPicker`); dialogs in the `vaht-dialog` crate |
 | §8 Input | `input/` (`Input`, `KeyBindings`, `MouseBindings`, `Grab`, `PointerTarget`) |
 | §9 Commands | `command.rs` (`Command`, `Action`, `Condition`) |
-| §10 Config and theme | `config/` (`Config`, `ConfigFiles`, `SettingOverrides`), `vaht-ui::theme` |
+| §10 Config and style | `config/` (`Config`, `ConfigFiles`, `SettingOverrides`), `vaht-ui::style` |
 | §11 Session and IPC | `services/` (`IpcServer`, `Launcher`, `Session`), `xwayland/` |
 | §12 Media and games | `output/frame_clock.rs`, `output/vrr.rs`, `protocols/` (fifo, commit-timing, syncobj, content-type: Smithay states plus thin handlers) |
 

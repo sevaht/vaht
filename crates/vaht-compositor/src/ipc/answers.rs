@@ -8,7 +8,7 @@ use vaht_ipc::{
 use super::{Answer, IpcClient, IpcHandler, IpcServer};
 use crate::Compositor;
 use crate::WindowId;
-use crate::config::{Action, Command, SettingChange, Settings, ThemeFile, schema};
+use crate::config::{Action, Command, SettingChange, Settings, StyleFile, schema};
 use crate::execution::ExecutionContext;
 use crate::outputs::Outputs;
 
@@ -155,7 +155,7 @@ impl Compositor {
             },
             Request::ConfigFiles {} => Reply::ConfigFiles {
                 files: self.config_file_infos(),
-                themes: ThemeFile::available(self.config_source.directory()),
+                styles: StyleFile::available(self.config_source.directory()),
                 problems: self.config_problem_texts(),
             },
             Request::ConfigSchema { file } => match schema::schema_of(file) {

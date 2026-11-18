@@ -36,8 +36,8 @@ pub enum Update {
         defaults: Value,
         /// The keys changed in place and not written.
         changed: Vec<Vec<String>>,
-        /// The themes that can be chosen.
-        themes: Vec<String>,
+        /// The styles that can be chosen.
+        styles: Vec<String>,
         /// What vaht could not use of the configuration files and left
         /// out.
         problems: Vec<String>,
@@ -169,8 +169,8 @@ impl VahtLink {
         let reading = client.request(&Request::ConfigRead {
             file: ConfigFile::Settings,
         });
-        let themes = client.request(&Request::ConfigFiles {});
-        match (reading, themes) {
+        let styles = client.request(&Request::ConfigFiles {});
+        match (reading, styles) {
             (
                 Ok(Reply::ConfigRead {
                     value,
@@ -178,13 +178,13 @@ impl VahtLink {
                     changed,
                 }),
                 Ok(Reply::ConfigFiles {
-                    themes, problems, ..
+                    styles, problems, ..
                 }),
             ) => updates.push(Update::Reading {
                 value,
                 defaults,
                 changed,
-                themes,
+                styles,
                 problems,
             }),
             (Err(error), _) | (_, Err(error)) => return Err(error.to_string()),

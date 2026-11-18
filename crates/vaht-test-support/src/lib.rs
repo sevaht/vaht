@@ -40,7 +40,7 @@ pub use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::
 pub use gamma_control::GammaControl;
 pub use headless::{ExitReport, HeadlessVaht};
 pub use input_method::InputMethod;
-pub use metrics::{BUILT_IN_METRICS, ThemeMetrics};
+pub use metrics::{BUILT_IN_METRICS, StyleMetrics};
 pub use output_configurator::{
     ConfigurationResult, ConfiguredHead, HeadChange, OutputConfigurator,
 };

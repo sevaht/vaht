@@ -135,7 +135,7 @@ mod tests {
         );
         std::fs::write(
             directory.path().join("settings.toml"),
-            "theme = \"x\"\n[logging]\nfile_size_mb = 3\nfiles = 2\n",
+            "style = \"x\"\n[logging]\nfile_size_mb = 3\nfiles = 2\n",
         )
         .expect("written");
         let set = LogRotation::configured(directory.path());

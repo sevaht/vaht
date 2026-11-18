@@ -1,7 +1,7 @@
 //! A rectangle vaht draws itself: one type for frames, taskbars and menus.
 //!
 //! A [`Panel`] owns its [`PanelContent`] and does everything else: it lays
-//! the content's widgets out, paints them with the theme, finds the widget
+//! the content's widgets out, paints them with the style, finds the widget
 //! under a point, and tracks which one the pointer holds down. Content types
 //! only describe what they show (01 §6). The panel repaints only when
 //! something changed; [`Panel::generation`] tells a compositor when the
@@ -14,8 +14,8 @@ use crate::canvas::Canvas;
 use crate::corner::CornerRadii;
 use crate::geometry::{Point, Rect, Size};
 use crate::layout::Layout;
+use crate::style::{Style, WidgetState};
 use crate::text::Typesetter;
-use crate::theme::{Theme, WidgetState};
 use crate::widget::Widget;
 
 /// What a panel shows; implemented by window frames, the taskbar, menus.
@@ -166,17 +166,17 @@ impl<Content: PanelContent> Panel<Content> {
 
     /// Lays out and paints the panel if anything changed; returns whether it
     /// did.
-    pub fn paint(&mut self, theme: &Theme, typesetter: &mut Typesetter) -> bool {
+    pub fn paint(&mut self, style: &Style, typesetter: &mut Typesetter) -> bool {
         if !self.is_dirty {
             return false;
         }
         self.is_dirty = false;
-        let layout = Self::lay_out(&self.content, self.size, theme, typesetter);
+        let layout = Self::lay_out(&self.content, self.size, style, typesetter);
         self.pixels = Pixmap::new(self.size.width, self.size.height);
         if let Some(pixels) = &mut self.pixels {
             let base = self.content.state();
             let pressed = self.pressed;
-            Canvas::new(pixels).paint(&layout, theme, typesetter, |placed| {
+            Canvas::new(pixels).paint(&layout, style, typesetter, |placed| {
                 if placed.is_button && placed.hit.is_some() && placed.hit == pressed {
                     WidgetState::Pressed
                 } else {
@@ -191,19 +191,19 @@ impl<Content: PanelContent> Panel<Content> {
     }
 
     /// Returns where each widget of `content` goes in a panel of `size`,
-    /// as `theme` styles it: what painting lays out, and what content can
+    /// as `style` styles it: what painting lays out, and what content can
     /// try before settling on its shape.
     pub fn lay_out(
         content: &Content,
         size: Size,
-        theme: &Theme,
+        style: &Style,
         typesetter: &mut Typesetter,
     ) -> Layout<Content::Hit> {
         let root = content.build();
         let mut fit_width = |text: &str, element| {
             // The fitted width is the text's, plus the element's padding in
             // the content's normal state.
-            let style = theme.style(element, content.state());
+            let style = style.element_style(element, content.state());
             typesetter.text_width(text, &style.text.font) + style.padding.horizontal()
         };
         Layout::new(&root, Rect::from_size(size), &mut fit_width)
@@ -226,7 +226,7 @@ impl<Content: PanelContent> Panel<Content> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::ThemeElement;
+    use crate::style::StyleElement;
     use crate::widget::Glyph;
 
     /// What clicking the test titlebar can report.
@@ -247,12 +247,12 @@ mod tests {
 
         fn build(&self) -> Widget<TitlebarHit> {
             Widget::row(
-                ThemeElement::Titlebar,
+                StyleElement::Titlebar,
                 vec![
-                    Widget::text(ThemeElement::Label, self.title.clone())
+                    Widget::text(StyleElement::Label, self.title.clone())
                         .with_size(crate::widget::SizePolicy::Fill { weight: 1 })
                         .with_hit(TitlebarHit::Label),
-                    Widget::glyph(ThemeElement::Button, Glyph::Close)
+                    Widget::glyph(StyleElement::Button, Glyph::Close)
                         .with_button(TitlebarHit::Close),
                 ],
             )
@@ -276,7 +276,7 @@ mod tests {
             },
             Size::new(200, 20),
         );
-        assert!(panel.paint(&Theme::built_in(), typesetter));
+        assert!(panel.paint(&Style::built_in(), typesetter));
         panel
     }
 
@@ -309,36 +309,36 @@ mod tests {
     #[test]
     fn painting_happens_only_after_a_change() {
         let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
-        let theme = Theme::built_in();
+        let style = Style::built_in();
         let mut panel = painted_titlebar(&mut typesetter);
         let generation = panel.generation();
-        assert!(!panel.paint(&theme, &mut typesetter), "nothing changed");
+        assert!(!panel.paint(&style, &mut typesetter), "nothing changed");
         assert_eq!(panel.generation(), generation);
         panel.update(|titlebar| titlebar.is_focused = false);
-        assert!(panel.paint(&theme, &mut typesetter));
+        assert!(panel.paint(&style, &mut typesetter));
         assert_eq!(panel.generation(), generation + 1);
     }
 
     #[test]
     fn pressing_a_button_repaints_it_in_the_pressed_style() {
         let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
-        let theme = Theme::built_in();
+        let style = Style::built_in();
         let mut panel = painted_titlebar(&mut typesetter);
         // A corner of the button, away from its picture.
         let before = pixel(&panel, 181, 18);
         panel.press(Point::new(190, 10));
-        assert!(panel.paint(&theme, &mut typesetter));
+        assert!(panel.paint(&style, &mut typesetter));
         assert_ne!(pixel(&panel, 181, 18), before);
     }
 
     #[test]
     fn pressing_a_plain_hit_region_does_not_change_its_look() {
         let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
-        let theme = Theme::built_in();
+        let style = Style::built_in();
         let mut panel = painted_titlebar(&mut typesetter);
         let before = panel.pixels().expect("painted").clone();
         assert_eq!(panel.press(Point::new(20, 10)), Some(TitlebarHit::Label));
-        panel.paint(&theme, &mut typesetter);
+        panel.paint(&style, &mut typesetter);
         assert!(
             panel.pixels().expect("painted").data() == before.data(),
             "the title looks the same while held"
@@ -380,10 +380,10 @@ mod tests {
 
         fn build(&self) -> Widget<()> {
             Widget::row(
-                ThemeElement::Taskbar,
+                StyleElement::Taskbar,
                 vec![
-                    Widget::fill(ThemeElement::WindowListEntry),
-                    Widget::fill(ThemeElement::WindowListEntry).with_state(WidgetState::Unfocused),
+                    Widget::fill(StyleElement::WindowListEntry),
+                    Widget::fill(StyleElement::WindowListEntry).with_state(WidgetState::Unfocused),
                 ],
             )
         }
@@ -395,14 +395,14 @@ mod tests {
 
     #[test]
     fn a_widget_may_be_drawn_in_a_state_of_its_own() {
-        let layers = crate::theme::ThemeLayers::from_toml(
+        let layers = crate::style::StyleLayers::from_toml(
             "[state.focused]\ntexture = { solid = \"red\" }\n\
              [state.unfocused]\ntexture = { solid = \"blue\" }\n",
         )
-        .expect("a valid theme");
+        .expect("a valid style");
         let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
         let mut panel = Panel::new(Entries, Size::new(100, 10));
-        assert!(panel.paint(&Theme::resolve(&layers), &mut typesetter));
+        assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
         let color = |x| {
             let pixel = panel
                 .pixels()
@@ -421,7 +421,7 @@ mod tests {
         type Hit = ();
 
         fn build(&self) -> Widget<()> {
-            Widget::field(ThemeElement::DialogField, self.0.clone())
+            Widget::field(StyleElement::DialogField, self.0.clone())
         }
 
         fn state(&self) -> WidgetState {
@@ -433,7 +433,7 @@ mod tests {
     fn dark_columns(field: crate::widget::TextField) -> Vec<u32> {
         let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
         let mut panel = Panel::new(Line(field), Size::new(100, 20));
-        assert!(panel.paint(&Theme::built_in(), &mut typesetter));
+        assert!(panel.paint(&Style::built_in(), &mut typesetter));
         let pixels = panel.pixels().expect("painted");
         (0..100)
             .filter(|x| {
@@ -466,7 +466,7 @@ mod tests {
         type Hit = ();
 
         fn build(&self) -> Widget<()> {
-            Widget::text(ThemeElement::MenuItem, "x")
+            Widget::text(StyleElement::MenuItem, "x")
                 .with_mark_on(Glyph::Check, crate::widget::MarkSide::Left)
         }
 
@@ -477,13 +477,13 @@ mod tests {
 
     #[test]
     fn a_mark_goes_on_its_side_in_the_glyph_color() {
-        let layers = crate::theme::ThemeLayers::from_toml(
+        let layers = crate::style::StyleLayers::from_toml(
             "[default]\ntexture = { solid = \"black\" }\nglyph_color = \"red\"\n",
         )
-        .expect("a valid theme");
+        .expect("a valid style");
         let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
         let mut panel = Panel::new(Checked, Size::new(100, 20));
-        assert!(panel.paint(&Theme::resolve(&layers), &mut typesetter));
+        assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
         let red_at = |x| {
             let pixel = panel
                 .pixels()
@@ -502,7 +502,7 @@ mod tests {
         type Hit = ();
 
         fn build(&self) -> Widget<()> {
-            Widget::glyph(ThemeElement::TaskbarButton, Glyph::ArrowLeft)
+            Widget::glyph(StyleElement::TaskbarButton, Glyph::ArrowLeft)
         }
 
         fn state(&self) -> WidgetState {
@@ -512,13 +512,13 @@ mod tests {
 
     #[test]
     fn a_taskbar_arrow_is_two_fifths_of_its_button_as_fluxbox_draws_it() {
-        let layers = crate::theme::ThemeLayers::from_toml(
+        let layers = crate::style::StyleLayers::from_toml(
             "[default]\ntexture = { solid = \"black\" }\nglyph_color = \"white\"\n",
         )
-        .expect("a valid theme");
+        .expect("a valid style");
         let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
         let mut panel = Panel::new(Arrow, Size::new(20, 20));
-        assert!(panel.paint(&Theme::resolve(&layers), &mut typesetter));
+        assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
         let pixels = panel.pixels().expect("painted");
         // Any coverage at all: the arrow is smoothed at its edges.
         let lit = |x, y| pixels.pixel(x, y).is_some_and(|pixel| pixel.red() > 0);
@@ -544,14 +544,14 @@ mod tests {
 
         fn build(&self) -> Widget<TitlebarHit> {
             let row = || {
-                let row = Widget::row(ThemeElement::Label, Vec::new());
+                let row = Widget::row(StyleElement::Label, Vec::new());
                 if self.rows_have_background {
                     row
                 } else {
                     row.without_background()
                 }
             };
-            Widget::column(ThemeElement::Titlebar, vec![row(), row()])
+            Widget::column(StyleElement::Titlebar, vec![row(), row()])
         }
 
         fn state(&self) -> WidgetState {
@@ -569,7 +569,7 @@ mod tests {
             },
             Size::new(40, 40),
         );
-        assert!(panel.paint(&Theme::built_in(), &mut typesetter));
+        assert!(panel.paint(&Style::built_in(), &mut typesetter));
         let top = |y| {
             let pixel = panel
                 .pixels()
@@ -599,7 +599,7 @@ mod tests {
         type Hit = ();
 
         fn build(&self) -> Widget<()> {
-            Widget::glyph(ThemeElement::Button, self.0)
+            Widget::glyph(StyleElement::Button, self.0)
         }
 
         fn state(&self) -> WidgetState {
@@ -612,9 +612,9 @@ mod tests {
     fn drawing_of(glyph: Glyph) -> Vec<String> {
         let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
         let mut panel = Panel::new(OneGlyph(glyph), Size::new(40, 40));
-        assert!(panel.paint(&Theme::built_in(), &mut typesetter));
+        assert!(panel.paint(&Style::built_in(), &mut typesetter));
         let pixels = panel.pixels().expect("a painted panel");
-        // The glyph is white on the theme's grey gradient.
+        // The glyph is white on the style's grey gradient.
         (0..40)
             .map(|y| {
                 (0..40)

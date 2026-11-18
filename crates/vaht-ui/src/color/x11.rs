@@ -2,7 +2,7 @@
 //! without spaces as `XParseColor` matches them, sorted by name for binary
 //! search.
 //!
-//! Fluxbox styles name colors this way (`grey55`, `SteelBlue`), and themes
+//! Fluxbox styles name colors this way (`grey55`, `SteelBlue`), and styles
 //! may too (02 §10.1). The list has not changed since the 1990s; it was
 //! generated once, from the same table fluxland uses.
 

@@ -71,7 +71,7 @@ use crate::client::{ClientListener, ListenError};
 use crate::config::{
     Action, Command, Config, ConfigProblem, ConfigSource, Delay, FocusModel, KeyChord, Loaded,
     MenuGenerator, MenuRequest, Menus, Modifiers, ResizeFrom, SettingChange, SettingOverrides,
-    ThemeFile, WindowManagerAction,
+    StyleFile, WindowManagerAction,
 };
 use crate::config::{CycleOrder, WindowCycle};
 use crate::config::{
@@ -373,7 +373,7 @@ impl Compositor {
         let window_manager = WindowManager::new(
             &config.settings,
             Self::bare_output_areas(&outputs),
-            config.theme.metrics(),
+            config.style.metrics(),
         );
         let mut launcher = Launcher::new(
             listener.socket_name().to_os_string(),
@@ -728,8 +728,8 @@ impl Compositor {
         self.menus.set_search(config.settings.menus.search);
         self.window_manager.apply_settings(&config.settings);
         self.taskbars.apply(&config.settings.taskbar);
-        if config.theme != self.config.theme {
-            self.window_manager.restyle(config.theme.metrics());
+        if config.style != self.config.style {
+            self.window_manager.restyle(config.style.metrics());
             for taskbar in self.taskbars.iter_mut() {
                 taskbar.invalidate();
             }
@@ -1834,9 +1834,9 @@ impl Compositor {
     /// the same as the screen would.
     pub(crate) fn prepare_frames(&mut self) {
         self.window_manager
-            .paint_frames(&self.config.theme, (&mut self.typesetter, &mut self.icons));
+            .paint_frames(&self.config.style, (&mut self.typesetter, &mut self.icons));
         self.frame_textures
-            .update(&self.window_manager, &self.config.theme, &self.ledger);
+            .update(&self.window_manager, &self.config.style, &self.ledger);
         self.sync_taskbars();
         let outputs = &self.outputs;
         let has_resized = self.taskbars.prepare(
@@ -1846,20 +1846,20 @@ impl Compositor {
                     .map_or_else(|| outputs.primary_geometry(), Outputs::geometry)
             },
             (&self.window_manager, &self.config.settings.taskbar),
-            &self.config.theme,
+            &self.config.style,
             (&mut self.typesetter, &mut self.icons),
         );
         if has_resized {
             // A taskbar took or gave up a row: maximized windows follow.
             self.refresh_output_area();
         }
-        self.menus.prepare(&self.config.theme, &mut self.typesetter);
+        self.menus.prepare(&self.config.style, &mut self.typesetter);
         let output_areas: Vec<_> = self.outputs.iter().map(Outputs::geometry).collect();
         self.config_banner
             .prepare(&output_areas, &mut self.typesetter);
         self.backdrop.prepare(&output_areas, &self.window_manager);
         self.outline
-            .update(self.window_manager.outline(), &self.config.theme);
+            .update(self.window_manager.outline(), &self.config.style);
         self.snap_overlay.update(&self.window_manager);
         self.cursor.prepare(self.start_time.elapsed());
     }
@@ -2382,7 +2382,7 @@ impl Compositor {
             let usable = OutputLayers::new(output, whole).usable_area();
             let usable = match self.taskbars.on_output(&output.name()) {
                 Some(taskbar) => {
-                    taskbar.reserve(usable, whole, self.config.theme.metrics().taskbar_height)
+                    taskbar.reserve(usable, whole, self.config.style.metrics().taskbar_height)
                 }
                 None => usable,
             };
@@ -2779,7 +2779,7 @@ impl Compositor {
             model,
             at,
             bounds,
-            (&self.config.theme, &mut self.typesetter),
+            (&self.config.style, &mut self.typesetter),
         );
         self.schedule_render();
     }
@@ -3027,7 +3027,7 @@ impl Compositor {
                 .launcher
                 .show_dialog("command", self.config_source.directory()),
             Action::Settings => self.launcher.show_settings(),
-            Action::SetTheme(name) => self.change_setting(SettingChange::theme(name)),
+            Action::SetStyle(name) => self.change_setting(SettingChange::style(name)),
             Action::SetSetting(change) | Action::UnsetSetting(change) => {
                 self.change_setting(change.clone());
             }
@@ -3173,7 +3173,7 @@ impl Compositor {
             model,
             at,
             bounds,
-            (&self.config.theme, &mut self.typesetter),
+            (&self.config.style, &mut self.typesetter),
         );
         self.menus.mark_opened_by(request.clone(), window);
         self.schedule_render();
@@ -3192,9 +3192,9 @@ impl Compositor {
         let named_icons = self.named_icons_for_menus(extra_icons);
         let builder = MenuBuilder::new(&self.config.menus, &self.window_manager, window)
             .with_named_icons(named_icons)
-            .with_themes(
-                ThemeFile::available(self.config_source.directory()),
-                self.config.settings.theme.as_deref(),
+            .with_styles(
+                StyleFile::available(self.config_source.directory()),
+                self.config.settings.style.as_deref(),
             )
             .with_window_icons(icons)
             .with_outputs(OutputChoices {
@@ -3270,7 +3270,7 @@ impl Compositor {
         };
         if self
             .menus
-            .fill_pipe(number, model, (&self.config.theme, &mut self.typesetter))
+            .fill_pipe(number, model, (&self.config.style, &mut self.typesetter))
         {
             tracing::debug!(number, "pipe menu filled");
             self.schedule_render();
@@ -3283,7 +3283,7 @@ impl Compositor {
         if !self.config.settings.menus.window_icons {
             return std::collections::HashMap::new();
         }
-        let size = vaht_ui::WidgetIcon::side(self.config.theme.metrics().menu.item_height);
+        let size = vaht_ui::WidgetIcon::side(self.config.style.metrics().menu.item_height);
         self.window_manager
             .windows_top_down()
             .filter_map(|window| Some((window.id(), window.icon_in(&mut self.icons, size)?)))
@@ -3296,7 +3296,7 @@ impl Compositor {
         &mut self,
         extra: &[&str],
     ) -> std::collections::HashMap<String, vaht_ui::Icon> {
-        let size = vaht_ui::WidgetIcon::side(self.config.theme.metrics().menu.item_height);
+        let size = vaht_ui::WidgetIcon::side(self.config.style.metrics().menu.item_height);
         let directory = self.config_source.directory();
         self.config
             .menus
@@ -3314,7 +3314,7 @@ impl Compositor {
     /// pointer has rested on it.
     pub(crate) fn open_highlighted_submenu(&mut self) {
         self.menus
-            .open_highlighted_submenu((&self.config.theme, &mut self.typesetter));
+            .open_highlighted_submenu((&self.config.style, &mut self.typesetter));
         self.start_pipe_menu();
         self.schedule_render();
     }
@@ -3332,7 +3332,7 @@ impl Compositor {
             model,
             menu.at,
             bounds,
-            (&self.config.theme, &mut self.typesetter),
+            (&self.config.style, &mut self.typesetter),
         );
         self.schedule_render();
     }
@@ -3454,7 +3454,7 @@ impl Compositor {
             Some(Some(KeyPress::Menu(key))) => {
                 let chosen = self
                     .menus
-                    .key(key, (&self.config.theme, &mut self.typesetter));
+                    .key(key, (&self.config.style, &mut self.typesetter));
                 self.start_pipe_menu();
                 self.schedule_render();
                 if let Some(choice) = chosen {
@@ -3540,7 +3540,7 @@ impl Compositor {
             .at(location)
             .filter(|_| !self.menus.is_open())
             .and_then(|taskbar| {
-                taskbar.tooltip_at(location, &self.config.theme, &mut self.typesetter)
+                taskbar.tooltip_at(location, &self.config.style, &mut self.typesetter)
             });
         let delay = self.config.settings.taskbar.tooltip_delay();
         if self
@@ -3560,7 +3560,7 @@ impl Compositor {
             .map_or_else(|| self.outputs.primary_geometry(), Outputs::geometry);
         let pointer = pointer.to_i32_round();
         self.tooltip
-            .show(pointer, bounds, (&self.config.theme, &mut self.typesetter));
+            .show(pointer, bounds, (&self.config.style, &mut self.typesetter));
         tracing::debug!("tooltip shown");
         self.schedule_render();
     }
@@ -3696,7 +3696,7 @@ impl Compositor {
                 if self.menus.is_open() {
                     let chosen = self
                         .menus
-                        .release(location, (&self.config.theme, &mut self.typesetter));
+                        .release(location, (&self.config.style, &mut self.typesetter));
                     self.start_pipe_menu();
                     self.schedule_render();
                     if let Some(choice) = chosen {

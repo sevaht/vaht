@@ -1,6 +1,6 @@
-//! Reading theme files (02 §10.1): TOML tables into [`ThemeLayers`].
+//! Reading style files (02 §10.1): TOML tables into [`StyleLayers`].
 //!
-//! A theme file's tables are its layers: `[default]`, `[state.<state>]`,
+//! A style file's tables are its layers: `[default]`, `[state.<state>]`,
 //! `[<element>]` and `[<element>.<state>]`, where an element is a dotted
 //! path such as `window.titlebar`. An element's table holds its style
 //! properties beside its states' tables (and, for `taskbar`, the tables of
@@ -16,7 +16,7 @@ use std::fmt;
 
 use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 
-use super::{BorderStyle, Bullet, StylePatch, ThemeElement, ThemeLayers, WidgetState};
+use super::{BorderStyle, Bullet, ElementStylePatch, StyleElement, StyleLayers, WidgetState};
 use crate::color::Color;
 use crate::corner::{Corner, CornerSet};
 use crate::geometry::Insets;
@@ -29,10 +29,10 @@ const PLANNED_PROPERTIES: [&str; 2] = ["submenu_indicator", "interlaced"];
 
 /// The elements drawn whole with an `alpha`: the taskbar, a menu and a
 /// tooltip.
-const TRANSLUCENT_ELEMENTS: [ThemeElement; 3] = [
-    ThemeElement::Taskbar,
-    ThemeElement::MenuFrame,
-    ThemeElement::Tooltip,
+const TRANSLUCENT_ELEMENTS: [StyleElement; 3] = [
+    StyleElement::Taskbar,
+    StyleElement::MenuFrame,
+    StyleElement::Tooltip,
 ];
 
 /// The properties only the element that may be rounded takes.
@@ -40,10 +40,10 @@ const CORNER_PROPERTIES: [&str; 2] = ["corner_radius", "corners"];
 
 /// The elements whose corners may be rounded: a window frame's outline and
 /// a menu's.
-const ROUNDED_ELEMENTS: [ThemeElement; 3] = [
-    ThemeElement::Border,
-    ThemeElement::MenuFrame,
-    ThemeElement::Tooltip,
+const ROUNDED_ELEMENTS: [StyleElement; 3] = [
+    StyleElement::Border,
+    StyleElement::MenuFrame,
+    StyleElement::Tooltip,
 ];
 
 /// States of 02 §10.1 that vaht does not have yet.
@@ -52,8 +52,8 @@ const PLANNED_STATES: [&str; 1] = ["active"];
 /// Elements of 02 §10.1 that vaht does not have yet.
 const PLANNED_ELEMENTS: [&str; 2] = ["taskbar.tray", "snap-picker"];
 
-impl ThemeLayers {
-    /// Reads a theme file's text.
+impl StyleLayers {
+    /// Reads a style file's text.
     ///
     /// # Errors
     ///
@@ -63,7 +63,7 @@ impl ThemeLayers {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for ThemeLayers {
+impl<'de> serde::Deserialize<'de> for StyleLayers {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut layers = Self::default();
         deserializer.deserialize_map(Table {
@@ -74,13 +74,13 @@ impl<'de> serde::Deserialize<'de> for ThemeLayers {
     }
 }
 
-/// One table of a theme file, at `path` (empty for the file itself), whose
+/// One table of a style file, at `path` (empty for the file itself), whose
 /// contents go into `layers`.
 struct Table<'layers> {
     /// The dotted path of the table.
     path: String,
     /// Where what it says goes.
-    layers: &'layers mut ThemeLayers,
+    layers: &'layers mut StyleLayers,
 }
 
 impl Table<'_> {
@@ -95,7 +95,7 @@ impl Table<'_> {
 
     /// Returns whether `path` names an element or leads to one.
     fn leads_to_element(path: &str) -> bool {
-        <ThemeElement as strum::IntoEnumIterator>::iter().any(|element| {
+        <StyleElement as strum::IntoEnumIterator>::iter().any(|element| {
             element.path() == path
                 || element
                     .path()
@@ -113,7 +113,7 @@ impl<'de> Visitor<'de> for Table<'_> {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
-        let element = ThemeElement::at_path(&self.path);
+        let element = StyleElement::at_path(&self.path);
         while let Some(key) = map.next_key::<String>()? {
             if self.path.is_empty() && key == "default" {
                 self.layers.default = map.next_value()?;
@@ -132,7 +132,7 @@ impl<'de> Visitor<'de> for Table<'_> {
                 }
                 match state_named(&key) {
                     Ok(Some(state)) => {
-                        let patch: StylePatch = map.next_value()?;
+                        let patch: ElementStylePatch = map.next_value()?;
                         self.layers.by_element_state.insert((element, state), patch);
                         continue;
                     }
@@ -153,7 +153,7 @@ impl<'de> Visitor<'de> for Table<'_> {
                         "`{key}` in [{}] is no style property, state or element",
                         self.path
                     ),
-                    None => format!("`{path}` is no element of a theme"),
+                    None => format!("`{path}` is no element of a style"),
                 };
                 return Err(refuse(&mut map, reason));
             }
@@ -177,7 +177,7 @@ impl<'de> DeserializeSeed<'de> for Table<'_> {
 /// The `[state]` table: one style per state.
 struct States<'layers> {
     /// Where the states' styles go.
-    layers: &'layers mut ThemeLayers,
+    layers: &'layers mut StyleLayers,
 }
 
 impl<'de> Visitor<'de> for States<'_> {
@@ -199,7 +199,7 @@ impl<'de> Visitor<'de> for States<'_> {
                 }
                 Err(reason) => return Err(refuse(&mut map, reason)),
             };
-            let patch: StylePatch = map.next_value()?;
+            let patch: ElementStylePatch = map.next_value()?;
             self.layers.by_state.insert(state, patch);
         }
         Ok(())
@@ -244,7 +244,7 @@ impl<'de> DeserializeSeed<'de> for Refusal {
     }
 }
 
-impl StylePatch {
+impl ElementStylePatch {
     /// Reads the property `key` from `map` into this patch, for `element`
     /// alone (none: for several, as the default and states are); returns
     /// whether `key` is a property at all.
@@ -252,7 +252,7 @@ impl StylePatch {
         &mut self,
         key: &str,
         map: &mut A,
-        element: Option<ThemeElement>,
+        element: Option<StyleElement>,
     ) -> Result<bool, A::Error> {
         if CORNER_PROPERTIES.contains(&key)
             && !element.is_some_and(|element| ROUNDED_ELEMENTS.contains(&element))
@@ -318,20 +318,23 @@ impl StylePatch {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for StylePatch {
+impl<'de> serde::Deserialize<'de> for ElementStylePatch {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         /// Reads a table of style properties, and nothing else.
         struct PatchVisitor;
 
         impl<'de> Visitor<'de> for PatchVisitor {
-            type Value = StylePatch;
+            type Value = ElementStylePatch;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a table of style properties")
             }
 
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<StylePatch, A::Error> {
-                let mut patch = StylePatch::default();
+            fn visit_map<A: MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<ElementStylePatch, A::Error> {
+                let mut patch = ElementStylePatch::default();
                 while let Some(key) = map.next_key::<String>()? {
                     if !patch.read_property(&key, &mut map, None)? {
                         return Err(de::Error::custom(format!("`{key}` is no style property")));
@@ -711,27 +714,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_built_in_theme_reads() {
-        let layers = ThemeLayers::from_toml(crate::Theme::BUILT_IN);
+    fn the_built_in_style_reads() {
+        let layers = StyleLayers::from_toml(crate::Style::BUILT_IN);
         assert!(layers.is_ok(), "{layers:?}");
     }
 
     #[test]
     fn the_frame_s_outline_takes_rounded_corners() {
-        let layers = ThemeLayers::from_toml(
+        let layers = StyleLayers::from_toml(
             "[window.border]\ncorner_radius = 8\ncorners = [\"top-left\", \"top-right\"]\n",
         )
-        .expect("a valid theme");
-        let theme = crate::Theme::resolve(&layers);
+        .expect("a valid style");
+        let style = crate::Style::resolve(&layers);
         assert_eq!(
-            theme.metrics().frame_corners,
+            style.metrics().frame_corners,
             crate::CornerRadii::of(8, [Corner::TopLeft, Corner::TopRight])
         );
     }
 
     #[test]
     fn tables_become_the_four_layers() {
-        let layers = ThemeLayers::from_toml(
+        let layers = StyleLayers::from_toml(
             "[default]\ntext_color = \"red\"\n\
              [state.unfocused]\ntext_color = \"grey55\"\n\
              [window.label]\njustify = \"left\"\n\
@@ -739,23 +742,23 @@ mod tests {
              [taskbar]\nheight = 24\n\
              [taskbar.window-list.entry.focused]\ntexture = { solid = \"grey55\", bevel = \"raised\" }\n",
         )
-        .expect("a valid theme");
+        .expect("a valid style");
         assert_eq!(layers.default.text_color, Some(Color::rgb(255, 0, 0)));
         assert_eq!(
             layers.by_state[&WidgetState::Unfocused].text_color,
             Some(Color::rgb(140, 140, 140))
         );
         assert_eq!(
-            layers.by_element[&ThemeElement::Label].justify,
+            layers.by_element[&StyleElement::Label].justify,
             Some(Justify::Left)
         );
         assert_eq!(
-            layers.by_element_state[&(ThemeElement::Label, WidgetState::Pressed)].text_color,
+            layers.by_element_state[&(StyleElement::Label, WidgetState::Pressed)].text_color,
             Some(Color::BLACK)
         );
-        assert_eq!(layers.by_element[&ThemeElement::Taskbar].height, Some(24));
+        assert_eq!(layers.by_element[&StyleElement::Taskbar].height, Some(24));
         assert_eq!(
-            layers.by_element_state[&(ThemeElement::WindowListEntry, WidgetState::Focused)].texture,
+            layers.by_element_state[&(StyleElement::WindowListEntry, WidgetState::Focused)].texture,
             Some(Texture::solid(Color::rgb(140, 140, 140)).with_bevel(Bevel::Raised))
         );
     }
@@ -803,7 +806,7 @@ mod tests {
         #[case] expected: &str,
         #[case] line: usize,
     ) {
-        let error = ThemeLayers::from_toml(text).expect_err(text);
+        let error = StyleLayers::from_toml(text).expect_err(text);
         assert!(error.message().contains(expected), "{error}");
         let start = error.span().expect("the problem is located").start;
         let found = text[..start].matches('\n').count() + 1;

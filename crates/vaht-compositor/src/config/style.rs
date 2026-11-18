@@ -1,43 +1,43 @@
-//! Themes: `themes/<name>.toml` in the configuration directory, or in the
-//! system's theme directory (02 §10).
+//! Styles: `styles/<name>.toml` in the configuration directory, or in the
+//! system's style directory (02 §10).
 //!
-//! `settings.toml` names the theme; [`ThemeFile`] finds it, the user's copy
-//! first, and reads it into a resolved [`Theme`] with the same line-and-
+//! `settings.toml` names the style; [`StyleFile`] finds it, the user's copy
+//! first, and reads it into a resolved [`Style`] with the same line-and-
 //! column errors as every other configuration file.
 
 use std::io;
 use std::path::{Path, PathBuf};
 
-use vaht_ui::Theme;
-use vaht_ui::theme::ThemeLayers;
+use vaht_ui::Style;
+use vaht_ui::style::StyleLayers;
 
 use super::ConfigError;
 
-/// A theme file, found by name.
+/// A style file, found by name.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ThemeFile {
+pub(crate) struct StyleFile {
     /// Where it is.
     path: PathBuf,
 }
 
-impl ThemeFile {
+impl StyleFile {
     /// The directory, inside the configuration directory, of the user's
-    /// themes.
-    pub(crate) const DIRECTORY: &str = "themes";
+    /// styles.
+    pub(crate) const DIRECTORY: &str = "styles";
 
-    /// The directory of themes installed with vaht.
-    const SYSTEM_DIRECTORY: &str = "/usr/share/vaht/themes";
+    /// The directory of styles installed with vaht.
+    const SYSTEM_DIRECTORY: &str = "/usr/share/vaht/styles";
 
-    /// Finds the theme `name`: in the `themes` directory of the
-    /// configuration `directory`, then among the system's themes.
+    /// Finds the style `name`: in the `styles` directory of the
+    /// configuration `directory`, then among the system's styles.
     ///
     /// # Errors
     ///
-    /// Returns an error if `name` is not a plain name, or no such theme
+    /// Returns an error if `name` is not a plain name, or no such style
     /// exists.
     pub(crate) fn find(directory: &Path, name: &str) -> Result<Self, ConfigError> {
         if name.is_empty() || name.contains(['/', '\0']) || name.starts_with('.') {
-            return Err(ConfigError::ThemeName {
+            return Err(ConfigError::StyleName {
                 name: name.to_owned(),
             });
         }
@@ -50,13 +50,13 @@ impl ThemeFile {
             .iter()
             .find(|path| path.is_file())
             .map(|path| Self { path: path.clone() })
-            .ok_or_else(|| ConfigError::MissingTheme {
+            .ok_or_else(|| ConfigError::MissingStyle {
                 name: name.to_owned(),
                 searched: searched.to_vec(),
             })
     }
 
-    /// Returns the names of the themes there are, sorted, each once: the
+    /// Returns the names of the styles there are, sorted, each once: the
     /// user's, in the configuration `directory`, and the system's.
     pub(crate) fn available(directory: &Path) -> Vec<String> {
         let directories = [
@@ -70,10 +70,10 @@ impl ThemeFile {
             .flatten()
             .filter_map(|entry| {
                 let path = entry.path();
-                let is_theme = path
+                let is_style = path
                     .extension()
                     .is_some_and(|extension| extension == "toml");
-                is_theme.then(|| path.file_stem()?.to_str().map(ToOwned::to_owned))?
+                is_style.then(|| path.file_stem()?.to_str().map(ToOwned::to_owned))?
             })
             .collect();
         names.sort();
@@ -81,20 +81,20 @@ impl ThemeFile {
         names
     }
 
-    /// Reads and resolves the theme.
+    /// Reads and resolves the style.
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be read or is not a valid theme.
-    pub(crate) fn read(&self) -> Result<Theme, ConfigError> {
+    /// Returns an error if the file cannot be read or is not a valid style.
+    pub(crate) fn read(&self) -> Result<Style, ConfigError> {
         let text =
             std::fs::read_to_string(&self.path).map_err(|error: io::Error| ConfigError::Read {
                 path: self.path.clone(),
                 error,
             })?;
-        let layers: ThemeLayers = toml::from_str(&text)
+        let layers: StyleLayers = toml::from_str(&text)
             .map_err(|error| ConfigError::invalid(self.path.clone(), &text, &error))?;
-        Ok(Theme::resolve(&layers))
+        Ok(Style::resolve(&layers))
     }
 }
 
@@ -105,23 +105,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_theme_in_the_configuration_directory_is_found_and_read() {
+    fn a_style_in_the_configuration_directory_is_found_and_read() {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let themes = directory.path().join(ThemeFile::DIRECTORY);
-        std::fs::create_dir(&themes).expect("the themes directory");
-        std::fs::write(themes.join("mine.toml"), "[taskbar]\nheight = 30\n").expect("written");
-        let theme = ThemeFile::find(directory.path(), "mine")
+        let styles = directory.path().join(StyleFile::DIRECTORY);
+        std::fs::create_dir(&styles).expect("the styles directory");
+        std::fs::write(styles.join("mine.toml"), "[taskbar]\nheight = 30\n").expect("written");
+        let style = StyleFile::find(directory.path(), "mine")
             .and_then(|file| file.read())
-            .expect("the theme reads");
-        assert_eq!(theme.metrics().taskbar_height, 30);
+            .expect("the style reads");
+        assert_eq!(style.metrics().taskbar_height, 30);
     }
 
     #[rstest]
-    #[case::missing("nowhere", "no theme `nowhere`")]
-    #[case::a_path("../settings", "not a theme name")]
-    fn a_theme_that_cannot_be_found_is_explained(#[case] name: &str, #[case] expected: &str) {
+    #[case::missing("nowhere", "no style `nowhere`")]
+    #[case::a_path("../settings", "not a style name")]
+    fn a_style_that_cannot_be_found_is_explained(#[case] name: &str, #[case] expected: &str) {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let error = ThemeFile::find(directory.path(), name).expect_err(name);
+        let error = StyleFile::find(directory.path(), name).expect_err(name);
         assert!(error.to_string().contains(expected), "{error}");
     }
 }

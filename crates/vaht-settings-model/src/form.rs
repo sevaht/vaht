@@ -1078,11 +1078,11 @@ mod tests {
     fn a_type_that_may_be_null_is_optional() {
         let form = form_of(
             &json!({}),
-            &json!({ "theme": { "type": ["string", "null"] } }),
+            &json!({ "style": { "type": ["string", "null"] } }),
         );
-        let theme = setting(&form, "theme");
-        assert!(theme.is_optional);
-        assert_eq!(theme.kind, SettingKind::Text);
+        let style = setting(&form, "style");
+        assert!(style.is_optional);
+        assert_eq!(style.kind, SettingKind::Text);
     }
 
     #[test]

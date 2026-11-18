@@ -15,7 +15,7 @@ use vaht_test_support::{
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 
-/// The built-in theme's border color (`grey60`).
+/// The built-in style's border color (`grey60`).
 const BORDER_COLOR: [u8; 3] = [153, 153, 153];
 
 /// A headless vaht with one client showing one window.
@@ -112,7 +112,7 @@ impl OneWindow {
     }
 }
 
-/// Returns whether `color` is a shade of grey, as the built-in theme's
+/// Returns whether `color` is a shade of grey, as the built-in style's
 /// titlebar gradients are.
 fn is_grey(color: [u8; 3]) -> bool {
     color[0] == color[1] && color[1] == color[2]
@@ -407,7 +407,7 @@ fn the_handle_runs_under_the_content_with_a_grip_at_each_end() {
     const GRIP: [u8; 3] = [0, 255, 0];
     /// Fluxbox's grip width, which vaht keeps.
     const GRIP_WIDTH: u32 = 20;
-    let theme = "\
+    let style = "\
 [window.border]
 border = { width = 1, color = \"#0000ff\" }
 [window.handle]
@@ -421,9 +421,9 @@ texture = { solid = \"#00ff00\" }
         &[
             (
                 "settings.toml",
-                "theme = \"test\"\n[windows.frame]\nhandle = true\n[placement]\nstrategy = \"cascade\"\n",
+                "style = \"test\"\n[windows.frame]\nhandle = true\n[placement]\nstrategy = \"cascade\"\n",
             ),
-            ("themes/test.toml", theme),
+            ("styles/test.toml", style),
         ],
     );
     let mut client = TestClient::connect(vaht.socket());
@@ -523,7 +523,7 @@ fn dragging_the_left_grip_resizes_from_the_bottom_left_corner() {
 fn a_rounded_corner_is_cut_away_with_the_line_following_it() {
     const LINE: [u8; 3] = [0, 0, 255];
     const TITLEBAR: [u8; 3] = [255, 0, 0];
-    let theme = "\
+    let style = "\
 [default]
 text_effect = \"none\"
 [window.titlebar]
@@ -541,9 +541,9 @@ corners = [\"top-left\", \"top-right\"]
         &[
             (
                 "settings.toml",
-                "theme = \"test\"\n[placement]\nstrategy = \"cascade\"\n",
+                "style = \"test\"\n[placement]\nstrategy = \"cascade\"\n",
             ),
-            ("themes/test.toml", theme),
+            ("styles/test.toml", style),
         ],
     );
     let mut client = TestClient::connect(vaht.socket());

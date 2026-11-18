@@ -113,7 +113,7 @@ impl<L: Link> SettingsApp<L> {
                     value,
                     defaults,
                     changed,
-                    themes: _,
+                    styles: _,
                     problems,
                 } => {
                     if let Some(editor) = &mut self.editor {
@@ -474,7 +474,7 @@ mod tests {
                 value: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
                 defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
                 changed: Vec::new(),
-                themes: Vec::new(),
+                styles: Vec::new(),
                 problems: Vec::new(),
             },
         ]);
@@ -541,7 +541,7 @@ mod tests {
             value: json!({ "focus": { "raise_on_click": true, "model": "sloppy", "auto_raise_delay_ms": 250 } }),
             defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
             changed: Vec::new(),
-            themes: Vec::new(),
+            styles: Vec::new(),
                 problems: Vec::new(),
         });
         let mut harness = harness_of(&mut app);
@@ -566,7 +566,7 @@ mod tests {
             value: json!({ "focus": { "raise_on_click": true, "model": "sloppy", "auto_raise_delay_ms": 250 } }),
             defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
             changed: vec![vec!["focus".to_owned(), "model".to_owned()]],
-            themes: Vec::new(),
+            styles: Vec::new(),
                 problems: Vec::new(),
         });
         let mut harness = harness_of(&mut app);
@@ -631,7 +631,7 @@ mod tests {
                 value: json!({ "rows": 1 }),
                 defaults: json!({ "rows": 1 }),
                 changed: Vec::new(),
-                themes: Vec::new(),
+                styles: Vec::new(),
                 problems: Vec::new(),
             },
         ]);
@@ -659,7 +659,7 @@ mod tests {
                 defaults: value.clone(),
                 value,
                 changed: Vec::new(),
-                themes: Vec::new(),
+                styles: Vec::new(),
                 problems: Vec::new(),
             },
         ]);
@@ -847,7 +847,7 @@ mod tests {
             value: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
             defaults: json!({ "focus": { "raise_on_click": true, "model": "click", "auto_raise_delay_ms": 250 } }),
             changed: Vec::new(),
-            themes: Vec::new(),
+            styles: Vec::new(),
             problems: vec![
                 "settings.toml: taskbar.windows: unknown field (using the default)".to_owned(),
             ],

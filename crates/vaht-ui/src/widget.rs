@@ -2,13 +2,13 @@
 //!
 //! A panel's content builds a [`Widget`] tree from its own state; nothing in
 //! the tree draws itself or handles input. Each widget names the
-//! [`ThemeElement`] that styles it, how much room it wants
+//! [`StyleElement`] that styles it, how much room it wants
 //! ([`SizePolicy`]), and optionally the `Hit` value the content wants back
 //! when the widget is clicked. A *button* also looks pressed while held; a
 //! plain hit region (a title to drag, say) never changes look.
 
 use crate::icon::WidgetIcon;
-use crate::theme::{ThemeElement, WidgetState};
+use crate::style::{StyleElement, WidgetState};
 
 /// One node of a panel's content.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,7 +16,7 @@ pub struct Widget<Hit> {
     /// What it shows.
     pub kind: WidgetKind<Hit>,
     /// What styles it.
-    pub element: ThemeElement,
+    pub element: StyleElement,
     /// How much room it takes along its parent's main axis.
     pub size: SizePolicy,
     /// What clicking it reports, if it can be clicked.
@@ -42,20 +42,20 @@ pub struct Widget<Hit> {
 impl<Hit> Widget<Hit> {
     /// Returns a text widget that takes the room its text needs.
     #[must_use]
-    pub fn text(element: ThemeElement, text: impl Into<String>) -> Self {
+    pub fn text(element: StyleElement, text: impl Into<String>) -> Self {
         Self::new(element, WidgetKind::Text(text.into()), SizePolicy::Fit)
     }
 
     /// Returns a square widget showing `glyph`.
     #[must_use]
-    pub const fn glyph(element: ThemeElement, glyph: Glyph) -> Self {
+    pub const fn glyph(element: StyleElement, glyph: Glyph) -> Self {
         Self::new(element, WidgetKind::Glyph(glyph), SizePolicy::Square)
     }
 
     /// Returns a line of text being edited, with its cursor, that takes the
     /// room left over.
     #[must_use]
-    pub const fn field(element: ThemeElement, field: TextField) -> Self {
+    pub const fn field(element: StyleElement, field: TextField) -> Self {
         Self::new(
             element,
             WidgetKind::Field(field),
@@ -66,13 +66,13 @@ impl<Hit> Widget<Hit> {
     /// Returns a widget that only shows its element's background and takes
     /// the room left over.
     #[must_use]
-    pub const fn fill(element: ThemeElement) -> Self {
+    pub const fn fill(element: StyleElement) -> Self {
         Self::new(element, WidgetKind::Fill, SizePolicy::Fill { weight: 1 })
     }
 
     /// Returns a horizontal row of `children` on `element`'s background.
     #[must_use]
-    pub const fn row(element: ThemeElement, children: Vec<Self>) -> Self {
+    pub const fn row(element: StyleElement, children: Vec<Self>) -> Self {
         Self::new(
             element,
             WidgetKind::Row(children),
@@ -82,7 +82,7 @@ impl<Hit> Widget<Hit> {
 
     /// Returns a vertical column of `children` on `element`'s background.
     #[must_use]
-    pub const fn column(element: ThemeElement, children: Vec<Self>) -> Self {
+    pub const fn column(element: StyleElement, children: Vec<Self>) -> Self {
         Self::new(
             element,
             WidgetKind::Column(children),
@@ -162,7 +162,7 @@ impl<Hit> Widget<Hit> {
     }
 
     /// Creates a widget that cannot be clicked.
-    const fn new(element: ThemeElement, kind: WidgetKind<Hit>, size: SizePolicy) -> Self {
+    const fn new(element: StyleElement, kind: WidgetKind<Hit>, size: SizePolicy) -> Self {
         Self {
             kind,
             element,

@@ -161,7 +161,7 @@ impl Toplevel {
                 Self::largest_buffer(icon.buffers()),
             )
         });
-        // A name scales with the theme, so it comes before a picture.
+        // A name scales with the style, so it comes before a picture.
         let icon = match (icon_name, icon_buffer) {
             (Some(name), _) => Some(ClientIcon::Named(name)),
             (None, Some(buffer)) => self.icon_in(&buffer, read).map(ClientIcon::Pixels),

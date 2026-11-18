@@ -25,8 +25,8 @@ mod windows;
 mod workspaces;
 
 use smithay::utils::{Logical, Point, Rectangle};
-use vaht_ui::theme::Metrics;
-use vaht_ui::{IconStore, Theme, Typesetter, WidgetIcon};
+use vaht_ui::style::Metrics;
+use vaht_ui::{IconStore, Style, Typesetter, WidgetIcon};
 
 pub(crate) use self::arrange::ArrangeStyle;
 pub(crate) use self::focus::CycleDirection;
@@ -120,11 +120,11 @@ pub(crate) struct WindowManager {
     held_titlebar: Option<WindowId>,
     /// Where windows can be placed on each output.
     outputs: OutputAreas,
-    /// The theme's frame sizes.
-    theme_metrics: Metrics,
+    /// The style's frame sizes.
+    style_metrics: Metrics,
     /// What frames show, from the settings.
     frame: FrameSettings,
-    /// The frame sizes windows are laid out by: the theme's, as `frame`
+    /// The frame sizes windows are laid out by: the style's, as `frame`
     /// takes them.
     metrics: Metrics,
     /// How a resize by hand is shown, from the settings.
@@ -146,7 +146,7 @@ pub(crate) struct WindowManager {
 impl WindowManager {
     /// Creates a window manager with no windows, its workspaces and frames
     /// as `settings` say, placing windows on `output` with frames sized by
-    /// the theme's `metrics`.
+    /// the style's `metrics`.
     pub(crate) fn new(settings: &Settings, outputs: OutputAreas, metrics: Metrics) -> Self {
         let frame = settings.windows.frame.clone();
         Self {
@@ -156,7 +156,7 @@ impl WindowManager {
             snap_minimized: None,
             held_titlebar: None,
             outputs,
-            theme_metrics: metrics,
+            style_metrics: metrics,
             metrics: frame.frame_metrics(metrics),
             frame,
             resize_style: Self::resize_style(settings),
@@ -273,7 +273,7 @@ impl WindowManager {
         self.windows.len()
     }
 
-    /// Returns the frame sizes windows are laid out by: the theme's, less
+    /// Returns the frame sizes windows are laid out by: the style's, less
     /// what the settings leave out of frames.
     pub(crate) const fn metrics(&self) -> Metrics {
         self.metrics
@@ -895,7 +895,7 @@ impl WindowManager {
         self.snapping = settings.windows.snapping.clone();
         if settings.windows.frame != self.frame {
             self.frame = settings.windows.frame.clone();
-            self.restyle(self.theme_metrics);
+            self.restyle(self.style_metrics);
         }
         self.focus_most_recent();
         self.is_redraw_needed = true;
@@ -912,10 +912,10 @@ impl WindowManager {
     }
 
     /// Lays windows out with frames sized by `metrics` from now on, and
-    /// paints every frame again: the theme changed. A floating window's
+    /// paints every frame again: the style changed. A floating window's
     /// content stays where it is; the others are placed again.
     pub(crate) fn restyle(&mut self, metrics: Metrics) {
-        self.theme_metrics = metrics;
+        self.style_metrics = metrics;
         self.metrics = self.frame.frame_metrics(metrics);
         for window in self.windows.iter_mut() {
             window.invalidate_frame();
@@ -926,7 +926,7 @@ impl WindowManager {
     /// Paints every window's frame that changed.
     pub(crate) fn paint_frames(
         &mut self,
-        theme: &Theme,
+        style: &Style,
         (typesetter, icons): (&mut Typesetter, &mut IconStore),
     ) {
         let metrics = self.metrics;
@@ -934,7 +934,7 @@ impl WindowManager {
         let shows_icons = self.frame.icon && icon_size > 0;
         for window in self.windows.iter_mut() {
             window.show_frame_icon(shows_icons.then_some(&mut *icons), icon_size);
-            window.paint_frame(metrics, theme, typesetter);
+            window.paint_frame(metrics, style, typesetter);
         }
     }
 
@@ -1150,7 +1150,7 @@ impl WindowManager {
         true
     }
 
-    /// Applies `change` to `window`, given the theme's metrics.
+    /// Applies `change` to `window`, given the style's metrics.
     fn change_window(
         &mut self,
         window: Option<WindowId>,
@@ -1412,12 +1412,12 @@ mod tests {
         handle_height: 1,
         taskbar_height: 20,
         frame_corners: vaht_ui::CornerRadii::SQUARE,
-        menu: vaht_ui::theme::MenuMetrics {
+        menu: vaht_ui::style::MenuMetrics {
             title_height: 20,
             item_height: 20,
             border_width: 1,
             corners: vaht_ui::CornerRadii::SQUARE,
-            bullet: vaht_ui::theme::Bullet::Triangle,
+            bullet: vaht_ui::style::Bullet::Triangle,
             bullet_side: vaht_ui::MarkSide::Right,
         },
     };
@@ -1931,10 +1931,10 @@ mod tests {
         let window = desk.open();
         let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
         let mut icons = IconStore::from_environment();
-        let theme = Theme::built_in();
+        let style = Style::built_in();
         let mut shows_maximized = |desk: &mut Desk| {
             desk.manager
-                .paint_frames(&theme, (&mut typesetter, &mut icons));
+                .paint_frames(&style, (&mut typesetter, &mut icons));
             desk.window(window).frame().shows_maximized()
         };
         assert!(!shows_maximized(&mut desk), "floating");
@@ -1984,7 +1984,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_theme_keeps_floating_content_still_and_refits_maximized_windows() {
+    fn a_new_style_keeps_floating_content_still_and_refits_maximized_windows() {
         let mut desk = Desk::new();
         let floating = desk.open();
         let content = desk.window(floating).content_area();

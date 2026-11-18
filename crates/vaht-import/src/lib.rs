@@ -9,7 +9,7 @@
 //!
 //! Converted today: `init` to `settings.toml`, `keys` to `bindings.toml`,
 //! `apps` to `rules.toml`, `menu` and `windowmenu` to `menus.toml`, and the
-//! style `init` names to `themes/<name>.toml`, which `settings.toml` then
+//! style `init` names to `styles/<name>.toml`, which `settings.toml` then
 //! chooses. The wallpaper `startup` sets becomes `[wallpaper]`; the rest of
 //! `startup` is reported: its commands belong in `session.autostart`.
 
@@ -138,13 +138,13 @@ impl FluxboxSetup {
             });
         }
         if let Some((path, text)) = &self.style {
-            let name = Self::theme_name(path);
-            let mut theme = StyleFile::new(path, text).convert(&mut report);
-            Self::place_alphas(&init.alphas, Some(&mut theme), &init_path, &mut report);
-            settings.insert("theme", toml_edit::value(name.clone()));
+            let name = Self::style_name(path);
+            let mut vaht_style = StyleFile::new(path, text).convert(&mut report);
+            Self::place_alphas(&init.alphas, Some(&mut vaht_style), &init_path, &mut report);
+            settings.insert("style", toml_edit::value(name.clone()));
             files.push(OutputFile {
-                name: format!("themes/{name}.toml"),
-                text: header(path) + &theme.to_string(),
+                name: format!("styles/{name}.toml"),
+                text: header(path) + &vaht_style.to_string(),
             });
         }
         if self.style.is_none() {
@@ -222,28 +222,28 @@ impl FluxboxSetup {
     }
 
     /// Puts the `alphas` `init` (at `init_path`) sets into the converted
-    /// `theme`; without one, notes in `report` that they are left out.
+    /// `vaht_style`; without one, notes in `report` that they are left out.
     fn place_alphas(
         alphas: &[(&str, i64, usize)],
-        theme: Option<&mut toml_edit::DocumentMut>,
+        vaht_style: Option<&mut toml_edit::DocumentMut>,
         init_path: &Path,
         report: &mut Report,
     ) {
-        let Some(theme) = theme else {
+        let Some(vaht_style) = vaht_style else {
             for (element, _, line) in alphas {
                 report.note(
                     init_path,
                     *line,
                     Reason::NotYetInVaht,
                     format!(
-                        "a translucent {element}: with no style converted, add `alpha` to a theme"
+                        "a translucent {element}: with no style converted, add `alpha` to a vaht style"
                     ),
                 );
             }
             return;
         };
         for (element, alpha, _) in alphas {
-            let mut table = theme.as_item_mut();
+            let mut table = vaht_style.as_item_mut();
             for part in element.split('.') {
                 table = &mut table[part];
             }
@@ -251,10 +251,10 @@ impl FluxboxSetup {
         }
     }
 
-    /// Returns the name the theme converted from the style at `path` gets:
+    /// Returns the name the vaht style converted from the style at `path` gets:
     /// the style's own (its directory's, for a `theme.cfg`), with anything
     /// but letters, digits, `-` and `_` made `-`.
-    fn theme_name(path: &Path) -> String {
+    fn style_name(path: &Path) -> String {
         let named = if path.file_name().is_some_and(|name| name == "theme.cfg") {
             path.parent().unwrap_or(path)
         } else {
@@ -294,7 +294,7 @@ impl FluxboxSetup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputFile {
     /// Its path in the configuration directory, such as `settings.toml` or
-    /// `themes/nacitar.toml`.
+    /// `styles/nacitar.toml`.
     pub name: String,
     /// Its contents.
     pub text: String,

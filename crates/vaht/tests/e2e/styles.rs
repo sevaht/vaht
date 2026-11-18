@@ -1,4 +1,4 @@
-//! Theme tests: `themes/<name>.toml` named in `settings.toml` changing how
+//! Style tests: `styles/<name>.toml` named in `settings.toml` changing how
 //! frames look, read at start and again when the file changes, checked by
 //! screenshots.
 
@@ -9,15 +9,15 @@ use vaht_test_support::{HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR};
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 
-/// Settings that choose the theme `mine`.
-const SETTINGS: &str = "theme = \"mine\"\n";
+/// Settings that choose the style `mine`.
+const SETTINGS: &str = "style = \"mine\"\n";
 
-/// The built-in theme's border color, `grey60`.
+/// The built-in style's border color, `grey60`.
 const BUILT_IN_BORDER: [u8; 3] = [153, 153, 153];
 
-/// A theme whose focused titlebar is solid `color`, `height` pixels tall,
+/// A style whose focused titlebar is solid `color`, `height` pixels tall,
 /// with centered titles, under a black border `border` pixels wide.
-fn theme(color: &str, height: u32, border: u32) -> String {
+fn style(color: &str, height: u32, border: u32) -> String {
     format!(
         "[default]\njustify = \"center\"\n\
          [state.focused]\ntexture = {{ solid = \"{color}\" }}\n\
@@ -49,12 +49,12 @@ fn titlebar_above_content(screenshot: &Screenshot, border_color: [u8; 3]) -> ([u
 }
 
 #[test]
-fn the_theme_the_settings_name_styles_the_frames() {
+fn the_style_the_settings_name_styles_the_frames() {
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),
         &[
             ("settings.toml", SETTINGS),
-            ("themes/mine.toml", &theme("#ff00ff", 30, 2)),
+            ("styles/mine.toml", &style("#ff00ff", 30, 2)),
         ],
     );
     let mut client = TestClient::connect(vaht.socket());
@@ -65,22 +65,22 @@ fn the_theme_the_settings_name_styles_the_frames() {
 }
 
 #[test]
-fn editing_the_theme_restyles_the_open_windows() {
+fn editing_the_style_restyles_the_open_windows() {
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),
         &[
             ("settings.toml", SETTINGS),
-            ("themes/mine.toml", &theme("#ff00ff", 30, 1)),
+            ("styles/mine.toml", &style("#ff00ff", 30, 1)),
         ],
     );
     let mut client = TestClient::connect(vaht.socket());
     client.open_windows(1);
     let reloads = vaht.logged_count("configuration reloaded");
     std::fs::write(
-        vaht.config_directory().join("themes/mine.toml"),
-        theme("#00ffff", 24, 1),
+        vaht.config_directory().join("styles/mine.toml"),
+        style("#00ffff", 24, 1),
     )
-    .expect("the theme is rewritten");
+    .expect("the style is rewritten");
     vaht.wait_for_logged("configuration reloaded", reloads + 1);
     let (color, height) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
     assert_eq!(color, [0x00, 0xff, 0xff]);
@@ -88,7 +88,7 @@ fn editing_the_theme_restyles_the_open_windows() {
 }
 
 #[test]
-fn without_a_theme_named_the_built_in_one_applies() {
+fn without_a_style_named_the_built_in_one_applies() {
     let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
     let mut client = TestClient::connect(vaht.socket());
     client.open_windows(1);
@@ -97,13 +97,13 @@ fn without_a_theme_named_the_built_in_one_applies() {
 }
 
 #[test]
-fn set_theme_and_set_setting_apply_in_place_and_save_settings_writes_them() {
+fn set_style_and_set_setting_apply_in_place_and_save_settings_writes_them() {
     let settings = "# My settings.\n[focus]\nmodel = \"click\"\n";
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),
         &[
             ("settings.toml", settings),
-            ("themes/mine.toml", &theme("#ff00ff", 30, 2)),
+            ("styles/mine.toml", &style("#ff00ff", 30, 2)),
         ],
     );
     let mut client = TestClient::connect(vaht.socket());
@@ -116,9 +116,9 @@ fn set_theme_and_set_setting_apply_in_place_and_save_settings_writes_them() {
             .expect("vaht runs");
         assert!(output.status.success(), "{output:?}");
     };
-    run("set-theme mine");
+    run("set-style mine");
     let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
-    assert_eq!(color, [255, 0, 255], "the theme is in use at once");
+    assert_eq!(color, [255, 0, 255], "the style is in use at once");
     run("set-setting focus.model sloppy");
     run("set-setting taskbar.auto_hide_delay_ms 250");
     let file = vaht.config_directory().join("settings.toml");
@@ -128,7 +128,7 @@ fn set_theme_and_set_setting_apply_in_place_and_save_settings_writes_them() {
     vaht.wait_for_logged("configuration reloaded", 1);
     let written = read();
     assert!(written.starts_with("# My settings.\n"), "{written}");
-    assert!(written.contains("theme = \"mine\"\n"), "{written}");
+    assert!(written.contains("style = \"mine\"\n"), "{written}");
     assert!(written.contains("model = \"sloppy\""), "{written}");
     assert!(
         written.contains("[taskbar]\nauto_hide_delay_ms = 250\n"),

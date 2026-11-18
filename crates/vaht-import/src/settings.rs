@@ -36,7 +36,7 @@ const DROPPED: [(&str, &str); 14] = [
     ("File", "vaht's file names are fixed"),
     (
         "styleOverlay",
-        "themes cannot set the wallpaper, so overlays are not needed",
+        "styles cannot set the wallpaper, so overlays are not needed",
     ),
 ];
 
@@ -98,9 +98,9 @@ pub(crate) struct InitConversion {
     pub(crate) settings: DocumentMut,
     /// `outputs.toml`.
     pub(crate) outputs: Option<DocumentMut>,
-    /// The theme's `alpha`s `init` sets, below fully opaque: each the
-    /// theme element's path (`taskbar`, `menu.frame`), the alpha, and the
-    /// line it came from. Fluxbox keeps them in `init`, vaht in the theme.
+    /// The vaht style's `alpha`s `init` sets, below fully opaque: each the
+    /// vaht style element's path (`taskbar`, `menu.frame`), the alpha, and the
+    /// line it came from. Fluxbox keeps them in `init`, vaht in the style.
     pub(crate) alphas: Vec<(&'static str, i64, usize)>,
     /// `bindings.toml`'s `[switches]`, with the line of `init` each came
     /// from.
@@ -171,7 +171,7 @@ impl InitFile {
         self.convert_input_emulation(report);
         self.accept_what_vaht_does();
         self.report_unused(report);
-        let alphas = self.theme_alphas();
+        let alphas = self.style_alphas();
         InitConversion {
             settings: self.document,
             outputs: outputs.document(),
@@ -181,8 +181,8 @@ impl InitFile {
     }
 
     /// Returns the toolbar's and the menus' alpha, those below fully
-    /// opaque, as the theme elements vaht keeps them in.
-    fn theme_alphas(&mut self) -> Vec<(&'static str, i64, usize)> {
+    /// opaque, as the vaht style elements vaht keeps them in.
+    fn style_alphas(&mut self) -> Vec<(&'static str, i64, usize)> {
         [("toolbar.alpha", "taskbar"), ("menu.alpha", "menu.frame")]
             .into_iter()
             .filter_map(|(name, element)| {
@@ -890,8 +890,8 @@ impl InitFile {
         }
         self.convert_entry_width(report);
         self.convert_flag("iconbar.usePixmap", &["taskbar", "window_list", "icons"]);
-        // The theme's taskbar.window-list.entry padding is half of it each
-        // side; another value is reported, for the theme to change.
+        // The vaht style's taskbar.window-list.entry padding is half of it each
+        // side; another value is reported, for the vaht style to change.
         self.resources
             .accept_default(&format!("{SCREEN}iconbar.iconTextPadding"), "10");
     }

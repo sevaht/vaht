@@ -414,14 +414,14 @@ fn request(vaht: &HeadlessVaht, request: &Request) -> Reply {
 }
 
 #[test]
-fn the_configuration_files_are_listed_with_their_state_and_the_themes() {
+fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),
-        &[("themes/mine.toml", "[default]\ntext_color = \"white\"\n")],
+        &[("styles/mine.toml", "[default]\ntext_color = \"white\"\n")],
     );
     let Reply::ConfigFiles {
         files,
-        themes,
+        styles,
         problems,
     } = config(&vaht, &["files"])
     else {
@@ -434,7 +434,7 @@ fn the_configuration_files_are_listed_with_their_state_and_the_themes() {
             state: vaht_ipc::ConfigState::Clean,
         }]
     );
-    assert!(themes.contains(&"mine".to_owned()), "{themes:?}");
+    assert!(styles.contains(&"mine".to_owned()), "{styles:?}");
     assert_eq!(
         problems,
         Vec::<String>::new(),

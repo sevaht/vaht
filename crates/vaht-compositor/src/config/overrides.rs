@@ -1,4 +1,4 @@
-//! Settings changed while vaht runs (`set-setting`, `set-theme`), kept
+//! Settings changed while vaht runs (`set-setting`, `set-style`), kept
 //! apart from the files until `save-settings` writes them there (00 §3,
 //! `SaveSettings`).
 //!
@@ -53,9 +53,9 @@ impl SettingChange {
         Ok(change)
     }
 
-    /// Returns the change of `theme` to `name`.
-    pub(crate) fn theme(name: &str) -> Self {
-        Self::new(&["theme"], &toml::Value::String(name.to_owned()))
+    /// Returns the change of `style` to `name`.
+    pub(crate) fn style(name: &str) -> Self {
+        Self::new(&["style"], &toml::Value::String(name.to_owned()))
     }
 
     /// Returns the change of `key`, its parts, to `value`.
@@ -313,7 +313,7 @@ mod tests {
     #[case::no_key("", "needs a key")]
     #[case::unknown_key("focus.modle sloppy", "unknown field")]
     #[case::wrong_type("taskbar.auto_hide maybe", "invalid type")]
-    #[case::a_string_as_a_table("theme.name x", "expected a string")]
+    #[case::a_string_as_a_table("style.name x", "expected a string")]
     fn a_change_settings_cannot_hold_is_refused(#[case] arguments: &str, #[case] expected: &str) {
         let error = SettingChange::parse(arguments).expect_err(arguments);
         assert!(error.contains(expected), "{error}");
@@ -324,18 +324,18 @@ mod tests {
         let original = file("[focus]\nmodel = \"click\"\n");
         let overrides = SettingOverrides::default()
             .with(change("focus.model sloppy"), &original)
-            .with(SettingChange::theme("one"), &original);
+            .with(SettingChange::style("one"), &original);
         let mut table = original.clone();
         overrides.apply_to(&mut table).expect("applies");
         let settings = Settings::from_table(table).expect("valid");
-        assert_eq!(settings.theme.as_deref(), Some("one"));
+        assert_eq!(settings.style.as_deref(), Some("one"));
 
         let mut followed = overrides.clone();
         followed.follow_file(&file(
             "[focus]\nmodel = \"click\"\n[taskbar]\nauto_hide = true\n",
         ));
         assert_eq!(followed, overrides, "another setting edited");
-        followed.follow_file(&file("theme = \"two\"\n[focus]\nmodel = \"click\"\n"));
+        followed.follow_file(&file("style = \"two\"\n[focus]\nmodel = \"click\"\n"));
         assert_eq!(
             followed,
             SettingOverrides::default().with(change("focus.model sloppy"), &original),

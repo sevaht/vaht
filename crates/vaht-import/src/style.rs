@@ -1,9 +1,9 @@
-//! Fluxbox styles to vaht themes (02 §10).
+//! Fluxbox styles to vaht styles (02 §10).
 //!
 //! [`StyleFile`] reads a style as Fluxbox does (fluxland's `style.c` is the
 //! reference): each vaht element in each state gets what the style gives
 //! the Fluxbox resources behind it, through the same fallback chains
-//! (`window.label.focus.font`, then `window.font`). The theme is then
+//! (`window.label.focus.font`, then `window.font`). The vaht style is then
 //! written as the fewest layers that give every element exactly that: a
 //! value most elements share goes in `[default]`, one a state shares in
 //! `[state.<state>]`, and so on down to `[<element>.<state>]`. Colors keep
@@ -19,12 +19,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value};
-use vaht_ui::{Color, Corner, ThemeElement, WidgetState};
+use vaht_ui::{Color, Corner, StyleElement, WidgetState};
 
 use self::database::StyleDatabase;
 use crate::report::{Reason, Report};
 
-/// A property of a theme's style, as the converter writes it.
+/// A property of an element's style in a vaht style file, as the converter writes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, strum::EnumIter)]
 enum Property {
     /// `texture`.
@@ -75,7 +75,7 @@ impl Property {
         )
     }
 
-    /// Returns the property's key in theme files.
+    /// Returns the property's key in vaht style files.
     const fn key(self) -> &'static str {
         match self {
             Self::Texture => "texture",
@@ -150,7 +150,7 @@ struct Sources {
     /// The texture's resource names, the first the style has winning.
     texture: &'static [&'static str],
     /// The element whose texture `ParentRelative` means.
-    parent: Option<ThemeElement>,
+    parent: Option<StyleElement>,
     /// The font's names.
     font: Option<&'static [&'static str]>,
     /// The text color's names.
@@ -167,7 +167,7 @@ struct Sources {
     /// it shows: a menu's items, on the frame.
     shows_parent: bool,
     /// Whether Fluxbox styles say nothing of the element, so it keeps what
-    /// vaht's built-in theme gives it: a dialog's line.
+    /// vaht's built-in style gives it: a dialog's line.
     is_built_in: bool,
 }
 
@@ -193,11 +193,11 @@ impl Sources {
         clippy::too_many_lines,
         reason = "one table of every element's resources"
     )]
-    fn of(element: ThemeElement, state: WidgetState) -> Self {
+    fn of(element: StyleElement, state: WidgetState) -> Self {
         use WidgetState::{Disabled, Focused, Hovered, Pressed, Unfocused};
         if matches!(
             element,
-            ThemeElement::MenuTitle | ThemeElement::MenuFrame | ThemeElement::MenuItem
+            StyleElement::MenuTitle | StyleElement::MenuFrame | StyleElement::MenuItem
         ) {
             return Self::of_menu(element, state);
         }
@@ -213,15 +213,15 @@ impl Sources {
             Unfocused => unfocus,
         };
         match element {
-            ThemeElement::Titlebar => {
+            StyleElement::Titlebar => {
                 Self::texture(window(&["window.title.focus"], &["window.title.unfocus"]))
             }
-            ThemeElement::Label => Self {
+            StyleElement::Label => Self {
                 texture: window(
                     &["window.label.focus", "toolbar.windowLabel"],
                     &["window.label.unfocus", "toolbar.windowLabel"],
                 ),
-                parent: Some(ThemeElement::Titlebar),
+                parent: Some(StyleElement::Titlebar),
                 font: Some(window(
                     &["window.label.focus.font", "window.font"],
                     &["window.label.unfocus.font", "window.font"],
@@ -245,13 +245,13 @@ impl Sources {
                 padding: Some([0, 4, 0, 4]),
                 ..Self::texture(&[])
             },
-            ThemeElement::Button => Self {
+            StyleElement::Button => Self {
                 texture: match state {
                     Focused | Hovered | Disabled => &["window.button.focus"],
                     Unfocused => &["window.button.unfocus"],
                     Pressed => &["window.button.pressed"],
                 },
-                parent: Some(ThemeElement::Titlebar),
+                parent: Some(StyleElement::Titlebar),
                 glyph_color: Some(match state {
                     Focused | Hovered | Disabled => &["window.button.focus.picColor"],
                     Unfocused => &["window.button.unfocus.picColor"],
@@ -263,22 +263,22 @@ impl Sources {
                 padding: Some([5, 5, 5, 5]),
                 ..Self::texture(&[])
             },
-            ThemeElement::Handle => {
+            StyleElement::Handle => {
                 Self::texture(window(&["window.handle.focus"], &["window.handle.unfocus"]))
             }
-            ThemeElement::Grip => {
+            StyleElement::Grip => {
                 Self::texture(window(&["window.grip.focus"], &["window.grip.unfocus"]))
             }
-            ThemeElement::Border => Self::texture(&[]),
-            ThemeElement::Taskbar => Self::texture(&["toolbar"]),
-            ThemeElement::TaskbarButton => Self {
+            StyleElement::Border => Self::texture(&[]),
+            StyleElement::Taskbar => Self::texture(&["toolbar"]),
+            StyleElement::TaskbarButton => Self {
                 texture: match state {
                     Pressed => &["toolbar.button.pressed"],
                     Focused | Unfocused | Hovered | Disabled => {
                         &["toolbar.button", "toolbar.clock"]
                     }
                 },
-                parent: Some(ThemeElement::Taskbar),
+                parent: Some(StyleElement::Taskbar),
                 glyph_color: Some(&[
                     "toolbar.button.picColor",
                     "toolbar.clock.picColor",
@@ -290,9 +290,9 @@ impl Sources {
                 padding: Some([0, 0, 0, 0]),
                 ..Self::texture(&[])
             },
-            ThemeElement::TaskbarWorkspace => Self {
+            StyleElement::TaskbarWorkspace => Self {
                 texture: &["toolbar.workspace", "toolbar.label"],
-                parent: Some(ThemeElement::Taskbar),
+                parent: Some(StyleElement::Taskbar),
                 font: Some(&["toolbar.workspace.font", "toolbar.font"]),
                 text_color: Some(&[
                     "toolbar.workspace.textColor",
@@ -304,23 +304,23 @@ impl Sources {
                 padding: Some([0, 1, 0, 1]),
                 ..Self::texture(&[])
             },
-            ThemeElement::TaskbarClock => Self {
+            StyleElement::TaskbarClock => Self {
                 texture: &["toolbar.clock"],
-                parent: Some(ThemeElement::Taskbar),
+                parent: Some(StyleElement::Taskbar),
                 font: Some(&["toolbar.clock.font", "toolbar.font"]),
                 text_color: Some(&["toolbar.clock.textColor", "toolbar.textColor"]),
                 justify: Some(&["toolbar.clock.justify", "toolbar.justify"]),
                 padding: Some([0, 8, 0, 8]),
                 ..Self::texture(&[])
             },
-            ThemeElement::WindowListEntry => Self {
+            StyleElement::WindowListEntry => Self {
                 texture: match state {
                     Focused | Pressed | Hovered | Disabled => {
                         &["toolbar.iconbar.focused", "toolbar.windowLabel"]
                     }
                     Unfocused => &["toolbar.iconbar.unfocused", "toolbar.windowLabel"],
                 },
-                parent: Some(ThemeElement::Taskbar),
+                parent: Some(StyleElement::Taskbar),
                 font: Some(match state {
                     Focused | Pressed | Hovered | Disabled => &[
                         "toolbar.iconbar.focused.font",
@@ -356,24 +356,24 @@ impl Sources {
                 padding: Some([0, 5, 0, 5]),
                 ..Self::texture(&[])
             },
-            ThemeElement::MenuTitle | ThemeElement::MenuFrame | ThemeElement::MenuItem => {
+            StyleElement::MenuTitle | StyleElement::MenuFrame | StyleElement::MenuItem => {
                 Self::of_menu(element, state)
             }
-            ThemeElement::DialogField
-            | ThemeElement::Wireframe
-            | ThemeElement::Tooltip
-            | ThemeElement::Warning => Self {
+            StyleElement::DialogField
+            | StyleElement::Wireframe
+            | StyleElement::Tooltip
+            | StyleElement::Warning => Self {
                 is_built_in: true,
                 ..Self::texture(&[])
             },
-            ThemeElement::WindowListEmpty => Self {
+            StyleElement::WindowListEmpty => Self {
                 texture: &[
                     "toolbar.iconbar.empty",
                     "toolbar.iconbar",
                     "toolbar.windowLabel",
                     "toolbar",
                 ],
-                parent: Some(ThemeElement::Taskbar),
+                parent: Some(StyleElement::Taskbar),
                 ..Self::texture(&[])
             },
         }
@@ -383,25 +383,25 @@ impl Sources {
     /// fluxland's `load_menu` reads them: `menu.hilite` for the hovered
     /// item, `menu.frame.disableColor` for a disabled one, and the frame
     /// showing behind the others.
-    fn of_menu(element: ThemeElement, state: WidgetState) -> Self {
+    fn of_menu(element: StyleElement, state: WidgetState) -> Self {
         let is_hovered = state == WidgetState::Hovered;
         match element {
-            ThemeElement::MenuTitle => Self {
+            StyleElement::MenuTitle => Self {
                 font: Some(&["menu.title.font"]),
                 text_color: Some(&["menu.title.textColor"]),
                 justify: Some(&["menu.title.justify"]),
                 ..Self::texture(&["menu.title"])
             },
-            ThemeElement::MenuItem if is_hovered => Self {
+            StyleElement::MenuItem if is_hovered => Self {
                 font: Some(&["menu.hilite.font", "menu.frame.font"]),
                 text_color: Some(&["menu.hilite.textColor"]),
                 // A chosen toggle's square is the highlight's color.
                 glyph_color: Some(&["menu.hilite.color"]),
                 justify: Some(&["menu.hilite.justify", "menu.frame.justify"]),
-                parent: Some(ThemeElement::MenuFrame),
+                parent: Some(StyleElement::MenuFrame),
                 ..Self::texture(&["menu.hilite"])
             },
-            ThemeElement::MenuItem => Self {
+            StyleElement::MenuItem => Self {
                 font: Some(&["menu.frame.font"]),
                 glyph_color: Some(&["menu.hilite.color"]),
                 text_color: Some(if state == WidgetState::Disabled {
@@ -413,23 +413,23 @@ impl Sources {
                 shows_parent: true,
                 ..Self::texture(&[])
             },
-            ThemeElement::MenuFrame
-            | ThemeElement::Titlebar
-            | ThemeElement::Label
-            | ThemeElement::Button
-            | ThemeElement::Handle
-            | ThemeElement::Grip
-            | ThemeElement::Border
-            | ThemeElement::Taskbar
-            | ThemeElement::TaskbarButton
-            | ThemeElement::TaskbarWorkspace
-            | ThemeElement::TaskbarClock
-            | ThemeElement::WindowListEntry
-            | ThemeElement::WindowListEmpty
-            | ThemeElement::DialogField
-            | ThemeElement::Wireframe
-            | ThemeElement::Tooltip
-            | ThemeElement::Warning => Self {
+            StyleElement::MenuFrame
+            | StyleElement::Titlebar
+            | StyleElement::Label
+            | StyleElement::Button
+            | StyleElement::Handle
+            | StyleElement::Grip
+            | StyleElement::Border
+            | StyleElement::Taskbar
+            | StyleElement::TaskbarButton
+            | StyleElement::TaskbarWorkspace
+            | StyleElement::TaskbarClock
+            | StyleElement::WindowListEntry
+            | StyleElement::WindowListEmpty
+            | StyleElement::DialogField
+            | StyleElement::Wireframe
+            | StyleElement::Tooltip
+            | StyleElement::Warning => Self {
                 font: Some(&["menu.frame.font"]),
                 text_color: Some(&["menu.frame.textColor"]),
                 justify: Some(&["menu.frame.justify"]),
@@ -448,12 +448,12 @@ const UNUSED_REASONS: [(&str, Reason, &str); 6] = [
     (
         "background",
         Reason::Dropped,
-        "themes cannot set the wallpaper",
+        "styles cannot set the wallpaper",
     ),
     (
         "rootcommand",
         Reason::Dropped,
-        "themes cannot set the wallpaper",
+        "styles cannot set the wallpaper",
     ),
     (
         "toolbar.shaped",
@@ -484,7 +484,7 @@ impl StyleFile {
         ("window.bevelWidth", "0"),
         // The window list's entries have no outline.
         ("toolbar.iconbar.borderWidth", "0"),
-        // Text has no effect unless a theme gives it one.
+        // Text has no effect unless a vaht style gives it one.
         ("window.font.effect", "none"),
     ];
 
@@ -495,7 +495,7 @@ impl StyleFile {
         }
     }
 
-    /// Converts the style to a theme file, noting in `report` what it
+    /// Converts the style to a vaht style file, noting in `report` what it
     /// leaves out.
     pub(crate) fn convert(mut self, report: &mut Report) -> DocumentMut {
         let cells = self.cells(report);
@@ -504,22 +504,22 @@ impl StyleFile {
     }
 
     /// Returns what the style gives every element in every state.
-    fn cells(&mut self, report: &mut Report) -> Vec<(ThemeElement, WidgetState, Cell)> {
+    fn cells(&mut self, report: &mut Report) -> Vec<(StyleElement, WidgetState, Cell)> {
         let mut cells = Vec::new();
         let mut tooltip: Option<Cell> = None;
-        let mut textures: HashMap<(ThemeElement, WidgetState), Written> = HashMap::new();
+        let mut textures: HashMap<(StyleElement, WidgetState), Written> = HashMap::new();
         // Parents first, so ParentRelative finds their textures.
         // The warning has no Fluxbox source, and vaht draws it from the
-        // built-in theme whatever the theme says, so a theme does not carry it.
-        let mut elements: Vec<ThemeElement> = <ThemeElement as strum::IntoEnumIterator>::iter()
-            .filter(|element| *element != ThemeElement::Warning)
+        // built-in style whatever the style says, so a style does not carry it.
+        let mut elements: Vec<StyleElement> = <StyleElement as strum::IntoEnumIterator>::iter()
+            .filter(|element| *element != StyleElement::Warning)
             .collect();
         elements
             .sort_by_key(|element| Sources::of(*element, WidgetState::Focused).parent.is_some());
         for element in elements {
             for state in <WidgetState as strum::IntoEnumIterator>::iter() {
                 let sources = Sources::of(element, state);
-                if element == ThemeElement::Tooltip {
+                if element == StyleElement::Tooltip {
                     // The same in every state, read (and noted) once.
                     let cell = match &tooltip {
                         Some(cell) => Clone::clone(cell),
@@ -540,7 +540,7 @@ impl StyleFile {
                 if !sources.texture.is_empty() {
                     // Without its own, a pressed taskbar button is the
                     // button with its bevel the other way, as in Fluxbox.
-                    let is_unstyled_press = element == ThemeElement::TaskbarButton
+                    let is_unstyled_press = element == StyleElement::TaskbarButton
                         && state == WidgetState::Pressed
                         && self.database.first_given(sources.texture).is_none();
                     let texture = if is_unstyled_press {
@@ -581,7 +581,7 @@ impl StyleFile {
                     cell.insert(Property::Padding, Written(Value::Array(array)));
                 }
                 self.add_sizes(&mut cell, element, state, report);
-                if element == ThemeElement::MenuItem {
+                if element == StyleElement::MenuItem {
                     self.add_bullet(&mut cell);
                 }
                 cells.push((element, state, cell));
@@ -598,63 +598,63 @@ impl StyleFile {
     fn add_sizes(
         &mut self,
         cell: &mut Cell,
-        element: ThemeElement,
+        element: StyleElement,
         state: WidgetState,
         report: &mut Report,
     ) {
         let height = match element {
-            ThemeElement::Titlebar => self
+            StyleElement::Titlebar => self
                 .number(&["window.title.height"])
                 .filter(|height| *height > 0),
-            ThemeElement::Handle => self.number(&["window.handleWidth"]),
-            ThemeElement::Taskbar => self
+            StyleElement::Handle => self.number(&["window.handleWidth"]),
+            StyleElement::Taskbar => self
                 .number(&["toolbar.height"])
                 .filter(|height| *height > 0),
-            ThemeElement::MenuTitle => self
+            StyleElement::MenuTitle => self
                 .number(&["menu.titleHeight"])
                 .filter(|height| *height > 0),
-            ThemeElement::MenuItem => {
+            StyleElement::MenuItem => {
                 let height = self
                     .number(&["menu.itemHeight"])
                     .filter(|height| *height > 0);
                 // Fluxbox keeps an item-high square each side of the text:
                 // the bullet's on the right, a pixel more on the left.
-                let side = height.unwrap_or(vaht_ui::Theme::DEFAULT_BAR_HEIGHT);
+                let side = height.unwrap_or(vaht_ui::Style::DEFAULT_BAR_HEIGHT);
                 let padding: Array = [0, side, 0, side + 1].into_iter().map(i64::from).collect();
                 cell.insert(Property::Padding, Written(Value::Array(padding)));
                 height
             }
-            ThemeElement::MenuFrame
-            | ThemeElement::Label
-            | ThemeElement::Button
-            | ThemeElement::Grip
-            | ThemeElement::Border
-            | ThemeElement::TaskbarButton
-            | ThemeElement::TaskbarWorkspace
-            | ThemeElement::TaskbarClock
-            | ThemeElement::WindowListEntry
-            | ThemeElement::WindowListEmpty
-            | ThemeElement::DialogField
-            | ThemeElement::Wireframe
-            | ThemeElement::Tooltip
-            | ThemeElement::Warning => None,
+            StyleElement::MenuFrame
+            | StyleElement::Label
+            | StyleElement::Button
+            | StyleElement::Grip
+            | StyleElement::Border
+            | StyleElement::TaskbarButton
+            | StyleElement::TaskbarWorkspace
+            | StyleElement::TaskbarClock
+            | StyleElement::WindowListEntry
+            | StyleElement::WindowListEmpty
+            | StyleElement::DialogField
+            | StyleElement::Wireframe
+            | StyleElement::Tooltip
+            | StyleElement::Warning => None,
         };
         if let Some(height) = height {
             cell.insert(Property::Height, Written(Value::from(i64::from(height))));
         }
         let border: Option<(&[&str], &[&str])> = match (element, state) {
-            (ThemeElement::Border, WidgetState::Focused | WidgetState::Pressed) => Some((
+            (StyleElement::Border, WidgetState::Focused | WidgetState::Pressed) => Some((
                 &["window.focus.borderWidth", "window.borderWidth"],
                 &["window.focus.borderColor", "window.borderColor"],
             )),
-            (ThemeElement::Border, WidgetState::Unfocused) => Some((
+            (StyleElement::Border, WidgetState::Unfocused) => Some((
                 &["window.unfocus.borderWidth", "window.borderWidth"],
                 &["window.unfocus.borderColor", "window.borderColor"],
             )),
-            (ThemeElement::Taskbar, _) => {
+            (StyleElement::Taskbar, _) => {
                 Some((&["toolbar.borderWidth"], &["toolbar.borderColor"]))
             }
-            (ThemeElement::MenuFrame, _) => Some((&["menu.borderWidth"], &["menu.borderColor"])),
+            (StyleElement::MenuFrame, _) => Some((&["menu.borderWidth"], &["menu.borderColor"])),
             _ => None,
         };
         if let Some((widths, colors)) = border {
@@ -668,33 +668,33 @@ impl StyleFile {
             cell.insert(Property::Border, Written(Value::InlineTable(border)));
         }
         match element {
-            ThemeElement::Border => self.add_round_corners(cell, "window.roundCorners"),
-            ThemeElement::MenuFrame => self.add_round_corners(cell, "menu.roundCorners"),
-            ThemeElement::Titlebar
-            | ThemeElement::Label
-            | ThemeElement::Button
-            | ThemeElement::Handle
-            | ThemeElement::Grip
-            | ThemeElement::Taskbar
-            | ThemeElement::TaskbarButton
-            | ThemeElement::TaskbarWorkspace
-            | ThemeElement::TaskbarClock
-            | ThemeElement::WindowListEntry
-            | ThemeElement::WindowListEmpty
-            | ThemeElement::MenuTitle
-            | ThemeElement::MenuItem
-            | ThemeElement::DialogField
-            | ThemeElement::Wireframe
-            | ThemeElement::Tooltip
-            | ThemeElement::Warning => {}
+            StyleElement::Border => self.add_round_corners(cell, "window.roundCorners"),
+            StyleElement::MenuFrame => self.add_round_corners(cell, "menu.roundCorners"),
+            StyleElement::Titlebar
+            | StyleElement::Label
+            | StyleElement::Button
+            | StyleElement::Handle
+            | StyleElement::Grip
+            | StyleElement::Taskbar
+            | StyleElement::TaskbarButton
+            | StyleElement::TaskbarWorkspace
+            | StyleElement::TaskbarClock
+            | StyleElement::WindowListEntry
+            | StyleElement::WindowListEmpty
+            | StyleElement::MenuTitle
+            | StyleElement::MenuItem
+            | StyleElement::DialogField
+            | StyleElement::Wireframe
+            | StyleElement::Tooltip
+            | StyleElement::Warning => {}
         }
     }
 
     /// Returns the tooltip's style: fluxland's tray tooltip, as the
-    /// built-in theme has it, with what the style's `systray.tooltip.*`
+    /// built-in style has it, with what the Fluxbox style's `systray.tooltip.*`
     /// lines say instead.
     fn tooltip_cell(&mut self, report: &mut Report) -> Cell {
-        let mut cell = Self::built_in_cell(ThemeElement::Tooltip);
+        let mut cell = Self::built_in_cell(StyleElement::Tooltip);
         if let Some(color) = self.color("systray.tooltip.color", report) {
             let mut texture = InlineTable::new();
             texture.insert("solid", Value::from(color));
@@ -741,16 +741,16 @@ impl StyleFile {
         cell
     }
 
-    /// Returns what vaht's built-in theme says of `element` in its own
+    /// Returns what vaht's built-in style says of `element` in its own
     /// section, for an element Fluxbox styles say nothing of.
-    fn built_in_cell(element: ThemeElement) -> Cell {
-        let theme: DocumentMut = vaht_ui::Theme::BUILT_IN
+    fn built_in_cell(element: StyleElement) -> Cell {
+        let vaht_style: DocumentMut = vaht_ui::Style::BUILT_IN
             .parse()
-            .expect("the built-in theme is valid TOML (tested in vaht-ui)");
+            .expect("the built-in style is valid TOML (tested in vaht-ui)");
         let section = element
             .path()
             .split('.')
-            .try_fold(theme.as_item(), |item, key| item.get(key));
+            .try_fold(vaht_style.as_item(), |item, key| item.get(key));
         <Property as strum::IntoEnumIterator>::iter()
             .filter_map(|property| {
                 let mut value = section?.get(property.key())?.as_value()?.clone();
@@ -983,7 +983,7 @@ impl StyleFile {
                 .iter()
                 .find(|(prefix, ..)| name.starts_with(prefix))
                 .map_or(
-                    (Reason::NotYetInVaht, "not used by vaht's theme"),
+                    (Reason::NotYetInVaht, "not used by vaht's style"),
                     |(_, reason, why)| (*reason, *why),
                 );
             report.note(
@@ -1081,7 +1081,7 @@ impl FluxboxFont {
         })
     }
 
-    /// Returns the font as a theme's `font` table.
+    /// Returns the font as a vaht style's `font` table.
     fn table(&self) -> InlineTable {
         let mut table = InlineTable::new();
         table.insert("family", Value::from(self.family.clone()));
@@ -1096,7 +1096,7 @@ impl FluxboxFont {
     }
 }
 
-/// A theme as layers: each property's value in each layer, chosen so the
+/// A vaht style as layers: each property's value in each layer, chosen so the
 /// layers give every element in every state exactly its value.
 #[derive(Debug, Default)]
 struct Layers {
@@ -1105,9 +1105,9 @@ struct Layers {
     /// `[state.<state>]`.
     by_state: Vec<(WidgetState, BTreeMap<Property, Written>)>,
     /// `[<element>]`.
-    by_element: Vec<(ThemeElement, BTreeMap<Property, Written>)>,
+    by_element: Vec<(StyleElement, BTreeMap<Property, Written>)>,
     /// `[<element>.<state>]`.
-    by_element_state: Vec<((ThemeElement, WidgetState), BTreeMap<Property, Written>)>,
+    by_element_state: Vec<((StyleElement, WidgetState), BTreeMap<Property, Written>)>,
 }
 
 impl Layers {
@@ -1117,13 +1117,13 @@ impl Layers {
     /// state, then an element, gets its own value where that spares more
     /// overrides than it costs; what is left differs per element and
     /// state.
-    fn fitting(cells: &[(ThemeElement, WidgetState, Cell)]) -> Self {
+    fn fitting(cells: &[(StyleElement, WidgetState, Cell)]) -> Self {
         let mut layers = Self::default();
         let states: Vec<WidgetState> = <WidgetState as strum::IntoEnumIterator>::iter().collect();
-        let elements: Vec<ThemeElement> =
-            <ThemeElement as strum::IntoEnumIterator>::iter().collect();
+        let elements: Vec<StyleElement> =
+            <StyleElement as strum::IntoEnumIterator>::iter().collect();
         for property in <Property as strum::IntoEnumIterator>::iter() {
-            let given: Vec<(ThemeElement, WidgetState, &Written)> = cells
+            let given: Vec<(StyleElement, WidgetState, &Written)> = cells
                 .iter()
                 .filter_map(|(element, state, cell)| Some((*element, *state, cell.get(&property)?)))
                 .collect();
@@ -1160,7 +1160,7 @@ impl Layers {
             let inherited =
                 |state: WidgetState| state_values.get(&state).or(default.as_ref()).cloned();
             for element in &elements {
-                let of_element: Vec<&(ThemeElement, WidgetState, &Written)> = given
+                let of_element: Vec<&(StyleElement, WidgetState, &Written)> = given
                     .iter()
                     .filter(|(given_element, ..)| given_element == element)
                     .collect();
@@ -1206,7 +1206,7 @@ impl Layers {
         }
     }
 
-    /// Returns the layers as a theme file.
+    /// Returns the layers as a vaht style file.
     fn document(&self) -> DocumentMut {
         let mut document = DocumentMut::new();
         document.insert("default", Item::Table(Self::table(&self.default)));
@@ -1218,7 +1218,7 @@ impl Layers {
             }
             document.insert("state", Item::Table(states));
         }
-        for element in <ThemeElement as strum::IntoEnumIterator>::iter() {
+        for element in <StyleElement as strum::IntoEnumIterator>::iter() {
             let own = self.by_element.iter().find(|(known, _)| *known == element);
             let by_state: Vec<_> = self
                 .by_element_state
@@ -1255,7 +1255,7 @@ impl Layers {
                 new.set_implicit(true);
                 Item::Table(new)
             });
-            table = item.as_table_mut().expect("theme paths name tables");
+            table = item.as_table_mut().expect("vaht style paths name tables");
         }
         table
     }
@@ -1276,9 +1276,9 @@ enum LayerKey {
     /// `[state.<state>]`.
     State(WidgetState),
     /// `[<element>]`.
-    Element(ThemeElement),
+    Element(StyleElement),
     /// `[<element>.<state>]`.
-    ElementState(ThemeElement, WidgetState),
+    ElementState(StyleElement, WidgetState),
 }
 
 /// Returns the values kept for `key` in `layers`, adding them if new.
@@ -1315,12 +1315,12 @@ fn most_common<'value>(values: impl Iterator<Item = &'value Written>) -> Option<
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
-    use vaht_ui::Theme;
-    use vaht_ui::theme::ThemeLayers;
+    use vaht_ui::Style;
+    use vaht_ui::style::StyleLayers;
 
     use super::*;
 
-    /// My style's lines that vaht's theme uses, and a pixmap and a
+    /// My style's lines that vaht's style uses, and a pixmap and a
     /// parent-relative texture to show those cases.
     const STYLE: &str = "\
 *.font:\t\t\t\tdejavu sans-8:bold
@@ -1358,19 +1358,19 @@ menu.frame.color:\tblack
 menu.bullet:\tsquare
 ";
 
-    /// Converts `style`, returning what each element gets, the theme
+    /// Converts `style`, returning what each element gets, the vaht style
     /// written, and the report.
-    fn convert(style: &str) -> (Vec<(ThemeElement, WidgetState, Cell)>, String, Report) {
+    fn convert(style: &str) -> (Vec<(StyleElement, WidgetState, Cell)>, String, Report) {
         let mut report = Report::default();
         let mut file = StyleFile::new(Path::new("style"), style);
         let cells = file.cells(&mut report);
         file.report_unused(&mut report);
-        let theme = Layers::fitting(&cells).document().to_string();
-        (cells, theme, report)
+        let vaht_style = Layers::fitting(&cells).document().to_string();
+        (cells, vaht_style, report)
     }
 
-    /// Returns `cell`'s properties as a theme file's table for `element`.
-    fn as_element_table(element: ThemeElement, cell: &Cell) -> String {
+    /// Returns `cell`'s properties as a vaht style file's table for `element`.
+    fn as_element_table(element: StyleElement, cell: &Cell) -> String {
         cell.iter().fold(
             format!("[{}]\n", element.path()),
             |text, (property, value)| format!("{text}{} = {}\n", property.key(), value.text()),
@@ -1379,15 +1379,16 @@ menu.bullet:\tsquare
 
     #[test]
     fn the_theme_gives_every_element_in_every_state_what_the_style_does() {
-        let (cells, theme, _) = convert(STYLE);
-        let theme = Theme::resolve(&ThemeLayers::from_toml(&theme).expect("a valid theme"));
+        let (cells, vaht_style, _) = convert(STYLE);
+        let vaht_style =
+            Style::resolve(&StyleLayers::from_toml(&vaht_style).expect("a valid style"));
         for (element, state, cell) in &cells {
-            let expected = Theme::resolve(
-                &ThemeLayers::from_toml(&as_element_table(*element, cell)).expect("a valid cell"),
+            let expected = Style::resolve(
+                &StyleLayers::from_toml(&as_element_table(*element, cell)).expect("a valid cell"),
             );
             let (got, want) = (
-                theme.style(*element, *state),
-                expected.style(*element, *state),
+                vaht_style.element_style(*element, *state),
+                expected.element_style(*element, *state),
             );
             for property in cell.keys() {
                 let matches = match property {
@@ -1419,22 +1420,23 @@ menu.bullet:\tsquare
 
     #[test]
     fn a_dialog_looks_as_in_the_built_in_theme() {
-        let (_, theme, _) = convert(STYLE);
-        let theme = Theme::resolve(&ThemeLayers::from_toml(&theme).expect("a valid theme"));
-        let built_in = Theme::built_in();
+        let (_, vaht_style, _) = convert(STYLE);
+        let vaht_style =
+            Style::resolve(&StyleLayers::from_toml(&vaht_style).expect("a valid style"));
+        let built_in = Style::built_in();
         let (got, want) = (
-            theme.style(ThemeElement::DialogField, WidgetState::Focused),
-            built_in.style(ThemeElement::DialogField, WidgetState::Focused),
+            vaht_style.element_style(StyleElement::DialogField, WidgetState::Focused),
+            built_in.element_style(StyleElement::DialogField, WidgetState::Focused),
         );
         assert_eq!(got.texture, want.texture);
         assert_eq!(got.text, want.text);
         assert_eq!(got.padding, want.padding);
-        let wireframe = |theme: &Theme| {
-            theme
-                .style(ThemeElement::Wireframe, WidgetState::Focused)
+        let wireframe = |vaht_style: &Style| {
+            vaht_style
+                .element_style(StyleElement::Wireframe, WidgetState::Focused)
                 .border
         };
-        assert_eq!(wireframe(&theme), wireframe(&built_in));
+        assert_eq!(wireframe(&vaht_style), wireframe(&built_in));
     }
 
     #[test]
@@ -1449,18 +1451,18 @@ menu.bullet:\tsquare
                 .unwrap_or_default()
         };
         assert_eq!(
-            value(ThemeElement::Label, WidgetState::Focused, Property::Texture),
+            value(StyleElement::Label, WidgetState::Focused, Property::Texture),
             r#"{ gradient = "vertical", from = "grey55", to = "grey5" }"#,
             "window*.focus.color beats *.color"
         );
         assert_eq!(
             value(
-                ThemeElement::TaskbarClock,
+                StyleElement::TaskbarClock,
                 WidgetState::Focused,
                 Property::Texture
             ),
             value(
-                ThemeElement::Taskbar,
+                StyleElement::Taskbar,
                 WidgetState::Focused,
                 Property::Texture
             ),
@@ -1468,14 +1470,14 @@ menu.bullet:\tsquare
         );
         assert_eq!(
             value(
-                ThemeElement::WindowListEntry,
+                StyleElement::WindowListEntry,
                 WidgetState::Unfocused,
                 Property::TextColor
             ),
             r#""grey55""#
         );
         assert_eq!(
-            value(ThemeElement::Label, WidgetState::Focused, Property::Font),
+            value(StyleElement::Label, WidgetState::Focused, Property::Font),
             r#"{ family = "dejavu sans", size = 8, weight = "bold" }"#
         );
     }
@@ -1487,7 +1489,7 @@ menu.bullet:\tsquare
             cells
                 .iter()
                 .find(|(element, known, _)| {
-                    *element == ThemeElement::TaskbarButton && *known == state
+                    *element == StyleElement::TaskbarButton && *known == state
                 })
                 .and_then(|(.., cell)| cell.get(&Property::Texture))
                 .map(Written::text)
@@ -1524,20 +1526,24 @@ menu.bullet:\tsquare
 
     #[test]
     fn a_menu_bullet_converts_with_its_side_and_the_check_color() {
-        let (_, theme, _) = convert(
+        let (_, vaht_style, _) = convert(
             "menu.bullet: Triangle\nmenu.bullet.position: right\nmenu.hilite.color: #112233\n",
         );
-        let resolved = Theme::resolve(&ThemeLayers::from_toml(&theme).expect("a valid theme"));
+        let resolved = Style::resolve(&StyleLayers::from_toml(&vaht_style).expect("a valid style"));
         let metrics = resolved.metrics().menu;
-        assert_eq!(metrics.bullet, vaht_ui::theme::Bullet::Triangle, "{theme}");
+        assert_eq!(
+            metrics.bullet,
+            vaht_ui::style::Bullet::Triangle,
+            "{vaht_style}"
+        );
         assert_eq!(metrics.bullet_side, vaht_ui::MarkSide::Right);
-        let item = resolved.style(ThemeElement::MenuItem, WidgetState::Focused);
+        let item = resolved.element_style(StyleElement::MenuItem, WidgetState::Focused);
         assert_eq!(item.glyph_color, Color::rgb(0x11, 0x22, 0x33));
         let (_, plain, _) = convert("menu.frame.textColor: white\n");
-        let resolved = Theme::resolve(&ThemeLayers::from_toml(&plain).expect("a valid theme"));
+        let resolved = Style::resolve(&StyleLayers::from_toml(&plain).expect("a valid style"));
         assert_eq!(
             resolved.metrics().menu.bullet,
-            vaht_ui::theme::Bullet::Empty,
+            vaht_ui::style::Bullet::Empty,
             "Fluxbox shows no bullet unless the style says"
         );
     }
@@ -1550,11 +1556,11 @@ menu.bullet:\tsquare
         #[case] expected_corners: Option<&str>,
     ) {
         let style = format!("window.borderWidth: 1\nwindow.roundCorners: {corners}\n");
-        let (cells, theme, report) = convert(&style);
+        let (cells, vaht_style, report) = convert(&style);
         let border = cells
             .iter()
             .find(|(element, state, _)| {
-                *element == ThemeElement::Border && *state == WidgetState::Focused
+                *element == StyleElement::Border && *state == WidgetState::Focused
             })
             .map(|(.., cell)| cell)
             .expect("the outline converts");
@@ -1567,8 +1573,11 @@ menu.bullet:\tsquare
             expected_corners.map(str::to_owned),
             "all four go without saying"
         );
-        let resolved = Theme::resolve(&ThemeLayers::from_toml(&theme).expect("a valid theme"));
-        assert!(!resolved.metrics().frame_corners.is_square(), "{theme}");
+        let resolved = Style::resolve(&StyleLayers::from_toml(&vaht_style).expect("a valid style"));
+        assert!(
+            !resolved.metrics().frame_corners.is_square(),
+            "{vaht_style}"
+        );
         assert!(!report.to_string().contains("roundCorners"), "{report}");
     }
 
@@ -1579,7 +1588,7 @@ menu.bullet:\tsquare
         assert!(
             cells
                 .iter()
-                .filter(|(element, ..)| *element != ThemeElement::Tooltip)
+                .filter(|(element, ..)| *element != StyleElement::Tooltip)
                 .all(|(.., cell)| !cell.contains_key(&Property::CornerRadius))
         );
     }

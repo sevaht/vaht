@@ -1,4 +1,4 @@
-//! Colors, as themes write them: `#rrggbb`, `#rrggbbaa`, or an X11 color
+//! Colors, as styles write them: `#rrggbb`, `#rrggbbaa`, or an X11 color
 //! name such as `grey55` or `SteelBlue`, as X.Org's `rgb.txt` names them.
 
 mod x11;

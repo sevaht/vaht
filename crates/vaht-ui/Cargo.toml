@@ -1,7 +1,7 @@
 [package]
 name = "vaht-ui"
-description = "vaht's panel toolkit: widgets, layout, themes and drawing, independent of Wayland."
-keywords = ["gui", "widgets", "theme", "tiny-skia"]
+description = "vaht's panel toolkit: widgets, layout, styles and drawing, independent of Wayland."
+keywords = ["gui", "widgets", "style", "tiny-skia"]
 categories = ["gui", "rendering"]
 version.workspace = true
 edition.workspace = true

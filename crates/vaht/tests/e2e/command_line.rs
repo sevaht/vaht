@@ -157,12 +157,12 @@ fn check_names_the_file_line_and_column_of_a_problem() {
 }
 
 #[test]
-fn check_reads_the_theme_the_settings_name() {
+fn check_reads_the_style_the_settings_name() {
     let output = check(
         &[
-            ("settings.toml", "theme = \"mine\"\n"),
+            ("settings.toml", "style = \"mine\"\n"),
             (
-                "themes/mine.toml",
+                "styles/mine.toml",
                 "[window.titlebar]\nheight = 30\n[window.lable]\nheight = 1\n",
             ),
         ],
@@ -170,11 +170,11 @@ fn check_reads_the_theme_the_settings_name() {
     );
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.contains("themes/mine.toml:3:"), "{error}");
+    assert!(error.contains("styles/mine.toml:3:"), "{error}");
     assert!(error.contains("`window.lable` is no element"), "{error}");
-    let missing = check(&[("settings.toml", "theme = \"absent\"\n")], &[]);
+    let missing = check(&[("settings.toml", "style = \"absent\"\n")], &[]);
     let error = String::from_utf8_lossy(&missing.stderr);
-    assert!(error.contains("no theme `absent`"), "{error}");
+    assert!(error.contains("no style `absent`"), "{error}");
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn check_prints_the_built_in_files() {
     let printed = String::from_utf8_lossy(&output.stdout);
     assert!(printed.contains("# ===== bindings.toml ====="), "{printed}");
     assert!(printed.contains("\"Alt+F4\" = \"close\""), "{printed}");
-    assert!(printed.contains("the built-in theme ====="), "{printed}");
+    assert!(printed.contains("the built-in style ====="), "{printed}");
 }
 
 #[test]
@@ -233,14 +233,14 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     assert!(printed.contains("keys:2: dropped"), "{printed}");
     let settings = std::fs::read_to_string(target.path().join("settings.toml")).expect("written");
     assert!(settings.contains("model = \"sloppy\""), "{settings}");
-    assert!(settings.contains("theme = \"Night-Sky\""), "{settings}");
-    let theme =
-        std::fs::read_to_string(target.path().join("themes/Night-Sky.toml")).expect("written");
-    assert!(theme.contains("SteelBlue"), "{theme}");
-    assert!(theme.contains("height = 24"), "{theme}");
+    assert!(settings.contains("style = \"Night-Sky\""), "{settings}");
+    let style =
+        std::fs::read_to_string(target.path().join("styles/Night-Sky.toml")).expect("written");
+    assert!(style.contains("SteelBlue"), "{style}");
+    assert!(style.contains("height = 24"), "{style}");
     assert!(
-        theme.contains("alpha = 200"),
-        "the toolbar's alpha: {theme}"
+        style.contains("alpha = 200"),
+        "the toolbar's alpha: {style}"
     );
     assert!(
         printed.contains("slit.color: the slit is gone"),

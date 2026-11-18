@@ -30,12 +30,12 @@ use smithay_client_toolkit::shm::slot::{Buffer, SlotPool};
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_dispatch2, delegate_registry, registry_handlers};
 use vaht_ui::{
-    Panel, PanelContent, Size, TextField, Theme, ThemeElement, Typesetter, Widget, WidgetState,
+    Panel, PanelContent, Size, Style, StyleElement, TextField, Typesetter, Widget, WidgetState,
 };
 
 use crate::{EditKey, LineDialog, Outcome};
 
-/// Shows `dialog` in a window styled by `theme`, and runs it until it
+/// Shows `dialog` in a window styled by `style`, and runs it until it
 /// closes.
 ///
 /// # Errors
@@ -43,7 +43,7 @@ use crate::{EditKey, LineDialog, Outcome};
 /// Returns an error if there is no Wayland compositor to show it on, it
 /// lacks what a window needs, the connection fails, or the dialog could not
 /// do what it was asked.
-pub fn show(dialog: Box<dyn LineDialog>, theme: Theme) -> Result<(), DialogError> {
+pub fn show(dialog: Box<dyn LineDialog>, style: Style) -> Result<(), DialogError> {
     let connection = Connection::connect_to_env().map_err(DialogError::Connect)?;
     let (globals, queue) =
         registry_queue_init::<DialogWindow>(&connection).map_err(DialogError::Globals)?;
@@ -59,9 +59,9 @@ pub fn show(dialog: Box<dyn LineDialog>, theme: Theme) -> Result<(), DialogError
     let shm = Shm::bind(&globals, &handle).map_err(missing("wl_shm"))?;
 
     let typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
-    let style = theme.style(ThemeElement::DialogField, WidgetState::Focused);
+    let field = style.element_style(StyleElement::DialogField, WidgetState::Focused);
     // A line of the font and a little room, as fluxland-run has.
-    let height = typesetter.line_height(&style.text.font) + style.padding.vertical() + 4;
+    let height = typesetter.line_height(&field.text.font) + field.padding.vertical() + 4;
     let size = Size::new(DialogWindow::WIDTH, height);
     let pool =
         SlotPool::new(DialogWindow::buffer_bytes(size), &shm).map_err(DialogError::Memory)?;
@@ -88,7 +88,7 @@ pub fn show(dialog: Box<dyn LineDialog>, theme: Theme) -> Result<(), DialogError
         panel: Panel::new(FieldContent(dialog.field()), size),
         title: dialog.title().to_owned(),
         dialog,
-        theme,
+        style,
         typesetter,
         is_configured: false,
         ending: None,
@@ -142,7 +142,7 @@ impl PanelContent for FieldContent {
     type Hit = ();
 
     fn build(&self) -> Widget<()> {
-        Widget::field(ThemeElement::DialogField, self.0.clone())
+        Widget::field(StyleElement::DialogField, self.0.clone())
     }
 
     fn state(&self) -> WidgetState {
@@ -178,7 +178,7 @@ struct DialogWindow {
     /// The window's title, as last set.
     title: String,
     /// How the line looks.
-    theme: Theme,
+    style: Style,
     /// Draws text.
     typesetter: Typesetter,
     /// Whether the compositor has configured the window, so it may draw.
@@ -260,7 +260,7 @@ impl DialogWindow {
         if !self.is_configured {
             return;
         }
-        self.panel.paint(&self.theme, &mut self.typesetter);
+        self.panel.paint(&self.style, &mut self.typesetter);
         let Some(pixels) = self.panel.pixels() else {
             return;
         };

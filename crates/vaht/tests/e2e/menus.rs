@@ -13,14 +13,14 @@ const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 /// Where the menu is opened: right-clicked on the desktop.
 const OPENED_AT: (u32, u32) = (300, 300);
 
-/// The built-in theme's menu sizes: the outline, the title and an item.
+/// The built-in style's menu sizes: the outline, the title and an item.
 const BORDER: u32 = 1;
 /// The title's height.
 const TITLE_HEIGHT: u32 = 20;
 /// An item's height.
 const ITEM_HEIGHT: u32 = 20;
 
-/// The built-in theme's menu body: black.
+/// The built-in style's menu body: black.
 const MENU_BODY: [u8; 3] = [0, 0, 0];
 
 /// Starts vaht with a root menu whose one item touches `marker`.

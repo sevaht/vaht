@@ -1,17 +1,17 @@
 //! One open menu as vaht draws it: its panel and where its lines go.
 //!
 //! [`MenuContent`] is a menu's panel content: the title, then a row per
-//! item, laid out by vaht-ui with the theme's `menu.*` elements, the
+//! item, laid out by vaht-ui with the style's `menu.*` elements, the
 //! highlighted item `hovered`, an inert one `disabled`, a submenu's bullet
-//! and a chosen toggle's check on the theme's bullet side. [`MenuGeometry`] says where the
+//! and a chosen toggle's check on the style's bullet side. [`MenuGeometry`] says where the
 //! menu's outline, the line under its title and its separators go, as plain
 //! colored rectangles around and over the panel, with arcs at rounded
 //! corners, as a window frame's lines are.
 
 use smithay::utils::{Logical, Point, Rectangle};
-use vaht_ui::theme::MenuMetrics;
+use vaht_ui::style::MenuMetrics;
 use vaht_ui::{
-    Corner, CornerRadii, Glyph, IconEmphasis, PanelContent, SizePolicy, Theme, ThemeElement,
+    Corner, CornerRadii, Glyph, IconEmphasis, PanelContent, SizePolicy, Style, StyleElement,
     Typesetter, Widget, WidgetIcon, WidgetState,
 };
 
@@ -25,7 +25,7 @@ pub(crate) struct MenuContent {
     model: MenuModel,
     /// The highlighted item, by index.
     hovered: Option<usize>,
-    /// How the theme sizes menus.
+    /// How the style sizes menus.
     metrics: MenuMetrics,
 }
 
@@ -49,15 +49,15 @@ impl MenuContent {
         self.hovered
     }
 
-    /// Returns how wide and tall the panel is with `theme`'s fonts: as wide
+    /// Returns how wide and tall the panel is with `style`'s fonts: as wide
     /// as its widest text needs, and as tall as its title and rows.
-    pub(crate) fn size(&self, theme: &Theme, typesetter: &mut Typesetter) -> vaht_ui::Size {
+    pub(crate) fn size(&self, style: &Style, typesetter: &mut Typesetter) -> vaht_ui::Size {
         let mut fit = |element, state, text: &str| {
-            let style = theme.style(element, state);
+            let style = style.element_style(element, state);
             typesetter.text_width(text, &style.text.font) + style.padding.horizontal()
         };
         let title = self.model.title.as_deref().map_or(0, |title| {
-            fit(ThemeElement::MenuTitle, WidgetState::Focused, title)
+            fit(StyleElement::MenuTitle, WidgetState::Focused, title)
         });
         let icon_span = WidgetIcon::span(self.metrics.item_height);
         let items = self
@@ -67,8 +67,8 @@ impl MenuContent {
             .filter_map(|item| Some((item.label()?, item.has_icon())))
             .map(|(label, has_icon)| {
                 // A highlighted item may be drawn in a wider font.
-                let text = fit(ThemeElement::MenuItem, WidgetState::Focused, label).max(fit(
-                    ThemeElement::MenuItem,
+                let text = fit(StyleElement::MenuItem, WidgetState::Focused, label).max(fit(
+                    StyleElement::MenuItem,
                     WidgetState::Hovered,
                     label,
                 ));
@@ -122,27 +122,27 @@ impl PanelContent for MenuContent {
         let mut children = Vec::new();
         if let Some(title) = &self.model.title {
             children.push(
-                Widget::text(ThemeElement::MenuTitle, title.clone())
+                Widget::text(StyleElement::MenuTitle, title.clone())
                     .with_size(SizePolicy::Fixed(self.metrics.title_height)),
             );
             // The line under the title is drawn over this, as an outline.
             children.push(
-                Widget::fill(ThemeElement::MenuFrame)
+                Widget::fill(StyleElement::MenuFrame)
                     .with_size(SizePolicy::Fixed(self.metrics.border_width)),
             );
         }
         let row = SizePolicy::Fixed(self.metrics.item_height);
         for (index, item) in self.model.items.iter().enumerate() {
             let widget = match item {
-                MenuItem::Separator => Widget::fill(ThemeElement::MenuFrame).with_size(row),
-                MenuItem::Inert { label } => Widget::text(ThemeElement::MenuItem, label.clone())
+                MenuItem::Separator => Widget::fill(StyleElement::MenuFrame).with_size(row),
+                MenuItem::Inert { label } => Widget::text(StyleElement::MenuItem, label.clone())
                     .with_size(row)
                     .with_state(WidgetState::Disabled),
                 MenuItem::Choice {
                     label, mark, icon, ..
                 } => {
                     let widget = Self::with_icon(
-                        Widget::text(ThemeElement::MenuItem, label.clone())
+                        Widget::text(StyleElement::MenuItem, label.clone())
                             .with_size(row)
                             .with_hit(index),
                         icon.as_ref(),
@@ -155,7 +155,7 @@ impl PanelContent for MenuContent {
                 }
                 MenuItem::Submenu { label, icon, .. } => {
                     let widget = Self::with_icon(
-                        Widget::text(ThemeElement::MenuItem, label.clone())
+                        Widget::text(StyleElement::MenuItem, label.clone())
                             .with_size(row)
                             .with_hit(index),
                         icon.as_ref(),
@@ -173,7 +173,7 @@ impl PanelContent for MenuContent {
                 widget
             });
         }
-        Widget::column(ThemeElement::MenuFrame, children)
+        Widget::column(StyleElement::MenuFrame, children)
     }
 
     fn state(&self) -> WidgetState {

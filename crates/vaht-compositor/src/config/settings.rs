@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use smithay::utils::{Logical, Point, Size};
 use vaht_ui::WallpaperFit;
-use vaht_ui::theme::Metrics;
+use vaht_ui::style::Metrics;
 
 pub(crate) use self::blur::BlurSettings;
 pub(crate) use self::input::{
@@ -42,8 +42,8 @@ use crate::window_manager::{
 )]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Settings {
-    /// The theme: `themes/<name>.toml`; the built-in theme when absent.
-    pub(crate) theme: Option<String>,
+    /// The style: `styles/<name>.toml`; the built-in style when absent.
+    pub(crate) style: Option<String>,
     /// The taskbar.
     pub(crate) taskbar: TaskbarSettings,
     /// How windows behave and look.
@@ -352,22 +352,22 @@ pub(crate) struct FrameSettings {
     /// The buttons right of the title, left to right.
     pub(crate) titlebar_right: Vec<TitlebarButton>,
     /// Whether frames have a handle along the bottom, with grips, as tall
-    /// as the theme's `window.handle` height.
+    /// as the style's `window.handle` height.
     pub(crate) handle: bool,
     /// Whether the titlebar shows the window's icon left of its title.
     pub(crate) icon: bool,
 }
 
 impl FrameSettings {
-    /// Returns the theme's frame sizes as frames with these settings take
+    /// Returns the style's frame sizes as frames with these settings take
     /// them: without a handle unless they show one.
-    pub(crate) const fn frame_metrics(&self, theme: Metrics) -> Metrics {
+    pub(crate) const fn frame_metrics(&self, style: Metrics) -> Metrics {
         if self.handle {
-            theme
+            style
         } else {
             Metrics {
                 handle_height: 0,
-                ..theme
+                ..style
             }
         }
     }

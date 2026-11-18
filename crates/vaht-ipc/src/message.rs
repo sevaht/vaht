@@ -59,7 +59,7 @@ pub enum Request {
         reset: bool,
     },
     /// Which configuration files can be read, and whether each has changes
-    /// not written yet, with the themes available.
+    /// not written yet, with the styles available.
     ConfigFiles {},
     /// What `file` holds, described as JSON Schema (draft 2020-12): every
     /// key with its type, documentation, default and range, and vaht's own
@@ -172,7 +172,7 @@ impl Event {
                 files, problems, ..
             } => Reply::ConfigFiles {
                 files,
-                themes: Vec::new(),
+                styles: Vec::new(),
                 problems,
             },
         }
@@ -296,14 +296,14 @@ pub enum Reply {
         /// Its directives.
         directives: String,
     },
-    /// The files that can be read and the themes, for
+    /// The files that can be read and the styles, for
     /// [`Request::ConfigFiles`].
     ConfigFiles {
         /// Each file.
         files: Vec<ConfigFileInfo>,
-        /// The themes that can be chosen: those in the configuration
-        /// directory's `themes/` and the system's, and the built-in one.
-        themes: Vec<String>,
+        /// The styles that can be chosen: those in the configuration
+        /// directory's `styles/` and the system's, and the built-in one.
+        styles: Vec<String>,
         /// What vaht could not use of the configuration files and left out,
         /// a sentence each; empty when all of it is in effect.
         problems: Vec<String>,

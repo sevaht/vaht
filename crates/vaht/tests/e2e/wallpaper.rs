@@ -119,14 +119,14 @@ fn a_workspace_with_its_own_image_shows_it_while_shown() {
 #[test]
 fn a_translucent_taskbar_shows_the_wallpaper_through() {
     let taskbar_at = |alpha: u8| -> [u8; 3] {
-        let theme = format!("[taskbar]\ntexture = {{ solid = \"#000000\" }}\nalpha = {alpha}\n");
-        let settings = "theme = \"see-through\"\n[wallpaper]\nimage = \"sky.png\"\nfit = \"tile\"\n\
+        let style = format!("[taskbar]\ntexture = {{ solid = \"#000000\" }}\nalpha = {alpha}\n");
+        let settings = "style = \"see-through\"\n[wallpaper]\nimage = \"sky.png\"\nfit = \"tile\"\n\
                         [taskbar]\nwidgets = []\n";
         let vaht = HeadlessVaht::start_with_files(
             Path::new(EXECUTABLE),
             &[
                 ("settings.toml", settings.as_bytes()),
-                ("themes/see-through.toml", theme.as_bytes()),
+                ("styles/see-through.toml", style.as_bytes()),
                 ("sky.png", &solid_png(16, SKY)),
             ],
             &[],

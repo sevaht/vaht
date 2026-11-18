@@ -22,7 +22,7 @@ pub(crate) struct ConfigSource {
     directory: PathBuf,
     /// Watches the directory, while it exists.
     watch: Option<ConfigWatch>,
-    /// Whether the directory, or its themes directory, came or went since
+    /// Whether the directory, or its styles directory, came or went since
     /// the watch began, so the watch must be renewed.
     is_watch_stale: bool,
     /// Reloads the configuration once a burst of file changes settles.
@@ -233,8 +233,8 @@ impl ConfigSource {
         }
     }
 
-    /// Notes that a configuration or theme file changed, and with
-    /// `needs_new_watch` that the directory or its themes directory came or
+    /// Notes that a configuration or style file changed, and with
+    /// `needs_new_watch` that the directory or its styles directory came or
     /// went, and schedules a reload once things settle.
     pub(crate) fn note_change(
         &mut self,
@@ -270,8 +270,8 @@ mod tests {
         std::fs::write(&path, "# Mine.\n[focus]\nmodel = \"click\" # how\n").expect("written");
         let source = ConfigSource::new(directory.path().to_path_buf());
         let key = |text: &str| text.split('.').map(str::to_owned).collect::<Vec<_>>();
-        let (theme, model, delay, speed) = (
-            key("theme"),
+        let (style, model, delay, speed) = (
+            key("style"),
             key("focus.model"),
             key("taskbar.auto_hide_delay_ms"),
             vec![
@@ -283,7 +283,7 @@ mod tests {
         );
         source
             .write_settings(&[
-                (&theme, Some("\"mine\"")),
+                (&style, Some("\"mine\"")),
                 (&model, Some("\"sloppy\"")),
                 (&delay, Some("250")),
                 (&speed, Some("0.5")),
@@ -292,7 +292,7 @@ mod tests {
         let written = std::fs::read_to_string(&path).expect("read");
         assert_eq!(
             written,
-            "# Mine.\ntheme = \"mine\"\n\n[focus]\nmodel = \"sloppy\" # how\n\n[taskbar]\n\
+            "# Mine.\nstyle = \"mine\"\n\n[focus]\nmodel = \"sloppy\" # how\n\n[taskbar]\n\
              auto_hide_delay_ms = 250\n\n[input.device.\"My Mouse\"]\naccel_speed = 0.5\n"
         );
     }

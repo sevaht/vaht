@@ -5,10 +5,10 @@
 //! impossible to miss: a red banner along the top of every output naming
 //! what was left out and what was used instead. It stays until the files are
 //! fixed; a click hides it (until the problems change). It is drawn from the
-//! built-in theme, never the user's, so a broken theme cannot hide it.
+//! built-in style, never the user's, so a broken style cannot hide it.
 
 use smithay::utils::{Logical, Point, Rectangle, Scale};
-use vaht_ui::{Panel, Theme, ThemeElement, Typesetter, WidgetState};
+use vaht_ui::{Panel, Style, StyleElement, Typesetter, WidgetState};
 
 use crate::config::ConfigProblem;
 use crate::scene::{Outline, PanelTexture, SceneElement, SceneRenderer};
@@ -25,8 +25,8 @@ pub(crate) struct ConfigBanner {
     /// Whether a press on the banner is held, so its release is not a click
     /// on what is beneath.
     is_held: bool,
-    /// The built-in theme, which draws it.
-    theme: Theme,
+    /// The built-in style, which draws it.
+    style: Style,
     /// The problems and outputs the banners shown were made for.
     built_for: Option<(Vec<ConfigProblem>, Vec<Area>)>,
     /// One banner on each output, while there is something to say.
@@ -53,7 +53,7 @@ impl Default for ConfigBanner {
         Self {
             problems: Vec::new(),
             is_held: false,
-            theme: Theme::built_in(),
+            style: Style::built_in(),
             built_for: None,
             shown: Vec::new(),
             hidden_for: None,
@@ -156,17 +156,17 @@ impl ConfigBanner {
 
     /// Makes the banner for `output`.
     fn make(&self, problems: &[ConfigProblem], output: Area, typesetter: &mut Typesetter) -> Shown {
-        let theme = &self.theme;
-        let style = theme.style(ThemeElement::Warning, WidgetState::Focused);
-        let border = i32::try_from(style.border.width).unwrap_or(0);
+        let style = &self.style;
+        let warning = style.element_style(StyleElement::Warning, WidgetState::Focused);
+        let border = i32::try_from(warning.border.width).unwrap_or(0);
         let outer_width = (output.size.w - 2 * Self::MARGIN).clamp(1, Self::WIDEST);
         let width = u32::try_from((outer_width - 2 * border).max(1)).unwrap_or(1);
-        let text_width = width.saturating_sub(style.padding.horizontal());
+        let text_width = width.saturating_sub(warning.padding.horizontal());
         let lines: Vec<String> = Self::lines(problems)
             .iter()
-            .map(|line| Self::fitted(line, text_width, &style.text.font, typesetter))
+            .map(|line| Self::fitted(line, text_width, &warning.text.font, typesetter))
             .collect();
-        let row_height = typesetter.line_height(&style.text.font) + style.padding.vertical();
+        let row_height = typesetter.line_height(&warning.text.font) + warning.padding.vertical();
         let height = u32::try_from(lines.len())
             .unwrap_or(u32::MAX)
             .saturating_mul(row_height);
@@ -176,21 +176,21 @@ impl ConfigBanner {
             (x, output.loc.y + Self::MARGIN).into(),
             (outer_width, outer_height).into(),
         );
-        let corners = style.corner_radii();
+        let corners = warning.corner_radii();
         let mut panel = Panel::new(
             Lines {
                 texts: lines,
                 line_height: row_height,
-                element: ThemeElement::Warning,
+                element: StyleElement::Warning,
             },
             vaht_ui::Size::new(width, height),
         );
-        panel.set_corners(corners.inset(style.border.width));
-        panel.paint(theme, typesetter);
+        panel.set_corners(corners.inset(warning.border.width));
+        panel.paint(style, typesetter);
         let mut texture = PanelTexture::new();
         texture.upload(&panel);
         let mut outline = Outline::default();
-        outline.update_as(Some(area), theme, ThemeElement::Warning, corners);
+        outline.update_as(Some(area), style, StyleElement::Warning, corners);
         Shown {
             area,
             border,

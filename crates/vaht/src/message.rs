@@ -164,7 +164,7 @@ fn readable(reply: &Reply) -> String {
         }
         Reply::ConfigFiles {
             files,
-            themes,
+            styles,
             problems,
         } => {
             for info in files {
@@ -174,7 +174,7 @@ fn readable(reply: &Reply) -> String {
                 };
                 let _ = writeln!(text, "{}\t{state}", info.file.file_name());
             }
-            let _ = writeln!(text, "\nthemes: {}", themes.join(", "));
+            let _ = writeln!(text, "\nstyles: {}", styles.join(", "));
             if !problems.is_empty() {
                 let _ = writeln!(
                     text,

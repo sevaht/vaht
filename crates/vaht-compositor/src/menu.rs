@@ -4,7 +4,7 @@
 //! What a menu shows is a [`MenuModel`] ([`model`]), built from
 //! `menus.toml` as it opens. How it is shown is the presenter's: today the
 //! built-in one, [`MenuStack`], the menus open now, each a panel drawn with
-//! the theme ([`content`]). The first is opened by an action; each further
+//! the style ([`content`]). The first is opened by an action; each further
 //! one is a submenu of the item highlighted in the one before.
 //!
 //! The pointer highlights the item under it, and resting on a submenu's
@@ -24,7 +24,7 @@ use smithay::backend::renderer::{ImportMem, Renderer};
 use smithay::input::keyboard::xkb::Keysym;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::utils::{Logical, Point, Scale};
-use vaht_ui::{Panel, Theme, Typesetter};
+use vaht_ui::{Panel, Style, Typesetter};
 
 pub(crate) use self::content::{MenuContent, MenuGeometry};
 pub(crate) use self::model::{MenuBuilder, MenuChoice, MenuItem, MenuModel, OutputChoices};
@@ -145,14 +145,14 @@ impl MenuStack {
     }
 
     /// Opens `model`, closing any menu open, its top-left corner at `at`
-    /// unless that would put it off `bounds` (the output), as `theme`
+    /// unless that would put it off `bounds` (the output), as `style`
     /// styles menus.
     pub(crate) fn open(
         &mut self,
         model: MenuModel,
         at: Point<i32, Logical>,
         bounds: Area,
-        style: (&Theme, &mut Typesetter),
+        style: (&Style, &mut Typesetter),
     ) {
         self.close();
         self.bounds = bounds;
@@ -275,7 +275,7 @@ impl MenuStack {
     pub(crate) fn release(
         &mut self,
         point: Point<f64, Logical>,
-        style: (&Theme, &mut Typesetter),
+        style: (&Style, &mut Typesetter),
     ) -> Option<MenuChoice> {
         self.pressed = None;
         let (level, item) = self.item_at(point)?;
@@ -291,7 +291,7 @@ impl MenuStack {
     pub(crate) fn key(
         &mut self,
         key: MenuKey,
-        style: (&Theme, &mut Typesetter),
+        style: (&Style, &mut Typesetter),
     ) -> Option<MenuChoice> {
         if !matches!(key, MenuKey::Type(_) | MenuKey::Erase) {
             self.search.clear();
@@ -335,7 +335,7 @@ impl MenuStack {
 
     /// Opens the submenu of the item highlighted in the last menu, if it is
     /// a submenu's.
-    pub(crate) fn open_highlighted_submenu(&mut self, style: (&Theme, &mut Typesetter)) {
+    pub(crate) fn open_highlighted_submenu(&mut self, style: (&Style, &mut Typesetter)) {
         self.submenu_timer = None;
         let Some(last) = self.menus.last() else {
             return;
@@ -376,7 +376,7 @@ impl MenuStack {
         &mut self,
         number: u64,
         model: MenuModel,
-        style: (&Theme, &mut Typesetter),
+        style: (&Style, &mut Typesetter),
     ) -> bool {
         let Some(pipe) = self.pipe.take_if(|pipe| pipe.number == number) else {
             return false;
@@ -405,12 +405,12 @@ impl MenuStack {
         true
     }
 
-    /// Paints every menu that changed, as `theme` styles menus.
-    pub(crate) fn prepare(&mut self, theme: &Theme, typesetter: &mut Typesetter) {
+    /// Paints every menu that changed, as `style` styles menus.
+    pub(crate) fn prepare(&mut self, style: &Style, typesetter: &mut Typesetter) {
         for menu in &mut self.menus {
             menu.panel.set_corners(menu.geometry.panel_corners());
-            menu.panel.paint(theme, typesetter);
-            menu.texture.update(&menu.panel, &menu.geometry, theme);
+            menu.panel.paint(style, typesetter);
+            menu.texture.update(&menu.panel, &menu.geometry, style);
         }
     }
 
@@ -441,14 +441,14 @@ impl MenuStack {
         model: MenuModel,
         at: Point<i32, Logical>,
         beside: Option<(usize, usize)>,
-        style: (&Theme, &mut Typesetter),
+        style: (&Style, &mut Typesetter),
     ) {
-        let (theme, typesetter) = style;
-        let content = MenuContent::new(model, theme.metrics().menu);
-        let size = content.size(theme, typesetter);
+        let (style, typesetter) = style;
+        let content = MenuContent::new(model, style.metrics().menu);
+        let size = content.size(style, typesetter);
         let probe = MenuGeometry::at(Point::default(), size, &content);
         let (width, height) = (probe.outer.size.w, probe.outer.size.h);
-        let border = to_i32(theme.metrics().menu.border_width);
+        let border = to_i32(style.metrics().menu.border_width);
         let wanted = beside.map_or(at, |(level, index)| {
             // The submenu's first item lines up with its item in the parent,
             // their outlines overlapping.
@@ -488,7 +488,7 @@ impl MenuStack {
 
     /// Opens the highlighted item's submenu, or chooses it, closing every
     /// menu and returning the choice.
-    fn choose_highlighted(&mut self, style: (&Theme, &mut Typesetter)) -> Option<MenuChoice> {
+    fn choose_highlighted(&mut self, style: (&Style, &mut Typesetter)) -> Option<MenuChoice> {
         let last = self.menus.last()?;
         let index = last.panel.content().hovered()?;
         match last.panel.content().model().items.get(index)? {
@@ -569,7 +569,7 @@ impl MenuStack {
     }
 }
 
-/// Converts a theme's pixel extent to a coordinate.
+/// Converts a style's pixel extent to a coordinate.
 fn to_i32(extent: u32) -> i32 {
     i32::try_from(extent).expect("menu sizes are far below i32::MAX")
 }
@@ -623,10 +623,10 @@ mod tests {
         }
     }
 
-    /// A theme and a typesetter to lay menus out with.
-    fn style() -> (Theme, Typesetter) {
+    /// A style and a typesetter to lay menus out with.
+    fn style() -> (Style, Typesetter) {
         (
-            Theme::built_in(),
+            Style::built_in(),
             Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
         )
     }
@@ -638,15 +638,15 @@ mod tests {
 
     #[test]
     fn typing_highlights_the_item_found_and_keeps_only_letters_that_find_one() {
-        let (theme, mut typesetter) = style();
+        let (style, mut typesetter) = style();
         let mut stack = MenuStack::with_search(MenuSearch::ItemStart);
         stack.open(
             model(),
             (100, 100).into(),
             bounds(),
-            (&theme, &mut typesetter),
+            (&style, &mut typesetter),
         );
-        let mut key = |stack: &mut MenuStack, key| stack.key(key, (&theme, &mut typesetter));
+        let mut key = |stack: &mut MenuStack, key| stack.key(key, (&style, &mut typesetter));
         key(&mut stack, MenuKey::Type('M'));
         assert_eq!(hovered(&stack, 0), Some(2), "More, in any letter case");
         key(&mut stack, MenuKey::Type('x'));
@@ -661,24 +661,24 @@ mod tests {
             model(),
             (100, 100).into(),
             bounds(),
-            (&theme, &mut typesetter),
+            (&style, &mut typesetter),
         );
-        anywhere.key(MenuKey::Type('o'), (&theme, &mut typesetter));
+        anywhere.key(MenuKey::Type('o'), (&style, &mut typesetter));
         assert_eq!(hovered(&anywhere, 0), Some(0), "Reload has an o");
     }
 
     #[test]
     fn keys_move_past_what_cannot_be_chosen_open_submenus_and_choose() {
-        let (theme, mut typesetter) = style();
+        let (style, mut typesetter) = style();
         let mut stack = MenuStack::default();
         stack.open(
             model(),
             (100, 100).into(),
             bounds(),
-            (&theme, &mut typesetter),
+            (&style, &mut typesetter),
         );
         assert!(stack.is_open());
-        let mut key = |stack: &mut MenuStack, key| stack.key(key, (&theme, &mut typesetter));
+        let mut key = |stack: &mut MenuStack, key| stack.key(key, (&style, &mut typesetter));
         assert_eq!(key(&mut stack, MenuKey::Down), None);
         assert_eq!(hovered(&stack, 0), Some(0), "the first item");
         key(&mut stack, MenuKey::Down);
@@ -706,22 +706,22 @@ mod tests {
 
     #[test]
     fn menus_stay_on_the_output_and_submenus_open_beside_their_item() {
-        let (theme, mut typesetter) = style();
+        let (style, mut typesetter) = style();
         let mut stack = MenuStack::default();
         stack.open(
             model(),
             (1915, 1075).into(),
             bounds(),
-            (&theme, &mut typesetter),
+            (&style, &mut typesetter),
         );
         let outer = stack.menus[0].geometry.outer;
         assert!(
             bounds().contains_rect(outer),
             "{outer:?} is moved onto the output"
         );
-        stack.key(MenuKey::Down, (&theme, &mut typesetter));
-        stack.key(MenuKey::Down, (&theme, &mut typesetter));
-        stack.key(MenuKey::Forward, (&theme, &mut typesetter));
+        stack.key(MenuKey::Down, (&style, &mut typesetter));
+        stack.key(MenuKey::Down, (&style, &mut typesetter));
+        stack.key(MenuKey::Forward, (&style, &mut typesetter));
         let submenu = stack.menus[1].geometry.outer;
         assert!(
             submenu.loc.x + submenu.size.w <= outer.loc.x + 1,
@@ -737,13 +737,13 @@ mod tests {
 
     #[test]
     fn a_press_outside_closes_every_menu_and_one_inside_is_the_menus() {
-        let (theme, mut typesetter) = style();
+        let (style, mut typesetter) = style();
         let mut stack = MenuStack::default();
         stack.open(
             model(),
             (100, 100).into(),
             bounds(),
-            (&theme, &mut typesetter),
+            (&style, &mut typesetter),
         );
         let corner = stack.menus[0].geometry.panel.loc.to_f64();
         let inside: Point<f64, Logical> = (corner.x + 5.0, corner.y + 5.0).into();
@@ -755,13 +755,13 @@ mod tests {
 
     #[test]
     fn releasing_on_an_item_chooses_it() {
-        let (theme, mut typesetter) = style();
+        let (style, mut typesetter) = style();
         let mut stack = MenuStack::default();
         stack.open(
             model(),
             (100, 100).into(),
             bounds(),
-            (&theme, &mut typesetter),
+            (&style, &mut typesetter),
         );
         let menu = &stack.menus[0];
         let corner = menu.geometry.panel.loc.to_f64();
@@ -771,8 +771,8 @@ mod tests {
         )
             .into();
         // The panel lays out as it paints.
-        stack.prepare(&theme, &mut typesetter);
-        let chosen = stack.release(first_row, (&theme, &mut typesetter));
+        stack.prepare(&style, &mut typesetter);
+        let chosen = stack.release(first_row, (&style, &mut typesetter));
         assert_eq!(
             chosen,
             Some(MenuChoice::Run {
@@ -792,7 +792,7 @@ mod tests {
         let manager = WindowManager::new(
             &config.settings,
             OutputAreas::new(output, Vec::new()),
-            config.theme.metrics(),
+            config.style.metrics(),
         );
         let builder = MenuBuilder::new(&config.menus, &manager, None);
         let workspace = builder.build(Menus::WORKSPACE).expect("built in");

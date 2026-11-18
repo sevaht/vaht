@@ -14,11 +14,11 @@
 use std::fmt;
 use std::path::Path;
 
-use vaht_ui::Theme;
+use vaht_ui::Style;
 
 use super::{
     Bindings, Config, ConfigFile, Menus, OutputSettings, Rules, SettingOverrides, Settings,
-    ThemeFile,
+    StyleFile,
 };
 
 /// What vaht used in place of something it could not.
@@ -145,19 +145,19 @@ impl Config {
             (fallback, instead),
             &mut problems,
         );
-        let theme = match &settings.theme {
-            Some(name) => ThemeFile::find(directory, name)
+        let style = match &settings.style {
+            Some(name) => StyleFile::find(directory, name)
                 .and_then(|file| file.read())
                 .unwrap_or_else(|error| {
                     problems.push(ConfigProblem {
-                        file: format!("theme {name}"),
+                        file: format!("style {name}"),
                         key: None,
                         message: error.to_string(),
                         instead: Instead::BuiltIn,
                     });
-                    Theme::built_in()
+                    Style::built_in()
                 }),
-            None => Theme::built_in(),
+            None => Style::built_in(),
         };
         let mut config = Self {
             bindings: Self::lenient_file::<Bindings>(
@@ -185,7 +185,7 @@ impl Config {
                 (&fallback.outputs, instead),
                 &mut problems,
             ),
-            theme,
+            style,
         };
         // Bindings and menus name each other's menus and key modes, so when
         // they disagree neither can be trusted: both are replaced.
@@ -473,13 +473,13 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_theme_is_a_problem_and_the_built_in_theme_is_used() {
+    fn a_missing_style_is_a_problem_and_the_built_in_style_is_used() {
         let loaded = load(&directory(&[(
             "settings.toml",
-            "theme = \"no-such-theme\"\n",
+            "style = \"no-such-style\"\n",
         )]));
         assert_eq!(loaded.problems.len(), 1);
-        assert!(loaded.problems[0].file.contains("no-such-theme"));
+        assert!(loaded.problems[0].file.contains("no-such-style"));
         assert_eq!(loaded.problems[0].instead, Instead::BuiltIn);
     }
 

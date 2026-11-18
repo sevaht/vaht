@@ -201,7 +201,7 @@ pub enum ConfigCommand {
         file: ConfigFileArgument,
     },
     /// Lists the files that can be read, whether each has changes not
-    /// written, the themes there are, and what vaht left out of the files
+    /// written, the styles there are, and what vaht left out of the files
     /// because it could not use it.
     Files,
     /// Prints what a file says now, a `key = value` line each, the keys

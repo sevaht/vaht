@@ -40,6 +40,7 @@ target. A ★ marks features it actually uses.
 | **tray** | systray, system tray | The taskbar's StatusNotifierItem host |
 | **panel** | (none) | Anything vaht draws and lays out itself: a frame, the taskbar, a menu, a tooltip, a dialog |
 | **profile** | layout, profile set | A named output configuration |
+| **style** | theme, skin | The colors, fonts, textures and sizes of everything vaht draws: a file in `styles/`, chosen by the `style` setting. Fluxbox calls the same thing a style; `vaht import fluxbox-style` converts one |
 | **setting** | option, preference, resource | One key of `settings.toml`, with a documented type, range and default |
 | **pending change** | draft, dirty edit | A setting changed while vaht runs and not yet written to its file; it already runs |
 | **revert** | undo, discard | Drop the pending changes, so the files run as they say |
@@ -71,7 +72,7 @@ These are structural problems in fluxland that vaht's design should avoid.
    `window_label_focus_text_color` and `window_button_pressed_pic_color` are
    separate fields, and there are dozens more like them. Fluxbox wildcards
    (`*.color`) are resolved once at load time. In vaht this should be a small
-   model of *element × state → appearance*, with the cascade done by the theme
+   model of *element × state → appearance*, with the cascade done by the style
    loader.
 3. **`wm_server` holds everything.** It has about 98 protocol globals plus grab
    state, snap state, focus-cycle state, key-repeat state, window marks and
@@ -213,13 +214,13 @@ These are structural problems in fluxland that vaht's design should avoid.
 | SaveRC | | keep, renamed **SaveSettings** (decided) | Writes the settings changed at runtime into the settings file. Uses `toml_edit`, so the file's comments, ordering and formatting survive and only the changed keys are touched. This is the only time vaht writes to config, and only when you ask |
 | Export, SetEnv | | keep, merged into **SetEnvironment** (decided) | Sets a variable in vaht's environment, inherited by programs it starts afterwards |
 
-## 10. Configuration and theme
+## 10. Configuration and style
 
 | Feature | fluxland | Verdict | Notes |
 |---|---|---|---|
 | `init` (90 Fluxbox resources) | `config.c`, `rcparser.c` | rework | New format (see 02). My `init` gets converted |
 | `keys`, `apps`, `menu`, `windowmenu` files | | rework | New format, possibly one file or several. Converted |
-| Fluxbox style format: textures, gradients, bevels, interlacing, pixmaps, fonts with halo and shadow, button pixmaps, style overlay | `style.c`, `render.c` | rework | New theme format built on cascading *element × state*. My style plus overlay gets converted. A Fluxbox style importer lives in the import tool |
+| Fluxbox style format: textures, gradients, bevels, interlacing, pixmaps, fonts with halo and shadow, button pixmaps, style overlay | `style.c`, `render.c` | rework | New style format built on cascading *element × state*. My style plus overlay gets converted. A Fluxbox style importer lives in the import tool |
 | Live reload (Mod4+r, SIGHUP) | | keep | |
 | `--check-config` validation | `validate.c` | keep | `vaht config check` |
 | libinput settings (`session.input.*`) and switch commands (`session.switch.*`: lid, tablet mode) | `input_config.c`, `input.c` | keep | `[input]` in `settings.toml` and `[switches]` in `bindings.toml`, both converted by `vaht import` |

@@ -51,7 +51,7 @@ fn the_run_dialog_runs_what_is_typed_and_remembers_it() {
 }
 
 #[test]
-fn the_run_dialog_is_a_white_line_in_the_built_in_theme() {
+fn the_run_dialog_is_a_white_line_in_the_built_in_style() {
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),
         &[("bindings.toml", "[keys]\n\"Super+T\" = \"run-dialog\"\n")],
@@ -147,7 +147,7 @@ fn what_a_dialog_writes_to_its_errors_reaches_vahts_log() {
     assert!(shown.success());
     vaht.wait_for_logged("placed first", 1);
     vaht.wait_for_logged("dialog=\"run\"", 1);
-    assert!(vaht.logged_count("using the built-in theme") >= 1);
+    assert!(vaht.logged_count("using the built-in style") >= 1);
     client.type_chord(&[keys::ESCAPE]);
     vaht.wait_for_logged("window closed", 1);
 }

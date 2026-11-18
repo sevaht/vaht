@@ -11,10 +11,10 @@ use crate::color::Color;
 use crate::geometry::Rect;
 use crate::icon::WidgetIcon;
 use crate::layout::{Content, Layout, Placed};
+use crate::style::{Style, WidgetState};
 use crate::text::{TextStyle, Typesetter};
 use crate::texture::render::{self, GradientImage};
 use crate::texture::{Bevel, Fill, Texture};
-use crate::theme::{Theme, WidgetState};
 use crate::widget::{Glyph, MarkSide, TextField};
 
 /// A button picture's stroke width relative to its box: thin enough to stay
@@ -34,17 +34,17 @@ impl<'pixmap> Canvas<'pixmap> {
         Self { pixmap }
     }
 
-    /// Paints every widget of `layout`, styled by `theme` in the state
+    /// Paints every widget of `layout`, styled by `style` in the state
     /// `state_of` gives for each placed widget.
     pub(crate) fn paint<Hit: Copy>(
         &mut self,
         layout: &Layout<Hit>,
-        theme: &Theme,
+        style: &Style,
         typesetter: &mut Typesetter,
         state_of: impl Fn(&Placed<Hit>) -> WidgetState,
     ) {
         for placed in layout.placed() {
-            let style = theme.style(placed.element, state_of(placed));
+            let style = style.element_style(placed.element, state_of(placed));
             if placed.has_background {
                 self.fill_texture(style.texture, placed.rect);
             }

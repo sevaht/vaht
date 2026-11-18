@@ -7,7 +7,7 @@
 
 use crate::geometry::{Point, Rect};
 use crate::icon::WidgetIcon;
-use crate::theme::{ThemeElement, WidgetState};
+use crate::style::{StyleElement, WidgetState};
 use crate::widget::{Glyph, MarkSide, SizePolicy, TextField, Widget, WidgetKind};
 
 /// What a placed widget draws inside its rectangle.
@@ -29,7 +29,7 @@ pub struct Placed<Hit> {
     /// Where it is, in the panel's pixels.
     pub rect: Rect,
     /// What styles it.
-    pub element: ThemeElement,
+    pub element: StyleElement,
     /// What it draws.
     pub content: Content,
     /// What clicking it reports.
@@ -61,7 +61,7 @@ impl<Hit: Copy> Layout<Hit> {
     pub fn new(
         root: &Widget<Hit>,
         area: Rect,
-        fit_width: &mut dyn FnMut(&str, ThemeElement) -> u32,
+        fit_width: &mut dyn FnMut(&str, StyleElement) -> u32,
     ) -> Self {
         let mut placer = Placer {
             fit_width,
@@ -132,7 +132,7 @@ impl Axis {
 struct Placer<'fit, Hit> {
     /// Returns the room a text widget of an element needs, padding
     /// included.
-    fit_width: &'fit mut dyn FnMut(&str, ThemeElement) -> u32,
+    fit_width: &'fit mut dyn FnMut(&str, StyleElement) -> u32,
     /// Every widget placed so far.
     placed: Vec<Placed<Hit>>,
 }
@@ -277,7 +277,7 @@ mod tests {
     use super::*;
 
     /// A text measurer that makes every character 10 pixels wide.
-    fn ten_per_character(text: &str, _: ThemeElement) -> u32 {
+    fn ten_per_character(text: &str, _: StyleElement) -> u32 {
         u32::try_from(text.chars().count() * 10).expect("small")
     }
 
@@ -299,11 +299,11 @@ mod tests {
     #[test]
     fn a_titlebar_row_gives_buttons_squares_and_the_label_the_rest() {
         let row = Widget::row(
-            ThemeElement::Titlebar,
+            StyleElement::Titlebar,
             vec![
-                Widget::fill(ThemeElement::Label),
-                Widget::glyph(ThemeElement::Button, Glyph::Minimize),
-                Widget::glyph(ThemeElement::Button, Glyph::Close),
+                Widget::fill(StyleElement::Label),
+                Widget::glyph(StyleElement::Button, Glyph::Minimize),
+                Widget::glyph(StyleElement::Button, Glyph::Close),
             ],
         );
         assert_eq!(
@@ -319,11 +319,11 @@ mod tests {
     #[test]
     fn fills_share_the_remainder_by_weight_without_losing_pixels() {
         let row = Widget::row(
-            ThemeElement::Titlebar,
+            StyleElement::Titlebar,
             vec![
-                Widget::text(ThemeElement::Label, "abcd"),
-                Widget::fill(ThemeElement::Label).with_size(SizePolicy::Fill { weight: 1 }),
-                Widget::fill(ThemeElement::Label).with_size(SizePolicy::Fill { weight: 2 }),
+                Widget::text(StyleElement::Label, "abcd"),
+                Widget::fill(StyleElement::Label).with_size(SizePolicy::Fill { weight: 1 }),
+                Widget::fill(StyleElement::Label).with_size(SizePolicy::Fill { weight: 2 }),
             ],
         );
         let rects = child_rects(&lay_out(&row));
@@ -340,10 +340,10 @@ mod tests {
     #[test]
     fn when_room_runs_out_later_children_get_less() {
         let row = Widget::row(
-            ThemeElement::Titlebar,
+            StyleElement::Titlebar,
             vec![
-                Widget::fill(ThemeElement::Label).with_size(SizePolicy::Fixed(150)),
-                Widget::fill(ThemeElement::Label).with_size(SizePolicy::Fixed(100)),
+                Widget::fill(StyleElement::Label).with_size(SizePolicy::Fixed(150)),
+                Widget::fill(StyleElement::Label).with_size(SizePolicy::Fixed(100)),
             ],
         );
         let widths: Vec<u32> = child_rects(&lay_out(&row))
@@ -356,10 +356,10 @@ mod tests {
     #[test]
     fn hit_testing_finds_the_topmost_clickable_widget() {
         let row = Widget::row(
-            ThemeElement::Titlebar,
+            StyleElement::Titlebar,
             vec![
-                Widget::fill(ThemeElement::Label).with_hit(1),
-                Widget::glyph(ThemeElement::Button, Glyph::Close).with_hit(2),
+                Widget::fill(StyleElement::Label).with_hit(1),
+                Widget::glyph(StyleElement::Button, Glyph::Close).with_hit(2),
             ],
         )
         .with_hit(0);
@@ -375,9 +375,9 @@ mod tests {
 
     #[test]
     fn sharing_children_split_the_room_equally_up_to_their_most() {
-        let entry = |max| Widget::fill(ThemeElement::Label).with_size(SizePolicy::Share { max });
+        let entry = |max| Widget::fill(StyleElement::Label).with_size(SizePolicy::Share { max });
         let widths = |width, count| -> Vec<u32> {
-            let root: Widget<()> = Widget::row(ThemeElement::Titlebar, vec![entry(128); count]);
+            let root: Widget<()> = Widget::row(StyleElement::Titlebar, vec![entry(128); count]);
             Layout::new(&root, Rect::new(0, 0, width, 20), &mut |_, _| 0)
                 .placed()
                 .iter()

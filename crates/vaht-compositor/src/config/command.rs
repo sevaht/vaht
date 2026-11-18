@@ -398,9 +398,9 @@ pub(crate) enum Action {
     Settings,
     /// Shows the title dialog for the window: its title, to change.
     SetTitleDialog,
-    /// Uses a theme in place of the settings' (`set-theme <name>`), until
+    /// Uses a style in place of the settings' (`set-style <name>`), until
     /// `save-settings` writes it to `settings.toml`.
-    SetTheme(String),
+    SetStyle(String),
     /// Changes a setting of `settings.toml` in place (`set-setting <key>
     /// <value>`, the value in TOML or a bare word), until `save-settings`
     /// writes it.
@@ -733,10 +733,10 @@ impl Action {
             "command-dialog" => without_arguments(Self::CommandDialog),
             "settings" => without_arguments(Self::Settings),
             "set-title-dialog" => without_arguments(Self::SetTitleDialog),
-            "set-theme" if arguments.is_empty() => {
-                Err("`set-theme` needs a theme's name".to_owned())
+            "set-style" if arguments.is_empty() => {
+                Err("`set-style` needs a style's name".to_owned())
             }
-            "set-theme" => Ok(Self::SetTheme(arguments.to_owned())),
+            "set-style" => Ok(Self::SetStyle(arguments.to_owned())),
             "save-settings" => without_arguments(Self::SaveSettings),
             "unset-setting" => SettingChange::parse_unset(arguments).map(Self::UnsetSetting),
             "reapply-rules" => without_arguments(Self::ReapplyRules),
@@ -872,7 +872,7 @@ impl fmt::Display for Action {
             Self::CommandDialog => formatter.write_str("command-dialog"),
             Self::Settings => formatter.write_str("settings"),
             Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
-            Self::SetTheme(name) => write!(formatter, "set-theme {name}"),
+            Self::SetStyle(name) => write!(formatter, "set-style {name}"),
             Self::SaveSettings => formatter.write_str("save-settings"),
             Self::UnsetSetting(change) => write!(formatter, "unset-setting {change}"),
             Self::ReapplyRules => formatter.write_str("reapply-rules"),
@@ -980,8 +980,8 @@ impl WindowManagerAction {
                     }),
             },
             "go-to-marked-window" => Ok(Self::GoToMarkedWindow(arguments.to_owned())),
-            "restart" | "reload-theme" => Err(format!(
-                "`{name}`: `reload` reads every file again, the theme too; a Wayland compositor \
+            "restart" | "reload-style" => Err(format!(
+                "`{name}`: `reload` reads every file again, the style too; a Wayland compositor \
                  cannot restart without closing every window"
             )),
             _ => Err(format!("unknown action `{name}`")),

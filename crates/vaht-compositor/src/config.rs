@@ -24,7 +24,7 @@ mod rules;
 pub(crate) mod schema;
 mod settings;
 mod source;
-mod theme;
+mod style;
 mod unique_map;
 mod watch;
 
@@ -32,7 +32,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use vaht_ui::Theme;
+use vaht_ui::Style;
 
 pub(crate) use self::bindings::{
     Bindings, KeyChord, KeyLookup, Modifiers, MouseButton, MouseContext, SwitchFlip, SwitchKind,
@@ -57,7 +57,7 @@ pub(crate) use self::settings::{
     WallpaperSettings, WidthPercent, WindowListScope,
 };
 pub(crate) use self::source::ConfigSource;
-pub(crate) use self::theme::ThemeFile;
+pub(crate) use self::style::StyleFile;
 
 /// One configuration file and vaht's built-in version of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,8 +116,8 @@ pub struct Config {
     pub(crate) menus: Menus,
     /// How each output is set up (`outputs.toml`).
     pub(crate) outputs: OutputSettings,
-    /// How everything vaht draws looks: the theme `settings.toml` names.
-    pub(crate) theme: Theme,
+    /// How everything vaht draws looks: the style `settings.toml` names.
+    pub(crate) style: Style,
 }
 
 impl Config {
@@ -197,9 +197,9 @@ impl Config {
                 .and_then(|()| Settings::from_table(table))
                 .map_err(|message| ConfigError::Changed { message })?
         };
-        let theme = match &settings.theme {
-            Some(name) => ThemeFile::find(directory, name)?.read()?,
-            None => Theme::built_in(),
+        let style = match &settings.style {
+            Some(name) => StyleFile::find(directory, name)?.read()?,
+            None => Style::built_in(),
         };
         let config = Self {
             bindings: bindings.read(directory)?,
@@ -207,7 +207,7 @@ impl Config {
             rules: rules.read(directory)?,
             menus: menus.read(directory)?,
             outputs: outputs.read(directory)?,
-            theme,
+            style,
         };
         config.check_custom_menus()?;
         config.check_key_modes()?;
@@ -267,11 +267,11 @@ impl Config {
         Ok(())
     }
 
-    /// Returns how everything vaht draws looks: the theme the settings
+    /// Returns how everything vaht draws looks: the style the settings
     /// name. vaht's dialogs, which are separate programs, draw with it too.
     #[must_use]
-    pub const fn theme(&self) -> &Theme {
-        &self.theme
+    pub const fn style(&self) -> &Style {
+        &self.style
     }
 
     /// Returns the built-in configuration, which every file's absence gives.
@@ -289,7 +289,7 @@ impl Config {
             rules: Rules::default(),
             menus: toml::from_str(menus.defaults).expect("the built-in menus are valid (tested)"),
             outputs: OutputSettings::default(),
-            theme: Theme::built_in(),
+            style: Style::built_in(),
         }
     }
 }
@@ -355,17 +355,17 @@ pub enum ConfigError {
         error: io::Error,
     },
 
-    /// The settings name a theme by something other than a plain name.
-    #[error("not a theme name: {name:?} (a theme is themes/<name>.toml)")]
-    ThemeName {
+    /// The settings name a style by something other than a plain name.
+    #[error("not a style name: {name:?} (a style is styles/<name>.toml)")]
+    StyleName {
         /// The name as written.
         name: String,
     },
 
-    /// The theme the settings name exists nowhere vaht looks.
-    #[error("no theme `{name}`: looked for {}", searched.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(" and "))]
-    MissingTheme {
-        /// The theme's name.
+    /// The style the settings name exists nowhere vaht looks.
+    #[error("no style `{name}`: looked for {}", searched.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join(" and "))]
+    MissingStyle {
+        /// The style's name.
         name: String,
         /// Where vaht looked.
         searched: Vec<PathBuf>,

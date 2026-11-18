@@ -178,10 +178,10 @@ pub(crate) struct MenuBuilder<'state> {
     window_manager: &'state WindowManager,
     /// The window the menu is about (the window menu's), if any.
     window: Option<WindowId>,
-    /// The themes there are, for the `themes` list.
-    themes: Vec<String>,
-    /// The theme in use, if not the built-in one.
-    current_theme: Option<&'state str>,
+    /// The styles there are, for the `styles` list.
+    styles: Vec<String>,
+    /// The style in use, if not the built-in one.
+    current_style: Option<&'state str>,
     /// Each window's icon, for lists of windows that show them.
     window_icons: HashMap<WindowId, vaht_ui::Icon>,
     /// The icons `menus.toml` names, by the name written, those found.
@@ -226,8 +226,8 @@ impl<'state> MenuBuilder<'state> {
             menus,
             window_manager,
             window,
-            themes: Vec::new(),
-            current_theme: None,
+            styles: Vec::new(),
+            current_style: None,
             window_icons: HashMap::new(),
             named_icons: HashMap::new(),
             outputs: OutputChoices::default(),
@@ -256,12 +256,12 @@ impl<'state> MenuBuilder<'state> {
         self
     }
 
-    /// Returns the builder listing `themes` in the `themes` list, `current`
+    /// Returns the builder listing `styles` in the `styles` list, `current`
     /// checked.
     #[must_use]
-    pub(crate) fn with_themes(mut self, themes: Vec<String>, current: Option<&'state str>) -> Self {
-        self.themes = themes;
-        self.current_theme = current;
+    pub(crate) fn with_styles(mut self, styles: Vec<String>, current: Option<&'state str>) -> Self {
+        self.styles = styles;
+        self.current_style = current;
         self
     }
 
@@ -508,16 +508,16 @@ impl<'state> MenuBuilder<'state> {
                 })
                 .collect(),
             MenuGenerator::WindowList => self.window_list(),
-            MenuGenerator::Themes => self
-                .themes
+            MenuGenerator::Styles => self
+                .styles
                 .iter()
                 .map(|name| MenuItem::Choice {
                     label: name.clone(),
                     choice: MenuChoice::Run {
-                        command: Command::Run(Action::SetTheme(name.clone())),
+                        command: Command::Run(Action::SetStyle(name.clone())),
                         window: None,
                     },
-                    mark: Some(self.current_theme == Some(name.as_str())),
+                    mark: Some(self.current_style == Some(name.as_str())),
                     icon: None,
                 })
                 .collect(),

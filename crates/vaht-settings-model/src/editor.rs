@@ -169,14 +169,14 @@ mod tests {
                         "model": { "enum": ["click", "sloppy"], "default": "click" },
                     },
                 },
-                "theme": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                "style": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
             },
         }))
         .expect("a form");
         let mut editor = SettingsEditor::new(form);
         editor.read(
-            json!({ "focus": { "auto_raise": false, "model": "sloppy" }, "theme": null }),
-            json!({ "focus": { "auto_raise": false, "model": "click" }, "theme": null }),
+            json!({ "focus": { "auto_raise": false, "model": "sloppy" }, "style": null }),
+            json!({ "focus": { "auto_raise": false, "model": "click" }, "style": null }),
             &[vec!["focus".to_owned(), "model".to_owned()]],
         );
         editor
@@ -196,7 +196,7 @@ mod tests {
         );
         assert!(editor.is_default(&path("focus.auto_raise")));
         assert!(
-            editor.is_default(&path("theme")),
+            editor.is_default(&path("style")),
             "unset, with nothing to default to"
         );
         assert_eq!(
@@ -207,7 +207,7 @@ mod tests {
             editor.default_of(&path("focus.model")),
             Some(&json!("click"))
         );
-        assert_eq!(editor.value_of(&path("theme")), None);
+        assert_eq!(editor.value_of(&path("style")), None);
     }
 
     #[test]

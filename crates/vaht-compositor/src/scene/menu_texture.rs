@@ -9,7 +9,7 @@ use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::backend::renderer::{ImportMem, Renderer};
 use smithay::utils::{Logical, Rectangle, Scale};
-use vaht_ui::{Color, Corner, CornerArc, Panel, Theme, ThemeElement, WidgetState};
+use vaht_ui::{Color, Corner, CornerArc, Panel, Style, StyleElement, WidgetState};
 
 use super::{CornerTexture, PanelTexture, SceneElement};
 use crate::menu::{MenuContent, MenuGeometry};
@@ -26,7 +26,7 @@ pub(crate) struct MenuTexture {
     separators: Vec<SolidColorBuffer>,
     /// Each corner's arc, in [`Corner`]'s order.
     corners: [CornerTexture; 4],
-    /// How opaque the menu is drawn, as the theme says.
+    /// How opaque the menu is drawn, as the style says.
     opacity: f32,
 }
 
@@ -43,15 +43,15 @@ impl MenuTexture {
     }
 
     /// Copies `panel`'s pixels if they are newer, and sizes and colors the
-    /// lines for `geometry` as `theme` styles menus.
+    /// lines for `geometry` as `style` styles menus.
     pub(crate) fn update(
         &mut self,
         panel: &Panel<MenuContent>,
         geometry: &MenuGeometry,
-        theme: &Theme,
+        style: &Style,
     ) {
         self.panel.upload(panel);
-        let frame = theme.style(ThemeElement::MenuFrame, WidgetState::Focused);
+        let frame = style.element_style(StyleElement::MenuFrame, WidgetState::Focused);
         self.opacity = frame.opacity();
         let outline = frame.border.color;
         for (buffer, line) in self.lines.iter_mut().zip(&geometry.lines) {

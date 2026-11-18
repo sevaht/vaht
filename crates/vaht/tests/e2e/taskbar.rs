@@ -1,5 +1,5 @@
 //! Taskbar tests: its window list, its buttons, and the room it keeps,
-//! checked by screenshots and clicks. A theme of solid colors tells its
+//! checked by screenshots and clicks. A style of solid colors tells its
 //! parts apart.
 
 use std::path::Path;
@@ -12,7 +12,7 @@ use vaht_test_support::{
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 
-/// The taskbar's height in the test theme, in pixels.
+/// The taskbar's height in the test style, in pixels.
 const HEIGHT: u32 = 20;
 
 /// The most an entry is wide where the tests limit it, in pixels; well
@@ -28,9 +28,9 @@ const UNFOCUSED: [u8; 3] = [0x00, 0x00, 0xff];
 /// The taskbar where nothing else is.
 const BACKGROUND: [u8; 3] = [0x00, 0xff, 0x00];
 
-/// A theme whose taskbar parts are solid colors, text in the color it is
+/// A style whose taskbar parts are solid colors, text in the color it is
 /// on, so it never shows.
-const THEME: &str = "\
+const STYLE: &str = "\
 [default]
 text_effect = \"none\"
 [taskbar]
@@ -46,21 +46,21 @@ texture = { solid = \"#0000ff\" }
 text_color = \"#0000ff\"
 ";
 
-/// Starts vaht with the test theme and a taskbar of `widgets`, and a
+/// Starts vaht with the test style and a taskbar of `widgets`, and a
 /// client.
 fn start(widgets: &str) -> (HeadlessVaht, TestClient) {
     start_with(widgets, "")
 }
 
-/// Starts vaht with the test theme, a taskbar of `widgets`, and
+/// Starts vaht with the test style, a taskbar of `widgets`, and
 /// `window_list` settings.
 fn start_with(widgets: &str, window_list: &str) -> (HeadlessVaht, TestClient) {
     let settings = format!(
-        "theme = \"test\"\n[taskbar]\nwidgets = {widgets}\n[taskbar.window_list]\n{window_list}"
+        "style = \"test\"\n[taskbar]\nwidgets = {widgets}\n[taskbar.window_list]\n{window_list}"
     );
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),
-        &[("settings.toml", &settings), ("themes/test.toml", THEME)],
+        &[("settings.toml", &settings), ("styles/test.toml", STYLE)],
     );
     let client = TestClient::connect(vaht.socket());
     (vaht, client)
@@ -416,17 +416,17 @@ const ICON: [u8; 3] = [0xff, 0x00, 0xff];
 /// The icon a window names itself.
 const NAMED_ICON: [u8; 3] = [0x00, 0xff, 0xff];
 
-/// Starts vaht with the test theme, a window list, `settings` added, and an
+/// Starts vaht with the test style, a window list, `settings` added, and an
 /// icon for the test client's app id; opens a window.
 fn start_with_icon(settings: &str) -> (HeadlessVaht, TestClient) {
-    let settings = format!("theme = \"test\"\n[taskbar]\nwidgets = [\"window-list\"]\n{settings}");
+    let settings = format!("style = \"test\"\n[taskbar]\nwidgets = [\"window-list\"]\n{settings}");
     let png = solid_png(32, ICON);
     let named_png = solid_png(32, NAMED_ICON);
     let vaht = HeadlessVaht::start_with_files(
         Path::new(EXECUTABLE),
         &[
             ("settings.toml", settings.as_bytes()),
-            ("themes/test.toml", THEME.as_bytes()),
+            ("styles/test.toml", STYLE.as_bytes()),
         ],
         &[
             (
@@ -569,12 +569,12 @@ fn a_title_too_long_for_its_entry_shows_in_a_tooltip_until_a_click() {
 }
 
 /// Starts vaht on two outputs (800 × 600, then 640 × 480) with the test
-/// theme, a window list taskbar on every output listing `windows`, and one
+/// style, a window list taskbar on every output listing `windows`, and one
 /// window open on the first output; returns the first entry's color on
 /// each output's taskbar.
 fn every_output_with(windows: &str) -> ([u8; 3], [u8; 3]) {
     let settings = format!(
-        "theme = \"test\"\n[taskbar]\nwidgets = [\"window-list\"]\non_every_output = true\n\
+        "style = \"test\"\n[taskbar]\nwidgets = [\"window-list\"]\non_every_output = true\n\
          windows = \"{windows}\"\n"
     );
     let vaht = HeadlessVaht::start_with_outputs(
@@ -582,7 +582,7 @@ fn every_output_with(windows: &str) -> ([u8; 3], [u8; 3]) {
         "800x600,640x480",
         &[
             ("settings.toml", settings.as_bytes()),
-            ("themes/test.toml", THEME.as_bytes()),
+            ("styles/test.toml", STYLE.as_bytes()),
         ],
     );
     let mut client = TestClient::connect(vaht.socket());

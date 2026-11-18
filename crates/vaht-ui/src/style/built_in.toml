@@ -1,7 +1,7 @@
-# vaht's built-in theme, after the nacitar_fbstyle Fluxbox style by nacitar
+# vaht's built-in style, after the nacitar_fbstyle Fluxbox style by nacitar
 # sevaht: dark grey gradients, white haloed text, a thin grey border.
 #
-# A theme gives a style to each element in each state, in four layers, each
+# A style gives a style to each element in each state, in four layers, each
 # overriding the one before: [default], [state.<state>], [<element>], and
 # [<element>.<state>]. Elements: window.titlebar, window.label,
 # window.button, window.handle, window.grip, window.border, taskbar,
@@ -10,7 +10,7 @@
 # the taskbar's own background), menu.title, menu.frame, menu.item,
 # dialog.field, wireframe (a resize's outline: its border), tooltip, warning
 # (vaht's notice that its configuration has problems: always drawn from this
-# built-in theme, so a theme of yours cannot hide it).
+# built-in style, so a style of yours cannot hide it).
 # States:
 # focused, unfocused, pressed, hovered (a menu's highlighted item) and
 # disabled (a menu item that does nothing).
@@ -114,7 +114,7 @@ text_color = "grey55"
 
 [dialog.field]
 # Black on white, as fbrun and fluxland-run draw their line. Fluxbox styles
-# say nothing of it, so an imported theme takes this section as it is.
+# say nothing of it, so an imported style takes this section as it is.
 texture = { solid = "white" }
 font = { family = "Sans", size = 12 }
 text_effect = "none"

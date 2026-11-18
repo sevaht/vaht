@@ -35,15 +35,15 @@ Everything lives under `$XDG_CONFIG_HOME/vaht/` (normally `~/.config/vaht/`):
 
 | File | Contains | Replaces (fluxland) |
 |---|---|---|
-| `settings.toml` | Behavior: focus, placement, workspaces, taskbar, menus, windows, Xwayland, session, theme choice, wallpaper | `init` |
+| `settings.toml` | Behavior: focus, placement, workspaces, taskbar, menus, windows, Xwayland, session, style choice, wallpaper | `init` |
 | `bindings.toml` | Key and mouse bindings, key modes | `keys` |
 | `rules.toml` | Per-window rules | `apps` |
 | `menus.toml` | Root menu, window menu, custom menus | `menu`, `windowmenu` |
 | `outputs.toml` | Per-output settings, display profiles, profile hooks | `session.output.*` in `init`; av-output-switcher's `profiles.json` (video part), converted by hand |
-| `themes/<name>.toml` | Themes; also read from `/usr/share/vaht/themes/` | `styles/*`, `overlay` |
+| `styles/<name>.toml` | Styles; also read from `/usr/share/vaht/styles/` | `styles/*`, `overlay` |
 
 - **`overlay` disappears.** My overlay existed only to stop styles from
-  setting the background. In vaht themes cannot set the wallpaper at all; it
+  setting the background. In vaht styles cannot set the wallpaper at all; it
   belongs to `settings.toml`.
 - **`startup` becomes `session.autostart`.** It is a list of commands, and my
   existing script can simply be one entry.
@@ -51,7 +51,7 @@ Everything lives under `$XDG_CONFIG_HOME/vaht/` (normally `~/.config/vaht/`):
   on the `reload` action and on SIGHUP. Rules apply to windows opened after the
   change.
   - **No polling.** One inotify watch on the config directory and one on
-    `themes/` are registered as a calloop source. vaht watches directories,
+    `styles/` are registered as a calloop source. vaht watches directories,
     not files, because editors save by writing a temporary file and renaming
     it, which a watch on the file would lose.
   - **Debounced.** An editor's burst of events (write, rename, chmod) settles
@@ -62,13 +62,13 @@ Everything lives under `$XDG_CONFIG_HOME/vaht/` (normally `~/.config/vaht/`):
     built-in one, at the start). `settings.toml` is taken a setting at a time:
     a setting that is not valid, a misspelled key or a value out of range, is
     left out, so it is the default, and every other setting, and every other
-    file, is in effect. A theme that cannot be read is the built-in theme;
+    file, is in effect. A style that cannot be read is the built-in style;
     `bindings.toml` and `menus.toml` that name each other's menus or key modes
     wrongly are both put back. Each thing left out is a problem. It is logged as
     an error and drawn as a red banner along the top of every output, naming the
     file, the setting, what is wrong and what vaht used instead, until the files
     are fixed; a click hides it (until the problems change). The banner is drawn
-    from the built-in theme, whatever theme is in use, so a broken theme cannot
+    from the built-in style, whatever style is in use, so a broken style cannot
     hide it. `vaht config files` and the settings window list the problems
     too. Fixing the files triggers the next load by itself. A change made from
     the settings window or `vaht config set` is still refused if it is
@@ -84,7 +84,7 @@ Only keys that differ from the default would be written. They are all shown
 here so the mapping can be checked.
 
 ```toml
-theme = "nacitar"
+style = "nacitar"
 dpi = 96
 
 [focus]
@@ -134,7 +134,7 @@ outputs = "primary"             # primary | all | [output matches]   (onhead 1)
 edge = "bottom"                 # placement BottomCenter
 alignment = "center"
 width_percent = 100
-height = "theme"                # or pixels (height 0 = from the theme)
+height = "style"                # or pixels (height 0 = from the style)
 rows = 1                        # new: a number, or "auto" up to max_rows (00 §5)
 auto_hide = false
 reserve_space = true            # maxOver = false
@@ -211,7 +211,7 @@ rest by name, so a setting never silently does nothing:
 - `[windows]`: `edge_snap_distance`, `double_click_ms`, `focused_alpha`
   and `unfocused_alpha` (0 to 255; `set-alpha` changes one window's),
   `opaque_resize`
-  (false shows an outline of the new frame, in the theme's `wireframe`,
+  (false shows an outline of the new frame, in the style's `wireframe`,
   while resizing, and the
   window takes the size when the drag ends; from Fluxbox's
   `opaqueResize`), and `[windows.frame]`
@@ -323,8 +323,8 @@ rest by name, so a setting never silently does nothing:
   `disabled`, `disabled-on-external-mouse`). A setting set nowhere keeps
   libinput's default, and one taken out is undone on reload. They apply
   on the DRM backend; a nested vaht's input is the host's.
-- `theme`: the name of a theme in `themes/` (§10); without it, the built-in
-  theme.
+- `style`: the name of a style in `styles/` (§10); without it, the built-in
+  style.
 - `[taskbar]`: `enabled`, `output` (the name of the output it shows on,
   such as `HDMI-A-1`; the primary output without one, or while that one
   is not there), `on_every_output` (off by default: on, every output has a
@@ -333,7 +333,7 @@ rest by name, so a setting never silently does nothing:
   auto-hides at its own edge), `windows` (`all`, the default, or
   `own-output`: each taskbar lists only the windows whose middle is on its
   output), `edge` (`top` or `bottom`), `width_percent`
-  (1 to 100), `rows` (new: a number of rows, each as tall as the theme's
+  (1 to 100), `rows` (new: a number of rows, each as tall as the style's
   taskbar, 1 by default; or `"auto"`: one, and another whenever the window
   list reaches its `row_limit`, up to `max_rows` (3). `row_limit` is one of
   three ways to say when: entries narrower than a share of the output's
@@ -356,7 +356,7 @@ rest by name, so a setting never silently does nothing:
   `[taskbar.tooltips]` `enabled` and `delay_ms` (from
   `tooltipDelay`;
   resting the pointer on an entry whose title does not fit shows the whole
-  title, and on a tray item its tooltip, in the theme's `tooltip`),
+  title, and on a tray item its tooltip, in the style's `tooltip`),
   `widgets` (`workspace-previous`, `workspace-name`, `workspace-next`,
   `window-previous`, `window-next`, `window-list`, `tray`, `clock`; the
   window arrows, Fluxbox's `prevwindow` and `nextwindow`, focus the window
@@ -393,7 +393,7 @@ strategies know how large it is.
 |---|---|
 | `tabs.*`, `tab.*`, `tabFocusModel`, `tabsAttachArea`, `tabPadding` | Tabs removed |
 | `slit.*`, `slitlistFile` | Slit removed |
-| `*.alpha: 255` (window, menu, toolbar, slit) | Fully opaque is the default. Other values are kept and moved to the theme, since opacity is appearance |
+| `*.alpha: 255` (window, menu, toolbar, slit) | Fully opaque is the default. Other values are kept and moved to the style, since opacity is appearance |
 | `colorsPerChannel`, `cacheMax`, `cacheLife`, `configVersion`, `forcePseudoTransparency` | Have no effect on Wayland, or are already ignored by fluxland |
 | `ignoreBorder` | The border is always part of the frame's move handle |
 | `appsFile`, `keyFile`, `menuFile`, `windowMenu`, `styleFile`, `styleOverlay`, `slitlistFile` | Fixed file names (§1.4) |
@@ -455,7 +455,7 @@ A command is written in one of three forms:
 | Menus and dialogs | `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`, `custom-menu <name>`, `hide-menus`, `run-dialog`, `command-dialog`, `settings` |
 | Taskbar | `activate-window-list-entry <n>`, `activate-tray-item <n>`, `tray-item-menu <n>`, `toggle-taskbar`, `taskbar-to-output <target>` |
 | Outputs | `apply-profile <name>`, `cycle-profile`, `cycle-primary-output` |
-| Theme | `set-theme <name>` |
+| Style | `set-style <name>` |
 
 The complete table is generated from the `Action` enum's documentation, so it
 cannot drift (D1).
@@ -667,15 +667,15 @@ lid-close = "exec swaylock"
   Mouse".accel_speed`), the value TOML (`true`, `300`, `"sloppy"`) or a
   bare word taken as a string. `vaht config check` refuses a key or value
   `settings.toml` could not hold, and a change that leaves the whole
-  configuration invalid (a theme that is not there) is not made. As with
-  `set-theme`, which is `set-setting theme <name>`, the change outlasts
+  configuration invalid (a style that is not there) is not made. As with
+  `set-style`, which is `set-setting style <name>`, the change outlasts
   reloads until the file says otherwise at that key, and `save-settings`
   writes every change into `settings.toml`, keeping the rest of the file.
   `reapply-rules` gives the windows open the traits `rules.toml` now says
   (frame, layer, stickiness, opacity, pseudo-transparency, exemptions,
   focus stealing); where a window goes and how large it is are only for a
-  window opening. `restart` and `reload-theme` are refused with a pointer to `reload`,
-  which reads every file, the theme too; a Wayland compositor cannot
+  window opening. `restart` and `reload-style` are refused with a pointer to `reload`,
+  which reads every file, the style too; a Wayland compositor cannot
   restart without closing every window.
 - `tile` takes a cell in thousandths of the usable area:
   `tile <x> <y> <width> <height>`, the left half being `tile 0 0 500 1000`.
@@ -783,7 +783,7 @@ items = [{ label = "xterm", command = "exec xterm" }]
 
 [menu.system]
 items = [
-    { label = "Themes",     generate = "themes" },
+    { label = "Styles",     generate = "styles" },
     { label = "Workspaces", generate = "workspaces" },
     { label = "Command",    command = "command-dialog" },
     { label = "Reload",     command = "reload" },
@@ -805,14 +805,14 @@ items = [
   - `command` (with a `label`; a missing label defaults to the action's name);
   - `submenu`;
   - `toggle` (a window state shown with a check mark);
-  - `generate`: `themes`, `workspaces`, `window-list`, `send-to-workspace`,
+  - `generate`: `styles`, `workspaces`, `window-list`, `send-to-workspace`,
     `layer`, `alpha`, `outputs`, `profiles`;
   - `pipe` (a command whose output is a menu in this same TOML form);
   - `separator`;
   - `icon` (optional on any item).
 - **Built so far:** `command`, `submenu`, `toggle` (`shade`, `stick`,
   `maximize`, `minimize`, `fullscreen`), `generate` (`workspaces`,
-  `send-to-workspace`, `window-list`, `alpha`, `layer`, `themes`; `inline =
+  `send-to-workspace`, `window-list`, `alpha`, `layer`, `styles`; `inline =
   true` lists in place),
   `separator`, and a bare `label` (drawn disabled). The actions
   `root-menu`, `window-menu`, `workspace-menu`, `window-list-menu`,
@@ -954,11 +954,11 @@ again, each window still where it was brought goes back to its place
 there (a maximized or tiled one fills its part of it), and one moved in
 the meantime stays where it was put (`output_memory.rs`).
 
-## 10. Themes: `themes/<name>.toml`
+## 10. Styles: `styles/<name>.toml`
 
 ### 10.1 Model
 
-A theme gives a `Style` to each **element** in each **state** (01 §6). Styles
+A style gives a `Style` to each **element** in each **state** (01 §6). Styles
 are resolved in four layers, each overriding the one before:
 
 1. `[default]`: applies to everything (`*.font`, `*.color` in Fluxbox).
@@ -967,7 +967,7 @@ are resolved in four layers, each overriding the one before:
 4. `[<element>.<state>]`: one element, one state.
 
 These four fixed layers replace Fluxbox's wildcard resource matching.
-`vaht config check --theme <name>` prints the fully resolved table, so it shows
+`vaht config check --style <name>` prints the fully resolved table, so it shows
 exactly what each element gets.
 
 - **Elements:**
@@ -1002,17 +1002,17 @@ exactly what each element gets.
   - The X11 list (`rgb.txt`) is large, about 750 names, but it has been frozen
     since the 1990s, so it needs no maintenance.
   - The importer needs it anyway to read fluxbox styles, so accepting names in
-    themes reuses the same table. That table is a static, sorted array in
+    styles reuses the same table. That table is a static, sorted array in
     `vaht-ui::color`, generated once from X.org's `rgb.txt` and checked against
     fluxland's `x11_colors.h` in a test.
   - The published crates for this are tiny and little used (the most popular
     has fewer than 200 downloads), so vaht doesn't add a dependency for it (X2).
-  - `vaht import` keeps names as written, so my converted theme still says
+  - `vaht import` keeps names as written, so my converted style still says
     `grey55`.
 
 **Built so far.**
-- `settings.toml`'s `theme = "<name>"` reads `themes/<name>.toml` from the
-  configuration directory, then from `/usr/share/vaht/themes/`. The file is
+- `settings.toml`'s `style = "<name>"` reads `styles/<name>.toml` from the
+  configuration directory, then from `/usr/share/vaht/styles/`. The file is
   watched like the others: editing it restyles every open window.
 - Elements: the window's six, and `taskbar`, `taskbar.button`,
   `taskbar.workspace`, `taskbar.clock`, `taskbar.window-list.entry`,
@@ -1023,7 +1023,7 @@ exactly what each element gets.
   (clear) to 255 (opaque), draws the whole of `taskbar`, a menu (in
   `menu.frame`) or a tooltip translucent, as Fluxbox's `toolbar.alpha`,
   `menu.alpha` and fluxland's `systray.tooltip.alpha`, which `vaht import`
-  converts into the theme. States: `focused`, `unfocused`, `pressed`, `hovered`,
+  converts into the style. States: `focused`, `unfocused`, `pressed`, `hovered`,
   `disabled`.
 - Properties: `texture` (solid or gradient, with a bevel), `font`,
   `text_color`, `text_effect`, `justify`, `glyph_color`, `padding`,
@@ -1038,10 +1038,10 @@ exactly what each element gets.
   radius 8, which cuts as much as Fluxbox's fixed 8-pixel shape.
 - Properties, states and elements still to come are refused by name, at
   their line in the file.
-- The built-in theme is itself a theme file (`vaht-ui`'s
-  `theme/built_in.toml`), printed by `vaht config check --print-defaults`.
-- A theme file is a whole theme: what it leaves out takes vaht's fallback,
-  not the built-in theme's value.
+- The built-in style is itself a style file (`vaht-ui`'s
+  `style/built_in.toml`), printed by `vaht config check --print-defaults`.
+- A style file is a whole style: what it leaves out takes vaht's fallback,
+  not the built-in style's value.
 
 ### 10.2 `nacitar_fbstyle`, converted
 
@@ -1049,7 +1049,7 @@ Shown in hex, with the original names in comments, so the values can be
 checked. The importer itself would keep the names (`from = "grey55"`).
 
 ```toml
-# themes/nacitar.toml (from nacitar_fbstyle by nacitar sevaht)
+# styles/nacitar.toml (from nacitar_fbstyle by nacitar sevaht)
 [default]
 font = { family = "DejaVu Sans", size = 8, weight = "bold" }
 text_effect = { halo = "#000000" }
@@ -1134,7 +1134,7 @@ corner_radius = 5
 
 ```
 vaht import fluxbox  [--from ~/.fluxbox] [--to ~/.config/vaht] [--force]
-vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/themes/<name>.toml
+vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/styles/<name>.toml
 ```
 
 - **There is one importer, for the Fluxbox format (decided).** fluxland was
@@ -1151,7 +1151,7 @@ vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/themes/<
 
 - **Built so far:** `init` to `settings.toml`, `keys` to `bindings.toml`,
   `apps` to `rules.toml`, and the style `session.styleFile` names (a file,
-  or a directory with `theme.cfg`) to `themes/<name>.toml`, which the
+  or a directory with `theme.cfg`) to `styles/<name>.toml`, which the
   converted `settings.toml` chooses.
   Every setting, binding or pattern vaht lacks is reported as "not in vaht
   yet", so importing again as features arrive picks them up. The first
@@ -1171,11 +1171,11 @@ vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/themes/<
   reload the configuration; one naming another window manager to start is
   reported.
 - **The styles menu converts:** `[stylesdir]` and `[stylesmenu]` become
-  the `themes` list, which shows vaht's themes (the directory is reported).
-  Choosing one runs `set-theme <name>`, which uses the theme at once
+  the `styles` list, which shows vaht's styles (the directory is reported).
+  Choosing one runs `set-style <name>`, which uses the style at once
   without writing anything. The change outlasts reloads, until
-  `settings.toml` is edited to name a theme itself; `save-settings` writes
-  it there (`theme = "<name>"`, the rest of the file kept as it was).
+  `settings.toml` is edited to name a style itself; `save-settings` writes
+  it there (`style = "<name>"`, the rest of the file kept as it was).
 - **The title dialog converts:** `SetTitleDialog` and the window menu's
   `[settitledialog]` become `set-title-dialog`, which shows the window's
   title to change (`vaht dialog title --window <id>`); `SetTitle` becomes
@@ -1186,8 +1186,8 @@ vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/themes/<
   title.
 - **The run window converts to the run dialog:** `RunDialog`, and `Exec
   fbrun` or `Exec fluxland-run`, become `run-dialog`; their options are
-  reported, since the theme's `dialog.field` styles the dialog. Fluxbox
-  styles say nothing of `dialog.field`, so a converted theme takes the
+  reported, since the style's `dialog.field` styles the dialog. Fluxbox
+  styles say nothing of `dialog.field`, so a converted style takes the
   built-in one's: black on white, as fbrun draws.
 - **The toolbar converts to `[taskbar]`:** its placement, tools, `maxOver`,
   `strftimeFormat`, `iconbar.mode` (a client pattern) and
@@ -1197,7 +1197,7 @@ vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/themes/<
   Fluxbox would give the resources behind it, looked up as Xlib's resource
   manager does (wildcards, tight before loose bindings) and through
   fluxland's fallback chains (`window.label.focus.font`, then
-  `window.font`). The theme is then written as the fewest layers that give
+  `window.font`). The style is then written as the fewest layers that give
   every element exactly that, which a test checks against vaht's own
   resolver. Padding, borders and bar heights are written per element only.
   Colors keep their X11 names. Pixmaps, interlacing and the gradients vaht
@@ -1209,7 +1209,7 @@ vaht import fluxbox-style <style file or directory> --to ~/.config/vaht/themes/<
 - It prints a report of every source line it dropped, and why: tabs, slit,
   ignored settings, unsupported pattern features.
 - It converts fluxbox styles (resource cascade, X11 color names, XPM and other
-  pixmaps to PNG beside the theme).
+  pixmaps to PNG beside the style).
 - `vaht config check` runs on the result before it reports success.
 
 ---
@@ -1246,7 +1246,7 @@ ask the running vaht and the dialogs use too.
   no running vaht.
 - **`vaht config`** reads the configuration as vaht has it, for the
   settings editor and for scripts: `files` (what can be read, whether each
-  has changes made in place and not written, and the themes there are),
+  has changes made in place and not written, and the styles there are),
   `schema <file>` (JSON Schema, draft 2020-12, of the file: every key with
   its type, its doc comment as `description`, its default, enum values and
   ranges; the ranges are the constants vaht's own validation uses), and
@@ -1276,7 +1276,7 @@ ask the running vaht and the dialogs use too.
   sends each change as it is made, and so every change runs at once. *Save*
   writes the changes into `settings.toml` and *Revert* drops them; both are
   enabled only while changes are pending. A value vaht refuses is shown
-  with the reason and changes nothing. Settings that are optional (`theme`,
+  with the reason and changes nothing. Settings that are optional (`style`,
   `log.keep_days`...) have a *Set* box; *Reset* puts one back to its
   default. Every control is labelled with the setting's name, so a screen
   reader announces it. Only `settings.toml` has a page so far. No
@@ -1296,7 +1296,7 @@ ask the running vaht and the dialogs use too.
   and `description` what it does or means (shown beside the chosen way).
 - **`vaht pick`** (`pick` request) is a dmenu-style chooser: the lines
   on standard input show as a vaht menu at the pointer (`--title` above
-  them), in the user's theme, and the one chosen is printed; closing the
+  them), in the user's style, and the one chosen is printed; closing the
   menu prints nothing and exits 1. The reply waits for the user; a
   connection's later requests are answered after it, in order. One pick
   shows at a time (a new one answers the one before with nothing), and

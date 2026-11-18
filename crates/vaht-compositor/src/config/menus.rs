@@ -68,7 +68,7 @@ impl Menus {
         icons
     }
 
-    /// Returns what to look the icon `icon` up by: a theme's icon name as
+    /// Returns what to look the icon `icon` up by: a style's icon name as
     /// it is, or a file's path, `~/` read as the home directory and a
     /// relative path taken from `config_directory`.
     pub(crate) fn icon_lookup(icon: &str, config_directory: &Path) -> Option<String> {
@@ -377,9 +377,9 @@ pub(crate) enum MenuGenerator {
     /// The stacking layers, the menu's window's own checked: choosing one
     /// moves the window there.
     Layer,
-    /// The themes there are, the one in use checked: choosing one makes it
-    /// the theme.
-    Themes,
+    /// The styles there are, the one in use checked: choosing one makes it
+    /// the style.
+    Styles,
     /// The display profiles, the one applied checked: choosing one
     /// applies it.
     Profiles,
@@ -396,7 +396,7 @@ impl MenuGenerator {
         ("window-list", Self::WindowList),
         ("alpha", Self::Alpha),
         ("layer", Self::Layer),
-        ("themes", Self::Themes),
+        ("styles", Self::Styles),
         ("profiles", Self::Profiles),
         ("outputs", Self::Outputs),
     ];
@@ -409,7 +409,7 @@ impl MenuGenerator {
             Self::WindowList => "Windows",
             Self::Alpha => "Transparency",
             Self::Layer => "Layer",
-            Self::Themes => "Themes",
+            Self::Styles => "Styles",
             Self::Profiles => "Display Profiles",
             Self::Outputs => "Primary Output",
         }
@@ -425,7 +425,7 @@ impl<'de> serde::Deserialize<'de> for MenuGenerator {
             .map(|&(_, generator)| generator)
             .ok_or_else(|| {
                 de::Error::custom(format!(
-                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list, alpha, layer, themes, profiles and outputs"
+                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list, alpha, layer, styles, profiles and outputs"
                 ))
             })
     }

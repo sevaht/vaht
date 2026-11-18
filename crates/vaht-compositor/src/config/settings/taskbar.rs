@@ -156,7 +156,7 @@ impl TaskbarSettings {
 /// How many rows the taskbar is: always a number of them (`rows = 2`), or
 /// (`"auto"`) one, and another whenever the window list's entries would be
 /// narrower than its `row_limit` allows (or hold more windows), up to `max_rows`. Each row is as
-/// tall as the theme's taskbar.
+/// tall as the style's taskbar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum TaskbarRows {
     /// Always this many.

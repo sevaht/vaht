@@ -1,7 +1,7 @@
 //! Rounded corners: how round each corner of a rectangle is, and drawing
 //! with them.
 //!
-//! [`CornerRadii`] says how round each [`Corner`] is; a theme says it as a
+//! [`CornerRadii`] says how round each [`Corner`] is; a style says it as a
 //! radius and a [`CornerSet`] of the corners it rounds. A [`Panel`] cuts its
 //! corners away by them (anti-aliased), and hit-testing asks
 //! [`CornerRadii::cuts`] whether a pixel was cut. A line drawn around a
@@ -30,7 +30,7 @@ pub enum Corner {
 }
 
 impl Corner {
-    /// Returns the corner's name in theme files.
+    /// Returns the corner's name in style files.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -41,7 +41,7 @@ impl Corner {
         }
     }
 
-    /// Returns the corner named `name` in theme files.
+    /// Returns the corner named `name` in style files.
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
         <Self as strum::IntoEnumIterator>::iter().find(|corner| corner.name() == name)
@@ -404,7 +404,7 @@ mod tests {
     }
 
     #[test]
-    fn corners_are_named_as_theme_files_write_them() {
+    fn corners_are_named_as_style_files_write_them() {
         assert_eq!(Corner::named("bottom-right"), Some(Corner::BottomRight));
         assert_eq!(Corner::named("bottomright"), None);
     }

@@ -12,7 +12,7 @@ use std::num::NonZeroUsize;
 use jiff::Zoned;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::utils::{Logical, Point};
-use vaht_ui::{IconStore, Theme, Typesetter};
+use vaht_ui::{IconStore, Style, Typesetter};
 
 use crate::Compositor;
 use crate::bus::Bus;
@@ -99,14 +99,14 @@ impl Taskbars {
     }
 
     /// Brings each taskbar up to date with `state` (the windows and the
-    /// settings) and paints it, as `theme` styles it, on its output, whose
+    /// settings) and paints it, as `style` styles it, on its output, whose
     /// area `whole_of` gives by name. Returns whether any changed height,
     /// so windows keep off it anew.
     pub(crate) fn prepare(
         &mut self,
         whole_of: impl Fn(&str) -> Area,
         state: (&WindowManager, &TaskbarSettings),
-        theme: &Theme,
+        style: &Style,
         tools: (&mut Typesetter, &mut IconStore),
     ) -> bool {
         let (window_manager, settings) = state;
@@ -122,7 +122,7 @@ impl Taskbars {
                 now: &now,
                 tray: tray.as_ref(),
             };
-            has_resized |= bar.prepare(view, theme, typesetter, icons);
+            has_resized |= bar.prepare(view, style, typesetter, icons);
         }
         has_resized
     }

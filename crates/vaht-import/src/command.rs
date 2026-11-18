@@ -262,7 +262,7 @@ impl FluxboxCommand<'_> {
     }
 
     /// Translates `Exec fbrun [options]` to the run dialog; its options
-    /// (font, colors, size, place) are the theme's and the rules' to say.
+    /// (font, colors, size, place) are the vaht style's and the rules' to say.
     fn run_dialog(arguments: &str) -> Translated {
         let options = arguments
             .split_once(char::is_whitespace)
@@ -273,7 +273,7 @@ impl FluxboxCommand<'_> {
             vec![(
                 Reason::Dropped,
                 format!(
-                    "the run window's options ({options}): the theme's dialog.field styles \
+                    "the run window's options ({options}): the vaht style's dialog.field element \
                      the run dialog, and rules place it"
                 ),
             )]

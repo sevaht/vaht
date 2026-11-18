@@ -2,7 +2,7 @@
 //!
 //! As fluxland's: a window list entry whose title does not fit shows the
 //! whole title, and a tray item its own tooltip (or title), a line each,
-//! in the theme's `tooltip` style, its corners as round as that says. It
+//! in the style's `tooltip` style, its corners as round as that says. It
 //! is centered over the pointer, 10
 //! pixels above it, or below it when there is no room above, and kept on
 //! the output. Moving to something else hides it and waits again; a press
@@ -13,7 +13,7 @@ use std::time::Duration;
 use smithay::reexports::calloop::LoopHandle;
 use smithay::utils::{Logical, Point, Rectangle, Scale};
 use vaht_ui::{
-    Panel, PanelContent, SizePolicy, Theme, ThemeElement, Typesetter, Widget, WidgetState,
+    Panel, PanelContent, SizePolicy, Style, StyleElement, Typesetter, Widget, WidgetState,
 };
 
 use crate::Compositor;
@@ -44,7 +44,7 @@ struct Shown {
     texture: PanelTexture,
     /// Its border.
     outline: Outline,
-    /// How opaque it is drawn, as the theme says.
+    /// How opaque it is drawn, as the style says.
     opacity: f32,
 }
 
@@ -57,7 +57,7 @@ pub(crate) struct Lines {
     /// How tall each line is.
     pub(crate) line_height: u32,
     /// What styles it.
-    pub(crate) element: ThemeElement,
+    pub(crate) element: StyleElement,
 }
 
 impl PanelContent for Lines {
@@ -123,19 +123,19 @@ impl Tooltip {
     }
 
     /// Shows the tooltip wanted, by the pointer at `pointer`, inside
-    /// `bounds`, as `theme` styles tooltips.
+    /// `bounds`, as `style` styles tooltips.
     pub(crate) fn show(
         &mut self,
         pointer: Point<i32, Logical>,
         bounds: Area,
-        style: (&Theme, &mut Typesetter),
+        style: (&Style, &mut Typesetter),
     ) {
         self.timer = None;
         let Some(text) = &self.wanted else {
             return;
         };
-        let (theme, typesetter) = style;
-        let tooltip = theme.style(ThemeElement::Tooltip, WidgetState::Focused);
+        let (style, typesetter) = style;
+        let tooltip = style.element_style(StyleElement::Tooltip, WidgetState::Focused);
         let line_height = typesetter.line_height(&tooltip.text.font);
         let lines: Vec<String> = text.lines().map(str::to_owned).collect();
         let widest = lines
@@ -169,16 +169,16 @@ impl Tooltip {
         let content = Lines {
             texts: lines,
             line_height: row_height,
-            element: ThemeElement::Tooltip,
+            element: StyleElement::Tooltip,
         };
         let corners = tooltip.corner_radii();
         let mut panel = Panel::new(content, vaht_ui::Size::new(width, height));
         panel.set_corners(corners.inset(tooltip.border.width));
-        panel.paint(theme, typesetter);
+        panel.paint(style, typesetter);
         let mut texture = PanelTexture::new();
         texture.upload(&panel);
         let mut outline = Outline::default();
-        outline.update_as(Some(area), theme, ThemeElement::Tooltip, corners);
+        outline.update_as(Some(area), style, StyleElement::Tooltip, corners);
         self.shown = Some(Shown {
             area,
             border,

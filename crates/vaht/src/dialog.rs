@@ -1,4 +1,4 @@
-//! `vaht dialog`: one of vaht's dialogs, in the configured theme.
+//! `vaht dialog`: one of vaht's dialogs, in the configured style.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -6,23 +6,23 @@ use std::process::ExitCode;
 use vaht_compositor::Config;
 use vaht_dialog::{CommandDialog, LineDialog, RunDialog, TitleDialog};
 use vaht_ipc::{Client, Reply, Request};
-use vaht_ui::Theme;
+use vaht_ui::Style;
 
 use crate::DialogKind;
 use crate::terminal;
 
-/// Shows the dialog `kind`, styled by the theme the configuration in
+/// Shows the dialog `kind`, styled by the style the configuration in
 /// `config_directory` names, until it closes.
 #[must_use]
 pub fn show(kind: DialogKind, config_directory: &Path) -> ExitCode {
-    let theme = match Config::load(config_directory) {
-        Ok(config) => config.theme().clone(),
+    let style = match Config::load(config_directory) {
+        Ok(config) => config.style().clone(),
         Err(error) => {
             terminal::report_error(
                 &anyhow::Error::new(error)
-                    .context("the configuration is not valid; using the built-in theme"),
+                    .context("the configuration is not valid; using the built-in style"),
             );
-            Theme::built_in()
+            Style::built_in()
         }
     };
     let dialog: Box<dyn LineDialog> = match kind {
@@ -36,7 +36,7 @@ pub fn show(kind: DialogKind, config_directory: &Path) -> ExitCode {
             }
         },
     };
-    match vaht_dialog::show(dialog, theme) {
+    match vaht_dialog::show(dialog, style) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             terminal::report_error(&anyhow::Error::new(error));

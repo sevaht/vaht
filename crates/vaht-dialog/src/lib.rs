@@ -10,7 +10,7 @@
 //! [`RunDialog`] runs a program, [`CommandDialog`] a vaht command, and
 //! [`TitleDialog`] retitles a window; each asks vaht through a
 //! [`Commander`]. [`show`] puts a dialog in a window
-//! drawn with vaht-ui in the theme's `dialog.field` style, and runs it
+//! drawn with vaht-ui in the style's `dialog.field` style, and runs it
 //! until it closes.
 
 mod command;

@@ -1,9 +1,9 @@
 # vaht's built-in settings: what applies to each key that
 # ~/.config/vaht/settings.toml leaves out. Every key is optional.
 
-# The theme: themes/<name>.toml in this directory, or in
-# /usr/share/vaht/themes. Without it, the built-in theme.
-# theme = "name"
+# The style: styles/<name>.toml in this directory, or in
+# /usr/share/vaht/styles. Without it, the built-in style.
+# style = "name"
 
 [focus]
 # click: a window takes focus when clicked. sloppy: when the pointer
@@ -69,7 +69,7 @@ layouts = [
 # Buttons: shade, stick, minimize, maximize, close.
 titlebar_left = []
 titlebar_right = ["minimize", "maximize", "close"]
-# A strip along the bottom, with a resize grip at each end; the theme's
+# A strip along the bottom, with a resize grip at each end; the style's
 # window.handle height sets how tall.
 handle = false
 # Whether the titlebar shows the window's icon left of its title: the one
@@ -81,7 +81,7 @@ names = ["Workspace 1", "Workspace 2", "Workspace 3", "Workspace 4"]
 
 [taskbar]
 enabled = true
-# How many rows tall it is, each as tall as the theme's taskbar: a number
+# How many rows tall it is, each as tall as the style's taskbar: a number
 # (always that many), or "auto": one, and another whenever the window list
 # reaches row_limit, up to max_rows. The window list and the tray wrap across
 # the rows; the tray never adds one.
@@ -123,7 +123,7 @@ show = { workspace = "current" }
 # { max = <pixels> } shares it, each at most that wide.
 entry_width = "fill"
 # Whether entries show their application's icon: the one the window names,
-# else its desktop entry's, from the hicolor theme or pixmaps.
+# else its desktop entry's, from the hicolor style or pixmaps.
 icons = true
 
 [taskbar.tray]

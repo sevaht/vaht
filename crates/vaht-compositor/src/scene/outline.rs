@@ -1,15 +1,15 @@
 //! A line around an area: a resize's outline, a tooltip's edge.
 //!
-//! Four straight lines in the border a theme element gives (the
+//! Four straight lines in the border a style element gives (the
 //! `wireframe`: white at 80%, two pixels wide, as fluxland draws it, in the
-//! built-in theme), stopping short of rounded corners, where an arc each
+//! built-in style), stopping short of rounded corners, where an arc each
 //! joins them ([`CornerTexture`]). [`Outline::lines_around`] is where such
 //! lines go, which menus' outlines share.
 
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::utils::{Logical, Rectangle, Scale};
-use vaht_ui::{Corner, CornerArc, CornerRadii, Theme, ThemeElement, WidgetState};
+use vaht_ui::{Corner, CornerArc, CornerRadii, Style, StyleElement, WidgetState};
 
 use super::{CornerTexture, SceneElement, SceneRenderer};
 use crate::window_manager::Area;
@@ -47,21 +47,21 @@ impl Default for Outline {
 }
 
 impl Outline {
-    /// Shows the outline of `area`, or none, in `theme`'s wireframe.
-    pub(crate) fn update(&mut self, area: Option<Area>, theme: &Theme) {
-        self.update_as(area, theme, ThemeElement::Wireframe, CornerRadii::SQUARE);
+    /// Shows the outline of `area`, or none, in `style`'s wireframe.
+    pub(crate) fn update(&mut self, area: Option<Area>, style: &Style) {
+        self.update_as(area, style, StyleElement::Wireframe, CornerRadii::SQUARE);
     }
 
-    /// Shows the outline of `area`, or none, in the border `theme` gives
+    /// Shows the outline of `area`, or none, in the border `style` gives
     /// `element`, its corners as round as `corners` says.
     pub(crate) fn update_as(
         &mut self,
         area: Option<Area>,
-        theme: &Theme,
-        element: ThemeElement,
+        style: &Style,
+        element: StyleElement,
         corners: CornerRadii,
     ) {
-        let border = theme.style(element, WidgetState::Focused).border;
+        let border = style.element_style(element, WidgetState::Focused).border;
         let Some(area) = area else {
             self.shown = None;
             return;

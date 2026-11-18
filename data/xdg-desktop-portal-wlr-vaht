@@ -5,7 +5,7 @@
 #
 # When a program asks to share the screen, the portal lists the outputs and
 # windows that can be shared and lets the user pick one with vaht's own menu,
-# in the user's vaht theme, at the pointer (`vaht pick`). Closing the
+# in the user's vaht style, at the pointer (`vaht pick`). Closing the
 # menu cancels the share.
 [screencast]
 chooser_type=dmenu

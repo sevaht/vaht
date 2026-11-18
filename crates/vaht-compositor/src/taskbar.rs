@@ -32,7 +32,7 @@ use smithay::backend::renderer::{ImportMem, Renderer};
 use smithay::reexports::calloop::LoopHandle;
 use smithay::utils::{Logical, Point, Rectangle, Scale};
 use vaht_ui::{
-    Glyph, IconEmphasis, IconStore, Panel, PanelContent, SizePolicy, Theme, ThemeElement,
+    Glyph, IconEmphasis, IconStore, Panel, PanelContent, SizePolicy, Style, StyleElement,
     Typesetter, Widget, WidgetIcon, WidgetState,
 };
 
@@ -123,7 +123,7 @@ pub(crate) struct Taskbar {
     texture: PanelTexture,
     /// Whether its clock shows seconds, and so ticks each second.
     clock_shows_seconds: bool,
-    /// How opaque it is drawn, as the theme says.
+    /// How opaque it is drawn, as the style says.
     opacity: f32,
     /// The output it is on, by connector.
     output: String,
@@ -372,12 +372,12 @@ impl Taskbar {
     }
 
     /// Returns the tooltip for global `point`: a window list entry's title
-    /// if it does not fit, as `theme` and `typesetter` lay it out, or a
+    /// if it does not fit, as `style` and `typesetter` lay it out, or a
     /// tray item's text; none elsewhere.
     pub(crate) fn tooltip_at(
         &self,
         point: Point<f64, Logical>,
-        theme: &Theme,
+        style: &Style,
         typesetter: &mut Typesetter,
     ) -> Option<String> {
         let hit = self.hit_at(point)?;
@@ -389,7 +389,8 @@ impl Taskbar {
                     .iter()
                     .find(|entry| entry.window == window)?;
                 let area = self.panel.area_of(hit)?;
-                let style = theme.style(ThemeElement::WindowListEntry, WidgetState::Focused);
+                let style =
+                    style.element_style(StyleElement::WindowListEntry, WidgetState::Focused);
                 let shown = entry.shown_title();
                 let icon = entry
                     .icon
@@ -416,20 +417,20 @@ impl Taskbar {
 
     /// Brings what the taskbar shows up to date with `window_manager`,
     /// `settings` and the time `now`, and paints it to fill its edge of an
-    /// output covering `whole`, as `theme` styles it, as many rows tall as
+    /// output covering `whole`, as `style` styles it, as many rows tall as
     /// the settings say or its window list needs. Returns whether it
     /// changed height, so windows keep off it anew.
     pub(crate) fn prepare(
         &mut self,
         view: TaskbarView<'_>,
-        theme: &Theme,
+        style: &Style,
         typesetter: &mut Typesetter,
         icons: &mut IconStore,
     ) -> bool {
-        let row_height = theme.metrics().taskbar_height;
+        let row_height = style.metrics().taskbar_height;
         let old_height = self.area.size.h;
-        self.opacity = theme
-            .style(ThemeElement::Taskbar, WidgetState::Focused)
+        self.opacity = style
+            .element_style(StyleElement::Taskbar, WidgetState::Focused)
             .opacity();
         let shows_tray = self.panel.content().widgets.contains(&TaskbarWidget::Tray);
         let tray_items: Vec<&TrayItem> = view
@@ -459,7 +460,7 @@ impl Taskbar {
                 (fewest..most)
                     .find(|rows| {
                         content.rows = *rows;
-                        content.entries_fit(width, narrowest, theme, typesetter)
+                        content.entries_fit(width, narrowest, style, typesetter)
                     })
                     .unwrap_or(most)
             };
@@ -471,12 +472,12 @@ impl Taskbar {
         }
         let size = vaht_ui::Size::new(width, u32::try_from(self.area.size.h).unwrap_or(0));
         self.panel.resize(size);
-        self.panel.paint(theme, typesetter);
+        self.panel.paint(style, typesetter);
         self.texture.upload(&self.panel);
         self.area.size.h != old_height
     }
 
-    /// Repaints the taskbar at the next prepare, as when the theme changed.
+    /// Repaints the taskbar at the next prepare, as when the style changed.
     pub(crate) fn invalidate(&mut self) {
         self.panel.invalidate();
     }
@@ -689,11 +690,11 @@ impl TaskbarContent {
             }
             TaskbarWidget::WindowNext => self.arrow(Glyph::ArrowRight, TaskbarHit::WindowNext),
             TaskbarWidget::WorkspaceName => {
-                Widget::text(ThemeElement::TaskbarWorkspace, self.workspace_name.clone())
+                Widget::text(StyleElement::TaskbarWorkspace, self.workspace_name.clone())
                     .with_hit(TaskbarHit::WorkspaceName)
             }
             TaskbarWidget::WindowList => self.window_list(),
-            TaskbarWidget::Clock => Widget::text(ThemeElement::TaskbarClock, self.clock.clone())
+            TaskbarWidget::Clock => Widget::text(StyleElement::TaskbarClock, self.clock.clone())
                 .with_hit(TaskbarHit::Clock),
             TaskbarWidget::Tray => self.tray_widget(),
         }
@@ -702,7 +703,7 @@ impl TaskbarContent {
     /// Returns an arrow button showing `glyph`, one row wide however many
     /// rows the taskbar is.
     fn arrow(&self, glyph: Glyph, hit: TaskbarHit) -> Widget<TaskbarHit> {
-        Widget::glyph(ThemeElement::TaskbarButton, glyph)
+        Widget::glyph(StyleElement::TaskbarButton, glyph)
             .with_size(SizePolicy::Fixed(self.row_height))
             .with_button(hit)
     }
@@ -724,7 +725,7 @@ impl TaskbarContent {
             self.per_row(self.entries.len())
         };
         let entry_row = |entries: &[WindowListEntry]| {
-            let gap = Widget::fill(ThemeElement::WindowListEmpty)
+            let gap = Widget::fill(StyleElement::WindowListEmpty)
                 .with_size(SizePolicy::Share {
                     max: self.entry_max_width,
                 })
@@ -734,7 +735,7 @@ impl TaskbarContent {
                 .map(|entry| entry.widget(self.entry_max_width))
                 .collect();
             widgets.resize(per_row.max(widgets.len()), gap);
-            Widget::row(ThemeElement::WindowListEmpty, widgets)
+            Widget::row(StyleElement::WindowListEmpty, widgets)
         };
         if self.rows <= 1 {
             return entry_row(&self.entries);
@@ -746,29 +747,29 @@ impl TaskbarContent {
             self.entries.chunks(per_row).map(entry_row).collect();
         let count = usize::try_from(self.rows).unwrap_or(usize::MAX);
         rows.resize_with(count.max(rows.len()), || entry_row(&[]));
-        Widget::column(ThemeElement::WindowListEmpty, rows)
+        Widget::column(StyleElement::WindowListEmpty, rows)
     }
 
     /// Returns whether the window list's entries are at least
     /// `min_entry_width` pixels wide with the taskbar as many rows as it is now,
-    /// `width` wide, as `theme` styles it.
+    /// `width` wide, as `style` styles it.
     fn entries_fit(
         &self,
         width: u32,
         min_entry_width: u32,
-        theme: &Theme,
+        style: &Style,
         typesetter: &mut Typesetter,
     ) -> bool {
         if self.entries.is_empty() {
             return true;
         }
         let size = vaht_ui::Size::new(width, self.rows.saturating_mul(self.row_height));
-        let layout = Panel::lay_out(self, size, theme, typesetter);
+        let layout = Panel::lay_out(self, size, style, typesetter);
         // The list is the first widget drawn on its background.
         let Some(list) = layout
             .placed()
             .iter()
-            .find(|placed| placed.element == ThemeElement::WindowListEmpty)
+            .find(|placed| placed.element == StyleElement::WindowListEmpty)
         else {
             return true;
         };
@@ -781,10 +782,10 @@ impl TaskbarContent {
     /// rows.
     fn tray_widget(&self) -> Widget<TaskbarHit> {
         if self.tray.is_empty() {
-            return Widget::fill(ThemeElement::Taskbar).with_size(SizePolicy::Fixed(0));
+            return Widget::fill(StyleElement::Taskbar).with_size(SizePolicy::Fixed(0));
         }
         let margin = || {
-            Widget::fill(ThemeElement::Taskbar)
+            Widget::fill(StyleElement::Taskbar)
                 .with_size(SizePolicy::Fixed(Self::TRAY_END_MARGIN))
                 .without_background()
         };
@@ -792,7 +793,7 @@ impl TaskbarContent {
             .tray
             .iter()
             .map(|entry| {
-                let slot = Widget::fill(ThemeElement::Taskbar)
+                let slot = Widget::fill(StyleElement::Taskbar)
                     .with_size(SizePolicy::Fixed(self.tray_slot))
                     .with_hit(TaskbarHit::TrayItem(entry.key))
                     .without_background();
@@ -814,11 +815,11 @@ impl TaskbarContent {
         // rows, margins and slots sit on it.
         let tray_row = |row: &[Widget<TaskbarHit>]| {
             Widget::row(
-                ThemeElement::Taskbar,
+                StyleElement::Taskbar,
                 std::iter::once(margin())
                     .chain(row.iter().cloned())
                     .chain(std::iter::once(
-                        Widget::fill(ThemeElement::Taskbar).without_background(),
+                        Widget::fill(StyleElement::Taskbar).without_background(),
                     ))
                     .collect(),
             )
@@ -831,7 +832,7 @@ impl TaskbarContent {
                 let mut rows = rows;
                 let count = usize::try_from(self.rows).unwrap_or(usize::MAX);
                 rows.resize_with(count.max(rows.len()), || tray_row(&[]));
-                Widget::column(ThemeElement::Taskbar, rows)
+                Widget::column(StyleElement::Taskbar, rows)
             }
         };
         tray.with_size(SizePolicy::Fixed(width))
@@ -843,7 +844,7 @@ impl PanelContent for TaskbarContent {
 
     fn build(&self) -> Widget<TaskbarHit> {
         Widget::row(
-            ThemeElement::Taskbar,
+            StyleElement::Taskbar,
             self.widgets
                 .iter()
                 .map(|widget| self.widget(*widget))
@@ -902,7 +903,7 @@ impl WindowListEntry {
         } else {
             WidgetState::Unfocused
         };
-        let entry = Widget::text(ThemeElement::WindowListEntry, title)
+        let entry = Widget::text(StyleElement::WindowListEntry, title)
             .with_size(SizePolicy::Share { max: max_width })
             .with_button(TaskbarHit::Entry(self.window))
             .with_state(state);
