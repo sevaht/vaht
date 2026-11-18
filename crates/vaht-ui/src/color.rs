@@ -82,17 +82,58 @@ impl fmt::Display for Color {
     }
 }
 
+impl Color {
+    /// Reads X11's `rgb:R/G/B` (what follows `rgb:`): each channel one to four
+    /// hex digits, scaled so all digits set is full intensity.
+    fn x11_channels(channels: &str) -> Option<Self> {
+        let mut parts = channels.split('/');
+        let mut channel = || {
+            let digits = parts.next()?;
+            if !(1..=4).contains(&digits.len())
+                || !digits.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return None;
+            }
+            let value = u32::from_str_radix(digits, 16).ok()?;
+            let most = (1_u32 << (4 * u32::try_from(digits.len()).ok()?)) - 1;
+            u8::try_from((value * 255 + most / 2) / most).ok()
+        };
+        let (red, green, blue) = (channel()?, channel()?, channel()?);
+        parts
+            .next()
+            .is_none()
+            .then(|| Self::rgba(red, green, blue, u8::MAX))
+    }
+}
+
 impl FromStr for Color {
     type Err = ParseColorError;
 
-    /// Parses `#rrggbb`, `#rrggbbaa`, or an X11 color name.
+    /// Parses `#rrggbb`, `#rrggbbaa`, X11's `#rgb` and `rgb:R/G/B`, or an X11
+    /// color name.
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let invalid = || ParseColorError {
             text: text.to_owned(),
         };
+        if let Some(channels) = text.strip_prefix("rgb:") {
+            return Self::x11_channels(channels).ok_or_else(invalid);
+        }
         let Some(digits) = text.strip_prefix('#') else {
             return Self::named(text).ok_or_else(invalid);
         };
+        if digits.len() == 3 && digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            // X11's `#rgb`: each digit is repeated, so `#fff` is white.
+            let channel = |index: usize| {
+                digits
+                    .get(index..=index)
+                    .and_then(|digit| u8::from_str_radix(digit, 16).ok())
+                    .map(|value| value * 17)
+            };
+            return match (channel(0), channel(1), channel(2)) {
+                (Some(red), Some(green), Some(blue)) => Ok(Self::rgba(red, green, blue, u8::MAX)),
+                _ => Err(invalid()),
+            };
+        }
         if !matches!(digits.len(), 6 | 8) || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(invalid());
         }
@@ -117,7 +158,7 @@ impl FromStr for Color {
 
 /// Text that is not a color vaht understands.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("not a color: {text:?} (expected #rrggbb, #rrggbbaa or an X11 color name)")]
+#[error("not a color: {text:?} (expected #rrggbb, #rrggbbaa, rgb:R/G/B or an X11 color name)")]
 pub struct ParseColorError {
     /// The text as given.
     pub text: String,
@@ -133,6 +174,26 @@ mod tests {
     fn hex_colors_parse_with_and_without_alpha() {
         assert_eq!("#8c8c8c".parse(), Ok(Color::rgb(140, 140, 140)));
         assert_eq!("#ffffff80".parse(), Ok(Color::rgba(255, 255, 255, 128)));
+    }
+
+    #[rstest]
+    #[case("rgb:80/84/88", Color::rgb(0x80, 0x84, 0x88))]
+    #[case("rgb:f/0/8", Color::rgb(255, 0, 136))]
+    #[case("rgb:ffff/0000/8080", Color::rgb(255, 0, 128))]
+    #[case("#fff", Color::rgb(255, 255, 255))]
+    #[case("#123", Color::rgb(0x11, 0x22, 0x33))]
+    fn x11_color_forms_parse(#[case] text: &str, #[case] color: Color) {
+        assert_eq!(text.parse(), Ok(color));
+    }
+
+    #[rstest]
+    #[case("rgb:80/84")]
+    #[case("rgb:80/84/88/90")]
+    #[case("rgb:80/84/zz")]
+    #[case("rgb:/84/88")]
+    #[case("rgb:12345/0/0")]
+    fn bad_x11_forms_are_refused(#[case] text: &str) {
+        assert!(text.parse::<Color>().is_err());
     }
 
     #[test]
