@@ -89,7 +89,7 @@ impl<Hit: Copy> Layout<Hit> {
             space,
             placed: Vec::new(),
         };
-        placer.place(root, area);
+        placer.place(root, area, true);
         Self {
             placed: placer.placed,
         }
@@ -162,8 +162,11 @@ struct Placer<'fit, Hit> {
 }
 
 impl<Hit: Copy> Placer<'_, Hit> {
-    /// Places `widget` in `area`, then its descendants.
-    fn place(&mut self, widget: &Widget<Hit>, area: Rect) {
+    /// Places `widget` in `area`, then its descendants. Only the root keeps
+    /// the room its element's style asks around and between its parts: the
+    /// rows and columns inside it, though styled as the same element (the
+    /// tray in the taskbar), are the parts, and fill what they are given.
+    fn place(&mut self, widget: &Widget<Hit>, area: Rect, is_root: bool) {
         let content = match &widget.kind {
             WidgetKind::Text(text) => Content::Text(text.clone()),
             WidgetKind::Glyph(glyph) => Content::Glyph(*glyph),
@@ -190,7 +193,11 @@ impl<Hit: Copy> Placer<'_, Hit> {
             | WidgetKind::Field(_)
             | WidgetKind::Fill => return,
         };
-        let space = (self.space)(widget.element);
+        let space = if is_root {
+            (self.space)(widget.element)
+        } else {
+            Space::default()
+        };
         let inner = area.inset(space.inset);
         // The gaps come out of what the children share.
         let gaps = space.gap * u32::try_from(children.len().saturating_sub(1)).unwrap_or(0);
@@ -198,7 +205,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
         let lengths = self.distribute(axis, shared, children);
         let mut start = 0;
         for (child, length) in children.iter().zip(lengths) {
-            self.place(child, axis.slice(inner, start, length));
+            self.place(child, axis.slice(inner, start, length), false);
             start += length + space.gap;
         }
     }
@@ -288,25 +295,15 @@ impl<Hit: Copy> Placer<'_, Hit> {
                 // give each line a fixed size instead.
                 Axis::Vertical => 0,
             },
-            WidgetKind::Row(children) | WidgetKind::Column(children) => {
-                let space = (self.space)(widget.element);
-                let own = match axis {
-                    Axis::Horizontal => space.inset.horizontal(),
-                    Axis::Vertical => space.inset.vertical(),
-                };
-                let gaps = space.gap * u32::try_from(children.len().saturating_sub(1)).unwrap_or(0);
-                own + gaps
-                    + children
-                        .iter()
-                        .map(|child| match child.size {
-                            SizePolicy::Fixed(length) => length,
-                            SizePolicy::Fit => self.natural_length(child, axis, thickness),
-                            SizePolicy::Square
-                            | SizePolicy::Share { .. }
-                            | SizePolicy::Fill { .. } => 0,
-                        })
-                        .sum::<u32>()
-            }
+            // A part of a bar keeps no room of its own (see `place`).
+            WidgetKind::Row(children) | WidgetKind::Column(children) => children
+                .iter()
+                .map(|child| match child.size {
+                    SizePolicy::Fixed(length) => length,
+                    SizePolicy::Fit => self.natural_length(child, axis, thickness),
+                    SizePolicy::Square | SizePolicy::Share { .. } | SizePolicy::Fill { .. } => 0,
+                })
+                .sum(),
             WidgetKind::Glyph(_) | WidgetKind::Field(_) | WidgetKind::Fill => 0,
         }
     }
@@ -467,6 +464,39 @@ mod tests {
                 Rect::new(23, 2, 54, 16),
                 Rect::new(81, 2, 16, 16)
             ]
+        );
+    }
+
+    #[test]
+    fn only_the_root_keeps_its_elements_room_not_the_rows_inside_it() {
+        // The tray inside the taskbar is a row of the taskbar's own element;
+        // it must fill what it is given, not be inset a second time.
+        let tray: Widget<()> = Widget::row(
+            StyleElement::Taskbar,
+            vec![Widget::fill(StyleElement::Label).with_size(SizePolicy::Fixed(10))],
+        )
+        .with_size(SizePolicy::Fixed(40));
+        let root = Widget::row(StyleElement::Taskbar, vec![tray]);
+        let space = Space {
+            inset: Insets::uniform(3),
+            gap: 3,
+        };
+        let layout = Layout::with_space(
+            &root,
+            Rect::new(0, 0, 100, 20),
+            &mut ten_per_character,
+            &mut |_| space,
+        );
+        let rects: Vec<Rect> = layout.placed().iter().map(|placed| placed.rect).collect();
+        assert_eq!(
+            rects[1],
+            Rect::new(3, 3, 40, 14),
+            "the tray, in the root's room"
+        );
+        assert_eq!(
+            rects[2],
+            Rect::new(3, 3, 10, 14),
+            "its slot has the tray's whole height, not 6 pixels less"
         );
     }
 }
