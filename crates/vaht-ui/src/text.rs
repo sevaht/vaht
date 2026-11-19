@@ -194,6 +194,38 @@ impl Typesetter {
         pixels
     }
 
+    /// Returns how tall `font` is: its ascent and its descent in whole
+    /// pixels, each rounded up as `FreeType` rounds a font's metrics, so the
+    /// height of a line of it that leaves nothing out, the way a toolbar
+    /// or titlebar is sized to hold text. A font that cannot be found is as
+    /// tall as [`Typesetter::line_height`] says.
+    #[must_use]
+    pub fn font_height(&mut self, font: &Font) -> u32 {
+        let pixel_size = self.pixel_size(font);
+        let buffer = self.lay_out("Mg", font, pixel_size);
+        let used = buffer
+            .layout_runs()
+            .flat_map(|run| {
+                run.glyphs
+                    .iter()
+                    .map(|glyph| (glyph.font_id, glyph.font_weight))
+            })
+            .next();
+        let metrics = used
+            .and_then(|(id, weight)| self.font_system.get_font(id, weight))
+            .map(|face| face.as_swash().metrics(&[]).scale(pixel_size));
+        let Some(metrics) = metrics else {
+            return self.line_height(font);
+        };
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a font's ascent and descent are small and positive"
+        )]
+        let height = (metrics.ascent.ceil() + metrics.descent.ceil()) as u32;
+        height
+    }
+
     /// Draws `text` in `style` into `area` of `target`, vertically centered
     /// and clipped to the area.
     pub fn draw(&mut self, target: &mut Pixmap, text: &str, style: &TextStyle, area: Rect) {
@@ -640,5 +672,21 @@ mod tests {
             inked_pixels(text, 10),
             "the same letters show with no room to spare as with plenty"
         );
+    }
+
+    #[test]
+    fn a_fonts_height_holds_its_ascent_and_descent_and_grows_with_its_size() {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let font = |points| Font {
+            family: "sans".to_owned(),
+            size_points: points,
+            weight: FontWeight::Normal,
+            is_italic: false,
+        };
+        let (small, large) = (font(8), font(16));
+        // The pixel size is the least a line needs; the ascent and descent
+        // of any real font add up to more of it.
+        assert!(typesetter.font_height(&small) >= typesetter.line_height(&small));
+        assert!(typesetter.font_height(&large) > typesetter.font_height(&small));
     }
 }
