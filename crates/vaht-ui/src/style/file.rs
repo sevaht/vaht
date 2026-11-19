@@ -884,6 +884,7 @@ impl<'de> serde::Deserialize<'de> for TextEffectFile {
 
 #[cfg(test)]
 mod tests {
+    use crate::Typesetter;
     use rstest::rstest;
 
     use super::*;
@@ -933,7 +934,7 @@ mod tests {
         );
         assert_eq!(
             layers.by_element[&StyleElement::Taskbar].height,
-            Some(Length::Pixels(24))
+            Some(Length::pixels(24))
         );
         assert_eq!(
             layers.by_element_state[&(StyleElement::WindowListEntry, WidgetState::Focused)].texture,
@@ -1121,5 +1122,34 @@ mod tests {
             .to_string();
         assert!(error.contains("a length"), "{error}");
         assert!(error.contains("spacing"), "{error}");
+    }
+
+    #[test]
+    fn a_length_in_lines_is_the_height_of_the_elements_font_plus_what_is_added() {
+        let font = Font {
+            family: "sans".to_owned(),
+            size_points: 12,
+            weight: FontWeight::Normal,
+            is_italic: false,
+        };
+        let line = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH).font_height(&font);
+        // Fluxbox's rule for a titlebar: the font's height, 2, and a bevel of
+        // 3 at both ends.
+        let layers = StyleLayers::from_toml(
+            "[window.titlebar]\nfont = { family = \"sans\", size = 12 }\n\
+             height = \"1lh + 2 + 6\"\npadding = [3, 3, 3, 3]\n\
+             [window.titlebar.hovered]\nheight = \"1lh + 4\"\n",
+        )
+        .expect("valid");
+        let style = crate::Style::resolve(&layers);
+        let titlebar = style.element_style(StyleElement::Titlebar, WidgetState::Focused);
+        assert_eq!(titlebar.height, Some(line + 8));
+        let hovered =
+            style.element_style_under_pointer(StyleElement::Titlebar, WidgetState::Focused, true);
+        assert_eq!(
+            hovered.height,
+            Some(line + 4),
+            "a hovered look measures too"
+        );
     }
 }

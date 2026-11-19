@@ -20,8 +20,10 @@
 # built-in copy, so a style of yours cannot hide it; the `warning` section
 # here is what it looks like).
 # Every length (padding, spacing, height, a border's width, corner_radius)
-# is a number of pixels, or text with a unit: "12px", or "1.5em", one and a
-# half times the size of the element's font, so it follows the text.
+# is a number of pixels, or text of terms added and subtracted, each a number
+# with a unit: px, em (times the size of the element's font) or lh (times a
+# line of it, its ascent and descent): "1.5em", or "1lh + 2 + 6", the rule
+# Fluxbox sizes a titlebar by, which a style can change.
 # States:
 # focused, unfocused, pressed, hovered (a menu's highlighted item; also a
 # window button under the pointer, if [window.button.hovered] says how) and

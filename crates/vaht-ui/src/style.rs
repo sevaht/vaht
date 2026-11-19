@@ -25,7 +25,7 @@ use crate::corner::{CornerRadii, CornerSet};
 use crate::geometry::Insets;
 use crate::image::Image;
 use crate::length::Length;
-use crate::text::{Font, FontWeight, Justify, TextEffect, TextStyle};
+use crate::text::{Font, FontWeight, Justify, TextEffect, TextStyle, Typesetter};
 use crate::texture::Texture;
 use crate::widget::{Glyph, MarkSide};
 
@@ -368,9 +368,22 @@ pub struct BorderPatch {
 }
 
 impl ElementStylePatch {
+    /// Returns whether any length this patch sets is a number of lines of
+    /// the font, which has to be measured.
+    fn uses_line(&self) -> bool {
+        self.padding
+            .is_some_and(|padding| padding.iter().any(|side| side.uses_line()))
+            || [self.spacing, self.height, self.corner_radius]
+                .into_iter()
+                .flatten()
+                .any(Length::uses_line)
+            || self.border.is_some_and(|border| border.width.uses_line())
+    }
+
     /// Overrides in `style` every property this patch sets, a length in `em`
-    /// being `em` pixels (the size of the element's final font).
-    fn apply_to(&self, style: &mut ElementStyle, em: f32) {
+    /// being `em` pixels (the size of the element's final font) and one in
+    /// `lh` being `line` pixels (its height).
+    fn apply_to(&self, style: &mut ElementStyle, em: f32, line: f32) {
         if let Some(texture) = &self.texture {
             style.texture = texture.clone();
         }
@@ -398,26 +411,26 @@ impl ElementStylePatch {
         }
         if let Some([top, right, bottom, left]) = self.padding {
             style.padding = Insets {
-                top: top.to_pixels(em),
-                right: right.to_pixels(em),
-                bottom: bottom.to_pixels(em),
-                left: left.to_pixels(em),
+                top: top.to_pixels(em, line),
+                right: right.to_pixels(em, line),
+                bottom: bottom.to_pixels(em, line),
+                left: left.to_pixels(em, line),
             };
         }
         if let Some(spacing) = self.spacing {
-            style.spacing = spacing.to_pixels(em);
+            style.spacing = spacing.to_pixels(em, line);
         }
         if let Some(border) = self.border {
             style.border = BorderStyle {
-                width: border.width.to_pixels(em),
+                width: border.width.to_pixels(em, line),
                 color: border.color,
             };
         }
         if let Some(height) = self.height {
-            style.height = Some(height.to_pixels(em));
+            style.height = Some(height.to_pixels(em, line));
         }
         if let Some(radius) = self.corner_radius {
-            style.corner_radius = radius.to_pixels(em);
+            style.corner_radius = radius.to_pixels(em, line);
         }
         if let Some(bullet) = self.bullet {
             style.bullet = bullet;
@@ -486,10 +499,11 @@ pub struct StyleLayers {
 pub struct Style {
     /// The style of each element in each state.
     styles: HashMap<(StyleElement, WidgetState), ElementStyle>,
-    /// What each element's `hovered` section changes: laid over the element's
-    /// look in its own state while the pointer is on it, so a style that
-    /// has none looks the same hovered or not.
-    hovering: HashMap<StyleElement, ElementStylePatch>,
+    /// How an element looks with the pointer on it, in each state: its look
+    /// in that state with what its `hovered` section sets laid over it, for
+    /// an element that has such a section (a style that has none looks the
+    /// same hovered or not).
+    hovered: HashMap<(StyleElement, WidgetState), ElementStyle>,
 }
 
 impl Style {
@@ -504,9 +518,31 @@ impl Style {
     /// file that is both built in and installed for people to read and copy.
     pub const BUILT_IN: &str = include_str!("../../../data/styles/vaht.toml");
 
-    /// Resolves `layers`, applying them in cascade order.
+    /// Resolves `layers`, applying them in cascade order. A length that is a
+    /// number of lines of text is measured with the system's fonts, which are
+    /// loaded only if there is one.
     #[must_use]
     pub fn resolve(layers: &StyleLayers) -> Self {
+        let mut typesetter: Option<Typesetter> = None;
+        let mut known: HashMap<Font, f32> = HashMap::new();
+        Self::resolve_with(layers, &mut |font| {
+            *known.entry(font.clone()).or_insert_with(|| {
+                let typesetter = typesetter
+                    .get_or_insert_with(|| Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH));
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a font's height is a few dozen pixels"
+                )]
+                let height = typesetter.font_height(font) as f32;
+                height
+            })
+        })
+    }
+
+    /// Resolves `layers` as [`Style::resolve`] does, `line_height` giving the
+    /// height of a line of a font, in pixels, for a length that needs one.
+    #[must_use]
+    pub fn resolve_with(layers: &StyleLayers, line_height: &mut dyn FnMut(&Font) -> f32) -> Self {
         let mut styles = HashMap::new();
         for element in <StyleElement as strum::IntoEnumIterator>::iter() {
             for state in <WidgetState as strum::IntoEnumIterator>::iter() {
@@ -519,30 +555,56 @@ impl Style {
                 .into_iter()
                 .flatten()
                 .collect();
-                // An em is the size of the element's font, which the last layer
-                // to set one decides, so the font is found before the lengths
-                // that may be in terms of it.
+                // An em and a line are the size and the height of the
+                // element's font, which the last layer to set one decides, so
+                // the font is found before the lengths that may be in terms
+                // of it.
                 let font = patches
                     .iter()
                     .rev()
                     .find_map(|patch| patch.font.as_ref())
                     .cloned()
                     .unwrap_or_else(|| ElementStyle::fallback().text.font);
-                let em = font.em_pixels();
+                let (em, line) = Self::font_units(
+                    &font,
+                    patches.iter().any(|patch| patch.uses_line()),
+                    line_height,
+                );
                 let mut style = ElementStyle::fallback();
                 for patch in patches {
-                    patch.apply_to(&mut style, em);
+                    patch.apply_to(&mut style, em, line);
                 }
                 styles.insert((element, state), style);
             }
         }
-        let hovering = layers
-            .by_element_state
-            .iter()
-            .filter(|((_, state), _)| *state == WidgetState::Hovered)
-            .map(|((element, _), patch)| (*element, patch.clone()))
-            .collect();
-        Self { styles, hovering }
+        let mut hovered = HashMap::new();
+        for ((element, state), patch) in &layers.by_element_state {
+            if *state != WidgetState::Hovered {
+                continue;
+            }
+            for base in <WidgetState as strum::IntoEnumIterator>::iter() {
+                let Some(style) = styles.get(&(*element, base)) else {
+                    continue;
+                };
+                let mut over = style.clone();
+                let font = patch.font.as_ref().unwrap_or(&style.text.font);
+                let (em, line) = Self::font_units(font, patch.uses_line(), line_height);
+                patch.apply_to(&mut over, em, line);
+                hovered.insert((*element, base), over);
+            }
+        }
+        Self { styles, hovered }
+    }
+
+    /// Returns what an em and a line of `font` are, in pixels; a line is
+    /// measured only if `needs_line`.
+    fn font_units(
+        font: &Font,
+        needs_line: bool,
+        line_height: &mut dyn FnMut(&Font) -> f32,
+    ) -> (f32, f32) {
+        let line = if needs_line { line_height(font) } else { 0.0 };
+        (font.em_pixels(), line)
     }
 
     /// Returns the built-in style: dark grey gradients with white, haloed
@@ -582,12 +644,8 @@ impl Style {
         is_hovered: bool,
     ) -> Cow<'_, ElementStyle> {
         let style = self.element_style(element, state);
-        match self.hovering.get(&element).filter(|_| is_hovered) {
-            Some(patch) => {
-                let mut hovered = style.clone();
-                patch.apply_to(&mut hovered, style.text.font.em_pixels());
-                Cow::Owned(hovered)
-            }
+        match self.hovered.get(&(element, state)).filter(|_| is_hovered) {
+            Some(hovered) => Cow::Borrowed(hovered),
             None => Cow::Borrowed(style),
         }
     }

@@ -1007,12 +1007,19 @@ exactly what each element gets.
     and `menu.hilite.color`;
   - **lengths:** every length in a style (`padding`, `spacing`, `height`,
     a `border`'s `width`, `corner_radius`) is a plain number of logical pixels
-    (which the output's scale then multiplies), or text with a unit: `"12px"`,
-    or `"1.5em"`, one and a half times the size of the element's font, so the
-    room follows the text. Which layer sets the font does not matter: an em is
-    the size of the font the element ends up with. Anything else (`"3 ems"`, a
-    negative number) is an error that says what a length is, at its line. Font
-    sizes themselves stay in points.
+    (which the output's scale then multiplies), or text of terms added and
+    subtracted, each a number with a unit: `px` (pixels), `em` (times the size
+    of the element's font) or `lh` (times a line of it: its ascent and descent,
+    what Fluxbox calls the font's height). So `"1.5em"` is room that follows
+    the text, and `"1lh + 2 + 6"` is a line of text with 2 pixels and a bevel
+    of 3 at both ends, the rule Fluxbox sizes a titlebar by, which a style can
+    change by editing its numbers (`"1lh + 1 + 4"`). Which layer sets the font
+    does not matter: the font is the one the element ends up with. Anything
+    else (`"3 ems"`, a bare minus) is an error that says what a length is, at
+    its line; a total below nothing is nothing. Font sizes themselves stay in
+    points. `vaht import` writes a bar's height as it is where the Fluxbox
+    style gives one, and as that rule, with the bar's font set, where the
+    style leaves it to the font.
   - box: `border = { width, color }`, `padding = [top, right, bottom, left]`,
     `spacing`, `corner_radius`, `corners`, `alpha`. `padding` is the room kept
     free inside an element's edges, and for a bar that holds parts (`window.titlebar`,

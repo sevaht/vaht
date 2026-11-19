@@ -661,17 +661,19 @@ impl StyleFile {
         }
     }
 
-    /// Returns the height Fluxbox gives the bar of `element` when the style
-    /// does not say (none: the usual one, so nothing need be said).
+    /// Adds to `cell` the height of the bar `element` (the titlebar or the
+    /// taskbar), as Fluxbox gives it.
     ///
     /// From Fluxbox's `FbWinFrame::reconfigureTitlebar` and `Toolbar::
-    /// reconfigure`: a titlebar is `window.title.height`, or else its font's
-    /// height, 2, and the bevel at both ends; a toolbar is its items' height
-    /// (`toolbar.height`, or else their font's height and 2) and the bevel at
-    /// both ends, however the height was given, and its border outside that.
-    /// The bevel is vaht's padding, and the toolbar's border is added, so the
-    /// parts keep their size.
-    fn bar_height(&mut self, element: StyleElement) -> Option<u32> {
+    /// reconfigure`: a titlebar is `window.title.height` (the whole of it), or
+    /// else its font's height, 2, and the bevel at both ends; a toolbar is
+    /// its items' height (`toolbar.height`, or else their font's height and
+    /// 2) and the bevel at both ends, and its border (vaht draws it inside,
+    /// Fluxbox outside). A height the style gives is written as it is. One it
+    /// leaves to the font is written as that rule, `"1lh + 2 + 6"`, a line
+    /// of the bar's font and what is added, with the font the rule is about
+    /// set on the bar, so it follows the font and reads as what it is.
+    fn add_bar_height(&mut self, cell: &mut Cell, element: StyleElement) {
         let (explicit, bevel, fonts): (&str, &str, &[&str]) = if element == StyleElement::Titlebar {
             ("window.title.height", "window.bevelWidth", &["window.font"])
         } else {
@@ -688,32 +690,54 @@ impl StyleFile {
             )
         };
         let bevel = self.number(&[bevel]).unwrap_or(0);
-        let explicit = self.number(&[explicit]).filter(|height| *height > 0);
-        let height = match (element, explicit) {
-            // The titlebar's own height is the whole of it.
-            (StyleElement::Titlebar, Some(height)) => height,
-            (StyleElement::Titlebar | StyleElement::Taskbar, content) => {
-                let content = content.unwrap_or_else(|| self.tallest_font(fonts) + 2);
-                // Fluxbox's toolbar has its border outside its height; vaht
-                // draws the bar's border inside, so it is added to keep the
-                // room for the parts the same.
-                let border = if element == StyleElement::Taskbar {
-                    self.number(&["toolbar.borderWidth"]).unwrap_or(0)
-                } else {
-                    0
-                };
-                content + 2 * bevel + 2 * border
-            }
-            _ => return None,
+        let border = if element == StyleElement::Taskbar {
+            self.number(&["toolbar.borderWidth"]).unwrap_or(0)
+        } else {
+            0
         };
-        (height != vaht_ui::Style::DEFAULT_BAR_HEIGHT).then_some(height)
+        let explicit = self.number(&[explicit]).filter(|height| *height > 0);
+        let added = match (element, explicit) {
+            // The titlebar's own height is the whole of it.
+            (StyleElement::Titlebar, Some(height)) => {
+                Self::insert_bar_height(cell, height);
+                return;
+            }
+            // The toolbar's is its items', with the bevel and the border added.
+            (_, Some(height)) => {
+                Self::insert_bar_height(cell, height + 2 * bevel + 2 * border);
+                return;
+            }
+            (_, None) => {
+                // A line, 2, and what the bevel and the border add, each a term.
+                ["1lh".to_owned(), "2".to_owned()]
+                    .into_iter()
+                    .chain(
+                        [2 * bevel, 2 * border]
+                            .into_iter()
+                            .filter(|extra| *extra > 0)
+                            .map(|extra| extra.to_string()),
+                    )
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            }
+        };
+        let font = self.tallest_font(fonts);
+        cell.insert(Property::Font, Written(Value::InlineTable(font.table())));
+        cell.insert(Property::Height, Written(Value::from(added)));
     }
 
-    /// Returns how tall the tallest of the fonts the resources `names` give
-    /// is (its ascent and descent, as Fluxbox sizes its bars by), measured
-    /// in the font vaht draws it with; a style that names none has Fluxbox's
-    /// default font.
-    fn tallest_font(&mut self, names: &[&str]) -> u32 {
+    /// Adds to `cell` a height of `height` pixels, unless that is the usual.
+    fn insert_bar_height(cell: &mut Cell, height: u32) {
+        if height != vaht_ui::Style::DEFAULT_BAR_HEIGHT {
+            cell.insert(Property::Height, Written(Value::from(i64::from(height))));
+        }
+    }
+
+    /// Returns the tallest of the fonts the resources `names` give (its
+    /// ascent and descent, as Fluxbox sizes its bars by, measured in the font
+    /// vaht draws it with); a style that names none has Fluxbox's default
+    /// font.
+    fn tallest_font(&mut self, names: &[&str]) -> FluxboxFont {
         let typesetter = self
             .typesetter
             .get_or_insert_with(|| Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH));
@@ -728,10 +752,9 @@ impl StyleFile {
             given
         };
         fonts
-            .iter()
-            .map(|font| typesetter.font_height(&font.vaht_font()))
-            .max()
-            .unwrap_or(0)
+            .into_iter()
+            .max_by_key(|font| typesetter.font_height(&font.vaht_font()))
+            .unwrap_or_else(FluxboxFont::default_font)
     }
 
     /// Adds to `cell` the padding of a titlebar button. Fluxbox draws a
@@ -837,7 +860,10 @@ impl StyleFile {
         report: &mut Report,
     ) {
         let height = match element {
-            StyleElement::Titlebar | StyleElement::Taskbar => self.bar_height(element),
+            StyleElement::Titlebar | StyleElement::Taskbar => {
+                self.add_bar_height(cell, element);
+                None
+            }
             StyleElement::Handle => self.number(&["window.handleWidth"]),
             StyleElement::MenuTitle => self
                 .number(&["menu.titleHeight"])
@@ -2080,8 +2106,8 @@ menu.bullet:\tsquare
     }
 
     #[test]
-    fn a_bars_height_is_what_fluxbox_makes_it() {
-        let height = |style: &str, path: [&str; 2]| {
+    fn a_bars_height_is_what_fluxbox_makes_it_and_reads_as_that_rule() {
+        let item = |style: &str, path: [&str; 2], key: &str| {
             let (_, vaht_style, _) = convert(style);
             let document: DocumentMut = vaht_style.parse().expect("TOML");
             let table = document.get(path[0])?;
@@ -2090,44 +2116,74 @@ menu.bullet:\tsquare
             } else {
                 table.get(path[1])?
             };
-            table.get("height").and_then(Item::as_integer)
+            table
+                .get(key)
+                .map(|item| item.to_string().trim().to_owned())
         };
         let titlebar = ["window", "titlebar"];
         let taskbar = ["taskbar", ""];
-        // A titlebar's own height is all of it; the bevel is inside.
+        // A height the style gives is written as it is: a titlebar's is the
+        // whole of it; a toolbar's is its items', with the bevel (and the
+        // border, which Fluxbox draws outside and vaht inside) added.
+        let height = |style, path| item(style, path, "height");
         assert_eq!(
-            height("window.title.height: 24\nwindow.bevelWidth: 5\n", titlebar),
-            Some(24)
+            height("window.title.height: 24\nwindow.bevelWidth: 5\n", titlebar).as_deref(),
+            Some("24")
         );
-        // A toolbar's own height is its items', and the bevel is added, and
-        // its border, which Fluxbox draws outside and vaht inside.
         assert_eq!(
-            height("toolbar.height: 30\ntoolbar.bevelWidth: 3\n", taskbar),
-            Some(36)
+            height("toolbar.height: 30\ntoolbar.bevelWidth: 3\n", taskbar).as_deref(),
+            Some("36")
         );
         assert_eq!(
             height(
                 "toolbar.height: 30\ntoolbar.bevelWidth: 3\ntoolbar.borderWidth: 1\n",
                 taskbar
-            ),
-            Some(38)
+            )
+            .as_deref(),
+            Some("38")
         );
-        // With none, a bar is its font's height, 2, and the bevel at both
-        // ends, the font measured as vaht draws it (what fonts are installed
-        // is the machine's, so the test measures the same way).
-        let font_height = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH)
+        assert_eq!(
+            height("window.title.height: 20\n", titlebar),
+            None,
+            "the usual height"
+        );
+        // One it leaves to the font is Fluxbox's rule, written out: a line of
+        // the font, 2, the bevel at both ends (and the border), with the font
+        // the rule is about on the bar.
+        assert_eq!(
+            height("window.font: sans-10\nwindow.bevelWidth: 3\n", titlebar).as_deref(),
+            Some("\"1lh + 2 + 6\"")
+        );
+        assert_eq!(
+            height(
+                "toolbar.font: sans-10\ntoolbar.bevelWidth: 3\ntoolbar.borderWidth: 1\n",
+                taskbar
+            )
+            .as_deref(),
+            Some("\"1lh + 2 + 6 + 2\"")
+        );
+        // The font may be the style's common one, left to the default layer;
+        // what matters is the font the bar ends up with.
+        let (_, vaht_style, _) = convert("window.font: serif-14\nwindow.bevelWidth: 3\n");
+        let layers = StyleLayers::from_toml(&vaht_style).expect("valid");
+        let style = Style::resolve(&layers);
+        let font = &style
+            .element_style(StyleElement::Titlebar, WidgetState::Focused)
+            .text
+            .font;
+        assert_eq!((font.family.as_str(), font.size_points), ("serif", 14));
+    }
+
+    #[test]
+    fn a_rule_left_to_the_font_comes_out_as_fluxbox_sizes_the_bar() {
+        // The converted style, read as vaht reads it, is as tall as Fluxbox
+        // makes a titlebar: the font's height, 2, and the bevel at both ends.
+        let (_, vaht_style, _) = convert("window.font: sans-10\nwindow.bevelWidth: 3\n");
+        let layers = StyleLayers::from_toml(&vaht_style).expect("valid");
+        let style = Style::resolve(&layers);
+        let line = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH)
             .font_height(&FluxboxFont::parse("sans-10").vaht_font());
-        let expected = i64::from(font_height) + 2 + 6;
-        assert_eq!(
-            height("window.font: sans-10\nwindow.bevelWidth: 3\n", titlebar),
-            Some(expected)
-        );
-        assert_eq!(
-            height("toolbar.font: sans-10\ntoolbar.bevelWidth: 3\n", taskbar),
-            Some(expected)
-        );
-        // The usual height is not written.
-        assert_eq!(height("window.title.height: 20\n", titlebar), None);
+        assert_eq!(style.metrics().titlebar_height, line + 2 + 6);
     }
 
     #[test]
