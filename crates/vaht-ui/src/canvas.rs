@@ -96,12 +96,12 @@ impl<'pixmap> Canvas<'pixmap> {
                     } else {
                         *glyph
                     };
-                    // A style of images that has none for restore keeps the
-                    // maximize one there.
+                    // A style of images that has none for a button's other
+                    // look (restore, unshade, stuck) keeps the one it has.
                     let image = style.glyph_images.get(glyph).or_else(|| {
-                        (glyph == Glyph::Restore)
-                            .then(|| style.glyph_images.get(Glyph::Maximize))
-                            .flatten()
+                        glyph
+                            .other_look_of()
+                            .and_then(|usual| style.glyph_images.get(usual))
                     });
                     match image {
                         // A picture of the style's own is the whole button.

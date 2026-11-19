@@ -1020,7 +1020,8 @@ exactly what each element gets.
     it, the state's own in `[window.button.pressed]` and the like). Optional, as
     every property is: a glyph without an image is drawn as before. A style
     with a `maximize` image and no `restore` one keeps the maximize image on a
-    maximized window's button, as Fluxbox styles do. `restore_glyph = false`
+    maximized window's button, as Fluxbox styles do; likewise `shade` for
+    `unshade` and `stick` for `stuck`. `restore_glyph = false`
     keeps the maximize button as it is while the window is maximized (true,
     the default, shows restore);
 - **Colors are `#rrggbb`, `#rrggbbaa`, or an X11 color name** such as `grey55`

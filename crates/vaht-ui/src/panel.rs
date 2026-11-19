@@ -886,6 +886,26 @@ mod tests {
     }
 
     #[test]
+    fn a_style_with_an_image_for_shade_or_stick_keeps_it_when_shaded_or_stuck() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        std::fs::write(
+            directory.path().join("one.xpm"),
+            "\"1 1 1 1\",\n\"a\tc #00ff00\",\n\"a\"",
+        )
+        .expect("written");
+        let text = "[window.button]\ntexture = { solid = \"black\" }\n\
+                    glyph_images = { shade = \"one.xpm\", stick = \"one.xpm\" }\n";
+        for glyph in [Glyph::Unshade, Glyph::Stuck] {
+            let panel = painted_glyph(glyph, text, Some(directory.path()));
+            let pixel = panel
+                .pixels()
+                .and_then(|pixels| pixels.pixel(10, 10))
+                .expect("inside");
+            assert_eq!((pixel.red(), pixel.green()), (0, 255), "{glyph:?}");
+        }
+    }
+
+    #[test]
     fn the_stuck_and_menu_glyphs_are_drawn() {
         let layers = crate::style::StyleLayers::from_toml(
             "[default]\ntexture = { solid = \"black\" }\nglyph_color = \"white\"\n",

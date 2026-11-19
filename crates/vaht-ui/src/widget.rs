@@ -270,6 +270,34 @@ pub enum Glyph {
     BulletDiamond,
 }
 
+impl Glyph {
+    /// Returns the button picture this one is the other look of: what a
+    /// button shows once clicked (restore, unshade, stuck), for a style that
+    /// has an image for the usual one and none for it.
+    #[must_use]
+    pub const fn other_look_of(self) -> Option<Self> {
+        match self {
+            Self::Restore => Some(Self::Maximize),
+            Self::Unshade => Some(Self::Shade),
+            Self::Stuck => Some(Self::Stick),
+            Self::Close
+            | Self::Maximize
+            | Self::Minimize
+            | Self::Shade
+            | Self::Stick
+            | Self::Menu
+            | Self::Submenu
+            | Self::ArrowLeft
+            | Self::ArrowRight
+            | Self::Check
+            | Self::BulletRight
+            | Self::BulletLeft
+            | Self::BulletSquare
+            | Self::BulletDiamond => None,
+        }
+    }
+}
+
 /// A line of text being edited, and where its cursor is.
 ///
 /// It is drawn left-justified, scrolled so the cursor stays in view, with
