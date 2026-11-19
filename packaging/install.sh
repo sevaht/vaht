@@ -24,6 +24,7 @@
 #   /etc/xdg/xdg-desktop-portal-wlr/vaht               screen share picks with vaht's menu
 #   PREFIX/share/vaht/styles/default.toml                 the default style, to read and copy
 #   PREFIX/share/vaht/layouts/*.toml                   the default layout, and a few more
+#   PREFIX/share/vaht/options/scheme/*.toml            color schemes for the default style
 #   PREFIX/share/doc/vaht/                             README and design notes
 #   PREFIX/share/licenses/vaht/LICENSE
 # and for one user (--user):
@@ -72,6 +73,7 @@ if [[ ${mode} == user ]]; then
     doc_dir=
     styles_dir=
     layouts_dir=
+    schemes_dir=
     license_dir=
 else
     bin_dir=${destdir}${prefix}/bin
@@ -84,6 +86,7 @@ else
     doc_dir=${destdir}${prefix}/share/doc/vaht
     styles_dir=${destdir}${prefix}/share/vaht/styles
     layouts_dir=${destdir}${prefix}/share/vaht/layouts
+    schemes_dir=${destdir}${prefix}/share/vaht/options/scheme
     license_dir=${destdir}${prefix}/share/licenses/vaht
 fi
 
@@ -102,6 +105,20 @@ if [[ -n ${session_dir} ]]; then
         "data/layouts/default.toml ${layouts_dir}/default.toml 644"
         "data/layouts/minimal.toml ${layouts_dir}/minimal.toml 644"
         "data/layouts/classic.toml ${layouts_dir}/classic.toml 644"
+        "data/options/scheme/amber.toml ${schemes_dir}/amber.toml 644"
+        "data/options/scheme/blue.toml ${schemes_dir}/blue.toml 644"
+        "data/options/scheme/brown.toml ${schemes_dir}/brown.toml 644"
+        "data/options/scheme/crimson.toml ${schemes_dir}/crimson.toml 644"
+        "data/options/scheme/cyan.toml ${schemes_dir}/cyan.toml 644"
+        "data/options/scheme/gold.toml ${schemes_dir}/gold.toml 644"
+        "data/options/scheme/green.toml ${schemes_dir}/green.toml 644"
+        "data/options/scheme/indigo.toml ${schemes_dir}/indigo.toml 644"
+        "data/options/scheme/orange.toml ${schemes_dir}/orange.toml 644"
+        "data/options/scheme/pink.toml ${schemes_dir}/pink.toml 644"
+        "data/options/scheme/purple.toml ${schemes_dir}/purple.toml 644"
+        "data/options/scheme/red.toml ${schemes_dir}/red.toml 644"
+        "data/options/scheme/slate.toml ${schemes_dir}/slate.toml 644"
+        "data/options/scheme/teal.toml ${schemes_dir}/teal.toml 644"
         "data/vaht-settings.desktop ${application_dir}/vaht-settings.desktop 644"
         "README.md ${doc_dir}/README.md 644"
         "DESIGN.md ${doc_dir}/DESIGN.md 644"
@@ -116,7 +133,7 @@ if [[ ${action} == uninstall ]]; then
             rm -v -- "${destination}"
         fi
     done
-    for directory in "${doc_dir}" "${license_dir}" "${styles_dir}" "${layouts_dir}"; do
+    for directory in "${doc_dir}" "${license_dir}" "${styles_dir}" "${layouts_dir}" "${schemes_dir}" "${schemes_dir%/*}"; do
         [[ -n ${directory} && -d ${directory} ]] && rmdir --ignore-fail-on-non-empty -- "${directory}"
     done
     exit 0

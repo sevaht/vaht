@@ -1,0 +1,14 @@
+# teal: a color scheme for styles with a `scheme` option (the default style
+# has one): the greys of the default look tinted teal. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/scheme/teal.toml; copy it to
+# ~/.config/vaht/options/scheme/<name>.toml and change it to make your own, and
+# choose it with `style_options = { scheme = "<name>" }` in settings.toml.
+
+dark = "#071212"
+mid = "#2a6f6f"
+light = "#68b0b0"
+edge = "#79b9b9"
+press_dark = "#1c4a4a"
+press_light = "#389494"
+menu = "#040b0b"

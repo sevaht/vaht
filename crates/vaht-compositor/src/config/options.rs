@@ -189,4 +189,89 @@ mod tests {
         assert_eq!(library.variables("shade", "../shade/dusk"), Ok(None));
         assert_eq!(library.choices(".."), Vec::<String>::new());
     }
+
+    /// The choices shipped in `data/options`, as a library.
+    struct Shipped;
+
+    impl ChoiceLibrary for Shipped {
+        fn variables(&self, option: &str, choice: &str) -> Result<Option<toml::Table>, String> {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../data/options")
+                .join(option)
+                .join(format!("{choice}.toml"));
+            match std::fs::read_to_string(&path) {
+                Ok(text) => toml::from_str(&text)
+                    .map(Some)
+                    .map_err(|error| format!("{}: {}", path.display(), error.message())),
+                Err(_) => Ok(None),
+            }
+        }
+    }
+
+    #[test]
+    fn every_shipped_scheme_and_size_loads_with_the_default_style_and_looks_different() {
+        use std::collections::BTreeMap;
+
+        use vaht_ui::style::options::Selection;
+
+        let load = |chosen: &[(&str, &str)]| {
+            let chosen: BTreeMap<String, String> = chosen
+                .iter()
+                .map(|(option, choice)| ((*option).to_owned(), (*choice).to_owned()))
+                .collect();
+            Style::built_in_selecting(&Selection {
+                directory: None,
+                chosen: &chosen,
+                library: &Shipped,
+            })
+        };
+        let default = load(&[]);
+        assert_eq!(default.option_problems(), Vec::<String>::new());
+        let schemes = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/options/scheme");
+        let mut count = 0;
+        for entry in std::fs::read_dir(schemes).expect("the shipped schemes") {
+            let path = entry.expect("an entry").path();
+            let name = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .expect("a name");
+            let table: toml::Table =
+                toml::from_str(&std::fs::read_to_string(&path).expect("readable")).expect("TOML");
+            let style = load(&[("scheme", name)]);
+            assert_eq!(style.option_problems(), Vec::<String>::new(), "{name}");
+            let scheme = style
+                .options()
+                .options
+                .iter()
+                .find(|option| option.name == "scheme")
+                .expect("the default style has a scheme option");
+            assert_eq!(scheme.chosen, name);
+            // It sets only variables the default style defines.
+            let known = load(&[]);
+            assert_ne!(style, known, "{name} changes the look");
+            for key in table.keys() {
+                assert!(
+                    [
+                        "dark",
+                        "mid",
+                        "light",
+                        "dim",
+                        "edge",
+                        "press_dark",
+                        "press_light",
+                        "menu"
+                    ]
+                    .contains(&key.as_str()),
+                    "{name} sets `{key}`, which the default style has no variable for"
+                );
+            }
+            count += 1;
+        }
+        assert!(count >= 14, "the shipped schemes: {count}");
+        for size in ["small", "large"] {
+            let style = load(&[("size", size)]);
+            assert_eq!(style.option_problems(), Vec::<String>::new(), "{size}");
+            assert_ne!(style, default, "{size} changes the look");
+        }
+    }
 }

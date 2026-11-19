@@ -1,0 +1,14 @@
+# blue: a color scheme for styles with a `scheme` option (the default style
+# has one): the greys of the default look tinted blue. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/scheme/blue.toml; copy it to
+# ~/.config/vaht/options/scheme/<name>.toml and change it to make your own, and
+# choose it with `style_options = { scheme = "<name>" }` in settings.toml.
+
+dark = "#060c13"
+mid = "#264673"
+light = "#6486b4"
+edge = "#7593bd"
+press_dark = "#192f4d"
+press_light = "#335d99"
+menu = "#04070b"

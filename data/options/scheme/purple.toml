@@ -1,0 +1,14 @@
+# purple: a color scheme for styles with a `scheme` option (the default style
+# has one): the greys of the default look tinted purple. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/scheme/purple.toml; copy it to
+# ~/.config/vaht/options/scheme/<name>.toml and change it to make your own, and
+# choose it with `style_options = { scheme = "<name>" }` in settings.toml.
+
+dark = "#0d0812"
+mid = "#4c2e6b"
+light = "#8c6cac"
+edge = "#997cb6"
+press_dark = "#331f47"
+press_light = "#663d8f"
+menu = "#08050b"

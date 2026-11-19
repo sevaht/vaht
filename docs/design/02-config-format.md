@@ -1282,6 +1282,14 @@ height = "$bar"                    # `$name` inside text is the variable's text
   green.toml`, named `file = "<style>/green.toml"`), not beside the style: a
   `.toml` directly in `styles/` is a style. The directories under `options/` and
   `styles/` are watched, so editing a choice file restyles open windows.
+- **The default style has two options**: `scheme` (default `graphite`, the greys;
+  variables `dark`, `mid`, `light`, `dim`, `edge`, `press_dark`, `press_light`
+  and `menu`) and `size` (`small`, `medium`, the default, and `large`; variables
+  `font_size`, `bar` and `button_pad`). vaht installs 14 more schemes in
+  `/usr/share/vaht/options/scheme/` (blue, teal, green, amber, crimson, purple,
+  slate, red, orange, gold, cyan, indigo, pink, brown); they set the first seven
+  variables and leave `dim` (unfocused text) alone. Any style that declares a
+  `scheme` option with those variables can take them.
 - `vaht import` writes styles without options.
 
 ## 11. `vaht import`

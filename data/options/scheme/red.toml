@@ -1,0 +1,14 @@
+# red: a color scheme for styles with a `scheme` option (the default style
+# has one): the greys of the default look tinted red. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/scheme/red.toml; copy it to
+# ~/.config/vaht/options/scheme/<name>.toml and change it to make your own, and
+# choose it with `style_options = { scheme = "<name>" }` in settings.toml.
+
+dark = "#160303"
+mid = "#861313"
+light = "#c85050"
+edge = "#cf6363"
+press_dark = "#590d0d"
+press_light = "#b31919"
+menu = "#0d0202"

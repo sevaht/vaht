@@ -1,0 +1,14 @@
+# green: a color scheme for styles with a `scheme` option (the default style
+# has one): the greys of the default look tinted green. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/scheme/green.toml; copy it to
+# ~/.config/vaht/options/scheme/<name>.toml and change it to make your own, and
+# choose it with `style_options = { scheme = "<name>" }` in settings.toml.
+
+dark = "#08120b"
+mid = "#2e6b42"
+light = "#6cac82"
+edge = "#7cb68f"
+press_dark = "#1f472c"
+press_light = "#3d8f58"
+menu = "#050b07"

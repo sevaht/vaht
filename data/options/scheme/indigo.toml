@@ -1,0 +1,14 @@
+# indigo: a color scheme for styles with a `scheme` option (the default style
+# has one): the greys of the default look tinted indigo. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/scheme/indigo.toml; copy it to
+# ~/.config/vaht/options/scheme/<name>.toml and change it to make your own, and
+# choose it with `style_options = { scheme = "<name>" }` in settings.toml.
+
+dark = "#060613"
+mid = "#262673"
+light = "#6464b4"
+edge = "#7575bd"
+press_dark = "#19194d"
+press_light = "#333399"
+menu = "#04040b"
