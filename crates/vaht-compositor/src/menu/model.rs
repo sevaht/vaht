@@ -409,14 +409,17 @@ impl<'state> MenuBuilder<'state> {
                     if *is_inline {
                         items.extend(generated);
                     } else {
+                        // Titled with its item's label, as a submenu of its own
+                        // definition is.
+                        let label = label
+                            .clone()
+                            .unwrap_or_else(|| generator.label().to_owned());
                         items.push(MenuItem::Submenu {
-                            label: label
-                                .clone()
-                                .unwrap_or_else(|| generator.label().to_owned()),
                             menu: MenuModel {
-                                title: None,
+                                title: Some(label.clone()),
                                 items: generated,
                             },
+                            label,
                             icon: None,
                             pipe: None,
                         });

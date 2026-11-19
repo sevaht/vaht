@@ -905,6 +905,37 @@ mod tests {
     }
 
     #[test]
+    fn a_list_in_a_submenu_is_titled_with_its_items_label() {
+        let config = Config::built_in();
+        let output = OutputArea {
+            whole: bounds(),
+            usable: bounds(),
+        };
+        let manager = WindowManager::new(
+            &config.settings,
+            OutputAreas::new(output, Vec::new()),
+            config.style.metrics(),
+        );
+        let root = MenuBuilder::new(&config.menus, &manager, None)
+            .build(Menus::ROOT)
+            .expect("built in");
+        let titled: Vec<(&str, Option<&str>)> = root
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Submenu { label, menu, .. } => {
+                    Some((label.as_str(), menu.title.as_deref()))
+                }
+                MenuItem::Choice { .. } | MenuItem::Inert { .. } | MenuItem::Separator => None,
+            })
+            .collect();
+        assert!(!titled.is_empty(), "the root menu has lists in submenus");
+        for (label, title) in titled {
+            assert_eq!(title, Some(label), "the submenu {label} shows its name");
+        }
+    }
+
+    #[test]
     fn the_built_in_menus_build_with_the_workspaces_listed() {
         let config = Config::built_in();
         let output = OutputArea {
