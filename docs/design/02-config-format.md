@@ -1023,7 +1023,7 @@ exactly what each element gets.
     points. `vaht import` writes a bar's height as it is where the Fluxbox
     style gives one, and as that rule, with the bar's font set, where the
     style leaves it to the font.
-  - box: `border = { width, color }`, `padding = [top, right, bottom, left]`,
+  - box: `border = { width, color }`, `padding = [top, right, bottom, left]` (or `padding = 5` for 5 on all four sides),
     `spacing`, `corner_radius`, `corners`, `alpha`. `padding` is the room kept
     free inside an element's edges, and for a bar that holds parts (`window.titlebar`,
     `taskbar`) it is the room around them, with `spacing` the gap between one

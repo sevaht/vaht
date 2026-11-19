@@ -24,7 +24,7 @@ use super::{
 use crate::color::Color;
 use crate::corner::{Corner, CornerSet};
 use crate::image::Image;
-use crate::length::Length;
+use crate::length::{Length, Sides};
 use crate::text::{Font, FontWeight, Justify, TextEffect};
 use crate::texture::{Bevel, GradientDirection, ImageFit, Texture};
 use crate::widget::{Glyph, MarkSide};
@@ -344,7 +344,7 @@ impl ElementStylePatch {
             "glyph_color" => self.glyph_color = Some(map.next_value::<ColorText>()?.0),
             "restore_glyph" => self.restore_glyph = Some(map.next_value()?),
             "glyph_images" => self.glyph_images = map.next_value_seed(GlyphImagesSeed(images))?,
-            "padding" => self.padding = Some(map.next_value::<[Length; 4]>()?),
+            "padding" => self.padding = Some(map.next_value::<Sides>()?.0),
             "spacing" => self.spacing = Some(map.next_value()?),
             "border" => self.border = Some(map.next_value::<BorderFile>()?.into_border()),
             "height" => self.height = Some(map.next_value()?),
@@ -1065,6 +1065,31 @@ mod tests {
         crate::Style::resolve(&layers)
             .element_style(StyleElement::Button, WidgetState::Focused)
             .clone()
+    }
+
+    #[test]
+    fn one_length_pads_all_four_sides() {
+        let sides = |padding: &str| {
+            let style = button(&format!("[window.button]\npadding = {padding}\n"));
+            [
+                style.padding.top,
+                style.padding.right,
+                style.padding.bottom,
+                style.padding.left,
+            ]
+        };
+        assert_eq!(sides("5"), [5; 4]);
+        assert_eq!(
+            sides("\"1em\""),
+            sides("[\"1em\", \"1em\", \"1em\", \"1em\"]")
+        );
+        assert_eq!(sides("[1, 2, 3, 4]"), [1, 2, 3, 4]);
+        for wrong in ["[1, 2, 3]", "[1, 2, 3, 4, 5]", "-1", "\"wide\""] {
+            assert!(
+                StyleLayers::from_toml(&format!("[window.button]\npadding = {wrong}\n")).is_err(),
+                "{wrong} is not padding"
+            );
+        }
     }
 
     #[test]

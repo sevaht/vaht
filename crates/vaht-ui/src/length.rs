@@ -15,6 +15,7 @@
 
 use std::fmt;
 
+use serde::Deserialize as _;
 use serde::de::{self, Deserializer, Visitor};
 
 /// A length in a style file, until the font it may be relative to is known.
@@ -154,6 +155,60 @@ impl<'de> serde::Deserialize<'de> for Length {
         }
 
         deserializer.deserialize_any(LengthVisitor)
+    }
+}
+
+/// The four lengths round an element, top, right, bottom, left: written as
+/// one length for all four, or a list of the four.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sides(pub [Length; 4]);
+
+impl<'de> serde::Deserialize<'de> for Sides {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// Reads a length, or a list of four.
+        struct SidesVisitor;
+
+        impl<'de> Visitor<'de> for SidesVisitor {
+            type Value = Sides;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(
+                    "one length for all four sides, or a list of four lengths (top, right, \
+                     bottom, left); a length is a number of pixels, or text such as `1.5em` \
+                     or `1lh + 2`",
+                )
+            }
+
+            fn visit_i64<E: de::Error>(self, number: i64) -> Result<Sides, E> {
+                let length = Length::deserialize(de::value::I64Deserializer::<E>::new(number))?;
+                Ok(Sides([length; 4]))
+            }
+
+            fn visit_u64<E: de::Error>(self, number: u64) -> Result<Sides, E> {
+                let length = Length::deserialize(de::value::U64Deserializer::<E>::new(number))?;
+                Ok(Sides([length; 4]))
+            }
+
+            fn visit_str<E: de::Error>(self, text: &str) -> Result<Sides, E> {
+                let length = Length::deserialize(de::value::StrDeserializer::<E>::new(text))?;
+                Ok(Sides([length; 4]))
+            }
+
+            fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Sides, A::Error> {
+                let mut sides = [Length::default(); 4];
+                for (index, side) in sides.iter_mut().enumerate() {
+                    *side = seq
+                        .next_element()?
+                        .ok_or_else(|| de::Error::invalid_length(index, &self))?;
+                }
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::invalid_length(5, &self));
+                }
+                Ok(Sides(sides))
+            }
+        }
+
+        deserializer.deserialize_any(SidesVisitor)
     }
 }
 
