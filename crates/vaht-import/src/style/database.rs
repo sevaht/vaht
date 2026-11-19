@@ -84,7 +84,15 @@ impl StyleDatabase {
     /// marks that line used. Like Fluxbox, a few window, toolbar and menu
     /// sizes and colors fall back to the style-wide ones (`borderWidth`).
     pub(crate) fn get(&mut self, name: &str) -> Option<&str> {
-        let found = self.find(name).or_else(|| {
+        let found = self.lookup(name)?;
+        self.used.insert(found);
+        self.lines.get(found).map(|line| line.value.as_str())
+    }
+
+    /// Returns the position of the line that gives `name`: the one answering
+    /// it, else the style-wide size or color it falls back to.
+    fn lookup(&self, name: &str) -> Option<usize> {
+        self.find(name).or_else(|| {
             let suffix = ["borderWidth", "borderColor", "bevelWidth", "handleWidth"]
                 .into_iter()
                 .find(|suffix| {
@@ -93,9 +101,7 @@ impl StyleDatabase {
                         .any(|prefix| name.strip_prefix(prefix) == Some(suffix))
                 })?;
             self.find(suffix)
-        })?;
-        self.used.insert(found);
-        self.lines.get(found).map(|line| line.value.as_str())
+        })
     }
 
     /// Marks the line answering `name` used if it says `value` (in any
@@ -139,7 +145,12 @@ impl StyleDatabase {
             .iter()
             .copied()
             .find(|name| is_stated(name))
-            .or_else(|| names.iter().copied().find(|name| self.find(name).is_some()))
+            .or_else(|| {
+                names
+                    .iter()
+                    .copied()
+                    .find(|name| self.lookup(name).is_some())
+            })
     }
 
     /// Returns the lines no lookup returned.

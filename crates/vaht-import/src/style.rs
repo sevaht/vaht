@@ -19,7 +19,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value};
-use vaht_ui::{Color, Corner, StyleElement, WidgetState};
+use vaht_ui::text::{Font, FontWeight};
+use vaht_ui::{Color, Corner, StyleElement, Typesetter, WidgetState};
 
 use self::database::StyleDatabase;
 use crate::report::{Reason, Report};
@@ -489,6 +490,8 @@ const UNUSED_REASONS: [(&str, Reason, &str); 6] = [
 pub(crate) struct StyleFile {
     /// Its lines.
     database: StyleDatabase,
+    /// Measures text, once something needs it.
+    typesetter: Option<Typesetter>,
     /// The name the converted style gets: the directory of its images.
     name: String,
     /// The images its textures use, found beside it, as the converted style
@@ -529,6 +532,7 @@ impl StyleFile {
     pub(crate) fn new(path: &Path, text: &str) -> Self {
         Self {
             database: StyleDatabase::parse(path, text),
+            typesetter: None,
             name: crate::style_name(path),
             images: Vec::new(),
         }
@@ -657,36 +661,90 @@ impl StyleFile {
         }
     }
 
-    /// Returns the height of a bar: the style's own (`explicit`), else the
-    /// usual one with the bevel (`bevel`) added at both ends, as Fluxbox makes a
-    /// bar as tall as its contents and its bevel, so the bevel does not take
-    /// from them; none for the usual one, with no bevel.
-    fn bar_height(&mut self, explicit: &str, bevel: &str) -> Option<u32> {
-        self.number(&[explicit])
-            .filter(|height| *height > 0)
-            .or_else(|| {
-                let bevel = self.number(&[bevel]).filter(|bevel| *bevel > 0)?;
-                Some(vaht_ui::Style::DEFAULT_BAR_HEIGHT + 2 * bevel)
-            })
+    /// Returns the height Fluxbox gives the bar of `element` when the style
+    /// does not say (none: the usual one, so nothing need be said).
+    ///
+    /// From Fluxbox's `FbWinFrame::reconfigureTitlebar` and `Toolbar::
+    /// reconfigure`: a titlebar is `window.title.height`, or else its font's
+    /// height, 2, and the bevel at both ends; a toolbar is its items' height
+    /// (`toolbar.height`, or else their font's height and 2) and the bevel at
+    /// both ends, however the height was given, and its border outside that.
+    /// The bevel is vaht's padding, and the toolbar's border is added, so the
+    /// parts keep their size.
+    fn bar_height(&mut self, element: StyleElement) -> Option<u32> {
+        let (explicit, bevel, fonts): (&str, &str, &[&str]) = if element == StyleElement::Titlebar {
+            ("window.title.height", "window.bevelWidth", &["window.font"])
+        } else {
+            (
+                "toolbar.height",
+                "toolbar.bevelWidth",
+                &[
+                    "toolbar.font",
+                    "toolbar.workspace.font",
+                    "toolbar.clock.font",
+                    "toolbar.iconbar.focused.font",
+                    "toolbar.iconbar.unfocused.font",
+                ],
+            )
+        };
+        let bevel = self.number(&[bevel]).unwrap_or(0);
+        let explicit = self.number(&[explicit]).filter(|height| *height > 0);
+        let height = match (element, explicit) {
+            // The titlebar's own height is the whole of it.
+            (StyleElement::Titlebar, Some(height)) => height,
+            (StyleElement::Titlebar | StyleElement::Taskbar, content) => {
+                let content = content.unwrap_or_else(|| self.tallest_font(fonts) + 2);
+                // Fluxbox's toolbar has its border outside its height; vaht
+                // draws the bar's border inside, so it is added to keep the
+                // room for the parts the same.
+                let border = if element == StyleElement::Taskbar {
+                    self.number(&["toolbar.borderWidth"]).unwrap_or(0)
+                } else {
+                    0
+                };
+                content + 2 * bevel + 2 * border
+            }
+            _ => return None,
+        };
+        (height != vaht_ui::Style::DEFAULT_BAR_HEIGHT).then_some(height)
     }
 
-    /// Adds to `cell` the padding of a titlebar button that leaves its
-    /// picture the size Fluxbox draws it, about ten pixels, whatever the
-    /// button's size: the titlebar's height less its bevel at both ends.
-    fn add_button_padding(&mut self, cell: &mut Cell, element: StyleElement) {
-        /// How big Fluxbox draws a titlebar button's picture, in pixels.
-        const PICTURE: u32 = 10;
-        if element != StyleElement::Button {
-            return;
+    /// Returns how tall the tallest of the fonts the resources `names` give
+    /// is (its ascent and descent, as Fluxbox sizes its bars by), measured
+    /// in the font vaht draws it with; a style that names none has Fluxbox's
+    /// default font.
+    fn tallest_font(&mut self, names: &[&str]) -> u32 {
+        let typesetter = self
+            .typesetter
+            .get_or_insert_with(|| Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH));
+        let given: Vec<FluxboxFont> = names
+            .iter()
+            .filter_map(|name| self.database.get(name).map(str::to_owned))
+            .map(|spec| FluxboxFont::parse(&spec))
+            .collect();
+        let fonts = if given.is_empty() {
+            vec![FluxboxFont::default_font()]
+        } else {
+            given
+        };
+        fonts
+            .iter()
+            .map(|font| typesetter.font_height(&font.vaht_font()))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Adds to `cell` the padding of a titlebar button. Fluxbox draws a
+    /// button's picture inside the button with a fixed margin of 2 pixels
+    /// (`WinButton::drawType`), whatever the size of the button, which is
+    /// the titlebar's height less its bevel at both ends.
+    fn add_button_padding(cell: &mut Cell, element: StyleElement) {
+        /// The margin Fluxbox keeps round a button's picture, in pixels.
+        const MARGIN: i64 = 2;
+        if element == StyleElement::Button {
+            let sides: Array = [MARGIN; 4].into_iter().collect();
+            cell.insert(Property::Padding, Written(Value::Array(sides)));
         }
-        let height = self
-            .bar_height("window.title.height", "window.bevelWidth")
-            .unwrap_or(vaht_ui::Style::DEFAULT_BAR_HEIGHT);
-        let bevel = self.number(&["window.bevelWidth"]).unwrap_or(0);
-        let side = height.saturating_sub(2 * bevel);
-        let padding = i64::from(side.saturating_sub(PICTURE) / 2);
-        let sides: Array = [padding; 4].into_iter().collect();
-        cell.insert(Property::Padding, Written(Value::Array(sides)));
     }
 
     /// Adds to `cell` the border of `element` in `state`, where it has one.
@@ -779,9 +837,8 @@ impl StyleFile {
         report: &mut Report,
     ) {
         let height = match element {
-            StyleElement::Titlebar => self.bar_height("window.title.height", "window.bevelWidth"),
+            StyleElement::Titlebar | StyleElement::Taskbar => self.bar_height(element),
             StyleElement::Handle => self.number(&["window.handleWidth"]),
-            StyleElement::Taskbar => self.bar_height("toolbar.height", "toolbar.bevelWidth"),
             StyleElement::MenuTitle => self
                 .number(&["menu.titleHeight"])
                 .filter(|height| *height > 0),
@@ -815,7 +872,7 @@ impl StyleFile {
             cell.insert(Property::Height, Written(Value::from(i64::from(height))));
         }
         self.add_bevel(cell, element);
-        self.add_button_padding(cell, element);
+        Self::add_button_padding(cell, element);
         self.add_border(cell, element, state, report);
         match element {
             StyleElement::Border => self.add_round_corners(cell, "window.roundCorners"),
@@ -1034,12 +1091,7 @@ impl StyleFile {
             .and_then(|key| self.database.get(key))
             .unwrap_or("sans-10")
             .to_owned();
-        let Some(font) = FluxboxFont::parse(&spec) else {
-            if let Some(key) = key {
-                self.note_resource(key, report, "an X11 core font name");
-            }
-            return;
-        };
+        let font = FluxboxFont::parse(&spec);
         cell.insert(Property::Font, Written(Value::InlineTable(font.table())));
         let effect = key.map_or_else(
             || Value::from("none"),
@@ -1268,11 +1320,13 @@ impl FluxboxFont {
     /// Fluxbox's size when a font names none.
     const DEFAULT_SIZE: u16 = 10;
 
-    /// Parses `spec`; `None` for an X11 core font name (`-misc-fixed-…`).
-    fn parse(spec: &str) -> Option<Self> {
+    /// Parses `spec`: Fluxbox's `family-size:options`, a `pango:` name, or an
+    /// X11 core font name (`-misc-fixed-…`), whose family, weight, slant and
+    /// size are kept.
+    fn parse(spec: &str) -> Self {
         let first = spec.split('|').next().unwrap_or_default().trim();
         if first.starts_with('-') {
-            return None;
+            return Self::parse_core(first);
         }
         if let Some(pango) = first.strip_prefix("pango:") {
             // `Family [Style…] [Size]`: style words follow the family.
@@ -1295,13 +1349,13 @@ impl FluxboxFont {
                 }
                 words.pop();
             }
-            return Some(Self {
+            return Self {
                 family: words.join(" "),
                 size,
                 is_bold,
                 is_italic,
                 has_halo: false,
-            });
+            };
         }
         let (name, options) = first.split_once(':').unwrap_or((first, ""));
         let (family, size) = match name.rsplit_once('-') {
@@ -1320,7 +1374,7 @@ impl FluxboxFont {
             _ => (name, Self::DEFAULT_SIZE),
         };
         let options = options.to_ascii_lowercase();
-        Some(Self {
+        Self {
             family: if family == "fixed" {
                 "sans".to_owned()
             } else {
@@ -1330,7 +1384,67 @@ impl FluxboxFont {
             is_bold: options.contains("bold"),
             is_italic: options.contains("italic") || options.contains("oblique"),
             has_halo: options.split(':').any(|option| option == "halo"),
-        })
+        }
+    }
+
+    /// Reads an X11 core font name, `-foundry-family-weight-slant-width-style-
+    /// pixels-points-…`, most of whose fields styles leave as `*`. The size is
+    /// the pixel size if it is given, as points at 96 dots an inch, else the
+    /// size in tenths of a point.
+    fn parse_core(name: &str) -> Self {
+        let fields: Vec<&str> = name.trim_start_matches('-').split('-').collect();
+        let field = |index: usize| fields.get(index).copied().filter(|field| *field != "*");
+        let number = |index: usize| {
+            field(index)
+                .and_then(|field| field.parse::<f32>().ok())
+                .filter(|number| *number > 0.0)
+        };
+        let points = number(6)
+            .map(|pixels| pixels * 72.0 / 96.0)
+            .or_else(|| number(7).map(|tenths| tenths / 10.0));
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "font sizes are small positive numbers"
+        )]
+        let size = points.map_or(Self::DEFAULT_SIZE, |points| points.round() as u16);
+        let weight = field(2).unwrap_or_default().to_ascii_lowercase();
+        let slant = field(3).unwrap_or_default().to_ascii_lowercase();
+        Self {
+            // `fixed` is X's own name for its default font.
+            family: field(1)
+                .filter(|family| *family != "fixed")
+                .map_or_else(|| "sans".to_owned(), str::to_owned),
+            size,
+            is_bold: weight.contains("bold"),
+            is_italic: slant == "i" || slant == "o",
+            has_halo: false,
+        }
+    }
+
+    /// Returns Fluxbox's font for a style that names none.
+    fn default_font() -> Self {
+        Self {
+            family: "sans".to_owned(),
+            size: Self::DEFAULT_SIZE,
+            is_bold: false,
+            is_italic: false,
+            has_halo: false,
+        }
+    }
+
+    /// Returns the font as vaht draws text with it.
+    fn vaht_font(&self) -> Font {
+        Font {
+            family: self.family.clone(),
+            size_points: self.size,
+            weight: if self.is_bold {
+                FontWeight::Bold
+            } else {
+                FontWeight::Normal
+            },
+            is_italic: self.is_italic,
+        }
     }
 
     /// Returns the font as a vaht style's `font` table.
@@ -1848,21 +1962,28 @@ menu.bullet:\tsquare
     }
 
     #[rstest]
-    #[case::fluxbox("dejavu sans-8:bold", Some(("dejavu sans", 8, true, false)))]
-    #[case::italic("Sans-9.5:italic", Some(("Sans", 10, false, true)))]
-    #[case::no_size("monospace", Some(("monospace", 10, false, false)))]
-    #[case::pango("pango:DejaVu Sans Bold Italic 11", Some(("DejaVu Sans", 11, true, true)))]
-    #[case::pango_without_size("pango:Cantarell", Some(("Cantarell", 10, false, false)))]
-    #[case::x11_core("-misc-fixed-medium-r-normal--13-*", None)]
+    #[case::fluxbox("dejavu sans-8:bold", ("dejavu sans", 8, true, false))]
+    #[case::italic("Sans-9.5:italic", ("Sans", 10, false, true))]
+    #[case::no_size("monospace", ("monospace", 10, false, false))]
+    #[case::pango("pango:DejaVu Sans Bold Italic 11", ("DejaVu Sans", 11, true, true))]
+    #[case::pango_without_size("pango:Cantarell", ("Cantarell", 10, false, false))]
+    #[case::x11_core("-misc-fixed-medium-r-normal--13-*", ("sans", 10, false, false))]
+    #[case::x11_pixels(
+        "-*-helvetica-bold-r-*-*-11-*-*-*-*-*-iso8859-*",
+        ("helvetica", 8, true, false)
+    )]
+    #[case::x11_tenths_of_a_point(
+        "-*-lucida-medium-i-*-*-*-100-*-*-*-*-*-*",
+        ("lucida", 10, false, true)
+    )]
     fn fonts_read_as_fluxbox_writes_them(
         #[case] spec: &str,
-        #[case] expected: Option<(&str, u16, bool, bool)>,
+        #[case] expected: (&str, u16, bool, bool),
     ) {
-        let font = FluxboxFont::parse(spec)
-            .map(|font| (font.family, font.size, font.is_bold, font.is_italic));
+        let font = FluxboxFont::parse(spec);
         assert_eq!(
-            font,
-            expected.map(|(family, size, bold, italic)| (family.to_owned(), size, bold, italic))
+            (font.family, font.size, font.is_bold, font.is_italic),
+            (expected.0.to_owned(), expected.1, expected.2, expected.3)
         );
     }
 
@@ -1941,7 +2062,8 @@ menu.bullet:\tsquare
     }
 
     #[test]
-    fn a_buttons_padding_leaves_its_picture_ten_pixels_whatever_its_size() {
+    fn a_buttons_picture_keeps_fluxboxs_fixed_margin_whatever_the_buttons_size() {
+        // WinButton::drawType draws it 2 pixels inside the button.
         let padding = |style: &str| {
             let (_, vaht_style, _) = convert(style);
             let document: DocumentMut = vaht_style.parse().expect("TOML");
@@ -1950,40 +2072,72 @@ menu.bullet:\tsquare
                 .trim()
                 .to_owned()
         };
-        // 20 high, no bevel: a 20 pixel button, 5 around its picture.
-        assert_eq!(padding("window.title.height: 20\n"), "[5, 5, 5, 5]");
-        // Sage: 24 high with a bevel of 5 is a 14 pixel button.
+        assert_eq!(padding("window.title.height: 20\n"), "[2, 2, 2, 2]");
         assert_eq!(
             padding("window.title.height: 24\nwindow.bevelWidth: 5\n"),
             "[2, 2, 2, 2]"
         );
-        assert_eq!(
-            padding("window.title.height: 8\n"),
-            "[0, 0, 0, 0]",
-            "a button smaller than its picture has no padding"
-        );
     }
 
     #[test]
-    fn a_bar_with_no_height_is_as_tall_as_its_contents_and_its_bevel() {
-        let (_, vaht_style, _) = convert("toolbar.bevelWidth: 3\nwindow.bevelWidth: 2\n");
-        let document: DocumentMut = vaht_style.parse().expect("TOML");
-        assert_eq!(document["taskbar"]["height"].as_integer(), Some(26));
+    fn a_bars_height_is_what_fluxbox_makes_it() {
+        let height = |style: &str, path: [&str; 2]| {
+            let (_, vaht_style, _) = convert(style);
+            let document: DocumentMut = vaht_style.parse().expect("TOML");
+            let table = document.get(path[0])?;
+            let table = if path[1].is_empty() {
+                table
+            } else {
+                table.get(path[1])?
+            };
+            table.get("height").and_then(Item::as_integer)
+        };
+        let titlebar = ["window", "titlebar"];
+        let taskbar = ["taskbar", ""];
+        // A titlebar's own height is all of it; the bevel is inside.
         assert_eq!(
-            document["window"]["titlebar"]["height"].as_integer(),
+            height("window.title.height: 24\nwindow.bevelWidth: 5\n", titlebar),
             Some(24)
         );
-        // The buttons are as big as the usual bar's, so as before.
+        // A toolbar's own height is its items', and the bevel is added, and
+        // its border, which Fluxbox draws outside and vaht inside.
         assert_eq!(
-            document["window"]["button"]["padding"].to_string().trim(),
-            "[5, 5, 5, 5]"
+            height("toolbar.height: 30\ntoolbar.bevelWidth: 3\n", taskbar),
+            Some(36)
         );
-        let (_, explicit, _) = convert("toolbar.bevelWidth: 3\ntoolbar.height: 30\n");
-        let document: DocumentMut = explicit.parse().expect("TOML");
         assert_eq!(
-            document["taskbar"]["height"].as_integer(),
-            Some(30),
-            "the style's own height wins"
+            height(
+                "toolbar.height: 30\ntoolbar.bevelWidth: 3\ntoolbar.borderWidth: 1\n",
+                taskbar
+            ),
+            Some(38)
         );
+        // With none, a bar is its font's height, 2, and the bevel at both
+        // ends, the font measured as vaht draws it (what fonts are installed
+        // is the machine's, so the test measures the same way).
+        let font_height = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH)
+            .font_height(&FluxboxFont::parse("sans-10").vaht_font());
+        let expected = i64::from(font_height) + 2 + 6;
+        assert_eq!(
+            height("window.font: sans-10\nwindow.bevelWidth: 3\n", titlebar),
+            Some(expected)
+        );
+        assert_eq!(
+            height("toolbar.font: sans-10\ntoolbar.bevelWidth: 3\n", taskbar),
+            Some(expected)
+        );
+        // The usual height is not written.
+        assert_eq!(height("window.title.height: 20\n", titlebar), None);
+    }
+
+    #[test]
+    fn a_style_wide_border_applies_when_the_windows_own_names_are_not_given() {
+        // `window.focus.borderWidth` is asked for first and given nowhere;
+        // the style-wide `borderWidth` still answers for the window.
+        let (_, vaht_style, _) = convert("borderWidth: 2\nborderColor: red\n");
+        let document: DocumentMut = vaht_style.parse().expect("TOML");
+        let border = &document["window"]["border"]["border"];
+        assert_eq!(border["width"].as_integer(), Some(2), "{vaht_style}");
+        assert_eq!(border["color"].as_str(), Some("red"));
     }
 }
