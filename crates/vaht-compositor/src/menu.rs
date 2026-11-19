@@ -2,10 +2,10 @@
 //! (01 §6.4).
 //!
 //! What a menu shows is a [`MenuModel`] ([`model`]), built from
-//! `menus.toml` as it opens. How it is shown is the presenter's: today the
-//! built-in one, [`MenuStack`], the menus open now, each a panel drawn with
-//! the style ([`content`]). The first is opened by an action; each further
-//! one is a submenu of the item highlighted in the one before.
+//! `menus.toml` as it opens. How it is shown is [`MenuStack`]'s: the menus
+//! open now, each a panel drawn with the style ([`content`]). The first is
+//! opened by an action; each further one is a submenu of the item highlighted
+//! in the one before.
 //!
 //! The pointer highlights the item under it, and resting on a submenu's
 //! item for a moment opens the submenu (a one-shot timer, `submenu_delay_ms`).

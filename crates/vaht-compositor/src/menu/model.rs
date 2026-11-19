@@ -5,8 +5,7 @@
 //! (a toggle's check). [`MenuBuilder`] makes one from a menu of
 //! `menus.toml` and what the window manager knows as the menu opens: toggles
 //! read the window's state, and generated lists read the workspaces and
-//! windows. The model knows nothing of how it is drawn, so another
-//! presenter (a toolkit's menus) can show it alike.
+//! windows. The model knows nothing of how it is drawn.
 
 use std::collections::HashMap;
 

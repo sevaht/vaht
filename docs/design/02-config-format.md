@@ -164,7 +164,6 @@ pin_right = []
 activation_grace_ms = 500
 
 [menus]
-presenter = "built-in"          # built-in | gtk (01 §6.4)
 submenu_delay_ms = 200
 search = "item-start"           # off | item-start | anywhere
 
@@ -852,8 +851,7 @@ items = [
   a `[menu.<name>]` table holds them, `pipe` items too) and optionally a
   `title`. It shows "…" while the command runs, read as it prints so a
   slow one never stalls vaht; "(no menu)" if the output is not a menu or
-  passes 256 KiB; and nothing changes if the menu closed meanwhile. Not
-  yet: the GTK presenter.
+  passes 256 KiB; and nothing changes if the menu closed meanwhile.
 - **Dropped:**
   - Fluxbox's `[config]` editor menu: settings are reached through
     `set-setting`.

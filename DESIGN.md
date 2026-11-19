@@ -22,11 +22,9 @@ repeating them.
 | `crates/vaht-ipc` | IPC message types |
 | `crates/vaht-settings-model` | The settings window's decisions (form from schema, editor state); no toolkit, no I/O |
 | `crates/vaht-settings` | The settings window: a thin egui shell and a client of vaht's IPC |
+| `crates/vaht-dialog` | What the run, command and title dialogs do (their line, completion, history); their egui window is the `vaht-dialog` program of `vaht-settings` |
 | `crates/vaht-import` | `vaht import fluxbox`: Fluxbox (and fluxland) setups to vaht's TOML |
 | `crates/vaht-test-support` | Test-only: a headless vaht, a client that clicks and takes screenshots |
-
-The remaining crates in 01 §2 (`vaht-dialog`, `vaht-menu-gtk`) are added
-when work on them starts.
 
 ## Testing
 

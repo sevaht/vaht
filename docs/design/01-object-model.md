@@ -47,7 +47,6 @@ standards.
 | `vaht-compositor` | library | The compositor | smithay, vaht-ui, vaht-ipc, zbus, toml, toml_edit |
 | `vaht-dialog` | library | What the text dialogs do (run, command, set title): their line, completion, history and how they act through IPC; the window is `vaht-settings`'s `vaht-dialog` program, in egui | vaht-ipc |
 | `vaht-import` | library | Converts fluxbox and fluxland setups to vaht TOML | vaht-compositor's `config` types |
-| `vaht-menu-gtk` | library, optional cargo feature | GTK menu helper (§6.4), run as `vaht menu-helper gtk`. **The only crate that depends on GTK.** After the first milestone | gtk4, gtk4-layer-shell, vaht-ipc |
 | `vaht` | **the one binary** | Subcommands (R-A3): `vaht` (run the compositor); `vaht config check\|schema` (offline) and `vaht config files\|get\|set\|unset\|save\|revert`; the IPC client commands `vaht run\|windows\|workspaces\|outputs\|subscribe\|log-filter\|pick\|version`; `vaht import`; `vaht ipc-schema` | all of the above, clap |
 
 **One binary, several libraries.** There is one thing to install and one
@@ -307,52 +306,23 @@ The bridge from `Canvas` to `MemoryRenderBuffer` sits in `vaht`
 | Window list per output | `WindowListScope::{AllOutputs, ThisOutput}` plus a `WindowMatcher` filter |
 | Slit later | Taskbar placement is `EdgeDock { edge, alignment, size, auto_hide, layer, reserves_space }`. A slit would be another `PanelContent` in an `EdgeDock` |
 
-### 6.4 Menus: one model, interchangeable presenters
+### 6.4 Menus: one model, drawn by vaht
 
-A menu's *content* is separate from *how it is shown*, so a toolkit menu can
-be swapped in without touching the root menu, the window menu or the tray.
+A menu's *content* is separate from *how it is drawn*, so the root menu, the
+window menu and the tray's menus are one kind of thing.
 
 - **`MenuModel`** (value) is the backend-neutral tree. Each item has an id,
-  label, icon, enabled flag, check or radio state, and a submenu that can be
-  loaded lazily (dbusmenu's `AboutToShow`). It is built by the root menu
-  config, the window menu and `Tray` (from dbusmenu) alike.
-- **`MenuPresenter`** (enum, rung 2) has two variants:
-  - **`BuiltIn`**: a `Panel<MenuContent>` stack in `Overlays`, using vaht's
-    style, with keyboard navigation and type-to-search. This is the default and
-    is in the first milestone.
-  - **`External(MenuHelper)`**: a helper process (`vaht menu-helper gtk`,
-    later perhaps `qt`) that shows the model with a real toolkit.
-- Both report a `MenuOutcome` (`Chosen(ItemId)`, `Dismissed`, or
+  label, icon, enabled flag, check state, and a submenu that can be loaded
+  lazily (dbusmenu's `AboutToShow`). It is built by the root menu config, the
+  window menu and `Tray` (from dbusmenu) alike.
+- **`MenuStack`** draws it: a stack of `Panel<MenuContent>` in `Overlays`, in
+  vaht's style, with keyboard navigation and type-to-search.
+- It reports a `MenuOutcome` (`Chosen(ItemId)`, `Dismissed`, or
   `SubmenuOpened(ItemId)` for lazy loading), which the menu's owner turns into
   a `Command` or a dbusmenu event.
 
-**The helper protocol is JSON lines over the helper's standard input and
-output**: `show { model, position, output }`, `update`, `close`, and replies
-`chosen` / `dismissed` / `opened`. Anything that speaks it can be a presenter,
-so Qt later means a new helper binary and **no** compositor change.
-
-**How the GTK helper works.** It is a GTK 4 client using `gtk4-layer-shell`.
-For each menu it opens a transparent overlay-layer surface at the pointer and
-pops a `GtkPopoverMenu` from it. This is the same approach waybar uses for
-tray menus. It stays running between menus, because GTK startup takes 100 ms
-or more.
-
-**Cost and risk.**
-- It is moderate work: a few hundred lines in its own crate, `vaht-menu-gtk`.
-  It is the only crate that depends on GTK, so a build without it has no GTK
-  dependency at all.
-- **Where bugs are likely:**
-  - keyboard focus moving to the helper's surface and back;
-  - dismissing the menu on outside clicks;
-  - placement near output edges;
-  - round trips for lazily loaded submenus.
-
-  vaht handles each of these generically, but they need testing on real tray
-  applications.
-- **Plan:** the `MenuModel` / `MenuPresenter` split goes in from the start. The
-  GTK helper comes after the first milestone. `menus.presenter = "built-in" |
-  "gtk"`, and if the helper fails to start or crashes, vaht logs it and falls
-  back to `built-in`, so a menu always appears.
+vaht draws its menus itself, and does not hand them to a toolkit: see the
+decision in §10.
 
 ---
 
@@ -526,9 +496,8 @@ disagree.
 
 1. **Workspaces are global**, and callers always ask per output (§5.3).
 2. **Borders are solid colors.**
-3. **Menus go through a `MenuPresenter`, with the built-in one as the default
-   and GTK as an option (decided).** See §6.4. The reasoning for drawing menus
-   ourselves by default:
+3. **Menus are drawn by vaht, from one `MenuModel` (decided).** See §6.4. The
+   reasoning for drawing menus ourselves:
    - The StatusNotifierItem specification makes the *host* responsible for
      showing an item's dbusmenu menu and tooltip. waybar draws them with GTK
      and Plasma with Qt, each in its own style. The alternative,
