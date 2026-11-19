@@ -627,7 +627,7 @@ impl StyleFile {
                 }
                 if let Some(padding) = sources.padding {
                     let array: Array = padding.iter().map(|side| i64::from(*side)).collect();
-                    cell.insert(Property::Padding, Written(Value::Array(array)));
+                    cell.insert(Property::Padding, Written(padding_value(array)));
                 }
                 self.add_sizes(&mut cell, element, state, report);
                 if element == StyleElement::MenuItem {
@@ -656,7 +656,7 @@ impl StyleFile {
         };
         if let Some(bevel) = bevel.filter(|bevel| *bevel > 0) {
             let sides: Array = [bevel; 4].into_iter().map(i64::from).collect();
-            cell.insert(Property::Padding, Written(Value::Array(sides)));
+            cell.insert(Property::Padding, Written(padding_value(sides)));
             cell.insert(Property::Spacing, Written(Value::from(i64::from(bevel))));
         }
     }
@@ -766,7 +766,7 @@ impl StyleFile {
         const MARGIN: i64 = 2;
         if element == StyleElement::Button {
             let sides: Array = [MARGIN; 4].into_iter().collect();
-            cell.insert(Property::Padding, Written(Value::Array(sides)));
+            cell.insert(Property::Padding, Written(padding_value(sides)));
         }
     }
 
@@ -876,7 +876,7 @@ impl StyleFile {
                 // the bullet's on the right, a pixel more on the left.
                 let side = height.unwrap_or(vaht_ui::Style::DEFAULT_BAR_HEIGHT);
                 let padding: Array = [0, side, 0, side + 1].into_iter().map(i64::from).collect();
-                cell.insert(Property::Padding, Written(Value::Array(padding)));
+                cell.insert(Property::Padding, Written(padding_value(padding)));
                 height
             }
             StyleElement::MenuFrame
@@ -955,7 +955,7 @@ impl StyleFile {
                 i64::from(self.number(&[name.as_str()]).unwrap_or(default))
             })
             .collect();
-        cell.insert(Property::Padding, Written(Value::Array(padding)));
+        cell.insert(Property::Padding, Written(padding_value(padding)));
         if let Some(radius) = self.number(&["systray.tooltip.radius"]) {
             cell.insert(
                 Property::CornerRadius,
@@ -1704,6 +1704,17 @@ fn most_common<'value>(values: impl Iterator<Item = &'value Written>) -> Option<
         .map(|(value, _)| value)
 }
 
+/// Returns `sides` (top, right, bottom, left) as a style writes padding: one
+/// number when all four are the same, else the list.
+fn padding_value(sides: Array) -> Value {
+    let first = sides.iter().next().and_then(Value::as_integer);
+    let is_even = first.is_some() && sides.iter().all(|side| side.as_integer() == first);
+    match first {
+        Some(number) if is_even => Value::from(number),
+        _ => Value::Array(sides),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
@@ -2054,7 +2065,7 @@ menu.bullet:\tsquare
         let document: DocumentMut = vaht_style.parse().expect("TOML");
         assert_eq!(
             document["window"]["titlebar"]["padding"].to_string().trim(),
-            "[3, 3, 3, 3]"
+            "3"
         );
         assert_eq!(
             document["window"]["titlebar"]["spacing"].as_integer(),
@@ -2098,10 +2109,10 @@ menu.bullet:\tsquare
                 .trim()
                 .to_owned()
         };
-        assert_eq!(padding("window.title.height: 20\n"), "[2, 2, 2, 2]");
+        assert_eq!(padding("window.title.height: 20\n"), "2");
         assert_eq!(
             padding("window.title.height: 24\nwindow.bevelWidth: 5\n"),
-            "[2, 2, 2, 2]"
+            "2"
         );
     }
 

@@ -56,7 +56,7 @@ text_color = "grey55"
 texture = { gradient = "vertical", from = "grey55", to = "grey5" }
 # The room round a button's picture: the button is 20 pixels, so 4 leaves a
 # 12 pixel picture (Fluxbox draws it 2 pixels inside, a 16 pixel picture).
-padding = [4, 4, 4, 4]
+padding = 4
 # Whether a maximized window's maximize button is drawn as a restore button
 # (the default); false keeps it the maximize button.
 # restore_glyph = false
@@ -86,7 +86,7 @@ border = { width = 0, color = "grey60" }
 height = 20
 
 [taskbar.button]
-padding = [0, 0, 0, 0]
+padding = 0
 
 [taskbar.button.pressed]
 texture = { gradient = "cross-diagonal", from = "grey20", to = "grey40", bevel = "sunken" }

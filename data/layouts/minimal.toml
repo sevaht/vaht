@@ -1,0 +1,9 @@
+# minimal: a slim taskbar (workspace name, window list, tray, clock) and only
+# a close button on windows.
+
+[windows.frame]
+titlebar_left = []
+titlebar_right = ["close"]
+
+[taskbar]
+widgets = ["workspace-name", "window-list", "tray", "clock"]

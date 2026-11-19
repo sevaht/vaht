@@ -316,4 +316,25 @@ mod tests {
             "it says what the defaults say, so choosing it changes nothing"
         );
     }
+
+    #[test]
+    fn every_layout_shipped_is_presentation_only_and_valid() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/layouts");
+        let mut count = 0;
+        for entry in std::fs::read_dir(directory).expect("the shipped layouts") {
+            let path = entry.expect("an entry").path();
+            let text = std::fs::read_to_string(&path).expect("readable");
+            let mut table: toml::Table = toml::from_str(&text).expect("TOML");
+            assert_eq!(
+                leave_out_other_settings(&mut table),
+                Vec::<String>::new(),
+                "{}: only presentation",
+                path.display()
+            );
+            super::super::Settings::from_table(table)
+                .unwrap_or_else(|message| panic!("{}: {message}", path.display()));
+            count += 1;
+        }
+        assert!(count >= 4, "the default and the others: {count}");
+    }
 }

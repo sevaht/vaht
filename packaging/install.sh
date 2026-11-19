@@ -23,7 +23,7 @@
 #   PREFIX/lib/systemd/user/vaht-session.target        the session, for the service manager
 #   /etc/xdg/xdg-desktop-portal-wlr/vaht               screen share picks with vaht's menu
 #   PREFIX/share/vaht/styles/vaht.toml                 the default style, to read and copy
-#   PREFIX/share/vaht/layouts/vaht.toml                the default layout
+#   PREFIX/share/vaht/layouts/*.toml                   the default layout, and a few more
 #   PREFIX/share/doc/vaht/                             README and design notes
 #   PREFIX/share/licenses/vaht/LICENSE
 # and for one user (--user):
@@ -100,6 +100,9 @@ if [[ -n ${session_dir} ]]; then
         "data/vaht.desktop ${session_dir}/vaht.desktop 644"
         "data/styles/vaht.toml ${styles_dir}/vaht.toml 644"
         "data/layouts/vaht.toml ${layouts_dir}/vaht.toml 644"
+        "data/layouts/minimal.toml ${layouts_dir}/minimal.toml 644"
+        "data/layouts/classic.toml ${layouts_dir}/classic.toml 644"
+        "data/layouts/top-bar.toml ${layouts_dir}/top-bar.toml 644"
         "data/vaht-settings.desktop ${application_dir}/vaht-settings.desktop 644"
         "README.md ${doc_dir}/README.md 644"
         "DESIGN.md ${doc_dir}/DESIGN.md 644"

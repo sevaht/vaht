@@ -1,0 +1,10 @@
+# classic: Fluxbox's stock arrangement. A stick button on the left of the
+# titlebar; shade, minimize, maximize and close on the right; workspace
+# arrows and name, the window list, tray and clock on the taskbar.
+
+[windows.frame]
+titlebar_left = ["stick"]
+titlebar_right = ["shade", "minimize", "maximize", "close"]
+
+[taskbar]
+widgets = ["workspace-previous", "workspace-name", "workspace-next", "window-list", "tray", "clock"]
