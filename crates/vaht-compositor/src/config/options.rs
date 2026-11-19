@@ -7,14 +7,12 @@
 
 use std::path::{Path, PathBuf};
 
+use super::library::system_directory;
 use vaht_ui::Style;
 use vaht_ui::style::options::ChoiceLibrary;
 
 /// The directory of choice directories in the configuration directory.
 pub(crate) const DIRECTORY: &str = "options";
-
-/// The directory of the choices installed with vaht.
-const SYSTEM_DIRECTORY: &str = "/usr/share/vaht/options";
 
 /// An option of the style in use with everything there is to choose from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +60,7 @@ impl<'directory> OptionLibrary<'directory> {
     fn directories(&self, option: &str) -> [PathBuf; 2] {
         [
             self.directory.join(DIRECTORY).join(option),
-            Path::new(SYSTEM_DIRECTORY).join(option),
+            system_directory().join(DIRECTORY).join(option),
         ]
     }
 

@@ -8,7 +8,7 @@
 use crate::geometry::{Insets, Point, Rect};
 use crate::icon::WidgetIcon;
 use crate::style::{StyleElement, WidgetState};
-use crate::widget::{Glyph, MarkSide, SizePolicy, TextField, Widget, WidgetKind};
+use crate::widget::{Glyph, MarkSide, SizePolicy, Widget, WidgetKind};
 
 /// What a placed widget draws inside its rectangle.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,8 +17,6 @@ pub enum Content {
     Text(String),
     /// A button picture.
     Glyph(Glyph),
-    /// A line of text being edited.
-    Field(TextField),
     /// Only the element's background (fills, rows and columns).
     Background,
 }
@@ -170,7 +168,6 @@ impl<Hit: Copy> Placer<'_, Hit> {
         let content = match &widget.kind {
             WidgetKind::Text(text) => Content::Text(text.clone()),
             WidgetKind::Glyph(glyph) => Content::Glyph(*glyph),
-            WidgetKind::Field(field) => Content::Field(field.clone()),
             WidgetKind::Fill | WidgetKind::Row(_) | WidgetKind::Column(_) => Content::Background,
         };
         self.placed.push(Placed {
@@ -188,10 +185,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
         let (axis, children) = match &widget.kind {
             WidgetKind::Row(children) => (Axis::Horizontal, children),
             WidgetKind::Column(children) => (Axis::Vertical, children),
-            WidgetKind::Text(_)
-            | WidgetKind::Glyph(_)
-            | WidgetKind::Field(_)
-            | WidgetKind::Fill => return,
+            WidgetKind::Text(_) | WidgetKind::Glyph(_) | WidgetKind::Fill => return,
         };
         let space = if is_root {
             (self.space)(widget.element)
@@ -304,7 +298,7 @@ impl<Hit: Copy> Placer<'_, Hit> {
                     SizePolicy::Square | SizePolicy::Share { .. } | SizePolicy::Fill { .. } => 0,
                 })
                 .sum(),
-            WidgetKind::Glyph(_) | WidgetKind::Field(_) | WidgetKind::Fill => 0,
+            WidgetKind::Glyph(_) | WidgetKind::Fill => 0,
         }
     }
 }

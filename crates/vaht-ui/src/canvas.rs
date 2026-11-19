@@ -14,10 +14,10 @@ use crate::icon::WidgetIcon;
 use crate::image::Image;
 use crate::layout::{Content, Layout, Placed};
 use crate::style::{BorderStyle, Style, WidgetState};
-use crate::text::{TextStyle, Typesetter};
+use crate::text::Typesetter;
 use crate::texture::render::{self, GradientImage};
 use crate::texture::{Bevel, Fill, ImageFit, Texture};
-use crate::widget::{Glyph, MarkSide, TextField};
+use crate::widget::{Glyph, MarkSide};
 
 /// A button picture's stroke width relative to its box: thin enough to stay
 /// crisp at titlebar sizes.
@@ -155,37 +155,8 @@ impl<'pixmap> Canvas<'pixmap> {
                         None => self.draw_glyph(glyph, style.glyph_color, inner),
                     }
                 }
-                Content::Field(field) => self.draw_field(field, &style.text, inner, typesetter),
                 Content::Background => {}
             }
-        }
-    }
-
-    /// Draws `field` in `area` (see [`Typesetter::draw_field`]) and its
-    /// cursor: a line in the text's color, a pixel in from the area's top
-    /// and bottom.
-    fn draw_field(
-        &mut self,
-        field: &TextField,
-        style: &TextStyle,
-        area: Rect,
-        typesetter: &mut Typesetter,
-    ) {
-        let area = self.physical(area);
-        let cursor = typesetter.draw_field((self.pixmap, self.scale), field, style, area);
-        let x = area.x + i32::try_from(cursor).expect("panel widths fit in i32");
-        let one = self.pixels(1);
-        let line = Rect::new(
-            x,
-            area.y + i32::try_from(one).expect("a pixel fits"),
-            one,
-            area.height.saturating_sub(2 * one),
-        );
-        if let Some(line) = line.to_skia() {
-            let mut paint = Paint::default();
-            paint.set_color(style.color.to_skia());
-            self.pixmap
-                .fill_rect(line, &paint, Transform::identity(), None);
         }
     }
 

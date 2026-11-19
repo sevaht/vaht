@@ -382,10 +382,7 @@ impl Sources {
             StyleElement::MenuTitle | StyleElement::MenuFrame | StyleElement::MenuItem => {
                 Self::of_menu(element, state)
             }
-            StyleElement::DialogField
-            | StyleElement::Wireframe
-            | StyleElement::Tooltip
-            | StyleElement::Warning => Self {
+            StyleElement::Wireframe | StyleElement::Tooltip | StyleElement::Warning => Self {
                 is_built_in: true,
                 ..Self::texture(&[])
             },
@@ -449,7 +446,6 @@ impl Sources {
             | StyleElement::TaskbarClock
             | StyleElement::WindowListEntry
             | StyleElement::WindowListEmpty
-            | StyleElement::DialogField
             | StyleElement::Wireframe
             | StyleElement::Tooltip
             | StyleElement::Warning => Self {
@@ -889,7 +885,6 @@ impl StyleFile {
             | StyleElement::TaskbarClock
             | StyleElement::WindowListEntry
             | StyleElement::WindowListEmpty
-            | StyleElement::DialogField
             | StyleElement::Wireframe
             | StyleElement::Tooltip
             | StyleElement::Warning => None,
@@ -916,7 +911,6 @@ impl StyleFile {
             | StyleElement::WindowListEmpty
             | StyleElement::MenuTitle
             | StyleElement::MenuItem
-            | StyleElement::DialogField
             | StyleElement::Wireframe
             | StyleElement::Tooltip
             | StyleElement::Warning => {}
@@ -1824,18 +1818,11 @@ menu.bullet:\tsquare
     }
 
     #[test]
-    fn a_dialog_looks_as_in_the_built_in_theme() {
+    fn the_wireframe_looks_as_in_the_built_in_theme() {
         let (_, vaht_style, _) = convert(STYLE);
         let vaht_style =
             Style::resolve(&StyleLayers::from_toml(&vaht_style).expect("a valid style"));
         let built_in = Style::built_in();
-        let (got, want) = (
-            vaht_style.element_style(StyleElement::DialogField, WidgetState::Focused),
-            built_in.element_style(StyleElement::DialogField, WidgetState::Focused),
-        );
-        assert_eq!(got.texture, want.texture);
-        assert_eq!(got.text, want.text);
-        assert_eq!(got.padding, want.padding);
         let wireframe = |vaht_style: &Style| {
             vaht_style
                 .element_style(StyleElement::Wireframe, WidgetState::Focused)

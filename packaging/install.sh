@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Installs vaht and the files it needs from the system: the executables (vaht
-# and vaht-settings, its settings window), the
+# Installs vaht and the files it needs from the system: the executables (vaht,
+# vaht-settings, its settings window, and vaht-dialog, its run and command
+# dialogs), the
 # login-screen entry (wayland-sessions/vaht.desktop), the portal choice
 # (xdg-desktop-portal/vaht-portals.conf) and the session target
 # (systemd/user/vaht-session.target), which ties the portals to the session,
@@ -17,6 +18,7 @@
 # What it installs, system-wide (PREFIX is /usr unless given):
 #   PREFIX/bin/vaht
 #   PREFIX/bin/vaht-settings
+#   PREFIX/bin/vaht-dialog
 #   PREFIX/share/applications/vaht-settings.desktop    the settings window, in launchers
 #   PREFIX/share/wayland-sessions/vaht.desktop        display managers list it
 #   PREFIX/share/xdg-desktop-portal/vaht-portals.conf  portals for XDG_CURRENT_DESKTOP=vaht
@@ -30,6 +32,7 @@
 # and for one user (--user):
 #   ~/.local/bin/vaht
 #   ~/.local/bin/vaht-settings
+#   ~/.local/bin/vaht-dialog
 #   ~/.config/xdg-desktop-portal/vaht-portals.conf
 #   ~/.config/systemd/user/vaht-session.target
 #   ~/.config/xdg-desktop-portal-wlr/vaht
@@ -94,6 +97,7 @@ fi
 files=(
     "target/release/vaht ${bin_dir}/vaht 755"
     "target/release/vaht-settings ${bin_dir}/vaht-settings 755"
+    "target/release/vaht-dialog ${bin_dir}/vaht-dialog 755"
     "data/vaht-portals.conf ${portal_dir}/vaht-portals.conf 644"
     "data/vaht-session.target ${unit_dir}/vaht-session.target 644"
     "data/xdg-desktop-portal-wlr-vaht ${share_dir}/vaht 644"
@@ -142,7 +146,7 @@ fi
 if [[ ${build} == yes ]]; then
     cargo build --release --locked -p vaht -p vaht-settings
 fi
-for program in vaht vaht-settings; do
+for program in vaht vaht-settings vaht-dialog; do
     if [[ ! -x target/release/${program} ]]; then
         echo "install.sh: target/release/${program} is not built; run without --no-build" >&2
         exit 1

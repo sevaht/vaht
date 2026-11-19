@@ -1,7 +1,7 @@
 //! Starting programs, and reaping them when they exit (03 §2).
 //!
 //! [`Launcher`] is the only place vaht starts processes. Each command line
-//! runs as `sh -c '<command line>'`, and vaht's dialogs as `vaht dialog
+//! runs as `sh -c '<command line>'`, and vaht's dialogs as `vaht-dialog
 //! <name>`, each:
 //! - in a process group of its own, so a signal meant for vaht's group
 //!   does not reach it;
@@ -221,40 +221,34 @@ impl Launcher {
         }
     }
 
-    /// Shows vaht's dialog `name` (`vaht dialog <name>`), styled by the
-    /// configuration in `config_directory`.
-    pub(crate) fn show_dialog(&mut self, name: &str, config_directory: &Path) {
-        self.start_dialog(name, &[], config_directory);
+    /// Shows vaht's dialog `name` (`vaht-dialog <name>`): the `vaht-dialog`
+    /// program installed beside vaht.
+    pub(crate) fn show_dialog(&mut self, name: &str) {
+        self.start_dialog(name, None);
     }
 
-    /// Shows vaht's dialog `name` for `window` (`vaht dialog <name>
-    /// --window <id>`), styled by the configuration in `config_directory`.
-    pub(crate) fn show_window_dialog(
-        &mut self,
-        name: &str,
-        window: WindowId,
-        config_directory: &Path,
-    ) {
-        let id = window.get().to_string();
-        self.start_dialog(
-            name,
-            &[OsStr::new("--window"), OsStr::new(&id)],
-            config_directory,
-        );
+    /// Shows vaht's dialog `name` for `window` (`vaht-dialog <name> --window
+    /// <id>`).
+    pub(crate) fn show_window_dialog(&mut self, name: &str, window: WindowId) {
+        self.start_dialog(name, Some(window));
     }
 
-    /// Starts `vaht dialog <name> <extra>`, styled by the configuration in
-    /// `config_directory`.
-    fn start_dialog(&mut self, name: &str, extra: &[&OsStr], config_directory: &Path) {
-        let executable = self.executable.clone();
-        let mut arguments = vec![
-            OsStr::new("vaht"),
-            OsStr::new("--config-directory"),
-            config_directory.as_os_str(),
-            OsStr::new("dialog"),
-            OsStr::new(name),
-        ];
-        arguments.extend_from_slice(extra);
+    /// Returns the command line of the dialog `name`, for `window`, if it is
+    /// about one.
+    fn dialog_arguments(name: &str, window: Option<WindowId>) -> Vec<OsString> {
+        let mut arguments = vec![OsString::from("vaht-dialog"), OsString::from(name)];
+        if let Some(window) = window {
+            arguments.push(OsString::from("--window"));
+            arguments.push(OsString::from(window.get().to_string()));
+        }
+        arguments
+    }
+
+    /// Starts `vaht-dialog <name>`, for `window` if it is about one.
+    fn start_dialog(&mut self, name: &str, window: Option<WindowId>) {
+        let executable = self.executable.with_file_name("vaht-dialog");
+        let arguments = Self::dialog_arguments(name, window);
+        let arguments: Vec<&OsStr> = arguments.iter().map(OsString::as_os_str).collect();
         self.start_helper(&executable, &arguments, name);
     }
 

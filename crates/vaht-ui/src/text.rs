@@ -16,7 +16,6 @@ use tiny_skia::{Pixmap, PixmapPaint, PremultipliedColorU8, Transform};
 
 use crate::color::Color;
 use crate::geometry::Rect;
-use crate::widget::TextField;
 
 /// A typeface at a size.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -270,49 +269,9 @@ impl Typesetter {
             text,
             style,
             area,
-            placement: Placement::Justified,
             scale,
         };
         self.draw_line(target, &line);
-    }
-
-    /// Draws `field`'s text in `style` into `area` of `target`
-    /// left-justified, scrolled so its cursor is in view (the cursor's own
-    /// pixel included), and clipped to the area. Returns where the cursor
-    /// goes, in pixels from the area's left edge. `area` and the answer are
-    /// in the pixels of `target`, `scale` times the logical ones.
-    pub fn draw_field(
-        &mut self,
-        (target, scale): (&mut Pixmap, f32),
-        field: &TextField,
-        style: &TextStyle,
-        area: Rect,
-    ) -> u32 {
-        let pixel_size = self.pixel_size(&style.font);
-        let cursor = {
-            let buffer = self.lay_out(field.before_cursor(), &style.font, pixel_size, scale);
-            let width = buffer
-                .layout_runs()
-                .map(|run| run.line_w)
-                .fold(0.0, f32::max);
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "a line's width is positive and far below u32::MAX"
-            )]
-            let pixels = width.ceil() as u32;
-            pixels
-        };
-        let scroll = cursor.saturating_sub(area.width.saturating_sub(1));
-        let line = Line {
-            text: field.text(),
-            style,
-            area,
-            placement: Placement::Scrolled(scroll),
-            scale,
-        };
-        self.draw_line(target, &line);
-        cursor - scroll
     }
 
     /// Draws `line` into `target`, vertically centered and clipped to its
@@ -322,7 +281,6 @@ impl Typesetter {
             text,
             style,
             area,
-            placement,
             scale,
         } = *line;
         if text.is_empty() {
@@ -362,11 +320,7 @@ impl Typesetter {
         let Some(line_width) = buffer.layout_runs().next().map(|line| line.line_w) else {
             return;
         };
-        let across = match placement {
-            Placement::Justified => style.justify.offset(line_width, area.width),
-            #[expect(clippy::cast_precision_loss, reason = "text widths are far below 2^24")]
-            Placement::Scrolled(scroll) => -(scroll as f32),
-        };
+        let across = style.justify.offset(line_width, area.width);
         // cosmic-text cuts a glyph's vertical position down to a whole pixel,
         // which puts the text up to a pixel above the middle of its area
         // (the baseline of a 20 pixel taskbar's text is at 13.7, and drawn at
@@ -505,19 +459,8 @@ struct Line<'text> {
     style: &'text TextStyle,
     /// Where it goes; it is clipped to this.
     area: Rect,
-    /// Where it goes across the area.
-    placement: Placement,
     /// How many times larger than logical pixels its pixels are.
     scale: f32,
-}
-
-/// Where a line of text goes across its area.
-#[derive(Debug, Clone, Copy)]
-enum Placement {
-    /// As its style's justification says.
-    Justified,
-    /// Left-justified, moved this many pixels left: a field's text.
-    Scrolled(u32),
 }
 
 impl fmt::Debug for Typesetter {

@@ -1,8 +1,6 @@
 //! The title dialog: one window's title, to change (Fluxbox's
 //! `SetTitleDialog`).
 
-use vaht_ui::TextField;
-
 use crate::commander::{CommandError, Commander, IpcCommander};
 use crate::line::LineEditor;
 use crate::{EditKey, LineDialog, Outcome};
@@ -35,7 +33,8 @@ impl TitleDialog {
 
     /// Returns a dialog for `window`, whose title is `current`, that sets
     /// it with `commander`.
-    fn with_commander(window: u64, current: &str, commander: Box<dyn Commander>) -> Self {
+    #[must_use]
+    pub fn with_commander(window: u64, current: &str, commander: Box<dyn Commander>) -> Self {
         let mut line = LineEditor::default();
         line.set(current);
         Self {
@@ -85,8 +84,16 @@ impl LineDialog for TitleDialog {
         Self::APP_ID
     }
 
-    fn field(&self) -> TextField {
-        self.line.field()
+    fn text(&self) -> &str {
+        self.line.text()
+    }
+
+    fn cursor(&self) -> usize {
+        self.line.cursor()
+    }
+
+    fn edit(&mut self, text: &str, cursor: usize) {
+        self.line.edit(text, cursor);
     }
 
     fn press(&mut self, key: EditKey) -> Result<Outcome, String> {
@@ -94,15 +101,6 @@ impl LineDialog for TitleDialog {
             EditKey::Accept => return self.set(),
             EditKey::Cancel => return Ok(Outcome::Close),
             EditKey::Complete | EditKey::Older | EditKey::Newer => {}
-            EditKey::DeleteBack => self.line.delete_back(),
-            EditKey::DeleteForward => self.line.delete_forward(),
-            EditKey::Left => self.line.move_left(),
-            EditKey::Right => self.line.move_right(),
-            EditKey::Home => self.line.move_home(),
-            EditKey::End => self.line.move_end(),
-            EditKey::KillToStart => self.line.kill_to_start(),
-            EditKey::KillToEnd => self.line.kill_to_end(),
-            EditKey::Insert(text) => self.line.insert(&text),
         }
         Ok(Outcome::Open)
     }
@@ -133,10 +131,8 @@ mod tests {
     fn the_line_starts_as_the_title_and_sets_it() {
         let recorder = Recorder::default();
         let mut dialog = TitleDialog::with_commander(7, "kitty", Box::new(recorder.clone()));
-        assert_eq!(dialog.field().text(), "kitty");
-        dialog
-            .press(EditKey::Insert(" logs".to_owned()))
-            .expect("typed");
+        assert_eq!(dialog.text(), "kitty");
+        dialog.edit("kitty logs", 10);
         assert_eq!(dialog.press(EditKey::Accept), Ok(Outcome::Close));
         assert_eq!(
             *recorder.0.borrow(),
@@ -148,7 +144,7 @@ mod tests {
     fn an_empty_line_gives_the_programs_title_back() {
         let recorder = Recorder::default();
         let mut dialog = TitleDialog::with_commander(7, "x", Box::new(recorder.clone()));
-        dialog.press(EditKey::KillToStart).expect("cleared");
+        dialog.edit("", 0);
         dialog.press(EditKey::Accept).expect("set");
         assert_eq!(*recorder.0.borrow(), [("set-title".to_owned(), Some(7))]);
     }

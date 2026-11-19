@@ -42,6 +42,11 @@ Everything lives under `$XDG_CONFIG_HOME/vaht/` (normally `~/.config/vaht/`):
 | `outputs.toml` | Per-output settings, display profiles, profile hooks | `session.output.*` in `init`; av-output-switcher's `profiles.json` (video part), converted by hand |
 | `styles/<name>.toml` | Styles; also read from `/usr/share/vaht/styles/` | `styles/*`, `overlay` |
 
+- **The installed copies** (styles, layouts, and option choices) are in
+  `/usr/share/vaht/`, or in the directory the environment variable
+  `VAHT_SYSTEM_DIRECTORY` names (the repository's `.cargo/config.toml` points
+  it at a directory with none, so builds and tests made there do not depend on
+  what is installed on the machine).
 - **`overlay` disappears.** My overlay existed only to stop styles from
   setting the background. In vaht styles cannot set the wallpaper at all; it
   belongs to `settings.toml`.
@@ -983,8 +988,6 @@ exactly what each element gets.
   - taskbar: `taskbar`, `taskbar.workspace`, `taskbar.clock`,
     `taskbar.window-list.entry`, `taskbar.window-list.empty`, `taskbar.tray`;
   - menus: `menu.title`, `menu.frame`, `menu.item`;
-  - dialogs: `dialog.field`, the line a dialog edits (its cursor takes the
-    text color);
   - other: `tooltip`, `snap-picker`, `wireframe`.
 - **States:** `focused`, `unfocused`, `hovered`, `pressed`, `active`,
   `disabled`. A menu item's highlight is its `hovered` state. A window's
@@ -1064,7 +1067,7 @@ exactly what each element gets.
 - Elements: the window's six, and `taskbar`, `taskbar.button`,
   `taskbar.workspace`, `taskbar.clock`, `taskbar.window-list.entry`,
   `taskbar.window-list.empty`, `menu.title`, `menu.frame`, `menu.item`,
-  `dialog.field`, `wireframe` (a resize's outline, drawn in its
+  `wireframe` (a resize's outline, drawn in its
   `border`) and `tooltip` (converted from fluxland's `systray.tooltip.*`,
   rounded as `corner_radius` says, as frames and menus are). `alpha`, 0
   (clear) to 255 (opaque), draws the whole of `taskbar`, a menu (in
@@ -1357,7 +1360,7 @@ vaht import fluxbox-style <path>... [--to ~/.config/vaht/styles] [--force] [--no
   it there (`style = "<name>"`, the rest of the file kept as it was).
 - **The title dialog converts:** `SetTitleDialog` and the window menu's
   `[settitledialog]` become `set-title-dialog`, which shows the window's
-  title to change (`vaht dialog title --window <id>`); `SetTitle` becomes
+  title to change (`vaht-dialog title --window <id>`); `SetTitle` becomes
   `set-title`, and `set-title` alone gives the program's title back.
 - **The command dialog converts:** `CommandDialog` and the menu's
   `[commanddialog]` become `command-dialog`, a line for a vaht command.
@@ -1365,9 +1368,8 @@ vaht import fluxbox-style <path>... [--to ~/.config/vaht/styles] [--force] [--no
   title.
 - **The run window converts to the run dialog:** `RunDialog`, and `Exec
   fbrun` or `Exec fluxland-run`, become `run-dialog`; their options are
-  reported, since the style's `dialog.field` styles the dialog. Fluxbox
-  styles say nothing of `dialog.field`, so a converted style takes the
-  built-in one's: black on white, as fbrun draws.
+  reported, since the dialog is vaht's own window (drawn by the toolkit of the
+  settings window, not by the style) and rules place it.
 - **The toolbar converts to `[taskbar]`:** its placement, tools, `maxOver`,
   `strftimeFormat`, `iconbar.mode` (a client pattern) and
   `iconbar.iconWidth`; settings that already ask for what vaht does are

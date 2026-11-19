@@ -76,9 +76,6 @@ fn main() -> ExitCode {
             return vaht::import::fluxbox_styles(paths, &to, (*force, *notes));
         }
         Some(Subcommand::IpcSchema) => return vaht::message::print_schema(),
-        Some(Subcommand::Dialog { dialog }) => {
-            return vaht::dialog::show(*dialog, &arguments.config_directory());
-        }
         Some(Subcommand::Live(command)) => return run_live(command, arguments.json),
         None => {}
     }

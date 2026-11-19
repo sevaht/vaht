@@ -13,10 +13,8 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
-smithay-client-toolkit = { workspace = true, features = ["calloop", "xkbcommon"] }
 thiserror.workspace = true
 vaht-ipc.workspace = true
-vaht-ui.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

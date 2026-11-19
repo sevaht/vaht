@@ -443,7 +443,12 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
         Some("default"),
         "the default layout, which needs no file, first"
     );
-    assert_eq!(style_options, [], "the built-in style declares none yet");
+    let declared: Vec<&str> = style_options
+        .iter()
+        .map(|option| option.name.as_str())
+        .collect();
+    assert_eq!(declared, ["scheme", "size"], "the built-in style's options");
+    assert_eq!(style_options[0].chosen, "graphite");
     assert_eq!(
         problems,
         Vec::<String>::new(),

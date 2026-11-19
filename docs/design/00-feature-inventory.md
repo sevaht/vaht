@@ -188,8 +188,8 @@ These are structural problems in fluxland that vaht's design should avoid.
 | Submenus, separators, pipe menus, icons, key navigation, type-to-search, right-to-left text | `menu.c` | keep ★ | `menuSearch: itemstart`, `menuDelay: 200` |
 | Built-in entries: [stylesdir], [workspaces], [config], [reconfig], [restart], [exit] | `menu_parse.c` | rework | [config] edits fluxbox `init` live. Under the new format, show toggles for real settings only |
 | Window menu (my `windowmenu`) | | keep ★ | |
-| CommandDialog, SetTitleDialog, SetWorkspaceNameDialog | `dialog.c` | rework (decided) | Ordinary client windows: `vaht dialog command\|title\|workspace-name`, acting through IPC |
-| RunDialog (separate `fluxland-run` program) | `tools/fluxland-run.c`, `run_dialog.c` | keep ★ (decided) | `vaht dialog run`: the same binary, run as a normal window that appears in the taskbar |
+| CommandDialog, SetTitleDialog, SetWorkspaceNameDialog | `dialog.c` | rework (decided) | Ordinary client windows (egui, the `vaht-dialog` program): `command`, `title`, acting through IPC |
+| RunDialog (separate `fluxland-run` program) | `tools/fluxland-run.c`, `run_dialog.c` | keep ★ (decided) | `vaht-dialog run`: an egui window that appears in the taskbar |
 
 ## 8. Input
 

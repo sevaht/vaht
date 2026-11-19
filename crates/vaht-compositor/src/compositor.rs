@@ -3021,12 +3021,8 @@ impl Compositor {
                 self.settle();
                 self.schedule_render();
             }
-            Action::RunDialog => self
-                .launcher
-                .show_dialog("run", self.config_source.directory()),
-            Action::CommandDialog => self
-                .launcher
-                .show_dialog("command", self.config_source.directory()),
+            Action::RunDialog => self.launcher.show_dialog("run"),
+            Action::CommandDialog => self.launcher.show_dialog("command"),
             Action::Settings => self.launcher.show_settings(),
             Action::SetStyle(name) => self.change_setting(SettingChange::style(name)),
             Action::SetLayout(name) => self.change_setting(SettingChange::layout(name)),
@@ -3069,11 +3065,7 @@ impl Compositor {
             }
             Action::SetTitleDialog => {
                 if let Some(window) = context.window {
-                    self.launcher.show_window_dialog(
-                        "title",
-                        window,
-                        self.config_source.directory(),
-                    );
+                    self.launcher.show_window_dialog("title", window);
                 }
             }
             Action::Exit => self.stop(),
@@ -3988,7 +3980,8 @@ pub struct RunOptions {
     pub backend: BackendChoice,
     /// Where the configuration files are (normally `~/.config/vaht`).
     pub config_directory: PathBuf,
-    /// vaht's own program, which shows its dialogs (`vaht dialog run`).
+    /// vaht's own program; its dialogs and settings window are the programs
+    /// beside it (`vaht-dialog`, `vaht-settings`).
     pub executable: PathBuf,
     /// Whether Xwayland may start, if the settings want it; off for runs
     /// that need no X11 programs, such as most tests.

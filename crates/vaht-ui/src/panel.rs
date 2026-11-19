@@ -584,51 +584,6 @@ mod tests {
         assert_eq!(color(75), (0, 0, 255));
     }
 
-    /// A dialog's line being edited.
-    struct Line(crate::widget::TextField);
-
-    impl PanelContent for Line {
-        type Hit = ();
-
-        fn build(&self) -> Widget<()> {
-            Widget::field(StyleElement::DialogField, self.0.clone())
-        }
-
-        fn state(&self) -> WidgetState {
-            WidgetState::Focused
-        }
-    }
-
-    /// Returns the columns of a painted 100 by 20 line with any dark pixel.
-    fn dark_columns(field: crate::widget::TextField) -> Vec<u32> {
-        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
-        let mut panel = Panel::new(Line(field), Size::new(100, 20));
-        assert!(panel.paint(&Style::built_in(), &mut typesetter));
-        let pixels = panel.pixels().expect("painted");
-        (0..100)
-            .filter(|x| {
-                (0..20)
-                    .filter_map(|y| pixels.pixel(*x, y))
-                    .any(|pixel| pixel.red() < 128)
-            })
-            .collect()
-    }
-
-    #[test]
-    fn an_empty_field_shows_its_cursor_at_the_start() {
-        let columns = dark_columns(crate::widget::TextField::default());
-        assert_eq!(columns, [2], "only the cursor, inside the padding");
-    }
-
-    #[test]
-    fn a_long_field_scrolls_to_keep_its_cursor_in_view() {
-        let text = "x".repeat(60);
-        let at_end = dark_columns(crate::widget::TextField::new(text.clone(), text.len()));
-        assert_eq!(at_end.last(), Some(&97), "the cursor at the right edge");
-        let at_start = dark_columns(crate::widget::TextField::new(text, 0));
-        assert_eq!(at_start.first(), Some(&2), "the cursor at the left edge");
-    }
-
     /// One item-high row with a check on the left.
     struct Checked;
 

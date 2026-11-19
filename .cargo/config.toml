@@ -1,0 +1,6 @@
+# vaht reads the styles, layouts and option choices installed with it from
+# /usr/share/vaht, or from VAHT_SYSTEM_DIRECTORY. Builds and tests made here
+# look in a directory that has none, so what they find does not depend on what
+# is installed on this machine (an older install has older styles).
+[env]
+VAHT_SYSTEM_DIRECTORY = "/nonexistent/vaht"

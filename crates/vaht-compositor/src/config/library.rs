@@ -10,6 +10,13 @@ use std::path::{Path, PathBuf};
 
 use super::ConfigError;
 
+/// The directory of the files installed with vaht: `VAHT_SYSTEM_DIRECTORY`, or
+/// `/usr/share/vaht`.
+pub(crate) fn system_directory() -> PathBuf {
+    std::env::var_os("VAHT_SYSTEM_DIRECTORY")
+        .map_or_else(|| PathBuf::from("/usr/share/vaht"), PathBuf::from)
+}
+
 /// One kind of named file, and where it is looked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Library {
@@ -17,8 +24,6 @@ pub(crate) struct Library {
     pub(crate) kind: &'static str,
     /// The directory of the user's, inside the configuration directory.
     pub(crate) directory: &'static str,
-    /// The directory of the ones installed with vaht.
-    system_directory: &'static str,
 }
 
 impl Library {
@@ -26,14 +31,12 @@ impl Library {
     pub(crate) const STYLES: Self = Self {
         kind: "style",
         directory: "styles",
-        system_directory: "/usr/share/vaht/styles",
     };
 
     /// The layouts (named sets of presentation settings).
     pub(crate) const LAYOUTS: Self = Self {
         kind: "layout",
         directory: "layouts",
-        system_directory: "/usr/share/vaht/layouts",
     };
 
     /// Every kind: the directories the configuration watches.
@@ -56,7 +59,7 @@ impl Library {
         let file_name = format!("{name}.toml");
         let searched = [
             directory.join(self.directory).join(&file_name),
-            Path::new(self.system_directory).join(&file_name),
+            system_directory().join(self.directory).join(&file_name),
         ];
         searched
             .iter()
@@ -79,7 +82,7 @@ impl Library {
     pub(crate) fn available(self, directory: &Path) -> Vec<String> {
         let directories = [
             directory.join(self.directory),
-            PathBuf::from(self.system_directory),
+            system_directory().join(self.directory),
         ];
         let mut names: Vec<String> = directories
             .iter()

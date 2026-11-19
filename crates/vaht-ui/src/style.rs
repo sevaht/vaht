@@ -63,8 +63,6 @@ pub enum StyleElement {
     MenuFrame,
     /// A menu's item; its `hovered` state is the highlighted one.
     MenuItem,
-    /// The line of text a dialog edits, such as the run dialog's command.
-    DialogField,
     /// The outline a resize shows while the window keeps its size: its
     /// `border` is the lines' width and color.
     Wireframe,
@@ -96,7 +94,6 @@ impl StyleElement {
             Self::MenuTitle => "menu.title",
             Self::MenuFrame => "menu.frame",
             Self::MenuItem => "menu.item",
-            Self::DialogField => "dialog.field",
             Self::Wireframe => "wireframe",
             Self::Tooltip => "tooltip",
             Self::Warning => "warning",

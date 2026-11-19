@@ -273,8 +273,8 @@ impl FluxboxCommand<'_> {
             vec![(
                 Reason::Dropped,
                 format!(
-                    "the run window's options ({options}): the vaht style's dialog.field element \
-                     the run dialog, and rules place it"
+                    "the run window's options ({options}): the run dialog is vaht's own \
+                     window, and rules place it"
                 ),
             )]
         };

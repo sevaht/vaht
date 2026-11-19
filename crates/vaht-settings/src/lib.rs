@@ -9,4 +9,5 @@
 
 pub mod app;
 pub mod controls;
+pub mod dialog;
 pub mod link;

@@ -16,10 +16,15 @@ publish.workspace = true
 name = "vaht-settings"
 path = "src/main.rs"
 
+[[bin]]
+name = "vaht-dialog"
+path = "src/bin/vaht-dialog.rs"
+
 [dependencies]
 anyhow.workspace = true
 eframe.workspace = true
 serde_json.workspace = true
+vaht-dialog = { path = "../vaht-dialog" }
 vaht-ipc = { path = "../vaht-ipc" }
 vaht-settings-model = { path = "../vaht-settings-model" }
 

@@ -1,8 +1,6 @@
 //! The command dialog: a vaht command to type and run, as Fluxbox's
 //! `CommandDialog` runs Fluxbox commands.
 
-use vaht_ui::TextField;
-
 use crate::commander::{CommandError, Commander, IpcCommander};
 use crate::line::LineEditor;
 use crate::{EditKey, LineDialog, Outcome};
@@ -32,7 +30,8 @@ impl CommandDialog {
     }
 
     /// Returns a command dialog that runs what is typed with `commander`.
-    fn with_commander(commander: Box<dyn Commander>) -> Self {
+    #[must_use]
+    pub fn with_commander(commander: Box<dyn Commander>) -> Self {
         Self {
             line: LineEditor::default(),
             title: Self::TITLE.to_owned(),
@@ -83,8 +82,16 @@ impl LineDialog for CommandDialog {
         Self::APP_ID
     }
 
-    fn field(&self) -> TextField {
-        self.line.field()
+    fn text(&self) -> &str {
+        self.line.text()
+    }
+
+    fn cursor(&self) -> usize {
+        self.line.cursor()
+    }
+
+    fn edit(&mut self, text: &str, cursor: usize) {
+        self.line.edit(text, cursor);
     }
 
     fn press(&mut self, key: EditKey) -> Result<Outcome, String> {
@@ -93,15 +100,6 @@ impl LineDialog for CommandDialog {
             EditKey::Cancel => return Ok(Outcome::Close),
             // There is nothing to complete, or to go back through.
             EditKey::Complete | EditKey::Older | EditKey::Newer => {}
-            EditKey::DeleteBack => self.line.delete_back(),
-            EditKey::DeleteForward => self.line.delete_forward(),
-            EditKey::Left => self.line.move_left(),
-            EditKey::Right => self.line.move_right(),
-            EditKey::Home => self.line.move_home(),
-            EditKey::End => self.line.move_end(),
-            EditKey::KillToStart => self.line.kill_to_start(),
-            EditKey::KillToEnd => self.line.kill_to_end(),
-            EditKey::Insert(text) => self.line.insert(&text),
         }
         Ok(Outcome::Open)
     }
@@ -126,7 +124,7 @@ mod tests {
 
     /// Types `text` and presses Return.
     fn enter(dialog: &mut CommandDialog, text: &str) -> Result<Outcome, String> {
-        dialog.press(EditKey::Insert(text.to_owned()))?;
+        dialog.edit(text, text.len());
         dialog.press(EditKey::Accept)
     }
 
@@ -141,6 +139,6 @@ mod tests {
         let mut dialog = CommandDialog::with_commander(Box::new(Picky));
         assert_eq!(enter(&mut dialog, "dance"), Ok(Outcome::Open));
         assert_eq!(dialog.title(), "Command: unknown action `dance`");
-        assert_eq!(dialog.field().text(), "dance", "the line stays, to fix");
+        assert_eq!(dialog.text(), "dance", "the line stays, to fix");
     }
 }

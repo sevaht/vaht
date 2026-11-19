@@ -45,15 +45,16 @@ standards.
 | `vaht-ui` | library | Panel toolkit: widgets, layout, `Canvas` (tiny-skia), `Typesetter` (cosmic-text), `Style` model. **Knows nothing about Wayland or windows** (M14) | tiny-skia, cosmic-text, image, resvg |
 | `vaht-ipc` | library | IPC message types (serde) plus a JSON Schema export (schemars), and a small blocking client | serde, serde_json |
 | `vaht-compositor` | library | The compositor | smithay, vaht-ui, vaht-ipc, zbus, toml, toml_edit |
-| `vaht-dialog` | library | Text dialogs as ordinary Wayland client windows: run, command, set title, rename workspace | vaht-ui, vaht-ipc, smithay-client-toolkit |
+| `vaht-dialog` | library | What the text dialogs do (run, command, set title): their line, completion, history and how they act through IPC; the window is `vaht-settings`'s `vaht-dialog` program, in egui | vaht-ipc |
 | `vaht-import` | library | Converts fluxbox and fluxland setups to vaht TOML | vaht-compositor's `config` types |
 | `vaht-menu-gtk` | library, optional cargo feature | GTK menu helper (§6.4), run as `vaht menu-helper gtk`. **The only crate that depends on GTK.** After the first milestone | gtk4, gtk4-layer-shell, vaht-ipc |
-| `vaht` | **the one binary** | Subcommands (R-A3): `vaht` (run the compositor); `vaht config check\|schema` (offline) and `vaht config files\|get\|set\|unset\|save\|revert`; the IPC client commands `vaht run\|windows\|workspaces\|outputs\|subscribe\|log-filter\|pick\|version`; `vaht dialog run\|command\|title\|workspace-name`; `vaht import`; `vaht ipc-schema` | all of the above, clap |
+| `vaht` | **the one binary** | Subcommands (R-A3): `vaht` (run the compositor); `vaht config check\|schema` (offline) and `vaht config files\|get\|set\|unset\|save\|revert`; the IPC client commands `vaht run\|windows\|workspaces\|outputs\|subscribe\|log-filter\|pick\|version`; `vaht import`; `vaht ipc-schema` | all of the above, clap |
 
 **One binary, several libraries.** There is one thing to install and one
-version to match, and the compositor runs its own dialogs as
-`vaht dialog …` (as niri does with `niri msg`). The code stays separated by
-crate.
+version to match, and the compositor's tools are subcommands (as niri does
+with `niri msg`). Its dialogs and settings window are `vaht-dialog` and
+`vaht-settings`, installed beside it: egui programs, so the compositor itself
+links no toolkit. The code stays separated by crate.
 
 **Dialogs are client windows (decided).**
 - They are framed and focused, appear in the taskbar, and follow rules like any
@@ -261,9 +262,9 @@ one place that performs modesets.
 | Type | Role | Responsibility |
 |---|---|---|
 | `Widget` | value | One node of a panel: `kind: WidgetKind`, `element: StyleElement`, `size: SizePolicy`, `hit: Option<HitId>`, `tooltip: Option<String>` |
-| `WidgetKind` | enum | `Text(String)`, `Glyph(Glyph)`, `Icon(ImageRef)`, `Fill`, `TextField(TextFieldState)` (used only by `vaht-dialog`), `Row(Vec<Widget>)`, `Column(Vec<Widget>)`, `Grid { rows, children }` |
+| `WidgetKind` | enum | `Text(String)`, `Glyph(Glyph)`, `Icon(ImageRef)`, `Fill`, `Row(Vec<Widget>)`, `Column(Vec<Widget>)`, `Grid { rows, children }` |
 | `SizePolicy` | enum | `Fixed(px)`, `Fit` (measured), `Fill { weight }` |
-| `PanelContent` | trait | Implemented by Frame strips, Taskbar, Menu, Tooltip and SnapPicker (and by `vaht-dialog`'s windows): `fn build(&self) -> Widget`, plus an associated `Hit` type that `HitId` maps back to |
+| `PanelContent` | trait | Implemented by Frame strips, Taskbar, Menu, Tooltip and SnapPicker: `fn build(&self) -> Widget`, plus an associated `Hit` type that `HitId` maps back to |
 | `Panel<C: PanelContent>` | entity | Owns its content, size, laid-out tree, `Canvas`, hover and pressed `HitId`, and a dirty flag. `layout`, `paint_if_dirty`, `hit_at(point) → Option<C::Hit>`, `tooltip_at`, `pointer_motion`, `press`, `release` |
 | `Canvas` | entity | A tiny-skia pixmap. Paints textures, text, glyphs and icons for a laid-out tree |
 | `Typesetter` | entity | The one cosmic-text `FontSystem` plus glyph cache. Measures and shapes text; creating one takes 55 ms, so it is shared |

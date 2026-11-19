@@ -80,7 +80,7 @@ impl Arguments {
 
 /// The subcommands.
 ///
-/// `config`, `import`, `dialog` and `ipc-schema` are about vaht's own files
+/// `config`, `import` and `ipc-schema` are about vaht's own files
 /// and programs; the rest ([`LiveCommand`]) ask the running vaht something,
 /// or tell it what to do, over its IPC socket (`$VAHT_SOCKET`, or the one
 /// beside `$WAYLAND_DISPLAY`).
@@ -99,37 +99,12 @@ pub enum Subcommand {
         #[command(subcommand)]
         source: ImportSource,
     },
-    /// Shows one of vaht's dialogs: a window with a line to type in. vaht
-    /// runs these itself (the `run-dialog` action), but they work from a
-    /// terminal too.
-    Dialog {
-        /// Which dialog.
-        #[command(subcommand)]
-        dialog: DialogKind,
-    },
     /// Prints the JSON Schema of the IPC protocol's messages: requests,
     /// replies and events.
     IpcSchema,
     /// What the running vaht is asked.
     #[command(flatten)]
     Live(LiveCommand),
-}
-
-/// The dialogs `vaht dialog` shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::Subcommand)]
-pub enum DialogKind {
-    /// A command line to run, with Tab completing program and file names
-    /// and Up and Down going through the lines run before.
-    Run,
-    /// A vaht command to run, written as a binding writes one.
-    Command,
-    /// A window's title, to change; left empty, the window's program's
-    /// title comes back.
-    Title {
-        /// The window, by id (see `vaht windows`).
-        #[arg(long)]
-        window: u64,
-    },
 }
 
 /// What the running vaht is asked: each is one request over its IPC socket.

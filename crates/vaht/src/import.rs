@@ -192,3 +192,14 @@ fn default_fluxbox_directory() -> PathBuf {
         |home| Path::new(&home).join(".fluxbox"),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn imported_rules_for_the_run_window_match_the_run_dialog() {
+        assert_eq!(
+            vaht_import::RUN_DIALOG_APP_ID,
+            vaht_dialog::RunDialog::APP_ID
+        );
+    }
+}

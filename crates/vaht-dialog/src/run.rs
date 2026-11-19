@@ -6,8 +6,6 @@ mod history;
 
 use std::path::PathBuf;
 
-use vaht_ui::TextField;
-
 use self::completion::{Completer, common_prefix};
 use self::history::RunHistory;
 use crate::commander::{Commander, IpcCommander};
@@ -71,6 +69,18 @@ impl RunDialog {
             history_path,
             Completer::from_environment(),
             Box::new(IpcCommander),
+        )
+    }
+
+    /// Returns a run dialog with no history or completion files, that runs
+    /// lines with `commander`: for tests of the window.
+    #[must_use]
+    pub fn detached(commander: Box<dyn Commander>) -> Self {
+        Self::with_parts(
+            RunHistory::default(),
+            None,
+            Completer::new(Vec::new(), None),
+            commander,
         )
     }
 
@@ -197,8 +207,20 @@ impl LineDialog for RunDialog {
         Self::APP_ID
     }
 
-    fn field(&self) -> TextField {
-        self.line.field()
+    fn text(&self) -> &str {
+        self.line.text()
+    }
+
+    fn cursor(&self) -> usize {
+        self.line.cursor()
+    }
+
+    fn edit(&mut self, text: &str, cursor: usize) {
+        // Typing, or moving the cursor, ends a run of Tab presses.
+        if text != self.line.text() || cursor != self.line.cursor() {
+            self.cycle = None;
+        }
+        self.line.edit(text, cursor);
     }
 
     fn press(&mut self, key: EditKey) -> Result<Outcome, String> {
@@ -211,15 +233,6 @@ impl LineDialog for RunDialog {
             EditKey::Complete => self.complete(),
             EditKey::Older => self.show_older(),
             EditKey::Newer => self.show_newer(),
-            EditKey::DeleteBack => self.line.delete_back(),
-            EditKey::DeleteForward => self.line.delete_forward(),
-            EditKey::Left => self.line.move_left(),
-            EditKey::Right => self.line.move_right(),
-            EditKey::Home => self.line.move_home(),
-            EditKey::End => self.line.move_end(),
-            EditKey::KillToStart => self.line.kill_to_start(),
-            EditKey::KillToEnd => self.line.kill_to_end(),
-            EditKey::Insert(text) => self.line.insert(&text),
         }
         Ok(Outcome::Open)
     }
@@ -272,11 +285,8 @@ mod tests {
 
     /// Types `text` into `dialog`.
     fn type_text(dialog: &mut RunDialog, text: &str) {
-        for character in text.chars() {
-            dialog
-                .press(EditKey::Insert(character.to_string()))
-                .expect("typing works");
-        }
+        let typed = format!("{}{text}", dialog.text());
+        dialog.edit(&typed, typed.len());
     }
 
     #[test]
@@ -306,7 +316,7 @@ mod tests {
         type_text(&mut dialog, "k");
         let press_tab = |dialog: &mut RunDialog| {
             dialog.press(EditKey::Complete).expect("completes");
-            dialog.field().text().to_owned()
+            dialog.text().to_owned()
         };
         assert_eq!(
             press_tab(&mut dialog),
@@ -316,7 +326,10 @@ mod tests {
         assert_eq!(press_tab(&mut dialog), "kill");
         assert_eq!(press_tab(&mut dialog), "kitty");
         assert_eq!(press_tab(&mut dialog), "kill", "around again");
-        dialog.press(EditKey::End).expect("moves");
+        // Moving the cursor away and back ends the run of presses.
+        let text = dialog.text().to_owned();
+        dialog.edit(&text, 0);
+        dialog.edit(&text, text.len());
         assert_eq!(
             press_tab(&mut dialog),
             "kill",
@@ -330,7 +343,7 @@ mod tests {
         let (mut dialog, _) = dialog(&directory, &[]);
         type_text(&mut dialog, "br");
         dialog.press(EditKey::Complete).expect("completes");
-        assert_eq!(dialog.field().text(), "brave");
+        assert_eq!(dialog.text(), "brave");
     }
 
     #[test]
@@ -340,7 +353,7 @@ mod tests {
         type_text(&mut dialog, "draft");
         let press = |dialog: &mut RunDialog, key| {
             dialog.press(key).expect("browses");
-            dialog.field().text().to_owned()
+            dialog.text().to_owned()
         };
         assert_eq!(press(&mut dialog, EditKey::Older), "second");
         assert_eq!(press(&mut dialog, EditKey::Older), "first");

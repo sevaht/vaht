@@ -47,4 +47,4 @@ pub use tiny_skia::Pixmap;
 #[doc(inline)]
 pub use wallpaper::{Wallpaper, WallpaperError, WallpaperFit};
 #[doc(inline)]
-pub use widget::{Glyph, MarkSide, SizePolicy, TextField, Widget};
+pub use widget::{Glyph, MarkSide, SizePolicy, Widget};

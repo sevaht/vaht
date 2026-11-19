@@ -52,17 +52,6 @@ impl<Hit> Widget<Hit> {
         Self::new(element, WidgetKind::Glyph(glyph), SizePolicy::Square)
     }
 
-    /// Returns a line of text being edited, with its cursor, that takes the
-    /// room left over.
-    #[must_use]
-    pub const fn field(element: StyleElement, field: TextField) -> Self {
-        Self::new(
-            element,
-            WidgetKind::Field(field),
-            SizePolicy::Fill { weight: 1 },
-        )
-    }
-
     /// Returns a widget that only shows its element's background and takes
     /// the room left over.
     #[must_use]
@@ -185,8 +174,6 @@ pub enum WidgetKind<Hit> {
     Text(String),
     /// A button picture.
     Glyph(Glyph),
-    /// A line of text being edited.
-    Field(TextField),
     /// Only the element's background.
     Fill,
     /// Children side by side, left to right.
@@ -295,66 +282,5 @@ impl Glyph {
             | Self::BulletSquare
             | Self::BulletDiamond => None,
         }
-    }
-}
-
-/// A line of text being edited, and where its cursor is.
-///
-/// It is drawn left-justified, scrolled so the cursor stays in view, with
-/// the cursor a line in the text's color.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct TextField {
-    /// The text.
-    text: String,
-    /// The cursor, as a byte offset into the text, at a character boundary.
-    cursor: usize,
-}
-
-impl TextField {
-    /// Returns `text` with the cursor at byte `cursor`, moved back to the
-    /// character boundary at or before it.
-    #[must_use]
-    pub fn new(text: impl Into<String>, cursor: usize) -> Self {
-        let text = text.into();
-        let mut cursor = cursor.min(text.len());
-        while !text.is_char_boundary(cursor) {
-            cursor -= 1;
-        }
-        Self { text, cursor }
-    }
-
-    /// Returns the text.
-    #[must_use]
-    pub fn text(&self) -> &str {
-        &self.text
-    }
-
-    /// Returns the cursor, as a byte offset into the text.
-    #[must_use]
-    pub const fn cursor(&self) -> usize {
-        self.cursor
-    }
-
-    /// Returns the text before the cursor.
-    #[must_use]
-    pub fn before_cursor(&self) -> &str {
-        &self.text[..self.cursor]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_field_cursor_stays_on_a_character_boundary() {
-        let field = TextField::new("aé", 2);
-        assert_eq!(field.cursor(), 1, "inside é, it moves back before it");
-        assert_eq!(
-            TextField::new("ab", 9).cursor(),
-            2,
-            "past the end, at the end"
-        );
-        assert_eq!(field.before_cursor(), "a");
     }
 }

@@ -15,7 +15,7 @@
 # taskbar.button, taskbar.workspace, taskbar.clock,
 # taskbar.window-list.entry, taskbar.window-list.empty (the tray shows on
 # the taskbar's own background), menu.title, menu.frame, menu.item,
-# dialog.field, wireframe (a resize's outline: its border), tooltip, warning
+# wireframe (a resize's outline: its border), tooltip, warning
 # (vaht's notice that its configuration has problems: always drawn from this
 # built-in copy, so a style of yours cannot hide it; the `warning` section
 # here is what it looks like).
@@ -168,14 +168,6 @@ font = { family = "DejaVu Sans", size = "$font_size", weight = "bold" }
 
 [menu.item.disabled]
 text_color = "$dim"
-
-[dialog.field]
-texture = { solid = "white" }
-font = { family = "Sans", size = 12 }
-text_effect = "none"
-text_color = "black"
-justify = "left"
-padding = [0, 2, 0, 2]
 
 [wireframe]
 border = { width = 2, color = "#ffffffcc" }

@@ -2,7 +2,7 @@
 //!
 //! [`Config::load`] reads every file in the configuration directory and
 //! validates all of it, returning the first problem, for a program that needs
-//! a whole configuration or none (`vaht dialog`). A running vaht uses
+//! a whole configuration or none (`vaht config check`). A running vaht uses
 //! [`Config::load_lenient`] instead, which uses what is valid and returns what
 //! it left out (02 §2), and `vaht config check` lists every problem
 //! ([`Config::problems`]). A file that does not exist is replaced by vaht's built-in version of it, the one
