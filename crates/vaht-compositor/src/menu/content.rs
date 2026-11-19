@@ -127,14 +127,16 @@ impl PanelContent for MenuContent {
             );
             // The line under the title is drawn over this, as an outline.
             children.push(
-                Widget::fill(StyleElement::MenuFrame)
+                Widget::fill(StyleElement::MenuItem)
                     .with_size(SizePolicy::Fixed(self.metrics.border_width)),
             );
         }
         let row = SizePolicy::Fixed(self.metrics.item_height);
         for (index, item) in self.model.items.iter().enumerate() {
             let widget = match item {
-                MenuItem::Separator => Widget::fill(StyleElement::MenuFrame).with_size(row),
+                // The menu's own background shows through: a row of the frame's
+                // texture would have its bevel round it, a box in the menu.
+                MenuItem::Separator => Widget::fill(StyleElement::MenuItem).with_size(row),
                 MenuItem::Inert { label } => Widget::text(StyleElement::MenuItem, label.clone())
                     .with_size(row)
                     .with_state(WidgetState::Disabled),

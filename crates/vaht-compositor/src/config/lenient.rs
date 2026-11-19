@@ -741,7 +741,7 @@ mod tests {
 
     #[test]
     fn the_default_layout_is_there_without_a_file() {
-        let chosen = load(&directory(&[("settings.toml", "layout = \"vaht\"\n")]));
+        let chosen = load(&directory(&[("settings.toml", "layout = \"default\"\n")]));
         assert_eq!(chosen.problems, []);
     }
 }
