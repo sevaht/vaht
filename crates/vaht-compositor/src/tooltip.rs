@@ -178,7 +178,12 @@ impl Tooltip {
         let mut texture = PanelTexture::new();
         texture.upload(&panel);
         let mut outline = Outline::default();
-        outline.update_as(Some(area), style, StyleElement::Tooltip, corners);
+        outline.update_as(
+            Some(area),
+            style,
+            StyleElement::Tooltip,
+            (corners, panel.scale()),
+        );
         self.shown = Some(Shown {
             area,
             border,

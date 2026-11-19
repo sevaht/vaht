@@ -55,8 +55,11 @@ struct Painting {
     image: Option<NonZeroUsize>,
     /// The output's area, in global coordinates.
     area: Rectangle<i32, Logical>,
-    /// The pixels.
+    /// The pixels, `scale` of them to a logical pixel of the area.
     pixels: Pixmap,
+    /// How many of the pixels make a logical one: the screens' scale, so the
+    /// wallpaper is shown at the resolution of the screen.
+    scale: f64,
     /// Which painting it is, counting every one.
     generation: u64,
     /// The pixels, as the renderer takes them.
@@ -113,13 +116,14 @@ impl Backdrop {
         &mut self,
         outputs: &[Rectangle<i32, Logical>],
         window_manager: &WindowManager,
+        scale: f64,
     ) {
         let current = window_manager.current_workspace().number();
         self.shown = self
             .workspace_images
             .contains_key(&current)
             .then_some(current);
-        self.paint(outputs);
+        self.paint(outputs, scale);
         self.pieces.retain(|window, _| {
             window_manager
                 .window(*window)
@@ -135,9 +139,13 @@ impl Backdrop {
 
     /// Paints the image shown for each of `outputs` not painted for, and
     /// drops the paintings of outputs gone or changed.
-    fn paint(&mut self, outputs: &[Rectangle<i32, Logical>]) {
+    #[expect(
+        clippy::float_cmp,
+        reason = "a scale that is what it was, exactly, paints the same"
+    )]
+    fn paint(&mut self, outputs: &[Rectangle<i32, Logical>], scale: f64) {
         self.paintings
-            .retain(|painting| outputs.contains(&painting.area));
+            .retain(|painting| outputs.contains(&painting.area) && painting.scale == scale);
         let shown = self.shown;
         let image = match shown {
             Some(workspace) => self.workspace_images.get(&workspace),
@@ -154,20 +162,35 @@ impl Backdrop {
             {
                 continue;
             }
-            let size = vaht_ui::Size::new(to_u32(output.size.w), to_u32(output.size.h));
+            let size = vaht_ui::Size::new(
+                Self::scaled(output.size.w, scale),
+                Self::scaled(output.size.h, scale),
+            );
             if let Some(pixels) = image.paint(size, self.settings.fit, Self::BACKGROUND) {
                 self.generation += 1;
                 let mut texture = PanelTexture::new();
-                texture.upload_pixels(&pixels, self.generation);
+                texture.upload_sized(&pixels, output.size, self.generation);
                 self.paintings.push(Painting {
                     image: shown,
                     area: *output,
                     pixels,
+                    scale,
                     generation: self.generation,
                     texture,
                 });
             }
         }
+    }
+
+    /// Returns `logical` pixels as `scale` times as many, rounded.
+    fn scaled(logical: i32, scale: f64) -> u32 {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "an output is far below u32::MAX pixels across"
+        )]
+        let pixels = (f64::from(logical) * scale).round().max(0.0) as u32;
+        pixels
     }
 
     /// Copies the piece of wallpaper under `window`'s content, from the
@@ -191,11 +214,15 @@ impl Backdrop {
             return;
         }
         let within = area.loc - painting.area.loc;
+        // Each edge is scaled, so pieces meet as the pixels do.
+        let edge = |logical: i32| i32::try_from(Self::scaled(logical, painting.scale)).unwrap_or(0);
+        let (left, top) = (edge(within.x), edge(within.y));
+        let (right, bottom) = (edge(within.x + area.size.w), edge(within.y + area.size.h));
         let Some(rect) = tiny_skia::IntRect::from_xywh(
-            within.x,
-            within.y,
-            to_u32(area.size.w),
-            to_u32(area.size.h),
+            left,
+            top,
+            u32::try_from(right - left).unwrap_or(0),
+            u32::try_from(bottom - top).unwrap_or(0),
         ) else {
             return;
         };
@@ -203,7 +230,7 @@ impl Backdrop {
             piece.area = area;
             piece.generation = painting.generation;
             piece.copies += 1;
-            piece.texture.upload_pixels(&copy, piece.copies);
+            piece.texture.upload_sized(&copy, area.size, piece.copies);
         }
     }
 
@@ -284,9 +311,4 @@ impl Backdrop {
             .filter_map(|(workspace, path)| Some((workspace, Self::load(path)?)))
             .collect()
     }
-}
-
-/// Converts a non-negative extent to a size.
-fn to_u32(extent: i32) -> u32 {
-    u32::try_from(extent).unwrap_or(0)
 }

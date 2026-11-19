@@ -121,12 +121,15 @@ impl FrameTexture {
             .iter_mut()
             .zip(<Corner as strum::IntoEnumIterator>::iter())
         {
-            texture.update(CornerArc {
-                corner,
-                radius: geometry.corners.radius(corner),
-                line_width: geometry.line_width,
-                color,
-            });
+            texture.update(
+                CornerArc {
+                    corner,
+                    radius: geometry.corners.radius(corner),
+                    line_width: geometry.line_width,
+                    color,
+                },
+                frame.titlebar().scale(),
+            );
         }
     }
 

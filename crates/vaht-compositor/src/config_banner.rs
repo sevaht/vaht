@@ -190,7 +190,12 @@ impl ConfigBanner {
         let mut texture = PanelTexture::new();
         texture.upload(&panel);
         let mut outline = Outline::default();
-        outline.update_as(Some(area), style, StyleElement::Warning, corners);
+        outline.update_as(
+            Some(area),
+            style,
+            StyleElement::Warning,
+            (corners, panel.scale()),
+        );
         Shown {
             area,
             border,

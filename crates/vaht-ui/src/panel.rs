@@ -35,8 +35,11 @@ pub trait PanelContent {
 pub struct Panel<Content: PanelContent> {
     /// What it shows.
     content: Content,
-    /// Its size in pixels.
+    /// Its size in logical pixels, which its widgets are laid out in.
     size: Size,
+    /// How many of its own pixels (what it paints) make a logical one: a
+    /// panel on a screen of a larger scale is painted larger, so it is sharp.
+    scale: f64,
     /// How round its corners are.
     corners: CornerRadii,
     /// Where each widget is; `None` until the next paint lays it out.
@@ -59,6 +62,7 @@ impl<Content: PanelContent> Panel<Content> {
         Self {
             content,
             size,
+            scale: 1.0,
             corners: CornerRadii::SQUARE,
             layout: None,
             pixels: None,
@@ -79,8 +83,46 @@ impl<Content: PanelContent> Panel<Content> {
         self.size
     }
 
+    /// Returns how many pixels of the painted image make a logical one.
+    pub const fn scale(&self) -> f64 {
+        self.scale
+    }
+
+    /// Paints the panel with `scale` pixels to a logical one from now on,
+    /// which is a screen's scale for a panel shown on it: what is laid out,
+    /// hit and sized stays in logical pixels, and only the image is larger.
+    pub fn set_scale(&mut self, scale: f64) {
+        #[expect(
+            clippy::float_cmp,
+            reason = "a scale that is what it was, exactly, changes nothing"
+        )]
+        if scale != self.scale {
+            self.scale = scale;
+            self.invalidate();
+        }
+    }
+
+    /// Returns the size of the painted image: the panel's size times its
+    /// scale, each rounded to a pixel.
+    #[must_use]
+    pub fn pixel_size(&self) -> Size {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a panel's size is far below u32::MAX"
+        )]
+        let scaled = |logical: u32| {
+            if logical == 0 {
+                0
+            } else {
+                ((f64::from(logical) * self.scale).round() as u32).max(1)
+            }
+        };
+        Size::new(scaled(self.size.width), scaled(self.size.height))
+    }
+
     /// Returns the painted pixels, if the panel has been painted and has an
-    /// area.
+    /// area: [`Panel::pixel_size`] large.
     pub const fn pixels(&self) -> Option<&Pixmap> {
         self.pixels.as_ref()
     }
@@ -194,16 +236,25 @@ impl<Content: PanelContent> Panel<Content> {
     /// Lays out and paints the panel if anything changed; returns whether it
     /// did.
     pub fn paint(&mut self, style: &Style, typesetter: &mut Typesetter) -> bool {
+        // A panel is painted at the scale of the screen it is shown on, which
+        // the typesetter it is painted with says.
+        self.set_scale(typesetter.scale());
         if !self.is_dirty {
             return false;
         }
         self.is_dirty = false;
         let layout = Self::lay_out(&self.content, self.size, style, typesetter);
-        self.pixels = Pixmap::new(self.size.width, self.size.height);
+        let image = self.pixel_size();
+        self.pixels = Pixmap::new(image.width, image.height);
         if let Some(pixels) = &mut self.pixels {
             let base = self.content.state();
             let (pressed, hovered) = (self.pressed, self.hovered);
-            Canvas::new(pixels).paint(&layout, style, typesetter, |placed| {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "a scale is a small number of pixels to one"
+            )]
+            let scale = self.scale as f32;
+            Canvas::new(pixels, scale).paint(&layout, style, typesetter, |placed| {
                 let is_button = placed.is_button && placed.hit.is_some();
                 if is_button && placed.hit == pressed {
                     (WidgetState::Pressed, false)
@@ -214,7 +265,7 @@ impl<Content: PanelContent> Panel<Content> {
                     )
                 }
             });
-            self.corners.cut(pixels);
+            self.corners.scaled(self.scale).cut(pixels);
         }
         self.layout = Some(layout);
         self.generation += 1;
@@ -903,6 +954,177 @@ mod tests {
                 .expect("inside");
             assert_eq!((pixel.red(), pixel.green()), (0, 255), "{glyph:?}");
         }
+    }
+
+    /// The titlebar test panel painted at `scale`.
+    fn painted_titlebar_at(scale: f64, typesetter: &mut Typesetter) -> Panel<Titlebar> {
+        let mut panel = Panel::new(
+            Titlebar {
+                title: "kitty: ~/scm".to_owned(),
+                is_focused: true,
+            },
+            Size::new(200, 20),
+        );
+        typesetter.set_scale(scale);
+        assert!(panel.paint(&Style::built_in(), typesetter));
+        panel
+    }
+
+    #[test]
+    fn a_panel_at_a_larger_scale_is_painted_larger_and_hit_where_it_always_was() {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let panel = painted_titlebar_at(2.0, &mut typesetter);
+        assert_eq!(
+            panel.size(),
+            Size::new(200, 20),
+            "laid out in logical pixels"
+        );
+        assert_eq!(panel.pixel_size(), Size::new(400, 40));
+        let pixels = panel.pixels().expect("painted");
+        assert_eq!((pixels.width(), pixels.height()), (400, 40));
+        // Hit-testing takes logical points, as at scale 1.
+        assert_eq!(panel.hit_at(Point::new(190, 10)), Some(TitlebarHit::Close));
+        assert_eq!(panel.hit_at(Point::new(20, 10)), Some(TitlebarHit::Label));
+        let at_one = painted_titlebar_at(1.0, &mut typesetter);
+        assert_eq!(
+            panel.area_of(TitlebarHit::Close),
+            at_one.area_of(TitlebarHit::Close),
+            "the same place in logical pixels"
+        );
+    }
+
+    #[test]
+    fn a_fractional_scale_rounds_the_image_to_pixels() {
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let panel = painted_titlebar_at(1.5, &mut typesetter);
+        assert_eq!(panel.pixel_size(), Size::new(300, 30));
+        let odd = Panel::new(
+            Titlebar {
+                title: String::new(),
+                is_focused: true,
+            },
+            Size::new(101, 21),
+        );
+        let mut odd = odd;
+        odd.set_scale(1.5);
+        assert_eq!(
+            odd.pixel_size(),
+            Size::new(152, 32),
+            "151.5 and 31.5 round up"
+        );
+    }
+
+    #[test]
+    fn lines_and_text_are_as_many_times_larger_as_the_scale() {
+        let layers = crate::style::StyleLayers::from_toml(
+            "[taskbar.window-list.entry]\ntexture = { solid = \"black\" }\n\
+             border = { width = 1, color = \"#ff0000\" }\ntext_color = \"white\"\n\
+             font = { family = \"sans\", size = 8 }\n",
+        )
+        .expect("a valid style");
+        let style = Style::resolve(&layers);
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let lit_rows = |scale: f64, typesetter: &mut Typesetter| {
+            let mut panel = Panel::new(EntryOf("Hg".to_owned()), Size::new(60, 20));
+            typesetter.set_scale(scale);
+            assert!(panel.paint(&style, typesetter));
+            let pixels = panel.pixels().expect("painted");
+            let is_red = |x, y| {
+                let pixel = pixels.pixel(x, y).expect("inside");
+                (pixel.red(), pixel.green()) == (255, 0)
+            };
+            // The border: one logical pixel is `scale` pixels wide.
+            let thickness = (0..8)
+                .take_while(|x| is_red(*x, pixels.height() / 2))
+                .count();
+            // The text: the rows with any near-white pixel inside the border.
+            let rows = (0..pixels.height())
+                .filter(|y| {
+                    (4..pixels.width() - 4)
+                        .any(|x| pixels.pixel(x, *y).is_some_and(|pixel| pixel.green() > 128))
+                })
+                .count();
+            (thickness, rows)
+        };
+        let (line_one, text_one) = lit_rows(1.0, &mut typesetter);
+        let (line_two, text_two) = lit_rows(2.0, &mut typesetter);
+        assert_eq!(
+            (line_one, line_two),
+            (1, 2),
+            "a one pixel line is two at twice the scale"
+        );
+        assert!(
+            text_two.abs_diff(2 * text_one) <= text_one / 4,
+            "the text is twice as tall: {text_one} rows, then {text_two}"
+        );
+    }
+
+    /// A window-list entry showing a title.
+    struct EntryOf(String);
+
+    impl PanelContent for EntryOf {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            Widget::text(StyleElement::WindowListEntry, self.0.clone())
+        }
+
+        fn state(&self) -> WidgetState {
+            WidgetState::Focused
+        }
+    }
+
+    #[test]
+    fn neighbors_still_meet_at_a_fractional_scale() {
+        // Two halves of a panel, painted in two colors, leave no gap or
+        // overlap between them whatever the scale rounds to.
+        struct Halves;
+
+        impl PanelContent for Halves {
+            type Hit = ();
+
+            fn build(&self) -> Widget<()> {
+                Widget::row(
+                    StyleElement::Titlebar,
+                    vec![
+                        Widget::fill(StyleElement::Label)
+                            .with_size(crate::widget::SizePolicy::Fixed(7)),
+                        Widget::fill(StyleElement::Handle),
+                    ],
+                )
+            }
+
+            fn state(&self) -> WidgetState {
+                WidgetState::Focused
+            }
+        }
+
+        let layers = crate::style::StyleLayers::from_toml(
+            "[window.label]\ntexture = { solid = \"#ff0000\" }\n\
+             [window.handle]\ntexture = { solid = \"#0000ff\" }\n",
+        )
+        .expect("a valid style");
+        let style = Style::resolve(&layers);
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(Halves, Size::new(21, 5));
+        typesetter.set_scale(1.5);
+        assert!(panel.paint(&style, &mut typesetter));
+        let pixels = panel.pixels().expect("painted");
+        let row: Vec<(u8, u8)> = (0..pixels.width())
+            .map(|x| {
+                let pixel = pixels.pixel(x, 2).expect("inside");
+                (pixel.red(), pixel.blue())
+            })
+            .collect();
+        // 7 logical pixels are 10.5: the edge rounds to 11, and every pixel
+        // is one color or the other, none blank and none both.
+        let reds = row.iter().filter(|pixel| **pixel == (255, 0)).count();
+        let blues = row.iter().filter(|pixel| **pixel == (0, 255)).count();
+        assert_eq!(reds + blues, row.len(), "no gap: {row:?}");
+        assert!(
+            (10..=11).contains(&reds),
+            "the 7 pixel part is about 10.5 wide: {reds}"
+        );
     }
 
     #[test]

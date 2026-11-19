@@ -1013,7 +1013,10 @@ exactly what each element gets.
     what Fluxbox calls the font's height). So `"1.5em"` is room that follows
     the text, and `"1lh + 2 + 6"` is a line of text with 2 pixels and a bevel
     of 3 at both ends, the rule Fluxbox sizes a titlebar by, which a style can
-    change by editing its numbers (`"1lh + 1 + 4"`). Which layer sets the font
+    change by editing its numbers (`"1lh + 1 + 4"`). vaht's own panels, its wallpaper and its corner arcs are painted at the physical
+    resolution of the screen (the largest scale of any output), laid out and hit in logical
+    pixels: a 1 pixel line is 2 sharp pixels at scale 2, and text is drawn at its larger size
+    rather than enlarged. Which layer sets the font
     does not matter: the font is the one the element ends up with. Anything
     else (`"3 ems"`, a bare minus) is an error that says what a length is, at
     its line; a total below nothing is nothing. Font sizes themselves stay in

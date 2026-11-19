@@ -25,6 +25,11 @@ pub(crate) struct PanelTexture {
     buffer: MemoryRenderBuffer,
     /// The panel generation last copied into `buffer`.
     uploaded_generation: Option<u64>,
+    /// The size the pixels are drawn at, in logical pixels: a panel painted
+    /// at a larger scale has more pixels than that, and is drawn at its size.
+    logical_size: Size<i32, Logical>,
+    /// The size of the pixels, as the buffer holds them.
+    buffer_size: Size<i32, Logical>,
 }
 
 impl PanelTexture {
@@ -33,19 +38,43 @@ impl PanelTexture {
         Self {
             buffer: MemoryRenderBuffer::new(Fourcc::Argb8888, (1, 1), 1, Transform::Normal, None),
             uploaded_generation: None,
+            logical_size: Size::from((1, 1)),
+            buffer_size: Size::from((1, 1)),
         }
     }
 
-    /// Copies `panel`'s pixels if they are newer than the last copy.
+    /// Copies `panel`'s pixels if they are newer than the last copy; they
+    /// are drawn at the panel's size, whatever scale they were painted at.
     pub(crate) fn upload<Content: PanelContent>(&mut self, panel: &Panel<Content>) {
         if let Some(pixels) = panel.pixels() {
-            self.upload_pixels(pixels, panel.generation());
+            let size = panel.size();
+            let logical = (
+                i32::try_from(size.width).expect("a panel is far narrower than i32::MAX"),
+                i32::try_from(size.height).expect("a panel is far shorter than i32::MAX"),
+            );
+            self.upload_sized(pixels, logical.into(), panel.generation());
         }
     }
 
     /// Copies `pixels`, of `generation`, unless that generation is the last
-    /// one copied.
+    /// one copied; they are drawn a pixel to a logical pixel.
     pub(crate) fn upload_pixels(&mut self, pixels: &Pixmap, generation: u64) {
+        let logical = (
+            i32::try_from(pixels.width()).expect("a pixmap is far narrower than i32::MAX"),
+            i32::try_from(pixels.height()).expect("a pixmap is far shorter than i32::MAX"),
+        );
+        self.upload_sized(pixels, logical.into(), generation);
+    }
+
+    /// Copies `pixels`, of `generation`, to be drawn `logical` large, unless
+    /// that generation is the last one copied.
+    pub(crate) fn upload_sized(
+        &mut self,
+        pixels: &Pixmap,
+        logical: Size<i32, Logical>,
+        generation: u64,
+    ) {
+        self.logical_size = logical;
         if self.uploaded_generation == Some(generation) {
             return;
         }
@@ -54,6 +83,7 @@ impl PanelTexture {
             i32::try_from(pixels.height()).expect("a panel is far shorter than i32::MAX"),
         )
             .into();
+        self.buffer_size = (size.w, size.h).into();
         let mut context = self.buffer.render();
         context.resize(size);
         let drawn: Result<(), std::convert::Infallible> = context.draw(|memory| {
@@ -92,8 +122,9 @@ impl PanelTexture {
             location.to_f64(),
             &self.buffer,
             Some(alpha),
-            None,
-            None,
+            // All of the pixels, drawn the size they are meant to be.
+            Some(Rectangle::from_size(self.buffer_size.to_f64())),
+            Some(self.logical_size),
             Kind::Unspecified,
         ) {
             Ok(element) => Some(SceneElement::Panel(element)),

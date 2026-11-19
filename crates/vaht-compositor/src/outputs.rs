@@ -408,6 +408,15 @@ impl Outputs {
             .fold(self.primary_geometry(), Rectangle::merge)
     }
 
+    /// Returns the scale vaht's own panels are painted at: the largest
+    /// scale of any output, so a panel is sharp wherever it is shown (and
+    /// shown slightly smaller, smoothly, on the others). At least 1.
+    pub(crate) fn ui_scale(&self) -> f64 {
+        self.iter()
+            .map(|output| output.current_scale().fractional_scale())
+            .fold(1.0, f64::max)
+    }
+
     /// Returns `output`'s area in global coordinates: its position, and its
     /// mode's size as its transform turns it and its scale shrinks it.
     pub(crate) fn geometry(output: &Output) -> Rectangle<i32, Logical> {

@@ -125,6 +125,10 @@ pub struct Typesetter {
     cache: SwashCache,
     /// The screen resolution that turns points into pixels.
     dots_per_inch: u16,
+    /// How many pixels of what is painted make a logical one: the scale of
+    /// the screen the panels are shown on. Layout and measuring stay in
+    /// logical pixels, so only what is drawn is larger.
+    scale: f64,
     /// Family names as asked for, and as the font database knows them.
     installed_families: HashMap<String, String>,
 }
@@ -171,14 +175,28 @@ impl Typesetter {
             font_system: FontSystem::new(),
             cache: SwashCache::new(),
             dots_per_inch,
+            scale: 1.0,
             installed_families: HashMap::new(),
         }
+    }
+
+    /// Returns the scale panels are painted at, the pixels of what they
+    /// paint to a logical one.
+    #[must_use]
+    pub const fn scale(&self) -> f64 {
+        self.scale
+    }
+
+    /// Sets the scale panels painted with this typesetter are painted at:
+    /// the scale of the screen they are shown on.
+    pub const fn set_scale(&mut self, scale: f64) {
+        self.scale = scale;
     }
 
     /// Returns how wide `text` is in `font`, in whole pixels, rounded up.
     pub fn text_width(&mut self, text: &str, font: &Font) -> u32 {
         let pixel_size = self.pixel_size(font);
-        let buffer = self.lay_out(text, font, pixel_size);
+        let buffer = self.lay_out(text, font, pixel_size, 1.0);
         let width = buffer
             .layout_runs()
             .map(|run| run.line_w)
@@ -212,7 +230,7 @@ impl Typesetter {
     #[must_use]
     pub fn font_height(&mut self, font: &Font) -> u32 {
         let pixel_size = self.pixel_size(font);
-        let buffer = self.lay_out("Mg", font, pixel_size);
+        let buffer = self.lay_out("Mg", font, pixel_size, 1.0);
         let used = buffer
             .layout_runs()
             .flat_map(|run| {
@@ -237,13 +255,23 @@ impl Typesetter {
     }
 
     /// Draws `text` in `style` into `area` of `target`, vertically centered
-    /// and clipped to the area.
-    pub fn draw(&mut self, target: &mut Pixmap, text: &str, style: &TextStyle, area: Rect) {
+    /// and clipped to the area. `target` is the pixmap and how many of its
+    /// pixels make a logical one (what a style's lengths are in), and `area`
+    /// is in its pixels: the font, and what is drawn round the letters, are
+    /// that many times as large.
+    pub fn draw(
+        &mut self,
+        (target, scale): (&mut Pixmap, f32),
+        text: &str,
+        style: &TextStyle,
+        area: Rect,
+    ) {
         let line = Line {
             text,
             style,
             area,
             placement: Placement::Justified,
+            scale,
         };
         self.draw_line(target, &line);
     }
@@ -251,21 +279,37 @@ impl Typesetter {
     /// Draws `field`'s text in `style` into `area` of `target`
     /// left-justified, scrolled so its cursor is in view (the cursor's own
     /// pixel included), and clipped to the area. Returns where the cursor
-    /// goes, in pixels from the area's left edge.
+    /// goes, in pixels from the area's left edge. `area` and the answer are
+    /// in the pixels of `target`, `scale` times the logical ones.
     pub fn draw_field(
         &mut self,
-        target: &mut Pixmap,
+        (target, scale): (&mut Pixmap, f32),
         field: &TextField,
         style: &TextStyle,
         area: Rect,
     ) -> u32 {
-        let cursor = self.text_width(field.before_cursor(), &style.font);
+        let pixel_size = self.pixel_size(&style.font);
+        let cursor = {
+            let buffer = self.lay_out(field.before_cursor(), &style.font, pixel_size, scale);
+            let width = buffer
+                .layout_runs()
+                .map(|run| run.line_w)
+                .fold(0.0, f32::max);
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "a line's width is positive and far below u32::MAX"
+            )]
+            let pixels = width.ceil() as u32;
+            pixels
+        };
         let scroll = cursor.saturating_sub(area.width.saturating_sub(1));
         let line = Line {
             text: field.text(),
             style,
             area,
             placement: Placement::Scrolled(scroll),
+            scale,
         };
         self.draw_line(target, &line);
         cursor - scroll
@@ -279,19 +323,31 @@ impl Typesetter {
             style,
             area,
             placement,
+            scale,
         } = *line;
         if text.is_empty() {
             return;
         }
-        // The layer extends past the area by the effect's reach, so a halo
-        // or shadow around the outermost letters is never clipped.
-        let margin = style.effect.reach();
+        // The layer extends past the area by the effect's reach (which is
+        // logical pixels, so `scale` times that), so a halo or shadow around
+        // the outermost letters is never clipped.
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "an effect's reach is a few pixels"
+        )]
+        let margin = (f32::from(style.effect.reach()) * scale).ceil() as u16;
         let extra = 2 * u32::from(margin);
         // It also extends past it above and below, which text may use: the
         // underscore and descenders touch the bottom of a line, and where
         // the line is the whole area, rounding the baseline would cut them
         // off. Only text wider than its area is clipped.
-        let slack = Self::VERTICAL_SLACK;
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "the slack is a few pixels"
+        )]
+        let slack = (f64::from(Self::VERTICAL_SLACK) * f64::from(scale)).ceil() as u32;
         let Some(mut layer) = Pixmap::new(area.width + extra, area.height + extra + 2 * slack)
         else {
             return;
@@ -302,7 +358,7 @@ impl Typesetter {
         )]
         let line_height = area.height as f32;
         let margin_pixels = f32::from(margin);
-        let mut buffer = self.lay_out(text, &style.font, line_height);
+        let mut buffer = self.lay_out(text, &style.font, line_height, scale);
         let Some(line_width) = buffer.layout_runs().next().map(|line| line.line_w) else {
             return;
         };
@@ -324,7 +380,12 @@ impl Typesetter {
             // eight directions: an outline exactly aligned with the letters.
             TextEffect::Halo(color) => {
                 for (shift_x, shift_y) in Self::HALO_DIRECTIONS {
-                    self.fill_glyphs(&mut layer, &mut buffer, at(shift_x, shift_y), color);
+                    self.fill_glyphs(
+                        &mut layer,
+                        &mut buffer,
+                        at(shift_x * scale, shift_y * scale),
+                        color,
+                    );
                 }
             }
             TextEffect::Shadow {
@@ -334,7 +395,7 @@ impl Typesetter {
             } => self.fill_glyphs(
                 &mut layer,
                 &mut buffer,
-                at(f32::from(offset_x), f32::from(offset_y)),
+                at(f32::from(offset_x) * scale, f32::from(offset_y) * scale),
                 color,
             ),
         }
@@ -375,9 +436,10 @@ impl Typesetter {
         f32::from(font.size_points) * f32::from(self.dots_per_inch) / Self::POINTS_PER_INCH
     }
 
-    /// Shapes `text` as one unwrapped line `line_height` tall.
-    fn lay_out(&mut self, text: &str, font: &Font, line_height: f32) -> Buffer {
-        let metrics = Metrics::new(self.pixel_size(font), line_height);
+    /// Shapes `text` as one unwrapped line `line_height` tall, in `font`
+    /// `scale` times as large as its size says.
+    fn lay_out(&mut self, text: &str, font: &Font, line_height: f32, scale: f32) -> Buffer {
+        let metrics = Metrics::new(self.pixel_size(font) * scale, line_height);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_wrap(Wrap::None);
         let weight = match font.weight {
@@ -445,6 +507,8 @@ struct Line<'text> {
     area: Rect,
     /// Where it goes across the area.
     placement: Placement,
+    /// How many times larger than logical pixels its pixels are.
+    scale: f32,
 }
 
 /// Where a line of text goes across its area.
@@ -549,7 +613,7 @@ mod tests {
     fn draw_haloed_letter(typesetter: &mut Typesetter, area: Rect) -> (Bounds, Bounds) {
         let mut target = Pixmap::new(60, 30).expect("a small pixmap");
         target.fill(tiny_skia::Color::from_rgba8(128, 128, 128, 255));
-        typesetter.draw(&mut target, "I", &haloed_style(), area);
+        typesetter.draw((&mut target, 1.0), "I", &haloed_style(), area);
         (
             bounds(&target, |pixel| pixel.red() >= 200),
             bounds(&target, |pixel| pixel.red() < 40),
@@ -583,7 +647,7 @@ mod tests {
             ..haloed_style()
         };
         let area = Rect::new(20, 5, 30, 20);
-        typesetter.draw(&mut target, "I", &style, area);
+        typesetter.draw((&mut target, 1.0), "I", &style, area);
         let shadow = bounds(&target, |pixel| pixel.red() < 40);
         assert!(
             i32::try_from(shadow.0).expect("small") < area.x,
@@ -638,7 +702,7 @@ mod tests {
             justify: Justify::Left,
         };
         let mut pixmap = Pixmap::new(60, 20).expect("a pixmap");
-        typesetter.draw(&mut pixmap, "23:15", &style, Rect::new(0, 0, 60, 20));
+        typesetter.draw((&mut pixmap, 1.0), "23:15", &style, Rect::new(0, 0, 60, 20));
         let (_, top, _, bottom) = bounds(&pixmap, |pixel| pixel.alpha() > 128);
         let gap_above = top;
         let gap_below = 19 - bottom;
@@ -666,7 +730,12 @@ mod tests {
         };
         let height = typesetter.line_height(&style.font) + padding;
         let mut pixmap = Pixmap::new(200, height + 8).expect("a pixmap");
-        typesetter.draw(&mut pixmap, text, &style, Rect::new(0, 4, 200, height));
+        typesetter.draw(
+            (&mut pixmap, 1.0),
+            text,
+            &style,
+            Rect::new(0, 4, 200, height),
+        );
         (0..pixmap.height())
             .flat_map(|y| (0..pixmap.width()).map(move |x| (x, y)))
             .filter(|(x, y)| pixmap.pixel(*x, *y).is_some_and(|pixel| pixel.alpha() > 0))

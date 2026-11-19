@@ -67,12 +67,15 @@ impl MenuTexture {
             .iter_mut()
             .zip(<Corner as strum::IntoEnumIterator>::iter())
         {
-            texture.update(CornerArc {
-                corner,
-                radius: geometry.corners.radius(corner),
-                line_width: geometry.line_width,
-                color: outline,
-            });
+            texture.update(
+                CornerArc {
+                    corner,
+                    radius: geometry.corners.radius(corner),
+                    line_width: geometry.line_width,
+                    color: outline,
+                },
+                panel.scale(),
+            );
         }
     }
 

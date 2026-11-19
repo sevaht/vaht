@@ -1833,6 +1833,8 @@ impl Compositor {
     /// frame and taking a screenshot both start here, so a screenshot shows
     /// the same as the screen would.
     pub(crate) fn prepare_frames(&mut self) {
+        // Panels are painted at the scale of the screen they are shown on.
+        self.typesetter.set_scale(self.outputs.ui_scale());
         self.window_manager
             .paint_frames(&self.config.style, (&mut self.typesetter, &mut self.icons));
         self.frame_textures
@@ -1857,9 +1859,13 @@ impl Compositor {
         let output_areas: Vec<_> = self.outputs.iter().map(Outputs::geometry).collect();
         self.config_banner
             .prepare(&output_areas, &mut self.typesetter);
-        self.backdrop.prepare(&output_areas, &self.window_manager);
-        self.outline
-            .update(self.window_manager.outline(), &self.config.style);
+        self.backdrop
+            .prepare(&output_areas, &self.window_manager, self.typesetter.scale());
+        self.outline.update(
+            self.window_manager.outline(),
+            &self.config.style,
+            self.typesetter.scale(),
+        );
         self.snap_overlay.update(&self.window_manager);
         self.cursor.prepare(self.start_time.elapsed());
     }

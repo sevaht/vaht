@@ -48,8 +48,13 @@ impl Default for Outline {
 
 impl Outline {
     /// Shows the outline of `area`, or none, in `style`'s wireframe.
-    pub(crate) fn update(&mut self, area: Option<Area>, style: &Style) {
-        self.update_as(area, style, StyleElement::Wireframe, CornerRadii::SQUARE);
+    pub(crate) fn update(&mut self, area: Option<Area>, style: &Style, scale: f64) {
+        self.update_as(
+            area,
+            style,
+            StyleElement::Wireframe,
+            (CornerRadii::SQUARE, scale),
+        );
     }
 
     /// Shows the outline of `area`, or none, in the border `style` gives
@@ -59,7 +64,7 @@ impl Outline {
         area: Option<Area>,
         style: &Style,
         element: StyleElement,
-        corners: CornerRadii,
+        (corners, scale): (CornerRadii, f64),
     ) {
         let border = style.element_style(element, WidgetState::Focused).border;
         let Some(area) = area else {
@@ -84,12 +89,15 @@ impl Outline {
             .iter_mut()
             .zip(<Corner as strum::IntoEnumIterator>::iter())
         {
-            texture.update(CornerArc {
-                corner,
-                radius: corners.radius(corner),
-                line_width: u32::try_from(width).unwrap_or(0),
-                color,
-            });
+            texture.update(
+                CornerArc {
+                    corner,
+                    radius: corners.radius(corner),
+                    line_width: u32::try_from(width).unwrap_or(0),
+                    color,
+                },
+                scale,
+            );
         }
         self.shown = Some(Outlined {
             area,

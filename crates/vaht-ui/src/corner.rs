@@ -135,6 +135,21 @@ impl CornerRadii {
             .fold(Self::SQUARE, |radii, corner| radii.with(corner, radius))
     }
 
+    /// Returns these radii for pixels `scale` times as many as the ones they
+    /// are in, each rounded to a pixel.
+    #[must_use]
+    pub fn scaled(self, scale: f64) -> Self {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "radii are a few dozen pixels"
+        )]
+        let radii = self
+            .radii
+            .map(|radius| (f64::from(radius) * scale).round() as u32);
+        Self { radii }
+    }
+
     /// Returns how round `corner` is.
     #[must_use]
     pub const fn radius(self, corner: Corner) -> u32 {
@@ -293,8 +308,23 @@ impl CornerArc {
     /// Paints the arc on its square; none for a square corner.
     #[must_use]
     pub fn paint(&self) -> Option<Pixmap> {
-        let mut pixmap = Pixmap::new(self.radius, self.radius)?;
-        let radius = pixels(self.radius);
+        self.paint_scaled(1.0)
+    }
+
+    /// Paints the arc on its square, with `scale` pixels to each logical one
+    /// the radius and the line are in: the image is that much larger, to be
+    /// drawn the size of the square.
+    #[must_use]
+    pub fn paint_scaled(&self, scale: f64) -> Option<Pixmap> {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a corner's radius is a few dozen pixels"
+        )]
+        let scaled = |logical: u32| (f64::from(logical) * scale).round() as u32;
+        let side = scaled(self.radius);
+        let mut pixmap = Pixmap::new(side, side)?;
+        let radius = pixels(side);
         let (center_x, center_y) = self.corner.arc_center(radius);
         let outer = PathBuilder::from_circle(center_x, center_y, radius)?;
         let mut paint = Paint::default();
@@ -307,7 +337,7 @@ impl CornerArc {
             Transform::identity(),
             None,
         );
-        let inner_radius = pixels(self.radius.saturating_sub(self.line_width));
+        let inner_radius = pixels(scaled(self.radius.saturating_sub(self.line_width)));
         if let Some(inner) = PathBuilder::from_circle(center_x, center_y, inner_radius) {
             paint.blend_mode = BlendMode::Clear;
             pixmap.fill_path(
