@@ -3252,6 +3252,10 @@ impl Compositor {
                 LayoutFile::available(self.config_source.directory()),
                 self.config.settings.layout.as_deref(),
             )
+            .with_taskbar_edge(match self.config.settings.taskbar.edge {
+                crate::config::TaskbarEdge::Top => "top",
+                crate::config::TaskbarEdge::Bottom => "bottom",
+            })
             .with_window_icons(icons)
             .with_outputs(OutputChoices {
                 profiles: self

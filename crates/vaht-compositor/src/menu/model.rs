@@ -200,6 +200,8 @@ pub(crate) struct MenuBuilder<'state> {
     layouts: Vec<String>,
     /// The layout in use, if there is one.
     current_layout: Option<&'state str>,
+    /// The edge the taskbar is on, as the setting names it.
+    taskbar_edge: &'static str,
     /// Each window's icon, for lists of windows that show them.
     window_icons: HashMap<WindowId, vaht_ui::Icon>,
     /// The icons `menus.toml` names, by the name written, those found.
@@ -248,6 +250,7 @@ impl<'state> MenuBuilder<'state> {
             current_style: None,
             layouts: Vec::new(),
             current_layout: None,
+            taskbar_edge: "bottom",
             window_icons: HashMap::new(),
             named_icons: HashMap::new(),
             outputs: OutputChoices::default(),
@@ -295,6 +298,14 @@ impl<'state> MenuBuilder<'state> {
     ) -> Self {
         self.layouts = layouts;
         self.current_layout = current;
+        self
+    }
+
+    /// Returns the builder with the taskbar on `edge` (`bottom` or `top`),
+    /// for the `positions` list.
+    #[must_use]
+    pub(crate) const fn with_taskbar_edge(mut self, edge: &'static str) -> Self {
+        self.taskbar_edge = edge;
         self
     }
 
@@ -579,6 +590,16 @@ impl<'state> MenuBuilder<'state> {
             MenuGenerator::Layouts => {
                 Self::named_items(&self.layouts, self.current_layout, Action::SetLayout)
             }
+            MenuGenerator::Positions => Self::named_items(
+                &["bottom".to_owned(), "top".to_owned()],
+                Some(self.taskbar_edge),
+                |edge| {
+                    Action::SetSetting(crate::config::SettingChange::new(
+                        &["taskbar", "edge"],
+                        &toml::Value::String(edge),
+                    ))
+                },
+            ),
             MenuGenerator::Profiles => self.profile_items(),
             MenuGenerator::Outputs => self.output_items(),
             MenuGenerator::Layer => {

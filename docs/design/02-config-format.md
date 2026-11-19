@@ -807,8 +807,10 @@ items = [
   - `submenu`;
   - `toggle` (a window state shown with a check mark);
   - `generate`: `styles` and `layouts` (the default, `vaht`, first and
-    a line under it if others follow), `workspaces`, `window-list`,
-    `send-to-workspace`, `layer`, `alpha`, `outputs`, `profiles`;
+    a line under it if others follow), `positions` (the taskbar's edge,
+    `bottom` or `top`, the one in use checked; titled "Position"),
+    `workspaces`, `window-list`, `send-to-workspace`, `layer`, `alpha`,
+    `outputs`, `profiles`;
   - `pipe` (a command whose output is a menu in this same TOML form);
   - `separator`;
   - `icon` (optional on any item).

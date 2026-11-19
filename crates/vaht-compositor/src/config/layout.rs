@@ -335,6 +335,6 @@ mod tests {
                 .unwrap_or_else(|message| panic!("{}: {message}", path.display()));
             count += 1;
         }
-        assert!(count >= 4, "the default and the others: {count}");
+        assert_eq!(count, 3, "the default, minimal and classic");
     }
 }

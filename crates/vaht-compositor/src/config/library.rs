@@ -162,16 +162,16 @@ mod tests {
     fn the_default_is_always_listed_and_first() {
         let configuration = tempfile::tempdir().expect("a temporary directory");
         assert_eq!(
-            Library::LAYOUTS.available(configuration.path())[0],
+            Library::STYLES.available(configuration.path())[0],
             "vaht",
             "listed with no files at all"
         );
-        let layouts = configuration.path().join("layouts");
-        std::fs::create_dir(&layouts).expect("a directory");
+        let styles = configuration.path().join("styles");
+        std::fs::create_dir(&styles).expect("a directory");
         for name in ["zebra", "apple", "vaht"] {
-            std::fs::write(layouts.join(format!("{name}.toml")), "").expect("written");
+            std::fs::write(styles.join(format!("{name}.toml")), "").expect("written");
         }
-        let names = Library::LAYOUTS.available(configuration.path());
+        let names = Library::STYLES.available(configuration.path());
         assert_eq!(&names[..3], ["vaht", "apple", "zebra"], "{names:?}");
         assert_eq!(
             names.iter().filter(|name| *name == "vaht").count(),

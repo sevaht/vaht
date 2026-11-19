@@ -102,7 +102,6 @@ if [[ -n ${session_dir} ]]; then
         "data/layouts/vaht.toml ${layouts_dir}/vaht.toml 644"
         "data/layouts/minimal.toml ${layouts_dir}/minimal.toml 644"
         "data/layouts/classic.toml ${layouts_dir}/classic.toml 644"
-        "data/layouts/top-bar.toml ${layouts_dir}/top-bar.toml 644"
         "data/vaht-settings.desktop ${application_dir}/vaht-settings.desktop 644"
         "README.md ${doc_dir}/README.md 644"
         "DESIGN.md ${doc_dir}/DESIGN.md 644"

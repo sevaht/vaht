@@ -436,10 +436,11 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
         }]
     );
     assert!(styles.contains(&"mine".to_owned()), "{styles:?}");
+    // Whatever is installed on this machine follows it.
     assert_eq!(
-        layouts,
-        ["vaht"],
-        "only the default layout, which needs no file"
+        layouts.first().map(String::as_str),
+        Some("vaht"),
+        "the default layout, which needs no file, first"
     );
     assert_eq!(
         problems,

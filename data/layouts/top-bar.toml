@@ -1,4 +1,0 @@
-# top-bar: the default arrangement with the taskbar along the top edge.
-
-[taskbar]
-edge = "top"
