@@ -35,6 +35,10 @@ pub(crate) enum GrabKind {
     Hold,
     /// Drags a window.
     Drag(WindowDrag),
+    /// Will drag a window once the pointer moves: until then the window is
+    /// left as it is, so a press that never moves changes nothing (a
+    /// maximized window stays maximized).
+    Pending(WindowDrag),
 }
 
 /// A drag in progress.
@@ -80,6 +84,23 @@ impl WindowGrab {
         }
     }
 
+    /// A grab that starts dragging `window` as `drag` once the pointer
+    /// moves, with the pointer button held since `start`.
+    pub(crate) const fn pending(
+        window: WindowId,
+        drag: WindowDrag,
+        start: GrabStartData<Compositor>,
+        serial: Serial,
+    ) -> Self {
+        Self {
+            start,
+            serial,
+            window: Some(window),
+            kind: GrabKind::Pending(drag),
+            drag: None,
+        }
+    }
+
     /// A grab holding the bound `press` on `window` (or the desktop) until
     /// its button is released, running `drag` if the pointer moves first.
     pub(crate) fn hold(window: Option<WindowId>, drag: Option<Command>, press: Press) -> Self {
@@ -100,6 +121,16 @@ impl WindowGrab {
     /// Runs the held press's drag command once the pointer is `delta` away
     /// from the press, far enough to be a drag.
     fn begin_drag_if_moved(&mut self, compositor: &mut Compositor, delta: Point<f64, Logical>) {
+        if let (GrabKind::Pending(drag), Some(window)) = (self.kind, self.window) {
+            if delta.x.hypot(delta.y) >= DRAG_DISTANCE
+                && compositor
+                    .window_manager
+                    .begin_drag(window, drag, self.start.location)
+            {
+                self.kind = GrabKind::Drag(drag);
+            }
+            return;
+        }
         if self.kind != GrabKind::Hold || delta.x.hypot(delta.y) < DRAG_DISTANCE {
             return;
         }

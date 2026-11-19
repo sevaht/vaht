@@ -9,7 +9,7 @@ use std::path::Path;
 
 use vaht_test_support::{
     BUILT_IN_METRICS, BUTTON_LEFT, BUTTON_RIGHT, Bounds, HeadlessVaht, Screenshot, TestClient,
-    WINDOW_COLOR, WINDOW_SIZE,
+    WINDOW_COLOR, WINDOW_SIZE, keys,
 };
 
 /// The executable cargo built for these tests.
@@ -429,6 +429,33 @@ fn alt_right_dragging_resizes_from_the_nearest_corner() {
             top: content.top - 15,
             ..content
         }
+    );
+}
+
+#[test]
+fn an_alt_right_press_that_never_moves_leaves_a_maximized_window_maximized() {
+    let mut window = OneWindow::open();
+    // Alt+F10 maximizes.
+    window.client.hold_alt();
+    window.client.press_key(keys::F10);
+    window.client.release_key(keys::F10);
+    window.client.release_modifiers();
+    let maximized = window.find_content();
+    assert_ne!(maximized, window.content, "the window maximized");
+    let inside = (maximized.left + 20, maximized.top + 20);
+    window.client.hold_alt();
+    window.client.click(inside.0, inside.1, BUTTON_RIGHT);
+    window.client.release_modifiers();
+    assert_eq!(window.find_content(), maximized);
+    // Still maximized, so Alt+F10 restores it.
+    window.client.hold_alt();
+    window.client.press_key(keys::F10);
+    window.client.release_key(keys::F10);
+    window.client.release_modifiers();
+    assert_eq!(
+        window.find_content(),
+        window.content,
+        "it was still maximized"
     );
 }
 

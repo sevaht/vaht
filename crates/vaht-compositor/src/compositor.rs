@@ -3457,8 +3457,10 @@ impl Compositor {
                 *grab = GrabKind::Drag(drag);
             }
         } else {
+            // A press bound to a drag waits for the pointer to move, so
+            // one that never does leaves the window as it was.
             let (start, serial) = (press.start.clone(), press.serial);
-            self.start_window_grab(window, drag, start, serial);
+            self.set_grab(WindowGrab::pending(window, drag, start, serial));
         }
     }
 

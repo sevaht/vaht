@@ -31,6 +31,8 @@ pub mod keys {
     pub const F1: u32 = 59;
     /// F2.
     pub const F2: u32 = 60;
+    /// F10.
+    pub const F10: u32 = 68;
     /// F11.
     pub const F11: u32 = 87;
     /// The up arrow.
