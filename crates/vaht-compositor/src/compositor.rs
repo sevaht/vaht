@@ -3250,7 +3250,14 @@ impl Compositor {
             )
             .with_layouts(
                 LayoutFile::available(self.config_source.directory()),
-                self.config.settings.layout.as_deref(),
+                // No `layout` setting is the default layout, `vaht`.
+                Some(
+                    self.config
+                        .settings
+                        .layout
+                        .as_deref()
+                        .unwrap_or(vaht_ui::Style::DEFAULT_NAME),
+                ),
             )
             .with_taskbar_edge(match self.config.settings.taskbar.edge {
                 crate::config::TaskbarEdge::Top => "top",
