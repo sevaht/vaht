@@ -166,9 +166,8 @@ fn readable(reply: &Reply) -> String {
             files,
             styles,
             layouts,
-            themes,
             problems,
-        } => config_files_lines(&mut text, files, [styles, layouts, themes], problems),
+        } => config_files_lines(&mut text, files, [styles, layouts], problems),
         Reply::ConfigSchema { schema } => {
             let _ = writeln!(
                 text,
@@ -202,12 +201,12 @@ fn readable(reply: &Reply) -> String {
 }
 
 /// Appends the lines of a `config files` reply to `text`: each file and its
-/// state, the `lists` of styles, layouts and themes there are, and the
+/// state, the `lists` of styles and layouts there are, and the
 /// `problems` left out.
 fn config_files_lines(
     text: &mut String,
     files: &[vaht_ipc::ConfigFileInfo],
-    lists: [&[String]; 3],
+    lists: [&[String]; 2],
     problems: &[String],
 ) {
     for info in files {
@@ -217,11 +216,7 @@ fn config_files_lines(
         };
         let _ = writeln!(text, "{}\t{state}", info.file.file_name());
     }
-    for (index, (kind, names)) in ["styles", "layouts", "themes"]
-        .iter()
-        .zip(lists)
-        .enumerate()
-    {
+    for (index, (kind, names)) in ["styles", "layouts"].iter().zip(lists).enumerate() {
         let gap = if index == 0 { "\n" } else { "" };
         let _ = writeln!(text, "{gap}{kind}: {}", names.join(", "));
     }

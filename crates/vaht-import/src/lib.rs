@@ -137,7 +137,7 @@ impl FluxboxSetup {
         let init = InitFile::new(self.init).convert(&mut report);
         let mut settings = init.settings;
         let layout = presentation::take_layout(&mut settings);
-        let mut theme_style = None;
+        let mut converted_style = None;
         if let Some(outputs) = init.outputs {
             files.push(OutputFile {
                 name: "outputs.toml".to_owned(),
@@ -156,16 +156,19 @@ impl FluxboxSetup {
                 name: format!("styles/{name}.toml"),
                 text: header(path) + &vaht_style.to_string(),
             });
-            theme_style = Some(name);
+            converted_style = Some(name);
         }
         if self.style.is_none() {
             Self::place_alphas(&init.alphas, None, &init_path, &mut report);
         }
         Self::convert_startup(self.startup.as_ref(), &mut settings, &mut report);
-        if let Some((theme, look)) = Self::look_files(&layout, theme_style.as_deref(), &init_path) {
-            files.extend(look);
-            settings.insert("theme", toml_edit::value(theme));
-        }
+        Self::place_look(
+            &layout,
+            converted_style.as_deref(),
+            &init_path,
+            &mut settings,
+            &mut files,
+        );
         files.insert(
             0,
             OutputFile {
@@ -246,41 +249,47 @@ impl FluxboxSetup {
         }
     }
 
-    /// Returns the name of the theme and the files that make it, the layout
-    /// and the theme itself, for the `layout` taken from `init` (at
-    /// `init_path`) and the `style` converted (written already); none if
-    /// there is neither. What is shown and how it looks go to a style and a
-    /// layout under one theme, so `settings.toml` is left with how vaht
-    /// behaves and another theme swaps the look whole.
-    fn look_files(
+    /// Names the converted `style` and the `layout` taken from `init` (at
+    /// `init_path`) in `settings`, and adds the layout's file to `files`.
+    fn place_look(
         layout: &toml_edit::DocumentMut,
         style: Option<&str>,
         init_path: &Path,
-    ) -> Option<(String, Vec<OutputFile>)> {
-        let layout_name =
-            (!layout.as_table().is_empty()).then(|| style.unwrap_or("fluxbox").to_owned());
-        let name = style.map(str::to_owned).or_else(|| layout_name.clone())?;
+        settings: &mut toml_edit::DocumentMut,
+        files: &mut Vec<OutputFile>,
+    ) {
+        if let Some(style) = style {
+            settings.insert("style", toml_edit::value(style));
+        }
+        if let Some((name, file)) = Self::layout_file(layout, style, init_path) {
+            files.push(file);
+            settings.insert("layout", toml_edit::value(name));
+        }
+    }
+
+    /// Returns the layout file for the `layout` taken from `init` (at
+    /// `init_path`), and the name it has, if it has anything in it. What is
+    /// shown and how it is arranged go to a layout of its own, so
+    /// `settings.toml` is left with how vaht behaves and another layout swaps
+    /// the arrangement whole.
+    fn layout_file(
+        layout: &toml_edit::DocumentMut,
+        style: Option<&str>,
+        init_path: &Path,
+    ) -> Option<(String, OutputFile)> {
+        if layout.as_table().is_empty() {
+            return None;
+        }
+        let name = style.unwrap_or("fluxbox").to_owned();
         let header = format!(
             "# Converted from {} by vaht import fluxbox.\n\n",
             init_path.display()
         );
-        let mut files = Vec::new();
-        let mut theme = toml_edit::DocumentMut::new();
-        if let Some(style) = style {
-            theme.insert("style", toml_edit::value(style));
-        }
-        if let Some(layout_name) = &layout_name {
-            theme.insert("layout", toml_edit::value(layout_name.clone()));
-            files.push(OutputFile {
-                name: format!("layouts/{layout_name}.toml"),
-                text: format!("{header}{layout}"),
-            });
-        }
-        files.push(OutputFile {
-            name: format!("themes/{name}.toml"),
-            text: format!("{header}{theme}"),
-        });
-        Some((name, files))
+        let file = OutputFile {
+            name: format!("layouts/{name}.toml"),
+            text: format!("{header}{layout}"),
+        };
+        Some((name, file))
     }
 
     /// Puts the `alphas` `init` (at `init_path`) sets into the converted

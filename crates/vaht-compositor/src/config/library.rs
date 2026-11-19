@@ -1,5 +1,5 @@
 //! Named files of one kind, found by name: `styles/<name>.toml`,
-//! `layouts/<name>.toml`, `themes/<name>.toml` (02 §10).
+//! `layouts/<name>.toml` (02 §10).
 //!
 //! Each kind has a directory in the configuration directory, where the user's
 //! files are, and one installed with vaht; [`Library::find`] looks in the
@@ -13,7 +13,7 @@ use super::ConfigError;
 /// One kind of named file, and where it is looked for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Library {
-    /// What the files are called in messages: `style`, `layout`, `theme`.
+    /// What the files are called in messages: `style`, `layout`.
     pub(crate) kind: &'static str,
     /// The directory of the user's, inside the configuration directory.
     pub(crate) directory: &'static str,
@@ -36,15 +36,8 @@ impl Library {
         system_directory: "/usr/share/vaht/layouts",
     };
 
-    /// The themes (a style and a layout under one name).
-    pub(crate) const THEMES: Self = Self {
-        kind: "theme",
-        directory: "themes",
-        system_directory: "/usr/share/vaht/themes",
-    };
-
     /// Every kind: the directories the configuration watches.
-    pub(crate) const ALL: [Self; 3] = [Self::STYLES, Self::LAYOUTS, Self::THEMES];
+    pub(crate) const ALL: [Self; 2] = [Self::STYLES, Self::LAYOUTS];
 
     /// Finds the file `name`: in the kind's directory of the configuration
     /// `directory`, then among the installed ones.
@@ -77,7 +70,7 @@ impl Library {
     }
 
     /// The name of the one of each kind that is built in, whose file is
-    /// optional: the default style, layout and theme.
+    /// optional: the default style and layout.
     pub(crate) const DEFAULT_NAME: &'static str = vaht_ui::Style::DEFAULT_NAME;
 
     /// Returns the names there are, each once: the default first (always
@@ -169,16 +162,16 @@ mod tests {
     fn the_default_is_always_listed_and_first() {
         let configuration = tempfile::tempdir().expect("a temporary directory");
         assert_eq!(
-            Library::THEMES.available(configuration.path())[0],
+            Library::LAYOUTS.available(configuration.path())[0],
             "vaht",
             "listed with no files at all"
         );
-        let themes = configuration.path().join("themes");
-        std::fs::create_dir(&themes).expect("a directory");
+        let layouts = configuration.path().join("layouts");
+        std::fs::create_dir(&layouts).expect("a directory");
         for name in ["zebra", "apple", "vaht"] {
-            std::fs::write(themes.join(format!("{name}.toml")), "").expect("written");
+            std::fs::write(layouts.join(format!("{name}.toml")), "").expect("written");
         }
-        let names = Library::THEMES.available(configuration.path());
+        let names = Library::LAYOUTS.available(configuration.path());
         assert_eq!(&names[..3], ["vaht", "apple", "zebra"], "{names:?}");
         assert_eq!(
             names.iter().filter(|name| *name == "vaht").count(),

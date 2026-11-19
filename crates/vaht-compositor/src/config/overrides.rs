@@ -58,17 +58,6 @@ impl SettingChange {
         Self::new(&["style"], &toml::Value::String(name.to_owned()))
     }
 
-    /// Returns the changes that choose the theme `name`: it is `theme`, and
-    /// the `style` and `layout` that would win over its own are put back to
-    /// what the theme says.
-    pub(crate) fn theme(name: &str) -> Vec<Self> {
-        vec![
-            Self::new(&["theme"], &toml::Value::String(name.to_owned())),
-            Self::unset(vec!["style".to_owned()]),
-            Self::unset(vec!["layout".to_owned()]),
-        ]
-    }
-
     /// Returns the change of `layout` to `name`.
     pub(crate) fn layout(name: &str) -> Self {
         Self::new(&["layout"], &toml::Value::String(name.to_owned()))

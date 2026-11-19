@@ -383,9 +383,6 @@ pub(crate) enum MenuGenerator {
     /// The layouts there are, the one in use checked: choosing one makes it
     /// the layout.
     Layouts,
-    /// The themes there are, the one in use checked: choosing one makes it
-    /// the theme.
-    Themes,
     /// The display profiles, the one applied checked: choosing one
     /// applies it.
     Profiles,
@@ -396,7 +393,7 @@ pub(crate) enum MenuGenerator {
 
 impl MenuGenerator {
     /// The generators by name.
-    const NAMES: [(&str, Self); 10] = [
+    const NAMES: [(&str, Self); 9] = [
         ("workspaces", Self::Workspaces),
         ("send-to-workspace", Self::SendToWorkspace),
         ("window-list", Self::WindowList),
@@ -404,7 +401,6 @@ impl MenuGenerator {
         ("layer", Self::Layer),
         ("styles", Self::Styles),
         ("layouts", Self::Layouts),
-        ("themes", Self::Themes),
         ("profiles", Self::Profiles),
         ("outputs", Self::Outputs),
     ];
@@ -419,7 +415,6 @@ impl MenuGenerator {
             Self::Layer => "Layer",
             Self::Styles => "Styles",
             Self::Layouts => "Layouts",
-            Self::Themes => "Themes",
             Self::Profiles => "Display Profiles",
             Self::Outputs => "Primary Output",
         }
@@ -435,7 +430,7 @@ impl<'de> serde::Deserialize<'de> for MenuGenerator {
             .map(|&(_, generator)| generator)
             .ok_or_else(|| {
                 de::Error::custom(format!(
-                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list, alpha, layer, styles, layouts, themes, profiles and outputs"
+                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list, alpha, layer, styles, layouts, profiles and outputs"
                 ))
             })
     }

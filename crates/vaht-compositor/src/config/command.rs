@@ -404,10 +404,6 @@ pub(crate) enum Action {
     /// Uses a layout in place of the settings' (`set-layout <name>`), until
     /// `save-settings` writes it to `settings.toml`.
     SetLayout(String),
-    /// Uses a theme, a style and a layout together (`set-theme <name>`):
-    /// the `style` and `layout` settings are put back, so the theme's apply,
-    /// until `save-settings` writes it to `settings.toml`.
-    SetTheme(String),
     /// Changes a setting of `settings.toml` in place (`set-setting <key>
     /// <value>`, the value in TOML or a bare word), until `save-settings`
     /// writes it.
@@ -748,10 +744,6 @@ impl Action {
                 Err("`set-layout` needs a layout's name".to_owned())
             }
             "set-layout" => Ok(Self::SetLayout(arguments.to_owned())),
-            "set-theme" if arguments.is_empty() => {
-                Err("`set-theme` needs a theme's name".to_owned())
-            }
-            "set-theme" => Ok(Self::SetTheme(arguments.to_owned())),
             "save-settings" => without_arguments(Self::SaveSettings),
             "unset-setting" => SettingChange::parse_unset(arguments).map(Self::UnsetSetting),
             "reapply-rules" => without_arguments(Self::ReapplyRules),
@@ -889,7 +881,6 @@ impl fmt::Display for Action {
             Self::SetTitleDialog => formatter.write_str("set-title-dialog"),
             Self::SetStyle(name) => write!(formatter, "set-style {name}"),
             Self::SetLayout(name) => write!(formatter, "set-layout {name}"),
-            Self::SetTheme(name) => write!(formatter, "set-theme {name}"),
             Self::SaveSettings => formatter.write_str("save-settings"),
             Self::UnsetSetting(change) => write!(formatter, "unset-setting {change}"),
             Self::ReapplyRules => formatter.write_str("reapply-rules"),

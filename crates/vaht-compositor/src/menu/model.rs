@@ -171,14 +171,12 @@ pub(crate) enum MenuChoice {
 
 impl MenuChoice {
     /// Returns whether choosing leaves the menus open, as Fluxbox's style
-    /// menus do, so one style, layout or theme can be tried after another.
+    /// menus do, so one style or layout can be tried after another.
     pub(crate) const fn keeps_menus_open(&self) -> bool {
         matches!(
             self,
             Self::Run {
-                command: Command::Run(
-                    Action::SetStyle(_) | Action::SetLayout(_) | Action::SetTheme(_)
-                ),
+                command: Command::Run(Action::SetStyle(_) | Action::SetLayout(_)),
                 ..
             }
         )
@@ -202,10 +200,6 @@ pub(crate) struct MenuBuilder<'state> {
     layouts: Vec<String>,
     /// The layout in use, if there is one.
     current_layout: Option<&'state str>,
-    /// The themes there are, for the `themes` list.
-    themes: Vec<String>,
-    /// The theme in use, if there is one.
-    current_theme: Option<&'state str>,
     /// Each window's icon, for lists of windows that show them.
     window_icons: HashMap<WindowId, vaht_ui::Icon>,
     /// The icons `menus.toml` names, by the name written, those found.
@@ -254,8 +248,6 @@ impl<'state> MenuBuilder<'state> {
             current_style: None,
             layouts: Vec::new(),
             current_layout: None,
-            themes: Vec::new(),
-            current_theme: None,
             window_icons: HashMap::new(),
             named_icons: HashMap::new(),
             outputs: OutputChoices::default(),
@@ -303,15 +295,6 @@ impl<'state> MenuBuilder<'state> {
     ) -> Self {
         self.layouts = layouts;
         self.current_layout = current;
-        self
-    }
-
-    /// Returns the builder listing `themes` in the `themes` list, `current`
-    /// checked.
-    #[must_use]
-    pub(crate) fn with_themes(mut self, themes: Vec<String>, current: Option<&'state str>) -> Self {
-        self.themes = themes;
-        self.current_theme = current;
         self
     }
 
@@ -595,9 +578,6 @@ impl<'state> MenuBuilder<'state> {
             }
             MenuGenerator::Layouts => {
                 Self::named_items(&self.layouts, self.current_layout, Action::SetLayout)
-            }
-            MenuGenerator::Themes => {
-                Self::named_items(&self.themes, self.current_theme, Action::SetTheme)
             }
             MenuGenerator::Profiles => self.profile_items(),
             MenuGenerator::Outputs => self.output_items(),

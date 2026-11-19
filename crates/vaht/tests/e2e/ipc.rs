@@ -423,7 +423,6 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
         files,
         styles,
         layouts,
-        themes: _,
         problems,
     } = config(&vaht, &["files"])
     else {

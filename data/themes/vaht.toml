@@ -1,8 +1,0 @@
-# vaht: the default theme: the default style and the default layout.
-#
-# This file is installed as /usr/share/vaht/themes/vaht.toml, and vaht has a
-# copy built in. A theme names a style and a layout (either may be left out);
-# `theme = "<name>"` in settings.toml (or `vaht config set theme <name>`)
-# chooses one, and a `style` or `layout` of settings.toml's own wins over its.
-style = "vaht"
-layout = "vaht"

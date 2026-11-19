@@ -24,7 +24,6 @@
 #   /etc/xdg/xdg-desktop-portal-wlr/vaht               screen share picks with vaht's menu
 #   PREFIX/share/vaht/styles/vaht.toml                 the default style, to read and copy
 #   PREFIX/share/vaht/layouts/vaht.toml                the default layout
-#   PREFIX/share/vaht/themes/vaht.toml                 the default theme
 #   PREFIX/share/doc/vaht/                             README and design notes
 #   PREFIX/share/licenses/vaht/LICENSE
 # and for one user (--user):
@@ -73,7 +72,6 @@ if [[ ${mode} == user ]]; then
     doc_dir=
     styles_dir=
     layouts_dir=
-    themes_dir=
     license_dir=
 else
     bin_dir=${destdir}${prefix}/bin
@@ -86,7 +84,6 @@ else
     doc_dir=${destdir}${prefix}/share/doc/vaht
     styles_dir=${destdir}${prefix}/share/vaht/styles
     layouts_dir=${destdir}${prefix}/share/vaht/layouts
-    themes_dir=${destdir}${prefix}/share/vaht/themes
     license_dir=${destdir}${prefix}/share/licenses/vaht
 fi
 
@@ -103,7 +100,6 @@ if [[ -n ${session_dir} ]]; then
         "data/vaht.desktop ${session_dir}/vaht.desktop 644"
         "data/styles/vaht.toml ${styles_dir}/vaht.toml 644"
         "data/layouts/vaht.toml ${layouts_dir}/vaht.toml 644"
-        "data/themes/vaht.toml ${themes_dir}/vaht.toml 644"
         "data/vaht-settings.desktop ${application_dir}/vaht-settings.desktop 644"
         "README.md ${doc_dir}/README.md 644"
         "DESIGN.md ${doc_dir}/DESIGN.md 644"
@@ -118,7 +114,7 @@ if [[ ${action} == uninstall ]]; then
             rm -v -- "${destination}"
         fi
     done
-    for directory in "${doc_dir}" "${license_dir}" "${styles_dir}" "${layouts_dir}" "${themes_dir}"; do
+    for directory in "${doc_dir}" "${license_dir}" "${styles_dir}" "${layouts_dir}"; do
         [[ -n ${directory} && -d ${directory} ]] && rmdir --ignore-fail-on-non-empty -- "${directory}"
     done
     exit 0

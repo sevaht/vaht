@@ -238,7 +238,8 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     assert!(printed.contains("keys:2: dropped"), "{printed}");
     let settings = std::fs::read_to_string(target.path().join("settings.toml")).expect("written");
     assert!(settings.contains("model = \"sloppy\""), "{settings}");
-    assert!(settings.contains("theme = \"Night-Sky\""), "{settings}");
+    assert!(settings.contains("style = \"Night-Sky\""), "{settings}");
+    assert!(settings.contains("layout = \"Night-Sky\""), "{settings}");
     assert!(
         !settings.contains("auto_hide"),
         "what is shown is the layout's, not settings.toml's: {settings}"
@@ -246,10 +247,10 @@ fn import_converts_a_fluxbox_setup_and_reports_what_it_left_out() {
     let layout =
         std::fs::read_to_string(target.path().join("layouts/Night-Sky.toml")).expect("written");
     assert!(layout.contains("auto_hide = true"), "{layout}");
-    let theme =
-        std::fs::read_to_string(target.path().join("themes/Night-Sky.toml")).expect("written");
-    assert!(theme.contains("style = \"Night-Sky\""), "{theme}");
-    assert!(theme.contains("layout = \"Night-Sky\""), "{theme}");
+    assert!(
+        !target.path().join("themes").exists(),
+        "there are no themes"
+    );
     let style =
         std::fs::read_to_string(target.path().join("styles/Night-Sky.toml")).expect("written");
     assert!(style.contains("SteelBlue"), "{style}");

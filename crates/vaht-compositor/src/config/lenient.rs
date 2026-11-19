@@ -19,7 +19,7 @@ use vaht_ui::Style;
 use super::layout::{self, LayoutFile, LayoutState};
 use super::{
     Bindings, Config, ConfigFile, Menus, OutputSettings, Rules, SettingOverrides, Settings,
-    StyleFile, ThemeFile,
+    StyleFile,
 };
 
 /// What vaht used in place of something it could not.
@@ -283,7 +283,6 @@ impl Config {
         if !Self::drop_invalid(&mut user, file.name, problems) {
             user = toml::Table::new();
         }
-        Self::lenient_theme(directory, &mut user, problems);
         let (layout_table, name) = Self::lenient_layout(directory, &user, problems);
         let merged = layout::merge_under(&layout_table, &user);
         let settings = Settings::from_table(merged).unwrap_or_else(|message| {
@@ -304,24 +303,6 @@ impl Config {
                 .collect(),
         };
         (settings, layout, dropped_overrides)
-    }
-
-    /// Puts into `user` the style and layout of the theme it names, where it
-    /// names none of its own. A theme that cannot be used is noted against
-    /// its own file, and contributes nothing.
-    fn lenient_theme(directory: &Path, user: &mut toml::Table, problems: &mut Vec<ConfigProblem>) {
-        let Some(name) = user.get("theme").and_then(toml::Value::as_str) else {
-            return;
-        };
-        match ThemeFile::find(directory, name).and_then(|found| found.read()) {
-            Ok(parts) => parts.lay_under(user),
-            Err(error) => problems.push(ConfigProblem {
-                file: format!("theme {name}"),
-                key: None,
-                message: error.to_string(),
-                instead: Instead::Left,
-            }),
-        }
     }
 
     /// Reads the layout `user`'s settings name, as a table of settings that
@@ -755,75 +736,8 @@ mod tests {
         assert!(error.to_string().contains("focus"), "{error}");
     }
 
-    /// A theme of the style `nord` and the layout `slim`.
-    fn themed(settings: &str) -> Loaded {
-        load(&directory(&[
-            ("themes/calm.toml", "style = \"nord\"\nlayout = \"slim\"\n"),
-            ("styles/nord.toml", "[window]\n"),
-            ("layouts/slim.toml", "[taskbar]\nrows = 3\n"),
-            ("layouts/full.toml", "[taskbar]\nrows = 1\n"),
-            ("settings.toml", settings),
-        ]))
-    }
-
     #[test]
-    fn a_theme_brings_its_style_and_its_layout() {
-        let loaded = themed("theme = \"calm\"\n");
-        assert_eq!(loaded.problems, []);
-        assert_eq!(loaded.config.settings.style.as_deref(), Some("nord"));
-        assert_eq!(loaded.config.layout.name.as_deref(), Some("slim"));
-        assert_eq!(loaded.config.settings.taskbar.row_range(), (3, 3));
-    }
-
-    #[test]
-    fn a_style_or_layout_settings_toml_names_wins_over_the_themes() {
-        let loaded = themed("theme = \"calm\"\nlayout = \"full\"\n");
-        assert_eq!(loaded.problems, []);
-        assert_eq!(
-            loaded.config.settings.style.as_deref(),
-            Some("nord"),
-            "the theme's"
-        );
-        assert_eq!(
-            loaded.config.settings.taskbar.row_range(),
-            (1, 1),
-            "the file's layout"
-        );
-    }
-
-    #[test]
-    fn a_theme_that_is_not_there_is_a_problem_and_the_rest_stands() {
-        let loaded = load(&directory(&[(
-            "settings.toml",
-            "theme = \"nowhere\"\n[taskbar]\nrows = 2\n",
-        )]));
-        assert_eq!(loaded.problems.len(), 1, "{:?}", loaded.problems);
-        assert!(loaded.problems[0].file.contains("nowhere"));
-        assert_eq!(loaded.problems[0].instead, Instead::Left);
-        assert_eq!(loaded.config.settings.taskbar.row_range(), (2, 2));
-    }
-
-    #[test]
-    fn a_theme_that_says_more_than_a_style_and_a_layout_is_refused() {
-        let files = [
-            (
-                "themes/odd.toml",
-                "style = \"vaht\"\n[focus]\nmodel = \"sloppy\"\n",
-            ),
-            ("settings.toml", "theme = \"odd\"\n"),
-        ];
-        let loaded = load(&directory(&files));
-        assert_eq!(loaded.problems.len(), 1, "{:?}", loaded.problems);
-        assert!(loaded.problems[0].message.contains("themes/odd.toml"));
-        let error = Config::load(directory(&files).path()).expect_err("an odd theme");
-        assert!(error.to_string().contains("odd.toml"), "{error}");
-    }
-
-    #[test]
-    fn the_default_theme_and_layout_are_there_without_files() {
-        let loaded = load(&directory(&[("settings.toml", "theme = \"vaht\"\n")]));
-        assert_eq!(loaded.problems, []);
-        assert_eq!(loaded.config.layout.name.as_deref(), Some("vaht"));
+    fn the_default_layout_is_there_without_a_file() {
         let chosen = load(&directory(&[("settings.toml", "layout = \"vaht\"\n")]));
         assert_eq!(chosen.problems, []);
     }

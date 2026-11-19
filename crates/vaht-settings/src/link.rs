@@ -44,8 +44,6 @@ pub enum Update {
         styles: Vec<String>,
         /// The layouts that can be chosen.
         layouts: Vec<String>,
-        /// The themes that can be chosen.
-        themes: Vec<String>,
         /// The layout in use, if there is one.
         layout: Option<String>,
         /// The settings the layout supplies, each as a path.
@@ -194,7 +192,6 @@ impl VahtLink {
                 Ok(Reply::ConfigFiles {
                     styles,
                     layouts,
-                    themes,
                     problems,
                     ..
                 }),
@@ -204,7 +201,6 @@ impl VahtLink {
                 changed,
                 styles,
                 layouts,
-                themes,
                 layout,
                 from_layout,
                 problems,

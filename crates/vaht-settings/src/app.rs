@@ -119,7 +119,6 @@ impl<L: Link> SettingsApp<L> {
                     changed,
                     styles,
                     layouts,
-                    themes,
                     layout,
                     from_layout,
                     problems,
@@ -130,7 +129,6 @@ impl<L: Link> SettingsApp<L> {
                     }
                     self.names.insert("styles".to_owned(), styles);
                     self.names.insert("layouts".to_owned(), layouts);
-                    self.names.insert("themes".to_owned(), themes);
                     self.problems = problems;
                     self.pending.clear();
                     if !matches!(self.status, Status::Refused(_) | Status::Disconnected(_)) {
@@ -502,7 +500,6 @@ mod tests {
                 changed: Vec::new(),
                 styles: Vec::new(),
             layouts: Vec::new(),
-            themes: Vec::new(),
             layout: None,
             from_layout: Vec::new(),
                 problems: Vec::new(),
@@ -573,7 +570,6 @@ mod tests {
             changed: Vec::new(),
             styles: Vec::new(),
             layouts: Vec::new(),
-            themes: Vec::new(),
             layout: None,
             from_layout: Vec::new(),
                 problems: Vec::new(),
@@ -602,7 +598,6 @@ mod tests {
             changed: vec![vec!["focus".to_owned(), "model".to_owned()]],
             styles: Vec::new(),
             layouts: Vec::new(),
-            themes: Vec::new(),
             layout: None,
             from_layout: Vec::new(),
                 problems: Vec::new(),
@@ -671,7 +666,6 @@ mod tests {
                 changed: Vec::new(),
                 styles: Vec::new(),
                 layouts: Vec::new(),
-                themes: Vec::new(),
                 layout: None,
                 from_layout: Vec::new(),
                 problems: Vec::new(),
@@ -703,7 +697,6 @@ mod tests {
                 changed: Vec::new(),
                 styles: Vec::new(),
                 layouts: Vec::new(),
-                themes: Vec::new(),
                 layout: None,
                 from_layout: Vec::new(),
                 problems: Vec::new(),
@@ -895,7 +888,6 @@ mod tests {
             changed: Vec::new(),
             styles: Vec::new(),
             layouts: Vec::new(),
-            themes: Vec::new(),
             layout: None,
             from_layout: Vec::new(),
             problems: vec![
@@ -939,7 +931,6 @@ mod tests {
                 changed: Vec::new(),
                 styles: names(lists.0),
                 layouts: names(lists.1),
-                themes: Vec::new(),
                 layout: Some("slim".to_owned()),
                 from_layout,
                 problems: Vec::new(),

@@ -837,12 +837,11 @@ mod tests {
     }
 
     #[test]
-    fn choosing_a_style_layout_or_theme_leaves_the_menus_open_and_anything_else_closes_them() {
+    fn choosing_a_style_or_layout_leaves_the_menus_open_and_anything_else_closes_them() {
         let (style, mut typesetter) = style();
         for (action, stays_open) in [
             (Action::SetStyle("a".to_owned()), true),
             (Action::SetLayout("a".to_owned()), true),
-            (Action::SetTheme("a".to_owned()), true),
             (Action::Reload, false),
         ] {
             let mut stack = MenuStack::default();

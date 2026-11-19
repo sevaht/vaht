@@ -8,7 +8,7 @@ use vaht_ipc::{
 use super::{Answer, IpcClient, IpcHandler, IpcServer};
 use crate::Compositor;
 use crate::WindowId;
-use crate::config::{Action, Command, LayoutFile, SettingChange, StyleFile, ThemeFile, schema};
+use crate::config::{Action, Command, LayoutFile, SettingChange, StyleFile, schema};
 use crate::execution::ExecutionContext;
 use crate::outputs::Outputs;
 
@@ -98,14 +98,13 @@ impl Compositor {
         }
     }
 
-    /// Returns the files and the styles, layouts and themes there are.
+    /// Returns the files and the styles and layouts there are.
     fn config_files(&self) -> Reply {
         let directory = self.config_source.directory();
         Reply::ConfigFiles {
             files: self.config_file_infos(),
             styles: StyleFile::available(directory),
             layouts: LayoutFile::available(directory),
-            themes: ThemeFile::available(directory),
             problems: self.config_problem_texts(),
         }
     }
