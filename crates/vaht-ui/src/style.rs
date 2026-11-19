@@ -15,6 +15,7 @@
 //! in and installed, after the `nacitar_fbstyle` Fluxbox style.
 
 mod file;
+pub mod options;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -492,6 +493,11 @@ pub struct StyleLayers {
     pub by_element: HashMap<StyleElement, ElementStylePatch>,
     /// Applies to one element in one state.
     pub by_element_state: HashMap<(StyleElement, WidgetState), ElementStylePatch>,
+    /// The options the style declares, and the choices in effect.
+    pub options: options::StyleOptions,
+    /// What was wrong with a choice made, a sentence each; the option's
+    /// default was used in its place.
+    pub problems: Vec<String>,
 }
 
 /// A resolved style: a complete style for every element in every state.
@@ -688,6 +694,7 @@ mod tests {
             by_state: HashMap::new(),
             by_element: HashMap::new(),
             by_element_state: HashMap::new(),
+            ..StyleLayers::default()
         }
     }
 

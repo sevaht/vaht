@@ -12,12 +12,14 @@
 //! menu, so only `[window.border]` and `[menu.frame]`, their outlines, take
 //! them.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 
 use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 
+use super::options::{self, NoLibrary, Selection, Variables};
 use super::{
     BorderPatch, Bullet, ElementStylePatch, GlyphImages, StyleElement, StyleLayers, WidgetState,
 };
@@ -75,27 +77,81 @@ impl StyleLayers {
     /// Returns an error naming the first problem and where it is, including
     /// an image that cannot be read.
     pub fn from_toml_in(text: &str, directory: Option<&Path>) -> Result<Self, toml::de::Error> {
+        Self::from_toml_selecting(
+            text,
+            &Selection {
+                directory,
+                chosen: &BTreeMap::new(),
+                library: &NoLibrary,
+            },
+        )
+    }
+
+    /// Reads a style file's text, with the choices of its options that
+    /// `selection` makes (02 §10.5); images and choice files it names are
+    /// beside it, in `selection.directory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the first problem and where it is. A choice
+    /// that cannot be used is no error: the option's default is used, and
+    /// [`StyleLayers::problems`] says so.
+    pub fn from_toml_selecting(
+        text: &str,
+        selection: &Selection<'_>,
+    ) -> Result<Self, toml::de::Error> {
+        let resolved = options::resolve(text, selection)?;
         let mut layers = Self::default();
-        let images = Images { directory };
+        let images = Context {
+            directory: selection.directory,
+            variables: &resolved.variables,
+        };
         let deserializer = toml::de::Deserializer::parse(text)?;
         deserializer.deserialize_map(Table {
             path: String::new(),
             layers: &mut layers,
             images,
         })?;
+        layers.options = resolved.options;
+        layers.problems = resolved.problems;
         Ok(layers)
     }
 }
 
-/// Where the images a style file names are: files in `directory`.
-#[derive(Debug, Clone, Copy)]
-struct Images<'directory> {
+/// What reading a value needs to know: where the images a style file names
+/// are (files in `directory`), and the variables its options give.
+#[derive(Clone, Copy)]
+struct Context<'context> {
     /// The directory the names are relative to; none where there are no
     /// files (a style read from text alone).
-    directory: Option<&'directory Path>,
+    directory: Option<&'context Path>,
+    /// The variables a value may refer to.
+    variables: &'context Variables,
 }
 
-impl Images<'_> {
+impl Context<'_> {
+    /// Reads the next value of `map` as a `T`, after the variables it refers
+    /// to are put in.
+    fn value<'de, A: MapAccess<'de>, T: de::DeserializeOwned>(
+        self,
+        map: &mut A,
+    ) -> Result<T, A::Error> {
+        self.value_with(map, std::marker::PhantomData::<T>)
+    }
+
+    /// Reads the next value of `map` with `seed`, after the variables it
+    /// refers to are put in.
+    fn value_with<'de, A: MapAccess<'de>, S: DeserializeSeed<'de>>(
+        self,
+        map: &mut A,
+        seed: S,
+    ) -> Result<S::Value, A::Error> {
+        map.next_value_seed(Substituting {
+            variables: self.variables,
+            seed,
+        })
+    }
+
     /// Reads the image file `name`, relative to the style's directory.
     fn load(self, name: &str) -> Result<Arc<Image>, String> {
         let directory = self
@@ -128,7 +184,7 @@ struct Table<'layers> {
     /// Where what it says goes.
     layers: &'layers mut StyleLayers,
     /// Where the images it names are.
-    images: Images<'layers>,
+    images: Context<'layers>,
 }
 
 impl Table<'_> {
@@ -163,6 +219,11 @@ impl<'de> Visitor<'de> for Table<'_> {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
         let element = StyleElement::at_path(&self.path);
         while let Some(key) = map.next_key::<String>()? {
+            if self.path.is_empty() && key == "options" {
+                // Declarations, read before the layers (options.rs).
+                map.next_value::<de::IgnoredAny>()?;
+                continue;
+            }
             if self.path.is_empty() && key == "default" {
                 self.layers.default = map.next_value_seed(PatchSeed(self.images))?;
                 continue;
@@ -229,7 +290,7 @@ struct States<'layers> {
     /// Where the states' styles go.
     layers: &'layers mut StyleLayers,
     /// Where the images they name are.
-    images: Images<'layers>,
+    images: Context<'layers>,
 }
 
 impl<'de> Visitor<'de> for States<'_> {
@@ -285,6 +346,30 @@ fn refuse<'de, A: MapAccess<'de>>(map: &mut A, reason: String) -> A::Error {
     }
 }
 
+/// A value read as TOML, with the variables it refers to put in, and then
+/// read by `seed`.
+struct Substituting<'variables, S> {
+    /// The variables a value may refer to.
+    variables: &'variables Variables,
+    /// How the value, once complete, is read.
+    seed: S,
+}
+
+impl<'de, S: DeserializeSeed<'de>> DeserializeSeed<'de> for Substituting<'_, S> {
+    type Value = S::Value;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<S::Value, D::Error> {
+        let value = <toml::Value as serde::Deserialize>::deserialize(deserializer)?;
+        let value = self
+            .variables
+            .substitute(value)
+            .map_err(de::Error::custom)?;
+        self.seed
+            .deserialize(value)
+            .map_err(|error: toml::de::Error| de::Error::custom(error.message()))
+    }
+}
+
 /// A value refused for its reason, whatever it holds.
 struct Refusal(String);
 
@@ -305,7 +390,7 @@ impl ElementStylePatch {
         key: &str,
         map: &mut A,
         element: Option<StyleElement>,
-        images: Images<'_>,
+        images: Context<'_>,
     ) -> Result<bool, A::Error> {
         if CORNER_PROPERTIES.contains(&key)
             && !element.is_some_and(|element| ROUNDED_ELEMENTS.contains(&element))
@@ -335,24 +420,26 @@ impl ElementStylePatch {
             ));
         }
         match key {
-            "alpha" => self.alpha = Some(map.next_value()?),
-            "texture" => self.texture = Some(map.next_value_seed(TextureSeed(images))?),
-            "font" => self.font = Some(map.next_value::<FontFile>()?.into_font()),
-            "text_color" => self.text_color = Some(map.next_value::<ColorText>()?.0),
-            "text_effect" => self.text_effect = Some(map.next_value::<TextEffectFile>()?.0),
-            "justify" => self.justify = Some(map.next_value::<JustifyFile>()?.into_justify()),
-            "glyph_color" => self.glyph_color = Some(map.next_value::<ColorText>()?.0),
-            "restore_glyph" => self.restore_glyph = Some(map.next_value()?),
-            "glyph_images" => self.glyph_images = map.next_value_seed(GlyphImagesSeed(images))?,
-            "padding" => self.padding = Some(map.next_value::<Sides>()?.0),
-            "spacing" => self.spacing = Some(map.next_value()?),
-            "border" => self.border = Some(map.next_value::<BorderFile>()?.into_border()),
-            "height" => self.height = Some(map.next_value()?),
-            "corner_radius" => self.corner_radius = Some(map.next_value()?),
-            "corners" => self.rounded_corners = Some(map.next_value::<CornersFile>()?.0),
-            "bullet" => self.bullet = Some(map.next_value::<BulletName>()?.into_bullet()),
+            "alpha" => self.alpha = Some(images.value(map)?),
+            "texture" => self.texture = Some(images.value_with(map, TextureSeed(images))?),
+            "font" => self.font = Some(images.value::<_, FontFile>(map)?.into_font()),
+            "text_color" => self.text_color = Some(images.value::<_, ColorText>(map)?.0),
+            "text_effect" => self.text_effect = Some(images.value::<_, TextEffectFile>(map)?.0),
+            "justify" => self.justify = Some(images.value::<_, JustifyFile>(map)?.into_justify()),
+            "glyph_color" => self.glyph_color = Some(images.value::<_, ColorText>(map)?.0),
+            "restore_glyph" => self.restore_glyph = Some(images.value(map)?),
+            "glyph_images" => {
+                self.glyph_images = images.value_with(map, GlyphImagesSeed(images))?;
+            }
+            "padding" => self.padding = Some(images.value::<_, Sides>(map)?.0),
+            "spacing" => self.spacing = Some(images.value(map)?),
+            "border" => self.border = Some(images.value::<_, BorderFile>(map)?.into_border()),
+            "height" => self.height = Some(images.value(map)?),
+            "corner_radius" => self.corner_radius = Some(images.value(map)?),
+            "corners" => self.rounded_corners = Some(images.value::<_, CornersFile>(map)?.0),
+            "bullet" => self.bullet = Some(images.value::<_, BulletName>(map)?.into_bullet()),
             "bullet_position" => {
-                self.bullet_side = Some(map.next_value::<SideName>()?.into_side());
+                self.bullet_side = Some(images.value::<_, SideName>(map)?.into_side());
             }
             planned if PLANNED_PROPERTIES.contains(&planned) => {
                 return Err(refuse(
@@ -367,14 +454,14 @@ impl ElementStylePatch {
 }
 
 /// Reads a table of style properties into a patch.
-struct PatchSeed<'directory>(Images<'directory>);
+struct PatchSeed<'directory>(Context<'directory>);
 
 impl<'de> DeserializeSeed<'de> for PatchSeed<'_> {
     type Value = ElementStylePatch;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
         /// Reads a table of style properties, and nothing else.
-        struct PatchVisitor<'directory>(Images<'directory>);
+        struct PatchVisitor<'directory>(Context<'directory>);
 
         impl<'de> Visitor<'de> for PatchVisitor<'_> {
             type Value = ElementStylePatch;
@@ -409,14 +496,14 @@ impl<'de> serde::Deserialize<'de> for Color {
 }
 
 /// A table of button pictures: each glyph's name and its image file.
-struct GlyphImagesSeed<'directory>(Images<'directory>);
+struct GlyphImagesSeed<'directory>(Context<'directory>);
 
 impl<'de> DeserializeSeed<'de> for GlyphImagesSeed<'_> {
     type Value = GlyphImages;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<GlyphImages, D::Error> {
         /// Reads the table.
-        struct GlyphImagesVisitor<'directory>(Images<'directory>);
+        struct GlyphImagesVisitor<'directory>(Context<'directory>);
 
         impl<'de> Visitor<'de> for GlyphImagesVisitor<'_> {
             type Value = GlyphImages;
@@ -525,14 +612,14 @@ struct ColorText(Color);
 
 /// A texture, checked while it is read so a mistake is located at it:
 /// `"parent"`, or a table ([`TextureFile`]).
-struct TextureSeed<'directory>(Images<'directory>);
+struct TextureSeed<'directory>(Context<'directory>);
 
 impl<'de> DeserializeSeed<'de> for TextureSeed<'_> {
     type Value = Texture;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Texture, D::Error> {
         /// Reads either form.
-        struct TextureVisitor<'directory>(Images<'directory>);
+        struct TextureVisitor<'directory>(Context<'directory>);
 
         impl<'de> Visitor<'de> for TextureVisitor<'_> {
             type Value = Texture;
@@ -588,7 +675,7 @@ struct TextureFile {
 
 impl TextureFile {
     /// Returns the texture written, or why it is not one.
-    fn texture(self, images: Images<'_>) -> Result<Texture, String> {
+    fn texture(self, images: Context<'_>) -> Result<Texture, String> {
         let bevel = self.bevel.into_bevel();
         if self.fit.is_some() && self.image.is_none() {
             return Err("`fit` is how an image covers an element: it goes with `image`".to_owned());
@@ -1065,6 +1152,140 @@ mod tests {
         crate::Style::resolve(&layers)
             .element_style(StyleElement::Button, WidgetState::Focused)
             .clone()
+    }
+
+    /// A style whose button takes a texture, a text color, a padding and a
+    /// border from the variables of two options.
+    const OPTIONAL_STYLE: &str = r#"
+[options.scheme]
+default = "graphite"
+[options.scheme.graphite]
+face = { gradient = "vertical", from = "grey30", to = "grey5" }
+ink = "white"
+[options.scheme.blue]
+face = { solid = "navy" }
+
+[options.size]
+default = "medium"
+[options.size.medium]
+pad = 4
+edge = { width = 1, color = "grey60" }
+[options.size.large]
+pad = 8
+
+[window.button]
+texture = "$face"
+text_color = "$ink"
+padding = "$pad"
+spacing = "1lh + $pad"
+border = "$edge"
+"#;
+
+    fn selecting(text: &str, chosen: &[(&str, &str)]) -> StyleLayers {
+        let chosen = chosen
+            .iter()
+            .map(|(option, choice)| ((*option).to_owned(), (*choice).to_owned()))
+            .collect();
+        StyleLayers::from_toml_selecting(
+            text,
+            &Selection {
+                directory: None,
+                chosen: &chosen,
+                library: &NoLibrary,
+            },
+        )
+        .expect("valid")
+    }
+
+    fn button_of(layers: &StyleLayers) -> crate::style::ElementStyle {
+        crate::Style::resolve(layers)
+            .element_style(StyleElement::Button, WidgetState::Focused)
+            .clone()
+    }
+
+    #[test]
+    fn variables_stand_in_for_textures_colors_lengths_and_borders() {
+        let defaults = button_of(&selecting(OPTIONAL_STYLE, &[]));
+        assert_eq!(defaults.padding.top, 4);
+        assert_eq!(defaults.border.width, 1);
+        assert_eq!(defaults.text.color, Color::rgb(255, 255, 255));
+        let chosen = button_of(&selecting(
+            OPTIONAL_STYLE,
+            &[("scheme", "blue"), ("size", "large")],
+        ));
+        assert_eq!(chosen.padding.top, 8, "the size's own choice");
+        assert_eq!(
+            chosen.border.width, 1,
+            "the default's, which large leaves out"
+        );
+        assert_eq!(
+            chosen.text.color,
+            Color::rgb(255, 255, 255),
+            "blue leaves ink out"
+        );
+        assert_ne!(chosen.texture, defaults.texture, "navy, not the gradient");
+        // Text with a variable in it is a length like any other.
+        assert_eq!(
+            button_of(&selecting(OPTIONAL_STYLE, &[("size", "large")])).spacing,
+            button_of(&selecting(OPTIONAL_STYLE, &[])).spacing + 4,
+            "1lh + 8 is four more than 1lh + 4"
+        );
+    }
+
+    #[test]
+    fn the_options_a_style_declares_are_listed_with_the_choice_in_effect() {
+        let layers = selecting(OPTIONAL_STYLE, &[("scheme", "blue")]);
+        let listed: Vec<(&str, &str, &[String])> = layers
+            .options
+            .options
+            .iter()
+            .map(|option| {
+                (
+                    option.name.as_str(),
+                    option.chosen.as_str(),
+                    option.choices.as_slice(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                (
+                    "scheme",
+                    "blue",
+                    &["graphite".to_owned(), "blue".to_owned()][..]
+                ),
+                (
+                    "size",
+                    "medium",
+                    &["medium".to_owned(), "large".to_owned()][..]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_variable_the_style_does_not_define_is_an_error_at_its_line() {
+        let error = StyleLayers::from_toml("[window.button]\npadding = \"$nowhere\"\n")
+            .expect_err("no such variable")
+            .to_string();
+        assert!(error.contains("`$nowhere`"), "{error}");
+        assert!(error.contains("line 2"), "{error}");
+    }
+
+    #[test]
+    fn a_style_without_options_reads_as_before() {
+        let layers = StyleLayers::from_toml("[window.button]\npadding = 3\n").expect("valid");
+        assert_eq!(layers.options, options::StyleOptions::default());
+        assert_eq!(layers.problems, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_choice_that_is_not_there_is_noted_and_the_default_used() {
+        let layers = selecting(OPTIONAL_STYLE, &[("size", "huge")]);
+        assert_eq!(button_of(&layers).padding.top, 4);
+        assert_eq!(layers.problems.len(), 1, "{:?}", layers.problems);
+        assert!(layers.problems[0].contains("huge"), "{:?}", layers.problems);
     }
 
     #[test]

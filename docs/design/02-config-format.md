@@ -1222,6 +1222,56 @@ configuration keeps running (the usual red banner, and `vaht config files`).
 `vaht config get` marks the settings a layout supplies with `+` (and the ones
 changed in place with `*`); `vaht config files` lists the layouts there are.
 
+### 10.5 Options: choices a style lets people make
+
+A style can offer named choices, such as a color scheme or a size, so one file
+serves many looks. It declares each **option** under `[options.<option>]`:
+
+```toml
+[options.scheme]
+label = "Color scheme"             # optional: what to call it for people
+default = "graphite"               # required, and written inline (below)
+[options.scheme.graphite]          # a choice: a table of variables
+face = { gradient = "vertical", from = "grey30", to = "grey5" }
+line = "grey60"
+[options.scheme.blue]              # the style's own, partial: leaves `line` out
+face = { gradient = "vertical", from = "#3355aa", to = "#0a1a44" }
+[options.scheme.green]
+file = "green.toml"                # a choice in a file beside the style
+
+[options.size.medium]
+bar = "1lh + 2 + 6"
+
+[window.titlebar]
+texture = "$face"                  # a value that is "$name" is the variable's value
+border = { width = 1, color = "$line" }
+height = "$bar"                    # `$name` inside text is the variable's text
+```
+
+- **Variables.** A choice is a table of variables; their values may be
+  anything a style value can be (a color, a texture, a length, a font, a
+  border). A property whose whole value is `"$name"` takes the variable's value;
+  `$name` inside text (`"1lh + $pad"`) is replaced by the variable's text,
+  which must be text or a number. Names are letters, digits and `_`, and not
+  start with a digit. Each variable belongs to one option, and a variable a
+  property uses that no option defines is an error at its line.
+- **The default choice is inline**, so a style loads with no other file: that
+  is what the variables are when nothing is chosen, and it is the vocabulary
+  of the option (a choice only takes the variables the default choice defines).
+- **Where a choice comes from.** For the choice made, lowest to highest: the
+  default choice; the style's own choice of that name (a table in the file, or
+  `file = "name.toml"` beside the style, a table of variables); then the library
+  of choices shared by every style, `options/<option>/<choice>.toml`, in
+  `/usr/share/vaht/options` and then the configuration directory. So a choice
+  that leaves variables out keeps the default's, a choice file made for the
+  option `scheme` works with every style that declares `scheme` and uses the
+  same variable names, and a file of yours replaces a style's own choice of the
+  same name.
+- A choice that does not exist, or cannot be read, is noted as a problem
+  (against its own file) and the option's default is used. Options are listed
+  sorted by name, each with its default choice first.
+- `vaht import` writes styles without options.
+
 ## 11. `vaht import`
 
 ```
