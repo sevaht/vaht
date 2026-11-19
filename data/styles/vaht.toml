@@ -49,9 +49,9 @@ text_color = "grey55"
 
 [window.button]
 texture = { gradient = "vertical", from = "grey55", to = "grey5" }
-# The room round a button's picture. Fluxbox keeps 2 pixels, so the picture
-# fills all but two pixels each side of its button.
-padding = [2, 2, 2, 2]
+# The room round a button's picture: the button is 20 pixels, so 4 leaves a
+# 12 pixel picture (Fluxbox draws it 2 pixels inside, a 16 pixel picture).
+padding = [4, 4, 4, 4]
 # Whether a maximized window's maximize button is drawn as a restore button
 # (the default); false keeps it the maximize button.
 # restore_glyph = false
