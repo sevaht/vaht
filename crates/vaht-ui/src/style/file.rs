@@ -19,12 +19,12 @@ use std::sync::Arc;
 use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 
 use super::{
-    BorderStyle, Bullet, ElementStylePatch, GlyphImages, StyleElement, StyleLayers, WidgetState,
+    BorderPatch, Bullet, ElementStylePatch, GlyphImages, StyleElement, StyleLayers, WidgetState,
 };
 use crate::color::Color;
 use crate::corner::{Corner, CornerSet};
-use crate::geometry::Insets;
 use crate::image::Image;
+use crate::length::Length;
 use crate::text::{Font, FontWeight, Justify, TextEffect};
 use crate::texture::{Bevel, GradientDirection, ImageFit, Texture};
 use crate::widget::{Glyph, MarkSide};
@@ -344,15 +344,7 @@ impl ElementStylePatch {
             "glyph_color" => self.glyph_color = Some(map.next_value::<ColorText>()?.0),
             "restore_glyph" => self.restore_glyph = Some(map.next_value()?),
             "glyph_images" => self.glyph_images = map.next_value_seed(GlyphImagesSeed(images))?,
-            "padding" => {
-                let [top, right, bottom, left] = map.next_value::<[u32; 4]>()?;
-                self.padding = Some(Insets {
-                    top,
-                    right,
-                    bottom,
-                    left,
-                });
-            }
+            "padding" => self.padding = Some(map.next_value::<[Length; 4]>()?),
             "spacing" => self.spacing = Some(map.next_value()?),
             "border" => self.border = Some(map.next_value::<BorderFile>()?.into_border()),
             "height" => self.height = Some(map.next_value()?),
@@ -814,16 +806,16 @@ impl<'de> serde::Deserialize<'de> for CornersFile {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BorderFile {
-    /// Its width in pixels.
-    width: u32,
+    /// Its width.
+    width: Length,
     /// Its color.
     color: Color,
 }
 
 impl BorderFile {
     /// Returns the border.
-    const fn into_border(self) -> BorderStyle {
-        BorderStyle {
+    const fn into_border(self) -> BorderPatch {
+        BorderPatch {
             width: self.width,
             color: self.color,
         }
@@ -939,7 +931,10 @@ mod tests {
             layers.by_element_state[&(StyleElement::Label, WidgetState::Pressed)].text_color,
             Some(Color::BLACK)
         );
-        assert_eq!(layers.by_element[&StyleElement::Taskbar].height, Some(24));
+        assert_eq!(
+            layers.by_element[&StyleElement::Taskbar].height,
+            Some(Length::Pixels(24))
+        );
         assert_eq!(
             layers.by_element_state[&(StyleElement::WindowListEntry, WidgetState::Focused)].texture,
             Some(Texture::solid(Color::rgb(140, 140, 140)).with_bevel(Bevel::Raised))
@@ -1061,5 +1056,70 @@ mod tests {
             .expect_err("no directory")
             .to_string();
         assert!(error.contains("not a file"), "{error}");
+    }
+
+    /// The resolved style of `text` for the titlebar's button, focused.
+    fn button(text: &str) -> crate::style::ElementStyle {
+        let layers = StyleLayers::from_toml(text).expect("valid");
+        crate::Style::resolve(&layers)
+            .element_style(StyleElement::Button, WidgetState::Focused)
+            .clone()
+    }
+
+    #[test]
+    fn a_length_in_em_is_the_elements_font_size_in_pixels() {
+        // 12 points is 16 pixels at 96 dots an inch.
+        let style = button(
+            "[default]\nfont = { family = \"sans\", size = 12 }\n\
+             [window.button]\npadding = [\"0.5em\", 4, \"1em\", \"12px\"]\n\
+             spacing = \"0.25em\"\nheight = \"2em\"\n\
+             border = { width = \"0.125em\", color = \"red\" }\n",
+        );
+        assert_eq!(
+            (
+                style.padding.top,
+                style.padding.right,
+                style.padding.bottom,
+                style.padding.left
+            ),
+            (8, 4, 16, 12)
+        );
+        assert_eq!(style.spacing, 4);
+        assert_eq!(style.height, Some(32));
+        assert_eq!(style.border.width, 2);
+        // A frame's corners may be rounded by an em too.
+        let layers = StyleLayers::from_toml(
+            "[default]\nfont = { family = \"sans\", size = 12 }\n\
+             [window.border]\ncorner_radius = \"0.5em\"\n",
+        )
+        .expect("valid");
+        let frame = crate::Style::resolve(&layers)
+            .element_style(StyleElement::Border, WidgetState::Focused)
+            .clone();
+        assert_eq!(frame.corner_radius, 8);
+    }
+
+    #[test]
+    fn an_em_follows_the_font_a_later_layer_gives_the_element() {
+        // The padding is set in one layer and the font in another: the font
+        // the element ends up with decides what an em is.
+        let style = button(
+            "[default]\nfont = { family = \"sans\", size = 12 }\n\
+             [window.button]\npadding = [\"1em\", \"1em\", \"1em\", \"1em\"]\n\
+             font = { family = \"sans\", size = 6 }\n",
+        );
+        assert_eq!(
+            style.padding.top, 8,
+            "6 points is 8 pixels, not the default's 16"
+        );
+    }
+
+    #[test]
+    fn a_bad_length_says_what_a_length_is_and_where() {
+        let error = StyleLayers::from_toml("[window.button]\nspacing = \"3 ems\"\n")
+            .expect_err("not a length")
+            .to_string();
+        assert!(error.contains("a length"), "{error}");
+        assert!(error.contains("spacing"), "{error}");
     }
 }

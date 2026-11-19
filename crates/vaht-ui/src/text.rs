@@ -129,6 +129,16 @@ pub struct Typesetter {
     installed_families: HashMap<String, String>,
 }
 
+impl Font {
+    /// Returns an em of this font, its size, in pixels at the default
+    /// resolution: what a length in `em` is in a style.
+    #[must_use]
+    pub fn em_pixels(&self) -> f32 {
+        f32::from(self.size_points) * f32::from(Typesetter::DEFAULT_DOTS_PER_INCH)
+            / Typesetter::POINTS_PER_INCH
+    }
+}
+
 impl Typesetter {
     /// The resolution assumed when none is configured; also Fluxbox's.
     pub const DEFAULT_DOTS_PER_INCH: u16 = 96;

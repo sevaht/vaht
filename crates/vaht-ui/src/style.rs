@@ -24,6 +24,7 @@ use crate::color::Color;
 use crate::corner::{CornerRadii, CornerSet};
 use crate::geometry::Insets;
 use crate::image::Image;
+use crate::length::Length;
 use crate::text::{Font, FontWeight, Justify, TextEffect, TextStyle};
 use crate::texture::Texture;
 use crate::widget::{Glyph, MarkSide};
@@ -337,16 +338,16 @@ pub struct ElementStylePatch {
     /// Whether the maximize button shows restore while maximized, if this
     /// layer says.
     pub restore_glyph: Option<bool>,
-    /// The padding, if this layer sets it.
-    pub padding: Option<Insets>,
+    /// The padding (top, right, bottom, left), if this layer sets it.
+    pub padding: Option<[Length; 4]>,
     /// The spacing between contents, if this layer sets it.
-    pub spacing: Option<u32>,
+    pub spacing: Option<Length>,
     /// The border, if this layer sets it.
-    pub border: Option<BorderStyle>,
+    pub border: Option<BorderPatch>,
     /// The bar height, if this layer sets it.
-    pub height: Option<u32>,
+    pub height: Option<Length>,
     /// The corner radius, if this layer sets it.
-    pub corner_radius: Option<u32>,
+    pub corner_radius: Option<Length>,
     /// Which corners are rounded, if this layer says.
     pub rounded_corners: Option<CornerSet>,
     /// The submenu bullet, if this layer sets it.
@@ -357,9 +358,19 @@ pub struct ElementStylePatch {
     pub alpha: Option<u8>,
 }
 
+/// A border as a layer writes it: its width may be relative to the font.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BorderPatch {
+    /// How thick.
+    pub width: Length,
+    /// Its color.
+    pub color: Color,
+}
+
 impl ElementStylePatch {
-    /// Overrides in `style` every property this patch sets.
-    fn apply_to(&self, style: &mut ElementStyle) {
+    /// Overrides in `style` every property this patch sets, a length in `em`
+    /// being `em` pixels (the size of the element's final font).
+    fn apply_to(&self, style: &mut ElementStyle, em: f32) {
         if let Some(texture) = &self.texture {
             style.texture = texture.clone();
         }
@@ -385,20 +396,28 @@ impl ElementStylePatch {
             style.glyph_images =
                 std::mem::take(&mut style.glyph_images).with(*glyph, Arc::clone(image));
         }
-        if let Some(padding) = self.padding {
-            style.padding = padding;
+        if let Some([top, right, bottom, left]) = self.padding {
+            style.padding = Insets {
+                top: top.to_pixels(em),
+                right: right.to_pixels(em),
+                bottom: bottom.to_pixels(em),
+                left: left.to_pixels(em),
+            };
         }
         if let Some(spacing) = self.spacing {
-            style.spacing = spacing;
+            style.spacing = spacing.to_pixels(em);
         }
         if let Some(border) = self.border {
-            style.border = border;
+            style.border = BorderStyle {
+                width: border.width.to_pixels(em),
+                color: border.color,
+            };
         }
         if let Some(height) = self.height {
-            style.height = Some(height);
+            style.height = Some(height.to_pixels(em));
         }
         if let Some(radius) = self.corner_radius {
-            style.corner_radius = radius;
+            style.corner_radius = radius.to_pixels(em);
         }
         if let Some(bullet) = self.bullet {
             style.bullet = bullet;
@@ -491,15 +510,28 @@ impl Style {
         let mut styles = HashMap::new();
         for element in <StyleElement as strum::IntoEnumIterator>::iter() {
             for state in <WidgetState as strum::IntoEnumIterator>::iter() {
-                let mut style = ElementStyle::fallback();
-                layers.default.apply_to(&mut style);
-                let patches = [
+                let patches: Vec<&ElementStylePatch> = [
+                    Some(&layers.default),
                     layers.by_state.get(&state),
                     layers.by_element.get(&element),
                     layers.by_element_state.get(&(element, state)),
-                ];
-                for patch in patches.into_iter().flatten() {
-                    patch.apply_to(&mut style);
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                // An em is the size of the element's font, which the last layer
+                // to set one decides, so the font is found before the lengths
+                // that may be in terms of it.
+                let font = patches
+                    .iter()
+                    .rev()
+                    .find_map(|patch| patch.font.as_ref())
+                    .cloned()
+                    .unwrap_or_else(|| ElementStyle::fallback().text.font);
+                let em = font.em_pixels();
+                let mut style = ElementStyle::fallback();
+                for patch in patches {
+                    patch.apply_to(&mut style, em);
                 }
                 styles.insert((element, state), style);
             }
@@ -553,7 +585,7 @@ impl Style {
         match self.hovering.get(&element).filter(|_| is_hovered) {
             Some(patch) => {
                 let mut hovered = style.clone();
-                patch.apply_to(&mut hovered);
+                patch.apply_to(&mut hovered, style.text.font.em_pixels());
                 Cow::Owned(hovered)
             }
             None => Cow::Borrowed(style),

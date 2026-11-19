@@ -19,6 +19,9 @@
 # (vaht's notice that its configuration has problems: always drawn from this
 # built-in copy, so a style of yours cannot hide it; the `warning` section
 # here is what it looks like).
+# Every length (padding, spacing, height, a border's width, corner_radius)
+# is a number of pixels, or text with a unit: "12px", or "1.5em", one and a
+# half times the size of the element's font, so it follows the text.
 # States:
 # focused, unfocused, pressed, hovered (a menu's highlighted item; also a
 # window button under the pointer, if [window.button.hovered] says how) and

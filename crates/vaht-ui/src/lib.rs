@@ -17,6 +17,7 @@ pub mod geometry;
 pub mod icon;
 pub mod image;
 pub mod layout;
+pub mod length;
 pub mod panel;
 pub mod raster;
 pub mod style;
