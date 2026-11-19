@@ -22,7 +22,7 @@
 #   PREFIX/share/xdg-desktop-portal/vaht-portals.conf  portals for XDG_CURRENT_DESKTOP=vaht
 #   PREFIX/lib/systemd/user/vaht-session.target        the session, for the service manager
 #   /etc/xdg/xdg-desktop-portal-wlr/vaht               screen share picks with vaht's menu
-#   PREFIX/share/vaht/styles/vaht.toml                 the default style, to read and copy
+#   PREFIX/share/vaht/styles/default.toml                 the default style, to read and copy
 #   PREFIX/share/vaht/layouts/*.toml                   the default layout, and a few more
 #   PREFIX/share/doc/vaht/                             README and design notes
 #   PREFIX/share/licenses/vaht/LICENSE
@@ -98,8 +98,8 @@ files=(
 if [[ -n ${session_dir} ]]; then
     files+=(
         "data/vaht.desktop ${session_dir}/vaht.desktop 644"
-        "data/styles/vaht.toml ${styles_dir}/vaht.toml 644"
-        "data/layouts/vaht.toml ${layouts_dir}/vaht.toml 644"
+        "data/styles/default.toml ${styles_dir}/default.toml 644"
+        "data/layouts/default.toml ${layouts_dir}/default.toml 644"
         "data/layouts/minimal.toml ${layouts_dir}/minimal.toml 644"
         "data/layouts/classic.toml ${layouts_dir}/classic.toml 644"
         "data/vaht-settings.desktop ${application_dir}/vaht-settings.desktop 644"

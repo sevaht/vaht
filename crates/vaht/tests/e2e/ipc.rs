@@ -439,7 +439,7 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
     // Whatever is installed on this machine follows it.
     assert_eq!(
         layouts.first().map(String::as_str),
-        Some("vaht"),
+        Some("default"),
         "the default layout, which needs no file, first"
     );
     assert_eq!(

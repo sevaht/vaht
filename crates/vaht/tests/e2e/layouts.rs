@@ -167,7 +167,7 @@ fn the_layouts_there_are_listed_and_a_layout_that_is_missing_is_reported() {
         .find_map(|line| line.strip_prefix("layouts: "))
         .expect("a layouts line");
     assert!(
-        listed.starts_with("vaht, ") && listed.split(", ").any(|name| name == "slim"),
+        listed.starts_with("default, ") && listed.split(", ").any(|name| name == "slim"),
         "{files}"
     );
     assert!(

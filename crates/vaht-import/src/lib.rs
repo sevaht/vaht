@@ -335,7 +335,7 @@ impl FluxboxSetup {
 /// Returns the name the vaht style converted from the style at `path` gets:
 /// the style's own (its directory's, for a `theme.cfg`, and without a
 /// `.style` extension), with anything but letters, digits, `-` and `_` made
-/// `-`.
+/// `-`; a style called `default` is `fluxbox-default`.
 pub(crate) fn style_name(path: &Path) -> String {
     let named = if path.file_name().is_some_and(|name| name == "theme.cfg") {
         path.parent().unwrap_or(path)
@@ -358,10 +358,12 @@ pub(crate) fn style_name(path: &Path) -> String {
             }
         })
         .collect();
-    if name.is_empty() {
-        "imported".to_owned()
-    } else {
-        name
+    match name.as_str() {
+        "" => "imported".to_owned(),
+        // vaht's own default style has this name, and a file of it would
+        // replace that one.
+        "default" => "fluxbox-default".to_owned(),
+        _ => name,
     }
 }
 
@@ -809,6 +811,11 @@ mod tests {
             "a directory's name"
         );
         assert_eq!(name("/styles/bloe"), "bloe");
+        assert_eq!(
+            name("/styles/default"),
+            "fluxbox-default",
+            "not vaht's own default style's name"
+        );
         assert_eq!(name("/"), "imported");
     }
 

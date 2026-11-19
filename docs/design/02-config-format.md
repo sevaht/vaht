@@ -806,7 +806,7 @@ items = [
   - `command` (with a `label`; a missing label defaults to the action's name);
   - `submenu`;
   - `toggle` (a window state shown with a check mark);
-  - `generate`: `styles` and `layouts` (the default, `vaht`, first and
+  - `generate`: `styles` and `layouts` (the default, `default`, first and
     a line under it if others follow), `positions` (the taskbar's edge,
     `bottom` or `top`, the one in use checked; titled "Position"),
     `workspaces`, `window-list`, `send-to-workspace`, `layer`, `alpha`,
@@ -1085,13 +1085,13 @@ exactly what each element gets.
   radius 8, which cuts as much as Fluxbox's fixed 8-pixel shape.
 - Properties, states and elements still to come are refused by name, at
   their line in the file.
-- The default style is itself a style file, `vaht` (`data/styles/vaht.toml`
-  in the source): installed as `/usr/share/vaht/styles/vaht.toml` for people to
+- The default style is itself a style file, `default` (`data/styles/default.toml`
+  in the source): installed as `/usr/share/vaht/styles/default.toml` for people to
   read and copy, and built into vaht, so it needs no file; printed by
-  `vaht config check --print-defaults`. With no `style` chosen, `vaht` is the
-  style, and it is found like any other: a `vaht.toml` in your `styles/`
+  `vaht config check --print-defaults`. With no `style` chosen, `default` is the
+  style, and it is found like any other: a `default.toml` in your `styles/`
   directory first, then the installed one, and the copy built in only when
-  neither exists. So editing a `vaht.toml` changes the default style. (The
+  neither exists. So editing a `default.toml` changes the default style. (The
   config-problem banner is the exception: it always uses the copy built in, so
   a style of yours cannot hide it. `/usr/share/vaht/styles` is not watched, so
   an edit there is read on the next reload.)
@@ -1200,8 +1200,8 @@ widgets = ["window-list", "clock"]
 
 `settings.toml` chooses one with `layout = "slim"`, found like a style: the
 configuration directory's `layouts/`, then `/usr/share/vaht/layouts`. The
-default layout, `vaht`, is what vaht does without one (its presentation
-settings, `data/layouts/vaht.toml`): installed to read and copy, and built in,
+default layout, `default`, is what vaht does without one (its presentation
+settings, `data/layouts/default.toml`): installed to read and copy, and built in,
 so it needs no file.
 
 **Precedence, lowest to highest:** vaht's defaults, the layout, `settings.toml`,

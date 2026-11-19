@@ -2,7 +2,7 @@
 # ~/.config/vaht/settings.toml leaves out. Every key is optional.
 
 # The style (colors, fonts, textures): styles/<name>.toml in this directory,
-# or in /usr/share/vaht/styles. Without it, `vaht`, the default style.
+# or in /usr/share/vaht/styles. Without it, `default`, the default style.
 # style = "name"
 
 # The layout (a named set of presentation settings: what the taskbar shows,

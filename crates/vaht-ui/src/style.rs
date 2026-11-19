@@ -11,7 +11,7 @@
 //!
 //! These replace Fluxbox's wildcard resource matching. Drawing never cascades:
 //! it looks the resolved style up. Style files are TOML (`style/file.rs`
-//! reads them); the default style is one too, `data/styles/vaht.toml`, built
+//! reads them); the default style is one too, `data/styles/default.toml`, built
 //! in and installed, after the `nacitar_fbstyle` Fluxbox style.
 
 mod file;
@@ -510,13 +510,13 @@ impl Style {
     /// The height of a bar whose style sets none, in pixels.
     pub const DEFAULT_BAR_HEIGHT: u32 = 20;
 
-    /// The name of the default style: `styles/vaht.toml`, which vaht has a copy
+    /// The name of the default style: `styles/default.toml`, which vaht has a copy
     /// of built in, so it needs no file.
-    pub const DEFAULT_NAME: &str = "vaht";
+    pub const DEFAULT_NAME: &str = "default";
 
-    /// The default style, as a style file: `data/styles/vaht.toml`, the one
+    /// The default style, as a style file: `data/styles/default.toml`, the one
     /// file that is both built in and installed for people to read and copy.
-    pub const BUILT_IN: &str = include_str!("../../../data/styles/vaht.toml");
+    pub const BUILT_IN: &str = include_str!("../../../data/styles/default.toml");
 
     /// Resolves `layers`, applying them in cascade order. A length that is a
     /// number of lines of text is measured with the system's fonts, which are

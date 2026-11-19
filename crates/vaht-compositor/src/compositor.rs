@@ -3250,7 +3250,7 @@ impl Compositor {
             )
             .with_layouts(
                 LayoutFile::available(self.config_source.directory()),
-                // No `layout` setting is the default layout, `vaht`.
+                // No `layout` setting is the default layout, `default`.
                 Some(
                     self.config
                         .settings

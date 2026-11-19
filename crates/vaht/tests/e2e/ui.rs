@@ -252,7 +252,7 @@ fn clicking_the_close_button_asks_the_window_to_close() {
 fn style_with_hovered_buttons() -> String {
     format!(
         "{}\n[window.button.hovered]\ntexture = {{ solid = \"#ff0000\" }}\n",
-        include_str!("../../../../data/styles/vaht.toml")
+        include_str!("../../../../data/styles/default.toml")
     )
 }
 

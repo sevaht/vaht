@@ -110,7 +110,7 @@ mod tests {
         // Where vaht is installed, the installed file is found first, and it
         // is whatever version was installed: this machine's, not this
         // source's. Without it, the copy built in stands in.
-        if !Path::new("/usr/share/vaht/styles/vaht.toml").exists() {
+        if !Path::new("/usr/share/vaht/styles/default.toml").exists() {
             assert_eq!(
                 loaded,
                 Style::built_in(),
@@ -132,13 +132,16 @@ mod tests {
         let directory = tempfile::tempdir().expect("a temporary directory");
         let styles = directory.path().join(Library::STYLES.directory);
         std::fs::create_dir(&styles).expect("a directory");
-        std::fs::write(styles.join("vaht.toml"), "[window.titlebar]\nheight = 33\n")
-            .expect("written");
+        std::fs::write(
+            styles.join("default.toml"),
+            "[window.titlebar]\nheight = 33\n",
+        )
+        .expect("written");
         let loaded = StyleFile::load(directory.path(), Style::DEFAULT_NAME).expect("loads");
         assert_eq!(
             loaded.metrics().titlebar_height,
             33,
-            "the user's own vaht.toml is used"
+            "the user's own default.toml is used"
         );
     }
 }

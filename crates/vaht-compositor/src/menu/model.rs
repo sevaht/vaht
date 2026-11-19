@@ -710,12 +710,12 @@ mod tests {
     fn the_default_comes_first_with_a_line_under_it_only_when_others_follow() {
         let named = |name: &str| Some(name.to_owned());
         assert_eq!(
-            labels(&["vaht", "a", "b"]),
-            [named("vaht"), None, named("a"), named("b")]
+            labels(&["default", "a", "b"]),
+            [named("default"), None, named("a"), named("b")]
         );
         assert_eq!(
-            labels(&["vaht"]),
-            [named("vaht")],
+            labels(&["default"]),
+            [named("default")],
             "nothing to divide it from"
         );
         assert_eq!(

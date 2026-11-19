@@ -1,7 +1,7 @@
 # vaht: the default style. Dark grey gradients, white haloed text, a thin
 # grey border; after the nacitar_fbstyle Fluxbox style by nacitar.
 #
-# This file is installed as /usr/share/vaht/styles/vaht.toml, and vaht has a
+# This file is installed as /usr/share/vaht/styles/default.toml, and vaht has a
 # copy built in, so the default style needs no file. Copy it to
 # ~/.config/vaht/styles/<name>.toml and change it to make a style of your own;
 # `style = "<name>"` in settings.toml (or `vaht config set style <name>`)

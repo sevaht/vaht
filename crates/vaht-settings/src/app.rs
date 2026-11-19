@@ -953,7 +953,7 @@ mod tests {
         let (mut app, link) = named_window(
             schema,
             json!({ "style": null }),
-            (&["vaht", "nord"], &[]),
+            (&["default", "nord"], &[]),
             Vec::new(),
         );
         let mut harness = harness_of(&mut app);

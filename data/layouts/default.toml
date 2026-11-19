@@ -2,7 +2,7 @@
 # layout says otherwise: the taskbar and what is on it, the window buttons,
 # window opacity, the snap picker and blur.
 #
-# This file is installed as /usr/share/vaht/layouts/vaht.toml, and vaht has a
+# This file is installed as /usr/share/vaht/layouts/default.toml, and vaht has a
 # copy built in, so the default layout needs no file. Copy it to
 # ~/.config/vaht/layouts/<name>.toml and change it to make a layout of your
 # own; `layout = "<name>"` in settings.toml (or `vaht config set layout

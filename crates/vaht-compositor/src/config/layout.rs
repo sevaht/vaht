@@ -44,9 +44,9 @@ pub(crate) struct LayoutState {
     pub(crate) keys: Vec<Vec<String>>,
 }
 
-/// The default layout, `data/layouts/vaht.toml`: installed for people to
+/// The default layout, `data/layouts/default.toml`: installed for people to
 /// read and copy, and built in so that it needs no file.
-const BUILT_IN: &str = include_str!("../../../../data/layouts/vaht.toml");
+const BUILT_IN: &str = include_str!("../../../../data/layouts/default.toml");
 
 /// Where a layout is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn the_built_in_layout_is_the_defaults_presentation_and_nothing_else() {
-        let mut table = LayoutFile::find(Path::new("/nonexistent"), "vaht")
+        let mut table = LayoutFile::find(Path::new("/nonexistent"), "default")
             .expect("the default layout needs no file")
             .read_table()
             .expect("valid");

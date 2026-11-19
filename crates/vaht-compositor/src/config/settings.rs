@@ -42,7 +42,7 @@ use crate::window_manager::{
 )]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct Settings {
-    /// The style: `styles/<name>.toml`; `vaht` when absent.
+    /// The style: `styles/<name>.toml`; `default` when absent.
     #[schemars(extend("x-vaht-names" = "styles"))]
     pub(crate) style: Option<String>,
     /// The layout: `layouts/<name>.toml`, a named set of presentation

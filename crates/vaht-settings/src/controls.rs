@@ -343,7 +343,7 @@ impl<'control> Control<'control> {
             .show_ui(ui, |ui| {
                 for (index, name) in names.iter().enumerate() {
                     // The default (vaht's own) is first, a line below it.
-                    if index == 1 && names.first().is_some_and(|first| first == "vaht") {
+                    if index == 1 && names.first().is_some_and(|first| first == "default") {
                         ui.separator();
                     }
                     if ui

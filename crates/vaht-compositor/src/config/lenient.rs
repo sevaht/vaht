@@ -600,12 +600,15 @@ mod tests {
     }
 
     #[test]
-    fn a_vaht_toml_of_the_users_is_the_default_style_when_none_is_chosen() {
+    fn a_default_toml_of_the_users_is_the_default_style_when_none_is_chosen() {
         let configuration = directory(&[("settings.toml", "[taskbar]\nrows = 2\n")]);
         let styles = configuration.path().join("styles");
         std::fs::create_dir(&styles).expect("a directory");
-        std::fs::write(styles.join("vaht.toml"), "[window.titlebar]\nheight = 33\n")
-            .expect("written");
+        std::fs::write(
+            styles.join("default.toml"),
+            "[window.titlebar]\nheight = 33\n",
+        )
+        .expect("written");
         let loaded = load(&configuration);
         assert_eq!(loaded.problems, []);
         assert_eq!(

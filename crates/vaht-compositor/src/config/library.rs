@@ -163,18 +163,25 @@ mod tests {
         let configuration = tempfile::tempdir().expect("a temporary directory");
         assert_eq!(
             Library::STYLES.available(configuration.path())[0],
-            "vaht",
+            "default",
             "listed with no files at all"
         );
         let styles = configuration.path().join("styles");
         std::fs::create_dir(&styles).expect("a directory");
-        for name in ["zebra", "apple", "vaht"] {
+        for name in ["zebra", "apple", "default"] {
             std::fs::write(styles.join(format!("{name}.toml")), "").expect("written");
         }
         let names = Library::STYLES.available(configuration.path());
-        assert_eq!(&names[..3], ["vaht", "apple", "zebra"], "{names:?}");
+        // Whatever is installed on this machine is listed too.
+        let ours: Vec<&str> = names
+            .iter()
+            .map(String::as_str)
+            .filter(|name| ["default", "apple", "zebra"].contains(name))
+            .collect();
+        assert_eq!(ours, ["default", "apple", "zebra"], "{names:?}");
+        assert_eq!(names[0], "default");
         assert_eq!(
-            names.iter().filter(|name| *name == "vaht").count(),
+            names.iter().filter(|name| *name == "default").count(),
             1,
             "once, though a file has the name too"
         );
