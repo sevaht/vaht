@@ -657,6 +657,19 @@ impl StyleFile {
         }
     }
 
+    /// Returns the height of a bar: the style's own (`explicit`), else the
+    /// usual one with the bevel (`bevel`) added at both ends, as Fluxbox makes a
+    /// bar as tall as its contents and its bevel, so the bevel does not take
+    /// from them; none for the usual one, with no bevel.
+    fn bar_height(&mut self, explicit: &str, bevel: &str) -> Option<u32> {
+        self.number(&[explicit])
+            .filter(|height| *height > 0)
+            .or_else(|| {
+                let bevel = self.number(&[bevel]).filter(|bevel| *bevel > 0)?;
+                Some(vaht_ui::Style::DEFAULT_BAR_HEIGHT + 2 * bevel)
+            })
+    }
+
     /// Adds to `cell` the padding of a titlebar button that leaves its
     /// picture the size Fluxbox draws it, about ten pixels, whatever the
     /// button's size: the titlebar's height less its bevel at both ends.
@@ -667,8 +680,7 @@ impl StyleFile {
             return;
         }
         let height = self
-            .number(&["window.title.height"])
-            .filter(|height| *height > 0)
+            .bar_height("window.title.height", "window.bevelWidth")
             .unwrap_or(vaht_ui::Style::DEFAULT_BAR_HEIGHT);
         let bevel = self.number(&["window.bevelWidth"]).unwrap_or(0);
         let side = height.saturating_sub(2 * bevel);
@@ -767,13 +779,9 @@ impl StyleFile {
         report: &mut Report,
     ) {
         let height = match element {
-            StyleElement::Titlebar => self
-                .number(&["window.title.height"])
-                .filter(|height| *height > 0),
+            StyleElement::Titlebar => self.bar_height("window.title.height", "window.bevelWidth"),
             StyleElement::Handle => self.number(&["window.handleWidth"]),
-            StyleElement::Taskbar => self
-                .number(&["toolbar.height"])
-                .filter(|height| *height > 0),
+            StyleElement::Taskbar => self.bar_height("toolbar.height", "toolbar.bevelWidth"),
             StyleElement::MenuTitle => self
                 .number(&["menu.titleHeight"])
                 .filter(|height| *height > 0),
@@ -1953,6 +1961,29 @@ menu.bullet:\tsquare
             padding("window.title.height: 8\n"),
             "[0, 0, 0, 0]",
             "a button smaller than its picture has no padding"
+        );
+    }
+
+    #[test]
+    fn a_bar_with_no_height_is_as_tall_as_its_contents_and_its_bevel() {
+        let (_, vaht_style, _) = convert("toolbar.bevelWidth: 3\nwindow.bevelWidth: 2\n");
+        let document: DocumentMut = vaht_style.parse().expect("TOML");
+        assert_eq!(document["taskbar"]["height"].as_integer(), Some(26));
+        assert_eq!(
+            document["window"]["titlebar"]["height"].as_integer(),
+            Some(24)
+        );
+        // The buttons are as big as the usual bar's, so as before.
+        assert_eq!(
+            document["window"]["button"]["padding"].to_string().trim(),
+            "[5, 5, 5, 5]"
+        );
+        let (_, explicit, _) = convert("toolbar.bevelWidth: 3\ntoolbar.height: 30\n");
+        let document: DocumentMut = explicit.parse().expect("TOML");
+        assert_eq!(
+            document["taskbar"]["height"].as_integer(),
+            Some(30),
+            "the style's own height wins"
         );
     }
 }
