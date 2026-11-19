@@ -657,6 +657,26 @@ impl StyleFile {
         }
     }
 
+    /// Adds to `cell` the padding of a titlebar button that leaves its
+    /// picture the size Fluxbox draws it, about ten pixels, whatever the
+    /// button's size: the titlebar's height less its bevel at both ends.
+    fn add_button_padding(&mut self, cell: &mut Cell, element: StyleElement) {
+        /// How big Fluxbox draws a titlebar button's picture, in pixels.
+        const PICTURE: u32 = 10;
+        if element != StyleElement::Button {
+            return;
+        }
+        let height = self
+            .number(&["window.title.height"])
+            .filter(|height| *height > 0)
+            .unwrap_or(vaht_ui::Style::DEFAULT_BAR_HEIGHT);
+        let bevel = self.number(&["window.bevelWidth"]).unwrap_or(0);
+        let side = height.saturating_sub(2 * bevel);
+        let padding = i64::from(side.saturating_sub(PICTURE) / 2);
+        let sides: Array = [padding; 4].into_iter().collect();
+        cell.insert(Property::Padding, Written(Value::Array(sides)));
+    }
+
     /// Adds to `cell` the border of `element` in `state`, where it has one.
     fn add_border(
         &mut self,
@@ -787,6 +807,7 @@ impl StyleFile {
             cell.insert(Property::Height, Written(Value::from(i64::from(height))));
         }
         self.add_bevel(cell, element);
+        self.add_button_padding(cell, element);
         self.add_border(cell, element, state, report);
         match element {
             StyleElement::Border => self.add_round_corners(cell, "window.roundCorners"),
@@ -1908,6 +1929,30 @@ menu.bullet:\tsquare
             entry["unfocused"]["border"]["width"].as_integer(),
             Some(0),
             "an unfocused entry with no line says so, since the focused one has one: {vaht_style}"
+        );
+    }
+
+    #[test]
+    fn a_buttons_padding_leaves_its_picture_ten_pixels_whatever_its_size() {
+        let padding = |style: &str| {
+            let (_, vaht_style, _) = convert(style);
+            let document: DocumentMut = vaht_style.parse().expect("TOML");
+            document["window"]["button"]["padding"]
+                .to_string()
+                .trim()
+                .to_owned()
+        };
+        // 20 high, no bevel: a 20 pixel button, 5 around its picture.
+        assert_eq!(padding("window.title.height: 20\n"), "[5, 5, 5, 5]");
+        // Sage: 24 high with a bevel of 5 is a 14 pixel button.
+        assert_eq!(
+            padding("window.title.height: 24\nwindow.bevelWidth: 5\n"),
+            "[2, 2, 2, 2]"
+        );
+        assert_eq!(
+            padding("window.title.height: 8\n"),
+            "[0, 0, 0, 0]",
+            "a button smaller than its picture has no padding"
         );
     }
 }
