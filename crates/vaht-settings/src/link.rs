@@ -8,7 +8,9 @@ use std::sync::mpsc;
 use std::thread;
 
 use serde_json::Value;
-use vaht_ipc::{Client, ClientError, ConfigEdit, ConfigFile, EventKind, Reply, Request};
+use vaht_ipc::{
+    Client, ClientError, ConfigEdit, ConfigFile, EventKind, Reply, Request, StyleOptionInfo,
+};
 
 /// What the window asks of vaht.
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +46,8 @@ pub enum Update {
         styles: Vec<String>,
         /// The layouts that can be chosen.
         layouts: Vec<String>,
+        /// The options the style in use declares, with their choices.
+        style_options: Vec<StyleOptionInfo>,
         /// The layout in use, if there is one.
         layout: Option<String>,
         /// The settings the layout supplies, each as a path.
@@ -192,6 +196,7 @@ impl VahtLink {
                 Ok(Reply::ConfigFiles {
                     styles,
                     layouts,
+                    style_options,
                     problems,
                     ..
                 }),
@@ -201,6 +206,7 @@ impl VahtLink {
                 changed,
                 styles,
                 layouts,
+                style_options,
                 layout,
                 from_layout,
                 problems,

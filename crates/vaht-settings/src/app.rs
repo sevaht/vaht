@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, Ui};
 use serde_json::Value;
-use vaht_ipc::{ConfigEdit, ConfigPath};
+use vaht_ipc::{ConfigEdit, ConfigPath, StyleOptionInfo};
 use vaht_settings_model::{Form, Section, Setting, SettingKind, SettingsEditor};
 
 use crate::controls::{Drafts, SettingView};
@@ -53,6 +53,10 @@ pub struct SettingsApp<L: Link> {
     /// The names there are of each list a setting may name (`styles`,
     /// `layouts`).
     names: HashMap<String, Vec<String>>,
+    /// The options the style in use declares, as vaht last said.
+    style_options: Vec<StyleOptionInfo>,
+    /// Choices made and not yet answered, by option.
+    pending_options: HashMap<String, String>,
 }
 
 impl SettingsApp<VahtLink> {
@@ -98,6 +102,8 @@ impl<L: Link> SettingsApp<L> {
             status: Status::Loading,
             problems: Vec::new(),
             names: HashMap::new(),
+            style_options: Vec::new(),
+            pending_options: HashMap::new(),
         }
     }
 
@@ -119,6 +125,7 @@ impl<L: Link> SettingsApp<L> {
                     changed,
                     styles,
                     layouts,
+                    style_options,
                     layout,
                     from_layout,
                     problems,
@@ -129,6 +136,8 @@ impl<L: Link> SettingsApp<L> {
                     }
                     self.names.insert("styles".to_owned(), styles);
                     self.names.insert("layouts".to_owned(), layouts);
+                    self.style_options = style_options;
+                    self.pending_options.clear();
                     self.problems = problems;
                     self.pending.clear();
                     if !matches!(self.status, Status::Refused(_) | Status::Disconnected(_)) {
@@ -253,7 +262,9 @@ impl<L: Link> SettingsApp<L> {
         let is_searching = !self.search.trim().is_empty();
         let mut group: Option<&str> = None;
         for setting in &section.settings {
-            if !editor.is_shown(setting) {
+            if !editor.is_shown(setting) || setting.path.to_string() == "style_options" {
+                // `style_options` is chosen under Appearance, from the lists
+                // the style in use offers.
                 continue;
             }
             // Settings the schema groups are shown under a heading each.
@@ -316,6 +327,59 @@ impl<L: Link> SettingsApp<L> {
                     self.section(ui, editor, inner, edits);
                 });
         }
+    }
+
+    /// Draws the choices the style in use offers: a list to choose from for
+    /// each of its options. Choosing the default puts the setting back, so
+    /// the file keeps no line for it.
+    fn appearance(&mut self, ui: &mut Ui, edits: &mut Vec<ConfigEdit>) {
+        if self.style_options.is_empty() {
+            return;
+        }
+        ui.strong("Appearance");
+        ui.separator();
+        for option in &self.style_options {
+            let now = self
+                .pending_options
+                .get(&option.name)
+                .unwrap_or(&option.chosen);
+            let title = option.label.as_deref().unwrap_or(&option.name);
+            let mut picked = None;
+            ui.horizontal(|ui| {
+                let label = ui.label(title);
+                let combo = egui::ComboBox::from_id_salt(("style-option", &option.name))
+                    .selected_text(now.as_str())
+                    .show_ui(ui, |ui| {
+                        for (index, choice) in option.choices.iter().enumerate() {
+                            // The default is first, a line below it.
+                            if index == 1 {
+                                ui.separator();
+                            }
+                            if ui.selectable_label(choice == now, choice).clicked() && choice != now
+                            {
+                                picked = Some(choice.clone());
+                            }
+                        }
+                    });
+                combo.response.labelled_by(label.id);
+            });
+            if let Some(choice) = picked {
+                let path =
+                    ConfigPath::from_parts(vec!["style_options".to_owned(), option.name.clone()])
+                        .expect("an option's name is a key");
+                edits.push(if choice == option.default {
+                    ConfigEdit::Unset { path }
+                } else {
+                    ConfigEdit::Set {
+                        path,
+                        value: Value::String(choice.clone()),
+                    }
+                });
+                self.pending_options.insert(option.name.clone(), choice);
+            }
+            ui.add_space(4.0);
+        }
+        ui.add_space(8.0);
     }
 
     /// Draws the tables of one shape `setting` holds by name (a device's
@@ -422,6 +486,7 @@ impl<L: Link> SettingsApp<L> {
                         ui.label("Waiting for vaht…");
                         return;
                     };
+                    self.appearance(ui, &mut edits);
                     let root = editor.form().root().clone();
                     self.section(ui, editor, &root, &mut edits);
                 });
@@ -500,6 +565,7 @@ mod tests {
                 changed: Vec::new(),
                 styles: Vec::new(),
             layouts: Vec::new(),
+            style_options: Vec::new(),
             layout: None,
             from_layout: Vec::new(),
                 problems: Vec::new(),
@@ -570,6 +636,7 @@ mod tests {
             changed: Vec::new(),
             styles: Vec::new(),
             layouts: Vec::new(),
+            style_options: Vec::new(),
             layout: None,
             from_layout: Vec::new(),
                 problems: Vec::new(),
@@ -598,6 +665,7 @@ mod tests {
             changed: vec![vec!["focus".to_owned(), "model".to_owned()]],
             styles: Vec::new(),
             layouts: Vec::new(),
+            style_options: Vec::new(),
             layout: None,
             from_layout: Vec::new(),
                 problems: Vec::new(),
@@ -666,6 +734,7 @@ mod tests {
                 changed: Vec::new(),
                 styles: Vec::new(),
                 layouts: Vec::new(),
+                style_options: Vec::new(),
                 layout: None,
                 from_layout: Vec::new(),
                 problems: Vec::new(),
@@ -697,6 +766,7 @@ mod tests {
                 changed: Vec::new(),
                 styles: Vec::new(),
                 layouts: Vec::new(),
+                style_options: Vec::new(),
                 layout: None,
                 from_layout: Vec::new(),
                 problems: Vec::new(),
@@ -888,6 +958,7 @@ mod tests {
             changed: Vec::new(),
             styles: Vec::new(),
             layouts: Vec::new(),
+            style_options: Vec::new(),
             layout: None,
             from_layout: Vec::new(),
             problems: vec![
@@ -931,6 +1002,7 @@ mod tests {
                 changed: Vec::new(),
                 styles: names(lists.0),
                 layouts: names(lists.1),
+                style_options: Vec::new(),
                 layout: Some("slim".to_owned()),
                 from_layout,
                 problems: Vec::new(),
@@ -998,5 +1070,97 @@ mod tests {
         harness.get_by_label("Focus").click();
         harness.run();
         harness.get_by_label("from layout");
+    }
+
+    /// A window told a style with a `scheme` option (the default is
+    /// `graphite`; `blue` is in effect) and a `size` option.
+    fn styled_window() -> (SettingsApp<FakeLink>, FakeLink) {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "style_options": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" },
+                },
+            },
+        });
+        let link = FakeLink::default();
+        link.to_tell.borrow_mut().extend([
+            Update::Schema(schema),
+            Update::Reading {
+                defaults: json!({ "style_options": {} }),
+                value: json!({ "style_options": { "scheme": "blue" } }),
+                changed: Vec::new(),
+                styles: vec!["default".to_owned()],
+                layouts: vec!["default".to_owned()],
+                style_options: vec![
+                    StyleOptionInfo {
+                        name: "scheme".to_owned(),
+                        label: Some("Color scheme".to_owned()),
+                        default: "graphite".to_owned(),
+                        chosen: "blue".to_owned(),
+                        choices: vec!["graphite".to_owned(), "blue".to_owned(), "red".to_owned()],
+                    },
+                    StyleOptionInfo {
+                        name: "size".to_owned(),
+                        label: None,
+                        default: "medium".to_owned(),
+                        chosen: "medium".to_owned(),
+                        choices: vec!["medium".to_owned(), "large".to_owned()],
+                    },
+                ],
+                layout: None,
+                from_layout: Vec::new(),
+                problems: Vec::new(),
+            },
+        ]);
+        (SettingsApp::new(link.clone()), link)
+    }
+
+    #[test]
+    fn the_choices_a_style_offers_are_chosen_under_appearance() {
+        let (mut app, link) = styled_window();
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_label("Appearance");
+        harness.get_by_label("Color scheme");
+        harness.get_by_label("size");
+        harness
+            .get_all_by_role(egui::accesskit::Role::ComboBox)
+            .next()
+            .expect("a list for the first option")
+            .click();
+        harness.run();
+        harness.get_by_label("red").click();
+        harness.run();
+        assert_eq!(
+            edits_sent(&link),
+            [ConfigEdit::Set {
+                path: ConfigPath::parse("style_options.scheme").expect("a key"),
+                value: json!("red"),
+            }]
+        );
+    }
+
+    #[test]
+    fn choosing_an_options_default_puts_the_setting_back() {
+        let (mut app, link) = styled_window();
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness
+            .get_all_by_role(egui::accesskit::Role::ComboBox)
+            .next()
+            .expect("a list for the first option")
+            .click();
+        harness.run();
+        harness.get_by_label("graphite").click();
+        harness.run();
+        assert_eq!(
+            edits_sent(&link),
+            [ConfigEdit::Unset {
+                path: ConfigPath::parse("style_options.scheme").expect("a key"),
+            }],
+            "no line is kept for the default"
+        );
     }
 }
