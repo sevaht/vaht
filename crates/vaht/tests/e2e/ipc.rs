@@ -423,6 +423,7 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
         files,
         styles,
         layouts,
+        style_options,
         problems,
     } = config(&vaht, &["files"])
     else {
@@ -442,6 +443,7 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
         Some("default"),
         "the default layout, which needs no file, first"
     );
+    assert_eq!(style_options, [], "the built-in style declares none yet");
     assert_eq!(
         problems,
         Vec::<String>::new(),

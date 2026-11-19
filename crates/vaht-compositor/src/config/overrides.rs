@@ -58,6 +58,20 @@ impl SettingChange {
         Self::new(&["style"], &toml::Value::String(name.to_owned()))
     }
 
+    /// Returns the change of the choice of the style's option `option` to
+    /// `choice`.
+    pub(crate) fn style_option(option: &str, choice: &str) -> Self {
+        Self::new(
+            &["style_options", option],
+            &toml::Value::String(choice.to_owned()),
+        )
+    }
+
+    /// Returns whether the change is of a choice of a style's option.
+    pub(crate) fn is_style_option(&self) -> bool {
+        self.key.first().is_some_and(|part| part == "style_options")
+    }
+
     /// Returns the change of `layout` to `name`.
     pub(crate) fn layout(name: &str) -> Self {
         Self::new(&["layout"], &toml::Value::String(name.to_owned()))

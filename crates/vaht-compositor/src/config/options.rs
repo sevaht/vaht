@@ -1,0 +1,192 @@
+//! The library of choices shared by every style: `options/<option>/<choice>.toml`
+//! (02 §10.5).
+//!
+//! A choice file is a table of variables. It is found in the user's
+//! configuration directory, then in the system's; a style that declares the
+//! option and uses the same variable names takes it up.
+
+use std::path::{Path, PathBuf};
+
+use vaht_ui::Style;
+use vaht_ui::style::options::ChoiceLibrary;
+
+/// The directory of choice directories in the configuration directory.
+pub(crate) const DIRECTORY: &str = "options";
+
+/// The directory of the choices installed with vaht.
+const SYSTEM_DIRECTORY: &str = "/usr/share/vaht/options";
+
+/// An option of the style in use with everything there is to choose from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ListedOption {
+    /// Its name.
+    pub(crate) name: String,
+    /// What to call it for people, if the style says.
+    pub(crate) label: Option<String>,
+    /// The choice made when none is.
+    pub(crate) default: String,
+    /// The choice in effect.
+    pub(crate) chosen: String,
+    /// The choices: the style's own and the shared ones, the default first,
+    /// the rest sorted.
+    pub(crate) choices: Vec<String>,
+}
+
+impl ListedOption {
+    /// Returns what to call the option: its label, else its name.
+    pub(crate) fn title(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.name)
+    }
+}
+
+/// The shared choices, as the configuration `directory` and the system have
+/// them.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OptionLibrary<'directory> {
+    /// The configuration directory.
+    directory: &'directory Path,
+}
+
+impl<'directory> OptionLibrary<'directory> {
+    /// The library of the configuration `directory`, and the system's.
+    pub(crate) const fn new(directory: &'directory Path) -> Self {
+        Self { directory }
+    }
+
+    /// Returns whether `name` is a plain name for an option or a choice.
+    fn is_plain(name: &str) -> bool {
+        !name.is_empty() && !name.contains(['/', '\0']) && !name.starts_with('.')
+    }
+
+    /// Returns the directories `option`'s choices are in: the user's first.
+    fn directories(&self, option: &str) -> [PathBuf; 2] {
+        [
+            self.directory.join(DIRECTORY).join(option),
+            Path::new(SYSTEM_DIRECTORY).join(option),
+        ]
+    }
+
+    /// Returns the options `style` declares, each with every choice there is
+    /// for it: the style's own and the library's.
+    pub(crate) fn listed(&self, style: &Style) -> Vec<ListedOption> {
+        style
+            .options()
+            .options
+            .iter()
+            .map(|option| {
+                let mut choices: Vec<String> = option
+                    .choices
+                    .iter()
+                    .cloned()
+                    .chain(self.choices(&option.name))
+                    .collect();
+                choices.sort_by_key(|choice| (*choice != option.default, choice.clone()));
+                choices.dedup();
+                ListedOption {
+                    name: option.name.clone(),
+                    label: option.label.clone(),
+                    default: option.default.clone(),
+                    chosen: option.chosen.clone(),
+                    choices,
+                }
+            })
+            .collect()
+    }
+
+    /// Returns the names of the choices of `option` there are, sorted, each
+    /// once.
+    pub(crate) fn choices(&self, option: &str) -> Vec<String> {
+        if !Self::is_plain(option) {
+            return Vec::new();
+        }
+        let mut names: Vec<String> = self
+            .directories(option)
+            .iter()
+            .filter_map(|directory| std::fs::read_dir(directory).ok())
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                let is_choice = path
+                    .extension()
+                    .is_some_and(|extension| extension == "toml");
+                is_choice.then(|| path.file_stem()?.to_str().map(ToOwned::to_owned))?
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+}
+
+impl ChoiceLibrary for OptionLibrary<'_> {
+    fn variables(&self, option: &str, choice: &str) -> Result<Option<toml::Table>, String> {
+        if !Self::is_plain(option) || !Self::is_plain(choice) {
+            return Ok(None);
+        }
+        let file_name = format!("{choice}.toml");
+        let Some(path) = self
+            .directories(option)
+            .into_iter()
+            .map(|directory| directory.join(&file_name))
+            .find(|path| path.is_file())
+        else {
+            return Ok(None);
+        };
+        let text = std::fs::read_to_string(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        toml::from_str(&text)
+            .map(Some)
+            .map_err(|error| format!("{}: {}", path.display(), error.message()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn configuration(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        for (name, text) in files {
+            let path = directory.path().join(name);
+            std::fs::create_dir_all(path.parent().expect("a parent")).expect("directories");
+            std::fs::write(path, text).expect("written");
+        }
+        directory
+    }
+
+    #[test]
+    fn a_choice_file_is_read_and_listed() {
+        let directory = configuration(&[
+            ("options/shade/dusk.toml", "bar = \"navy\"\n"),
+            ("options/shade/notes.txt", ""),
+        ]);
+        let library = OptionLibrary::new(directory.path());
+        assert!(library.choices("shade").contains(&"dusk".to_owned()));
+        assert!(!library.choices("shade").contains(&"notes".to_owned()));
+        let table = library
+            .variables("shade", "dusk")
+            .expect("readable")
+            .expect("there");
+        assert_eq!(table["bar"].as_str(), Some("navy"));
+        assert_eq!(library.variables("shade", "nowhere"), Ok(None));
+    }
+
+    #[test]
+    fn a_choice_that_is_not_toml_is_an_error_naming_the_file() {
+        let directory = configuration(&[("options/shade/bad.toml", "bar = \n")]);
+        let error = OptionLibrary::new(directory.path())
+            .variables("shade", "bad")
+            .expect_err("not TOML");
+        assert!(error.contains("bad.toml"), "{error}");
+    }
+
+    #[test]
+    fn names_that_are_paths_find_nothing() {
+        let directory = configuration(&[("options/shade/dusk.toml", "")]);
+        let library = OptionLibrary::new(directory.path());
+        assert_eq!(library.variables("../options", "dusk"), Ok(None));
+        assert_eq!(library.variables("shade", "../shade/dusk"), Ok(None));
+        assert_eq!(library.choices(".."), Vec::<String>::new());
+    }
+}

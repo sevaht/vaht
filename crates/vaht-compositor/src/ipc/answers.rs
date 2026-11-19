@@ -2,12 +2,13 @@
 
 use vaht_ipc::{
     ConfigEdit, ConfigFile, ConfigFileInfo, ConfigState, Event, EventKind, ModeInfo, OutputInfo,
-    Reply, Request, WindowInfo, WorkspaceInfo,
+    Reply, Request, StyleOptionInfo, WindowInfo, WorkspaceInfo,
 };
 
 use super::{Answer, IpcClient, IpcHandler, IpcServer};
 use crate::Compositor;
 use crate::WindowId;
+use crate::config::options::OptionLibrary;
 use crate::config::{Action, Command, LayoutFile, SettingChange, StyleFile, schema};
 use crate::execution::ExecutionContext;
 use crate::outputs::Outputs;
@@ -105,6 +106,17 @@ impl Compositor {
             files: self.config_file_infos(),
             styles: StyleFile::available(directory),
             layouts: LayoutFile::available(directory),
+            style_options: OptionLibrary::new(directory)
+                .listed(&self.config.style)
+                .into_iter()
+                .map(|option| StyleOptionInfo {
+                    name: option.name,
+                    label: option.label,
+                    default: option.default,
+                    chosen: option.chosen,
+                    choices: option.choices,
+                })
+                .collect(),
             problems: self.config_problem_texts(),
         }
     }

@@ -807,7 +807,7 @@ items = [
   - `submenu`;
   - `toggle` (a window state shown with a check mark);
   - `generate`: `styles` and `layouts` (the default, `default`, first and
-    a line under it if others follow), `positions` (the taskbar's edge,
+    a line under it if others follow), `style-options`, `positions` (the taskbar's edge,
     `bottom` or `top`, the one in use checked; titled "Position"),
     `workspaces`, `window-list`, `send-to-workspace`, `layer`, `alpha`,
     `outputs`, `profiles`;
@@ -1270,6 +1270,18 @@ height = "$bar"                    # `$name` inside text is the variable's text
 - A choice that does not exist, or cannot be read, is noted as a problem
   (against its own file) and the option's default is used. Options are listed
   sorted by name, each with its default choice first.
+- **Choosing.** `settings.toml`'s `style_options = { scheme = "blue", size =
+  "large" }` makes a choice for each option it names; an option left out has its
+  default. `set-setting style_options.scheme blue` (and the `style-options` menu
+  list, a submenu of choices for each option of the style in use, the one in
+  effect checked, which leaves the menus open as `styles` does) change it in
+  place until `save-settings`. `vaht config files` lists each option's choices,
+  the one in effect marked `*`, and the settings window's `ConfigFiles` reply
+  carries them (`style_options`).
+- A style's own choice files go in a directory of their own (`styles/<style>/
+  green.toml`, named `file = "<style>/green.toml"`), not beside the style: a
+  `.toml` directly in `styles/` is a style. The directories under `options/` and
+  `styles/` are watched, so editing a choice file restyles open windows.
 - `vaht import` writes styles without options.
 
 ## 11. `vaht import`

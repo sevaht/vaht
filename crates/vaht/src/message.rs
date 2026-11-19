@@ -166,8 +166,14 @@ fn readable(reply: &Reply) -> String {
             files,
             styles,
             layouts,
+            style_options,
             problems,
-        } => config_files_lines(&mut text, files, [styles, layouts], problems),
+        } => config_files_lines(
+            &mut text,
+            files,
+            ([styles, layouts], style_options),
+            problems,
+        ),
         Reply::ConfigSchema { schema } => {
             let _ = writeln!(
                 text,
@@ -206,7 +212,7 @@ fn readable(reply: &Reply) -> String {
 fn config_files_lines(
     text: &mut String,
     files: &[vaht_ipc::ConfigFileInfo],
-    lists: [&[String]; 2],
+    (lists, style_options): ([&[String]; 2], &[vaht_ipc::StyleOptionInfo]),
     problems: &[String],
 ) {
     for info in files {
@@ -219,6 +225,20 @@ fn config_files_lines(
     for (index, (kind, names)) in ["styles", "layouts"].iter().zip(lists).enumerate() {
         let gap = if index == 0 { "\n" } else { "" };
         let _ = writeln!(text, "{gap}{kind}: {}", names.join(", "));
+    }
+    for option in style_options {
+        let choices: Vec<String> = option
+            .choices
+            .iter()
+            .map(|choice| {
+                if *choice == option.chosen {
+                    format!("*{choice}")
+                } else {
+                    choice.clone()
+                }
+            })
+            .collect();
+        let _ = writeln!(text, "style option {}: {}", option.name, choices.join(", "));
     }
     if !problems.is_empty() {
         let _ = writeln!(

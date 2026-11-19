@@ -510,6 +510,10 @@ pub struct Style {
     /// an element that has such a section (a style that has none looks the
     /// same hovered or not).
     hovered: HashMap<(StyleElement, WidgetState), ElementStyle>,
+    /// The options the style declares, and the choices in effect.
+    options: options::StyleOptions,
+    /// What was wrong with a choice made, a sentence each.
+    option_problems: Vec<String>,
 }
 
 impl Style {
@@ -599,7 +603,12 @@ impl Style {
                 hovered.insert((*element, base), over);
             }
         }
-        Self { styles, hovered }
+        Self {
+            styles,
+            hovered,
+            options: layers.options.clone(),
+            option_problems: layers.problems.clone(),
+        }
     }
 
     /// Returns what an em and a line of `font` are, in pixels; a line is
@@ -625,6 +634,34 @@ impl Style {
         Self::resolve(
             &StyleLayers::from_toml(Self::BUILT_IN).expect("the built-in style is valid (tested)"),
         )
+    }
+
+    /// Returns the built-in style with the choices `selection` makes of its
+    /// options.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the built-in style file is invalid; a unit test makes sure
+    /// it is not.
+    #[must_use]
+    pub fn built_in_selecting(selection: &options::Selection<'_>) -> Self {
+        Self::resolve(
+            &StyleLayers::from_toml_selecting(Self::BUILT_IN, selection)
+                .expect("the built-in style is valid (tested)"),
+        )
+    }
+
+    /// Returns the options the style declares, with the choice in effect.
+    #[must_use]
+    pub const fn options(&self) -> &options::StyleOptions {
+        &self.options
+    }
+
+    /// Returns what was wrong with a choice made of the style's options, a
+    /// sentence each; the option's default is in effect for each.
+    #[must_use]
+    pub fn option_problems(&self) -> &[String] {
+        &self.option_problems
     }
 
     /// Returns how `element` looks in `state`.

@@ -152,15 +152,22 @@ impl Config {
         // No style chosen is the default style, which is a file like any other
         // (a user's, or the installed one) and only falls back to the copy built in.
         let name = settings.style.as_deref().unwrap_or(Style::DEFAULT_NAME);
-        let style = StyleFile::load(directory, name).unwrap_or_else(|error| {
-            problems.push(ConfigProblem {
-                file: format!("style {name}"),
-                key: None,
-                message: error.to_string(),
-                instead: Instead::BuiltIn,
+        let style =
+            StyleFile::load(directory, name, &settings.style_options).unwrap_or_else(|error| {
+                problems.push(ConfigProblem {
+                    file: format!("style {name}"),
+                    key: None,
+                    message: error.to_string(),
+                    instead: Instead::BuiltIn,
+                });
+                Style::built_in()
             });
-            Style::built_in()
-        });
+        problems.extend(style.option_problems().iter().map(|message| ConfigProblem {
+            file: format!("style {name}"),
+            key: Some("style_options".to_owned()),
+            message: message.clone(),
+            instead: Instead::Left,
+        }));
         let mut config = Self {
             bindings: Self::lenient_file::<Bindings>(
                 bindings_file,

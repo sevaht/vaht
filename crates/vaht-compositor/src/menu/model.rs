@@ -10,9 +10,10 @@
 
 use std::collections::HashMap;
 
+use crate::config::options::ListedOption;
 use crate::config::{
-    Action, Command, MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowManagerAction,
-    WindowToggle,
+    Action, Command, MenuDefinition, MenuEntry, MenuGenerator, Menus, SettingChange,
+    WindowManagerAction, WindowToggle,
 };
 use crate::tray::{TrayItemKey, TrayMenu, TrayMenuEntry};
 use crate::window_manager::{AlphaChange, StackLayer, WindowId, WindowManager, WorkspaceTarget};
@@ -172,13 +173,19 @@ pub(crate) enum MenuChoice {
 impl MenuChoice {
     /// Returns whether choosing leaves the menus open, as Fluxbox's style
     /// menus do, so one style or layout can be tried after another.
-    pub(crate) const fn keeps_menus_open(&self) -> bool {
+    pub(crate) fn keeps_menus_open(&self) -> bool {
         matches!(
             self,
             Self::Run {
                 command: Command::Run(Action::SetStyle(_) | Action::SetLayout(_)),
                 ..
             }
+        ) || matches!(
+            self,
+            Self::Run {
+                command: Command::Run(Action::SetSetting(change)),
+                ..
+            } if change.is_style_option()
         )
     }
 }
@@ -202,6 +209,8 @@ pub(crate) struct MenuBuilder<'state> {
     current_layout: Option<&'state str>,
     /// The edge the taskbar is on, as the setting names it.
     taskbar_edge: &'static str,
+    /// The options of the style in use, for the `style-options` list.
+    style_options: Vec<ListedOption>,
     /// Each window's icon, for lists of windows that show them.
     window_icons: HashMap<WindowId, vaht_ui::Icon>,
     /// The icons `menus.toml` names, by the name written, those found.
@@ -251,6 +260,7 @@ impl<'state> MenuBuilder<'state> {
             layouts: Vec::new(),
             current_layout: None,
             taskbar_edge: "bottom",
+            style_options: Vec::new(),
             window_icons: HashMap::new(),
             named_icons: HashMap::new(),
             outputs: OutputChoices::default(),
@@ -298,6 +308,13 @@ impl<'state> MenuBuilder<'state> {
     ) -> Self {
         self.layouts = layouts;
         self.current_layout = current;
+        self
+    }
+
+    /// Returns the builder listing `options` in the `style-options` list.
+    #[must_use]
+    pub(crate) fn with_style_options(mut self, options: Vec<ListedOption>) -> Self {
+        self.style_options = options;
         self
     }
 
@@ -454,6 +471,42 @@ impl<'state> MenuBuilder<'state> {
         })
     }
 
+    /// Returns the `style-options` list: a submenu for each option of the
+    /// style in use, with its choices, the one in effect checked.
+    fn style_option_items(options: &[ListedOption]) -> Vec<MenuItem> {
+        if options.is_empty() {
+            return vec![MenuItem::Inert {
+                label: "(this style has no options)".to_owned(),
+            }];
+        }
+        options
+            .iter()
+            .map(|option| MenuItem::Submenu {
+                label: option.title().to_owned(),
+                menu: MenuModel {
+                    title: Some(option.title().to_owned()),
+                    items: option
+                        .choices
+                        .iter()
+                        .map(|choice| MenuItem::Choice {
+                            label: choice.clone(),
+                            choice: MenuChoice::Run {
+                                command: Command::Run(Action::SetSetting(
+                                    SettingChange::style_option(&option.name, choice),
+                                )),
+                                window: None,
+                            },
+                            mark: Some(*choice == option.chosen),
+                            icon: None,
+                        })
+                        .collect(),
+                },
+                icon: None,
+                pipe: None,
+            })
+            .collect()
+    }
+
     /// Returns the `profiles` list: each display profile, the one applied
     /// checked.
     fn profile_items(&self) -> Vec<MenuItem> {
@@ -590,11 +643,12 @@ impl<'state> MenuBuilder<'state> {
             MenuGenerator::Layouts => {
                 Self::named_items(&self.layouts, self.current_layout, Action::SetLayout)
             }
+            MenuGenerator::StyleOptions => Self::style_option_items(&self.style_options),
             MenuGenerator::Positions => Self::named_items(
                 &["bottom".to_owned(), "top".to_owned()],
                 Some(self.taskbar_edge),
                 |edge| {
-                    Action::SetSetting(crate::config::SettingChange::new(
+                    Action::SetSetting(SettingChange::new(
                         &["taskbar", "edge"],
                         &toml::Value::String(edge),
                     ))
@@ -722,6 +776,38 @@ mod tests {
             labels(&["a", "b"]),
             [named("a"), named("b")],
             "no default listed"
+        );
+    }
+
+    #[test]
+    fn the_style_options_list_has_a_submenu_for_each_option_with_the_choice_checked() {
+        use crate::config::options::ListedOption;
+        let option = ListedOption {
+            name: "scheme".to_owned(),
+            label: Some("Color scheme".to_owned()),
+            default: "graphite".to_owned(),
+            chosen: "blue".to_owned(),
+            choices: vec!["graphite".to_owned(), "blue".to_owned()],
+        };
+        let items = MenuBuilder::style_option_items(&[option]);
+        let [MenuItem::Submenu { label, menu, .. }] = items.as_slice() else {
+            panic!("one submenu: {items:?}");
+        };
+        assert_eq!(label, "Color scheme");
+        let marks: Vec<(String, Option<bool>)> = menu
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Choice { label, mark, .. } => Some((label.clone(), *mark)),
+                MenuItem::Submenu { .. } | MenuItem::Inert { .. } | MenuItem::Separator => None,
+            })
+            .collect();
+        assert_eq!(
+            marks,
+            [
+                ("graphite".to_owned(), Some(false)),
+                ("blue".to_owned(), Some(true))
+            ]
         );
     }
 }

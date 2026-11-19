@@ -1,12 +1,13 @@
 //! Noticing that a configuration file changed, without polling (02 §2).
 //!
 //! One inotify instance watches the configuration directory, and its
-//! `styles` directory when there is one, and is registered with the event
+//! `styles`, `layouts` and `options` directories (and the directories in
+//! `options` and `styles`) when there are any, and is registered with the event
 //! loop. Directories are watched rather than files, because editors save by
 //! writing a new file and renaming it over the old one, which a watch on
 //! the old file would never see.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use smithay::reexports::calloop::generic::Generic;
@@ -14,6 +15,7 @@ use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
 
 use super::ConfigFile;
 use super::library::Library;
+use super::options;
 use crate::Compositor;
 use crate::event_source::EventSource;
 use crate::resources::ResourceLedger;
@@ -55,13 +57,30 @@ impl ConfigWatch {
             .map_err(WatchError::Watch)?;
         // Without a directory of styles or layouts yet, its creation is a
         // change like any other, and the next reload watches it.
-        let libraries: Vec<_> = Library::ALL
+        // The directories of styles and layouts, the options' (a directory of
+        // choices for each option), and any directory inside `styles`, where a
+        // style keeps the choice files it names.
+        let mut watched: Vec<PathBuf> = Library::ALL
             .iter()
-            .filter_map(|library| {
-                inotify
-                    .add_watch(&directory.join(library.directory), Self::EVENTS)
-                    .ok()
-            })
+            .map(|library| directory.join(library.directory))
+            .collect();
+        watched.push(directory.join(options::DIRECTORY));
+        for parent in [
+            directory.join(options::DIRECTORY),
+            directory.join(Library::STYLES.directory),
+        ] {
+            watched.extend(
+                std::fs::read_dir(parent)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .filter(|path| path.is_dir()),
+            );
+        }
+        let libraries: Vec<_> = watched
+            .iter()
+            .filter_map(|path| inotify.add_watch(path, Self::EVENTS).ok())
             .collect();
         let source = EventSource::insert(
             handle,
@@ -84,12 +103,16 @@ impl ConfigWatch {
                 let file_changed = events.iter().any(|event| {
                     let name = event.name.as_deref();
                     if libraries.contains(&event.wd) {
-                        name.is_some_and(|name| {
-                            Path::new(name).extension() == Some("toml".as_ref())
-                        })
+                        // A file of the library, or a directory in one (a
+                        // new option's, or a style's own).
+                        event.mask.contains(AddWatchFlags::IN_ISDIR)
+                            || name.is_some_and(|name| {
+                                Path::new(name).extension() == Some("toml".as_ref())
+                            })
                     } else {
                         name.is_some_and(|name| {
                             ConfigFile::is_named(name)
+                                || name == options::DIRECTORY
                                 || Library::ALL.iter().any(|library| name == library.directory)
                         })
                     }
@@ -97,10 +120,15 @@ impl ConfigWatch {
                 // A directory of styles or layouts appearing or going needs a
                 // new watch.
                 let libraries_moved = events.iter().any(|event| {
-                    !libraries.contains(&event.wd)
-                        && Library::ALL.iter().any(|library| {
-                            event.name.as_deref() == Some(library.directory.as_ref())
-                        })
+                    if libraries.contains(&event.wd) {
+                        event.mask.contains(AddWatchFlags::IN_ISDIR)
+                    } else {
+                        Library::ALL
+                            .iter()
+                            .map(|library| library.directory)
+                            .chain([options::DIRECTORY])
+                            .any(|name| event.name.as_deref() == Some(name.as_ref()))
+                    }
                 });
                 if directory_gone || file_changed {
                     compositor.config_source.note_change(

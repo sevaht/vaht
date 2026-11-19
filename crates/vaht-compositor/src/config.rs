@@ -20,6 +20,7 @@ mod lenient;
 mod library;
 mod matcher;
 mod menus;
+pub(crate) mod options;
 mod outputs;
 mod overrides;
 mod rules;
@@ -197,7 +198,13 @@ impl Config {
         // No style chosen is the default style, which is a file like any other
         // (a user's, or the installed one) and only falls back to the copy built in.
         let name = settings.style.as_deref().unwrap_or(Style::DEFAULT_NAME);
-        let style = StyleFile::load(directory, name)?;
+        let style = StyleFile::load(directory, name, &settings.style_options)?;
+        if let Some(problem) = style.option_problems().first() {
+            return Err(ConfigError::StyleOption {
+                style: name.to_owned(),
+                message: problem.clone(),
+            });
+        }
         let config = Self {
             bindings: bindings.read(directory)?,
             settings,
@@ -408,6 +415,15 @@ pub enum ConfigError {
         /// Why.
         #[source]
         error: io::Error,
+    },
+
+    /// A choice of a style's option cannot be used.
+    #[error("style `{style}`: {message}")]
+    StyleOption {
+        /// The style's name.
+        style: String,
+        /// What is wrong.
+        message: String,
     },
 
     /// A layout is not valid.

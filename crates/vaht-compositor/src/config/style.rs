@@ -5,14 +5,17 @@
 //! first, and reads it into a resolved [`Style`] with the same line-and-
 //! column errors as every other configuration file.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use vaht_ui::Style;
 use vaht_ui::style::StyleLayers;
+use vaht_ui::style::options::Selection;
 
 use super::ConfigError;
 use super::library::Library;
+use super::options::OptionLibrary;
 
 /// A style file, found by name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,12 +45,20 @@ impl StyleFile {
     /// # Errors
     ///
     /// Returns an error if the style cannot be found, read, or is not valid.
-    pub(crate) fn load(directory: &Path, name: &str) -> Result<Style, ConfigError> {
+    pub(crate) fn load(
+        directory: &Path,
+        name: &str,
+        chosen: &BTreeMap<String, String>,
+    ) -> Result<Style, ConfigError> {
         match Self::find(directory, name) {
             Err(ConfigError::MissingInLibrary { .. }) if name == Style::DEFAULT_NAME => {
-                Ok(Style::built_in())
+                Ok(Style::built_in_selecting(&Selection {
+                    directory: None,
+                    chosen,
+                    library: &OptionLibrary::new(directory),
+                }))
             }
-            found => found?.read(),
+            found => found?.read(directory, chosen),
         }
     }
 
@@ -63,15 +74,26 @@ impl StyleFile {
     /// # Errors
     ///
     /// Returns an error if the file cannot be read or is not a valid style.
-    pub(crate) fn read(&self) -> Result<Style, ConfigError> {
+    pub(crate) fn read(
+        &self,
+        configuration: &Path,
+        chosen: &BTreeMap<String, String>,
+    ) -> Result<Style, ConfigError> {
         let text =
             std::fs::read_to_string(&self.path).map_err(|error: io::Error| ConfigError::Read {
                 path: self.path.clone(),
                 error,
             })?;
-        // The images a style names are beside it.
-        let layers = StyleLayers::from_toml_in(&text, self.path.parent())
-            .map_err(|error| ConfigError::invalid(self.path.clone(), &text, &error))?;
+        // The images and choice files a style names are beside it.
+        let layers = StyleLayers::from_toml_selecting(
+            &text,
+            &Selection {
+                directory: self.path.parent(),
+                chosen,
+                library: &OptionLibrary::new(configuration),
+            },
+        )
+        .map_err(|error| ConfigError::invalid(self.path.clone(), &text, &error))?;
         Ok(Style::resolve(&layers))
     }
 }
@@ -89,7 +111,7 @@ mod tests {
         std::fs::create_dir(&styles).expect("the styles directory");
         std::fs::write(styles.join("mine.toml"), "[taskbar]\nheight = 30\n").expect("written");
         let style = StyleFile::find(directory.path(), "mine")
-            .and_then(|file| file.read())
+            .and_then(|file| file.read(directory.path(), &BTreeMap::new()))
             .expect("the style reads");
         assert_eq!(style.metrics().taskbar_height, 30);
     }
@@ -106,7 +128,8 @@ mod tests {
     #[test]
     fn the_default_style_needs_no_file_and_is_always_listed() {
         let directory = tempfile::tempdir().expect("a temporary directory");
-        let loaded = StyleFile::load(directory.path(), Style::DEFAULT_NAME).expect("built in");
+        let loaded = StyleFile::load(directory.path(), Style::DEFAULT_NAME, &BTreeMap::new())
+            .expect("built in");
         // Where vaht is installed, the installed file is found first, and it
         // is whatever version was installed: this machine's, not this
         // source's. Without it, the copy built in stands in.
@@ -122,7 +145,7 @@ mod tests {
             "chooseable from a menu even when no file is installed"
         );
         assert!(
-            StyleFile::load(directory.path(), "no-such-style").is_err(),
+            StyleFile::load(directory.path(), "no-such-style", &BTreeMap::new()).is_err(),
             "any other missing style is still an error"
         );
     }
@@ -137,7 +160,8 @@ mod tests {
             "[window.titlebar]\nheight = 33\n",
         )
         .expect("written");
-        let loaded = StyleFile::load(directory.path(), Style::DEFAULT_NAME).expect("loads");
+        let loaded = StyleFile::load(directory.path(), Style::DEFAULT_NAME, &BTreeMap::new())
+            .expect("loads");
         assert_eq!(
             loaded.metrics().titlebar_height,
             33,

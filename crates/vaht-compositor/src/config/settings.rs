@@ -45,6 +45,10 @@ pub(crate) struct Settings {
     /// The style: `styles/<name>.toml`; `default` when absent.
     #[schemars(extend("x-vaht-names" = "styles"))]
     pub(crate) style: Option<String>,
+    /// The choice made of each option the style declares (02 §10.5), by
+    /// option, such as `{ scheme = "blue" }`; an option left out has its
+    /// default choice.
+    pub(crate) style_options: BTreeMap<String, String>,
     /// The layout: `layouts/<name>.toml`, a named set of presentation
     /// settings (what the taskbar shows, the window buttons) that lies under
     /// these settings, which win over it; none when absent.

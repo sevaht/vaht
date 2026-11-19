@@ -137,3 +137,132 @@ fn set_style_and_set_setting_apply_in_place_and_save_settings_writes_them() {
     let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
     assert_eq!(color, [255, 0, 255], "and still after the reload");
 }
+
+/// A style with a color-scheme option: the focused titlebar is `$face`, a
+/// choice of `scheme`.
+const OPTIONAL: &str = "\
+[options.scheme]\ndefault = \"magenta\"\n\
+[options.scheme.magenta]\nface = \"#ff00ff\"\n\
+[options.scheme.cyan]\nface = \"#00ffff\"\n\
+[default]\njustify = \"center\"\n\
+[state.focused]\ntexture = { solid = \"$face\" }\n\
+[window.titlebar]\nheight = 30\n\
+[window.border]\nborder = { width = 2, color = \"black\" }\n";
+
+/// Runs `vaht <arguments>` against `vaht`, which must succeed; returns what
+/// it printed.
+fn print(vaht: &HeadlessVaht, arguments: &[&str]) -> String {
+    let output = std::process::Command::new(EXECUTABLE)
+        .args(arguments)
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .output()
+        .expect("vaht runs");
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).expect("UTF-8")
+}
+
+#[test]
+fn a_choice_of_a_styles_option_is_made_in_settings_toml_or_in_place() {
+    let settings = "style = \"mine\"\n[style_options]\nscheme = \"cyan\"\n";
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", settings), ("styles/mine.toml", OPTIONAL)],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(color, [0, 255, 255], "the settings' choice");
+    let files = print(&vaht, &["config", "files"]);
+    assert!(
+        files.contains("style option scheme: magenta, *cyan"),
+        "{files}"
+    );
+    // A choice made in place applies at once and leaves the file alone.
+    print(&vaht, &["run", "set-setting style_options.scheme magenta"]);
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(color, [255, 0, 255], "the choice in place");
+    let file = vaht.config_directory().join("settings.toml");
+    assert_eq!(
+        std::fs::read_to_string(file).expect("the settings are there"),
+        settings,
+        "nothing is written until save-settings"
+    );
+}
+
+#[test]
+fn a_choice_in_the_shared_library_can_be_made_and_wins_over_the_styles_own() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[
+            ("settings.toml", "style = \"mine\"\n"),
+            ("styles/mine.toml", OPTIONAL),
+            ("options/scheme/lime.toml", "face = \"#00ff00\"\n"),
+            ("options/scheme/cyan.toml", "face = \"#0000ff\"\n"),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let files = print(&vaht, &["config", "files"]);
+    assert!(
+        files.contains("style option scheme: *magenta, cyan, lime"),
+        "{files}"
+    );
+    print(&vaht, &["run", "set-setting style_options.scheme lime"]);
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(color, [0, 255, 0], "a choice only the library has");
+    print(&vaht, &["run", "set-setting style_options.scheme cyan"]);
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(
+        color,
+        [0, 0, 255],
+        "the library's wins over the style's own"
+    );
+}
+
+#[test]
+fn a_choice_nothing_has_is_reported_and_the_default_used() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[
+            (
+                "settings.toml",
+                "style = \"mine\"\n[style_options]\nscheme = \"nowhere\"\n",
+            ),
+            ("styles/mine.toml", OPTIONAL),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(color, [255, 0, 255], "the default choice");
+    let files = print(&vaht, &["config", "files"]);
+    assert!(files.contains("nowhere"), "named as a problem: {files}");
+}
+
+#[test]
+fn editing_a_choice_file_in_the_library_restyles_the_open_windows() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[
+            (
+                "settings.toml",
+                "style = \"mine\"\n[style_options]\nscheme = \"lime\"\n",
+            ),
+            ("styles/mine.toml", OPTIONAL),
+            ("options/scheme/lime.toml", "face = \"#00ff00\"\n"),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(color, [0, 255, 0]);
+    let reloads = vaht.logged_count("configuration reloaded");
+    std::fs::write(
+        vaht.config_directory().join("options/scheme/lime.toml"),
+        "face = \"#ffff00\"\n",
+    )
+    .expect("the choice is rewritten");
+    vaht.wait_for_logged("configuration reloaded", reloads + 1);
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(color, [255, 255, 0]);
+}

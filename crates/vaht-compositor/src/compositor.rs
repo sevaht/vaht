@@ -3259,6 +3259,10 @@ impl Compositor {
                         .unwrap_or(vaht_ui::Style::DEFAULT_NAME),
                 ),
             )
+            .with_style_options(
+                crate::config::options::OptionLibrary::new(self.config_source.directory())
+                    .listed(&self.config.style),
+            )
             .with_taskbar_edge(match self.config.settings.taskbar.edge {
                 crate::config::TaskbarEdge::Top => "top",
                 crate::config::TaskbarEdge::Bottom => "bottom",

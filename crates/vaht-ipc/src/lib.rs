@@ -21,7 +21,7 @@ pub use client::{Client, ClientError};
 pub use config_path::{ConfigPath, ConfigPathError};
 pub use message::{
     ConfigEdit, ConfigFile, ConfigFileInfo, ConfigState, Event, EventKind, ModeInfo, OutputInfo,
-    Reply, Request, WindowInfo, WorkspaceInfo,
+    Reply, Request, StyleOptionInfo, WindowInfo, WorkspaceInfo,
 };
 
 /// The environment variable that names vaht's IPC socket, set for every

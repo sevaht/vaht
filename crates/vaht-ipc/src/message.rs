@@ -174,6 +174,7 @@ impl Event {
                 files,
                 styles: Vec::new(),
                 layouts: Vec::new(),
+                style_options: Vec::new(),
                 problems,
             },
         }
@@ -264,6 +265,24 @@ pub struct ConfigFileInfo {
     pub state: ConfigState,
 }
 
+/// An option the style in use declares (02 §10.5), with the choice in effect.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StyleOptionInfo {
+    /// Its name, as `style_options` names it.
+    pub name: String,
+    /// What to call it for people, if the style says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// The choice made when none is.
+    pub default: String,
+    /// The choice in effect.
+    pub chosen: String,
+    /// The choices that can be made: the style's own and the shared ones,
+    /// the default first, the rest sorted.
+    pub choices: Vec<String>,
+}
+
 /// What vaht answers a request with.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "reply", rename_all = "kebab-case", deny_unknown_fields)]
@@ -308,6 +327,10 @@ pub enum Reply {
         /// The layouts that can be chosen: those in the configuration
         /// directory's `layouts/` and the system's.
         layouts: Vec<String>,
+        /// The options the style in use declares, each with the choice in
+        /// effect; empty for a style with none.
+        #[serde(default)]
+        style_options: Vec<StyleOptionInfo>,
         /// What vaht could not use of the configuration files and left out,
         /// a sentence each; empty when all of it is in effect.
         problems: Vec<String>,
