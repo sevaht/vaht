@@ -33,7 +33,7 @@ pub(crate) struct WindowShape {
     rectangles: Vec<Rectangle<i32, Logical>>,
     /// What the renderer knows each of the window's surfaces by under this
     /// shape, by the id it has unshaped.
-    ids: std::cell::RefCell<HashMap<Id, Id>>,
+    ids: std::rc::Rc<std::cell::RefCell<HashMap<Id, Id>>>,
 }
 
 /// Each X11 window's shape, followed over vaht's own X connection.
@@ -61,8 +61,17 @@ impl WindowShape {
             .any(|rectangle| rectangle.contains_rect(whole));
         (!is_whole).then(|| Self {
             rectangles,
-            ids: std::cell::RefCell::default(),
+            ids: std::rc::Rc::default(),
         })
+    }
+
+    /// The shape of the one rectangle `visible`, relative to the window: a
+    /// window's own geometry, outside which what it draws does not show.
+    pub(crate) fn within(visible: Rectangle<i32, Logical>) -> Self {
+        Self {
+            rectangles: vec![visible],
+            ids: std::rc::Rc::default(),
+        }
     }
 
     /// Returns whether `point` (relative to the window) is in the shape.

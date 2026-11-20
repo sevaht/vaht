@@ -29,8 +29,8 @@ mod window_list;
 mod x11_client;
 
 pub use client::{
-    BUTTON_LEFT, BUTTON_RIGHT, KeyboardFocus, Presentation, TestClient, TestLayer, WINDOW_COLOR,
-    WINDOW_SIZE, keys,
+    BUTTON_LEFT, BUTTON_RIGHT, KeyboardFocus, OUTSIDE_COLOR, Presentation, TestClient, TestLayer,
+    WINDOW_COLOR, WINDOW_SIZE, keys,
 };
 pub use clipboard::{ClipboardManager, Selection};
 /// What colour management names transfer functions and primaries by.

@@ -13,11 +13,12 @@ use std::time::Duration;
 
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
-use smithay::backend::renderer::element::AsRenderElements;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
+use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
+use smithay::backend::renderer::element::{AsRenderElements, Kind};
 use smithay::backend::renderer::{ImportAll, Renderer};
 use smithay::desktop::space::SpaceElement as _;
-use smithay::desktop::{Window as SurfaceWindow, WindowSurface, WindowSurfaceType};
+use smithay::desktop::{PopupManager, Window as SurfaceWindow, WindowSurface, WindowSurfaceType};
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -25,7 +26,7 @@ use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource as _};
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
-use smithay::wayland::compositor::with_states;
+use smithay::wayland::compositor::{get_parent, with_states};
 use smithay::wayland::seat::WaylandFocus as _;
 use smithay::wayland::shell::xdg::dialog::ToplevelDialogHint;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData};
@@ -37,6 +38,7 @@ use crate::outputs::Outputs;
 use crate::window_manager::{
     Axes, ClientIcon, CommittedState, Ending, PlacementKind, RequestedState, SizeLimits,
 };
+use crate::xwayland::WindowShape;
 
 /// How a client names the window another is a dialog of.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +64,21 @@ pub(crate) struct Toplevel {
     /// (`ConfigureNotify`), which may lag where vaht has put it while it
     /// moves (04 §8.2).
     confirmed_origin: Option<Point<i32, Logical>>,
+    /// What shows of a Wayland window's surface tree, for the geometry and
+    /// extent it was last worked out for.
+    visible: std::cell::RefCell<Option<VisibleParts>>,
+}
+
+/// The part of a Wayland window's surface tree that shows: its window
+/// geometry, as a shape, if anything it draws lies outside it.
+#[derive(Debug)]
+struct VisibleParts {
+    /// The window geometry the shape was made for.
+    geometry: Rectangle<i32, Logical>,
+    /// The extent of the surface tree it was made for.
+    extent: Rectangle<i32, Logical>,
+    /// None where nothing lies outside the geometry.
+    shape: Option<WindowShape>,
 }
 
 impl Toplevel {
@@ -72,6 +89,7 @@ impl Toplevel {
             read_icon: None,
             told_area: None,
             confirmed_origin: None,
+            visible: std::cell::RefCell::default(),
         }
     }
 
@@ -82,6 +100,7 @@ impl Toplevel {
             read_icon: None,
             told_area: None,
             confirmed_origin: None,
+            visible: std::cell::RefCell::default(),
         }
     }
 
@@ -225,6 +244,106 @@ impl Toplevel {
         point: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<i32, Logical>)> {
         self.window.surface_under(point, WindowSurfaceType::ALL)
+    }
+
+    /// Returns the shape a Wayland window shows through: its window
+    /// geometry, if its surfaces draw anything outside it (a client's
+    /// shadows, or a part of its interface that it laid out beyond the
+    /// size it was given), as the compositors built on wlroots show it. None
+    /// for a window all of whose surfaces are inside it, and for an X11
+    /// window, whose own shape is a different matter.
+    pub(crate) fn geometry_shape(&self) -> Option<WindowShape> {
+        if self.x11().is_some() {
+            return None;
+        }
+        let geometry = self.window.geometry();
+        let extent = self.window.bbox();
+        let mut visible = self.visible.borrow_mut();
+        if let Some(known) = visible.as_ref()
+            && known.geometry == geometry
+            && known.extent == extent
+        {
+            return known.shape.clone();
+        }
+        let shape = (geometry.size.w > 0 && geometry.size.h > 0 && !geometry.contains_rect(extent))
+            .then(|| WindowShape::within(geometry));
+        *visible = Some(VisibleParts {
+            geometry,
+            extent,
+            shape: shape.clone(),
+        });
+        shape
+    }
+
+    /// Returns whether `surface`, found under the pointer, is one the window
+    /// shows at `point` (relative to the surface origin): a popup always is,
+    /// and a surface of the window's own tree is where its shape shows it.
+    pub(crate) fn shows_surface_at(&self, surface: &WlSurface, point: Point<f64, Logical>) -> bool {
+        let Some(shape) = self.geometry_shape() else {
+            return true;
+        };
+        let root = self.wl_surface();
+        let is_popup = root.is_some_and(|root| {
+            let mut top = surface.clone();
+            while let Some(parent) = get_parent(&top) {
+                top = parent;
+            }
+            top != root
+        });
+        is_popup || shape.contains(point)
+    }
+
+    /// Returns the elements that draw the window's popups, and, apart, those
+    /// that draw its own surfaces, with the surface origin at `origin`, at
+    /// opacity `alpha`: the popups may lie anywhere, the rest only show
+    /// inside [`Toplevel::geometry_shape`].
+    pub(crate) fn render_elements_apart<R>(
+        &self,
+        renderer: &mut R,
+        origin: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> (
+        Vec<WaylandSurfaceRenderElement<R>>,
+        Vec<WaylandSurfaceRenderElement<R>>,
+    )
+    where
+        R: Renderer + ImportAll,
+        R::TextureId: Clone + 'static,
+    {
+        match self.window.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                let surface = toplevel.wl_surface();
+                let popups = PopupManager::popups_for_surface(surface)
+                    .flat_map(|(popup, popup_offset)| {
+                        let offset = (self.window.geometry().loc + popup_offset
+                            - popup.geometry().loc)
+                            .to_physical_precise_round(scale);
+                        render_elements_from_surface_tree(
+                            renderer,
+                            popup.wl_surface(),
+                            origin + offset,
+                            scale,
+                            alpha,
+                            Kind::Unspecified,
+                        )
+                    })
+                    .collect();
+                let own = render_elements_from_surface_tree(
+                    renderer,
+                    surface,
+                    origin,
+                    scale,
+                    alpha,
+                    Kind::Unspecified,
+                );
+                (popups, own)
+            }
+            WindowSurface::X11(_) => (
+                Vec::new(),
+                self.window.render_elements(renderer, origin, scale, alpha),
+            ),
+        }
     }
 
     /// Returns the elements that draw the window and its popups, with the

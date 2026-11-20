@@ -686,17 +686,30 @@ impl<'state> Scene<'state> {
         for (window, toplevel) in windows {
             if window.shows_content() {
                 let origin = window.surface_origin().to_physical_precise_round(scale);
-                let surface_elements = toplevel.render_elements(
+                // Popups show wherever they are; the window's own surfaces
+                // only inside its window geometry (and an X11 window's
+                // shape): what a client draws outside it, a shadow or a part
+                // of its interface laid out past the size it was given, is
+                // not part of the window.
+                let (popups, surface_elements) = toplevel.render_elements_apart(
                     renderer,
                     origin,
                     scale,
                     self.window_manager.opacity(window),
                 );
+                elements.extend(popups.into_iter().map(SceneElement::Surface));
                 let shape = toplevel
                     .x11()
                     .zip(self.drawn.xwayland)
-                    .and_then(|(surface, server)| server.shape_of(surface));
-                elements.extend(Self::clipped(surface_elements, shape, origin, scale));
+                    .and_then(|(surface, server)| server.shape_of(surface))
+                    .cloned()
+                    .or_else(|| toplevel.geometry_shape());
+                elements.extend(Self::clipped(
+                    surface_elements,
+                    shape.as_ref(),
+                    origin,
+                    scale,
+                ));
                 elements.extend(
                     toplevel
                         .wl_surface()
@@ -806,6 +819,8 @@ impl<'state> Scene<'state> {
                 && is_in_shape
                 && let Some((surface, offset)) =
                     toplevel.surface_under(point - surface_origin.to_f64())
+                // What is not shown takes no click either.
+                && toplevel.shows_surface_at(&surface, point - surface_origin.to_f64())
             {
                 // The pointer is given relative to where the client thinks
                 // its window is (an X11 window lags while it moves).

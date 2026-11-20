@@ -216,6 +216,14 @@ rectangles. X11 windows whose Motif hints ask for no decorations (a
 frameless Electron window, such as the ROTK launcher) get no frame, as in
 Fluxbox.
 
+A Wayland window is clipped in the same way, to its **window geometry**
+(`xdg_surface.set_window_geometry`), as the compositors built on wlroots do:
+what its surfaces draw outside it (a shadow, or part of an interface that a
+program laid out past the size it was given) is not part of the window, is not
+drawn, and takes no pointer input. Its popups are separate surfaces and are
+not clipped. A window all of whose surfaces are inside its geometry has no
+clip, and an X11 window is clipped by its X shape alone.
+
 ### 8.2 The pointer seen by an X11 window that vaht moves
 
 Seen with the ROTK launcher (Wine/Chromium, a frameless Electron window

@@ -92,6 +92,10 @@ pub const WINDOW_SIZE: (u32, u32) = (240, 120);
 /// so screenshots can find the windows.
 pub const WINDOW_COLOR: [u8; 3] = [0x20, 0x60, 0xc0];
 
+/// The color a window opened with [`TestClient::open_window_drawing_outside_its_geometry`]
+/// draws outside its window geometry.
+pub const OUTSIDE_COLOR: [u8; 3] = [0xe0, 0x20, 0x20];
+
 /// The Linux input code of the left mouse button (`BTN_LEFT`).
 pub const BUTTON_LEFT: u32 = 0x110;
 
@@ -414,6 +418,19 @@ impl TestClient {
     /// Panics if the connection to vaht fails.
     pub fn open_windows(&mut self, count: usize) {
         self.open_windows_decorated(count, WindowDecorations::RequestServer);
+    }
+
+    /// Opens one window whose surface is `inset` pixels larger than its window
+    /// geometry on every side, the rim drawn in [`OUTSIDE_COLOR`]: what a
+    /// client's shadow, or an interface laid out past its size, looks like.
+    /// Waits until it has been shown once.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn open_window_drawing_outside_its_geometry(&mut self, inset: u32) {
+        self.state.outside_geometry = Some(inset);
+        self.open_windows(1);
     }
 
     /// Opens `count` windows that ask to draw their own decorations

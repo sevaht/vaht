@@ -49,6 +49,7 @@ use smithay_client_toolkit::reexports::protocols_wlr::virtual_pointer::v1::clien
 use smithay_client_toolkit::reexports::protocols_wlr::virtual_pointer::v1::client::zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1;
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::shell::WaylandSurface as _;
+use smithay_client_toolkit::shell::xdg::XdgSurface as _;
 use smithay_client_toolkit::shell::wlr_layer::{
     LayerShell, LayerShellHandler, LayerSurface,
     LayerSurfaceConfigure,
@@ -78,7 +79,7 @@ use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::clie
 use smithay_client_toolkit::reexports::protocols::wp::color_management::v1::client::wp_image_description_v1::{self, WpImageDescriptionV1};
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 
-use super::{BYTES_PER_PIXEL, Presentation, WINDOW_COLOR, WINDOW_SIZE};
+use super::{BYTES_PER_PIXEL, OUTSIDE_COLOR, Presentation, WINDOW_COLOR, WINDOW_SIZE};
 
 /// Binds the global `name`, which vaht must offer.
 pub(super) fn bind<I>(globals: &GlobalList, handle: &QueueHandle<ClientState>, name: &str) -> I
@@ -126,6 +127,9 @@ pub(super) struct ClientState {
     pub(super) layer_colors: Vec<(wl_surface::WlSurface, [u8; 3])>,
     /// How many windows have drawn for the first time.
     pub(super) first_draws: usize,
+    /// When set, windows draw this many pixels more on every side than their
+    /// window geometry, in [`OUTSIDE_COLOR`], as a client does for a shadow.
+    pub(super) outside_geometry: Option<u32>,
     /// The buffer scale vaht last preferred for any surface
     /// (`wl_surface.preferred_buffer_scale`), if it said one.
     pub(super) preferred_scale: Option<i32>,
@@ -234,6 +238,7 @@ impl ClientState {
             shm,
             windows: Vec::new(),
             first_draws: 0,
+            outside_geometry: None,
             preferred_scale: None,
             fractional_scale: None,
             last_button_serial: None,
@@ -270,7 +275,57 @@ impl ClientState {
     /// Fills `window`, `size` pixels large, with [`WINDOW_COLOR`] and asks
     /// to hear when it is shown.
     pub(super) fn draw(&mut self, window: &Window, handle: &QueueHandle<Self>, size: (u32, u32)) {
-        self.fill(window.wl_surface(), handle, size, WINDOW_COLOR);
+        let Some(inset) = self.outside_geometry else {
+            self.fill(window.wl_surface(), handle, size, WINDOW_COLOR);
+            return;
+        };
+        // The whole buffer is `size`; the window geometry is the middle of
+        // it, `inset` pixels in, and the rim around it is something else.
+        let (width, height) = (size.0, size.1);
+        let geometry = (
+            i32::try_from(inset).expect("an inset fits"),
+            i32::try_from(width.saturating_sub(2 * inset)).expect("fits"),
+            i32::try_from(height.saturating_sub(2 * inset)).expect("fits"),
+        );
+        window
+            .xdg_surface()
+            .set_window_geometry(geometry.0, geometry.0, geometry.1, geometry.2);
+        let [red, green, blue] = WINDOW_COLOR;
+        let [out_red, out_green, out_blue] = OUTSIDE_COLOR;
+        let stride = i32::try_from(width * BYTES_PER_PIXEL).expect("fits");
+        let (buffer, canvas) = self
+            .pool
+            .create_buffer(
+                i32::try_from(width).expect("fits"),
+                i32::try_from(height).expect("fits"),
+                stride,
+                wl_shm::Format::Argb8888,
+            )
+            .expect("the pool has room");
+        let (pixels, _) = canvas.as_chunks_mut::<4>();
+        for (index, pixel) in pixels.iter_mut().enumerate() {
+            let (x, y) = (
+                u32::try_from(index).expect("fits") % width,
+                u32::try_from(index).expect("fits") / width,
+            );
+            let is_inside =
+                (inset..width - inset).contains(&x) && (inset..height - inset).contains(&y);
+            *pixel = if is_inside {
+                [blue, green, red, u8::MAX]
+            } else {
+                [out_blue, out_green, out_red, u8::MAX]
+            };
+        }
+        let surface = window.wl_surface();
+        surface.frame(handle, FrameCallbackData(surface.clone()));
+        buffer.attach_to(surface).expect("a fresh buffer attaches");
+        surface.damage_buffer(
+            0,
+            0,
+            geometry.1 + 2 * geometry.0,
+            geometry.2 + 2 * geometry.0,
+        );
+        surface.commit();
     }
 
     /// Returns a buffer `size` pixels square, all `color`, for an icon.

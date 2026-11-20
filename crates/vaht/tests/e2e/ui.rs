@@ -720,3 +720,32 @@ fn a_window_dragged_to_the_left_edge_shows_where_and_takes_the_left_half() {
     let [red, _, blue] = after.rgb(1500, 1000);
     assert!(blue <= red + 20, "no preview on the right: {red} {blue}");
 }
+
+#[test]
+fn what_a_window_draws_outside_its_window_geometry_is_not_shown() {
+    // A client's shadow, or an interface it laid out past the size it was
+    // given, lies outside its window geometry: it is not part of the window.
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_window_drawing_outside_its_geometry(24);
+    let screenshot = client.screenshot();
+    assert_eq!(
+        screenshot.bounds_of(vaht_test_support::OUTSIDE_COLOR),
+        None,
+        "nothing of the rim shows"
+    );
+    let content = screenshot
+        .bounds_of(WINDOW_COLOR)
+        .expect("the geometry shows");
+    assert_eq!(
+        (
+            content.right - content.left + 1,
+            content.bottom - content.top + 1
+        ),
+        (WINDOW_SIZE.0 - 48, WINDOW_SIZE.1 - 48),
+        "the window is its geometry, no more"
+    );
+}
