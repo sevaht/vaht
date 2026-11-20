@@ -2158,6 +2158,31 @@ mod tests {
     }
 
     #[test]
+    fn resizing_to_less_than_the_client_accepts_asks_for_its_minimum() {
+        let mut desk = Desk::new();
+        let window = desk.manager.add_window(&desk.config.settings, &desk.ledger);
+        let committed = CommittedState {
+            title: "browser".to_owned(),
+            app_id: "app".to_owned(),
+            app_id_alternate: String::new(),
+            icon: None,
+            geometry: Rectangle::from_size((800, 600).into()),
+            size_limits: SizeLimits::from_client((500, 83).into(), (0, 0).into()),
+            is_self_decorated: false,
+        };
+        desk.commit(window, committed);
+        desk.settle();
+        desk.manager.run(&action("resize-to 500 60"), Some(window));
+        let asked = desk
+            .manager
+            .window_mut(window)
+            .expect("the window exists")
+            .take_request()
+            .and_then(|request| request.size);
+        assert_eq!(asked, Some(Size::from((500, 83))), "not 500 by 60");
+    }
+
+    #[test]
     fn a_program_that_opens_maximized_is_floated_at_a_real_size_not_a_sliver() {
         // Brave asks to be maximized before it has drawn anything, so the
         // window remembers, as the size to return to, a frame round nothing.

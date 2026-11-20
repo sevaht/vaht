@@ -638,10 +638,14 @@ impl Window {
         self.location += delta;
     }
 
-    /// Asks the client to make the content `size`, as a floating window.
+    /// Asks the client to make the content `size`, as a floating window,
+    /// brought within the sizes it accepts (a window asked to be smaller than
+    /// its client's minimum would be drawn wrongly, as it draws more than it
+    /// was given).
     pub(crate) fn resize_to(&mut self, size: Size<i32, Logical>, metrics: Metrics) {
         self.float(None, metrics);
-        self.request_size(size);
+        let limits = self.size_limits();
+        self.request_size(limits.clamp(size.w, size.h));
     }
 
     /// Starts `drag` with the pointer at `pointer`. A maximized or tiled
