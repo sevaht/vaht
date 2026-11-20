@@ -419,7 +419,10 @@ impl Window {
         if let Some(DragProgress::Resize(anchor)) = self.drag {
             let size = self.committed.geometry.size;
             self.location = anchor.edges.anchored_location(anchor.initial, size);
-            if anchor.is_finishing {
+            if anchor
+                .finishing_from
+                .is_some_and(|before| before != self.committed.geometry.size)
+            {
                 self.drag = None;
             }
         }
@@ -663,7 +666,7 @@ impl Window {
                 let anchor = ResizeAnchor {
                     edges,
                     initial: self.content_area(),
-                    is_finishing: false,
+                    finishing_from: None,
                 };
                 match style {
                     ResizeStyle::Live => {
@@ -712,7 +715,7 @@ impl Window {
                 let moved_outer = Rectangle::new(outer.loc + (moved - self.location), outer.size);
                 self.location = moved + (snap.snap(moved_outer) - moved_outer.loc);
             }
-            Some(DragProgress::Resize(anchor)) if !anchor.is_finishing => {
+            Some(DragProgress::Resize(anchor)) if anchor.finishing_from.is_none() => {
                 let limits = self.size_limits();
                 self.request_size(anchor.edges.resize(anchor.initial.size, delta, limits));
             }
@@ -744,7 +747,13 @@ impl Window {
         match &mut self.drag {
             Some(DragProgress::Move { .. }) => self.drag = None,
             Some(DragProgress::Resize(anchor)) => {
-                anchor.is_finishing = true;
+                let (before, asked) = (self.committed.geometry.size, self.requested.size);
+                if asked.is_none_or(|asked| asked == before) {
+                    // Nothing is left to arrive.
+                    self.drag = None;
+                } else {
+                    anchor.finishing_from = Some(before);
+                }
                 self.request(|requested| requested.is_resizing = false);
             }
             Some(DragProgress::Outline { anchor, size }) => {
@@ -754,7 +763,7 @@ impl Window {
                 } else {
                     // The size arrives as a live resize's last one does.
                     self.drag = Some(DragProgress::Resize(ResizeAnchor {
-                        is_finishing: true,
+                        finishing_from: Some(self.committed.geometry.size),
                         ..anchor
                     }));
                     self.request_size(size);

@@ -182,8 +182,12 @@ pub(crate) struct ResizeAnchor {
     pub(crate) edges: ResizeEdges,
     /// The content area when the resize began.
     pub(crate) initial: Rectangle<i32, Logical>,
-    /// Whether the drag has ended; the next commit is the last one anchored.
-    pub(crate) is_finishing: bool,
+    /// Once the drag has ended, the content size the client had then: the
+    /// window stays anchored until the client commits a different size, which
+    /// is its answer to the last one asked of it. (A client may commit again
+    /// at the old size first, as an X11 program does for any change of its
+    /// own, and that is not the answer.)
+    pub(crate) finishing_from: Option<Size<i32, Logical>>,
 }
 
 #[cfg(test)]

@@ -2404,6 +2404,40 @@ mod tests {
     }
 
     #[test]
+    fn a_resize_from_the_left_stays_anchored_when_the_client_commits_the_old_size_first() {
+        // An X11 program commits again at its old size for changes of its
+        // own (its title, say) before it takes the new size: the window must
+        // not take that commit for the answer and stop holding its right edge.
+        let mut desk = Desk::new();
+        let window = desk.open();
+        desk.run(&action("move-to 300 300"));
+        let before = desk.window(window).content_area();
+        let edges = ResizeEdges {
+            horizontal: HorizontalEdge::Left,
+            vertical: VerticalEdge::Bottom,
+        };
+        desk.manager
+            .begin_drag(window, WindowDrag::Resize { edges }, (300.0, 300.0).into());
+        desk.manager.follow_drag(window, (-40, 30).into(), 0);
+        desk.manager.end_drag(window);
+        let committing = |desk: &mut Desk, size: Size<i32, Logical>| {
+            let mut committed = desk.committed[&window].clone();
+            committed.geometry = Rectangle::from_size(size);
+            desk.commit(window, committed);
+        };
+        committing(&mut desk, before.size);
+        committing(&mut desk, before.size + Size::from((40, 30)));
+        let after = desk.window(window).content_area();
+        assert_eq!(after.size, before.size + Size::from((40, 30)));
+        assert_eq!(
+            after.loc.x + after.size.w,
+            before.loc.x + before.size.w,
+            "the right edge did not move: the window grew to the left"
+        );
+        assert_eq!(after.loc.y, before.loc.y, "the top did not move");
+    }
+
+    #[test]
     fn changes_between_settles_reach_the_client_as_one_request() {
         let mut desk = Desk::new();
         let window = desk.open();
