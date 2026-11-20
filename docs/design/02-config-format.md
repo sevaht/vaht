@@ -370,8 +370,14 @@ rest by name, so a setting never silently does nothing:
   `entry_width` (`"fill"`, sharing the whole list, or `{ max }`, from
   `iconbar.alignment` and `iconWidth`) and `icons` (each entry's icon: the one the
   window names or draws over xdg-toplevel-icon (a drawn one is read back
-  through the renderer, with no `unsafe`), else its desktop entry's `Icon`,
-  found in the `hicolor` theme or `pixmaps`; PNG and SVG; from
+  through the renderer, with no `unsafe`), or, for an X11 window, its
+  `_NET_WM_ICON` or else the icon bitmap in its `WM_HINTS` (what xterm sets);
+  else its application's, from its desktop entry (found by file name,
+  `StartupWMClass`, the program `Exec` runs, or `Name`, in the entries of every
+  data directory, Flatpak's and Snap's too) and that entry's `Icon`, looked up
+  in the icon theme the GTK settings name, the themes it inherits, `hicolor`,
+  and every other installed theme (by each theme's `index.theme`), and then in
+  `pixmaps`: PNG, SVG, XPM and the other common picture formats; from
   `iconbar.usePixmap`), `[taskbar.tray]` with `pin_left` and `pin_right`
   (item ids, from `systray.pinLeft` and `systray.pinRight`), and
   `[taskbar.clock]` with `format`, checked when read. The tray hosts

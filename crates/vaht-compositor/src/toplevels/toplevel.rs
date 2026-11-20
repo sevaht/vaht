@@ -136,6 +136,7 @@ impl Toplevel {
             return CommittedState {
                 title: surface.title(),
                 app_id: surface.class(),
+                app_id_alternate: surface.instance(),
                 icon: None,
                 geometry: self.window.geometry(),
                 size_limits: self.size_limits(),
@@ -170,6 +171,7 @@ impl Toplevel {
         CommittedState {
             title,
             app_id,
+            app_id_alternate: String::new(),
             icon,
             geometry: self.window.geometry(),
             size_limits: self.size_limits(),

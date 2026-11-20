@@ -1,4 +1,5 @@
-//! X11 windows' icons (`_NET_WM_ICON`), as Fluxbox shows them.
+//! X11 windows' icons (`_NET_WM_ICON`, else the icon bitmap of `WM_HINTS`),
+//! as Fluxbox shows them.
 //!
 //! An X program hands its icon over as pixels in a property of its window,
 //! where a Wayland program names it or draws it over xdg-toplevel-icon.
@@ -14,7 +15,9 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
 use x11rb::connection::Connection as _;
 use x11rb::protocol::Event;
-use x11rb::protocol::xproto::{AtomEnum, ChangeWindowAttributesAux, ConnectionExt as _, EventMask};
+use x11rb::protocol::xproto::{
+    AtomEnum, ChangeWindowAttributesAux, ConnectionExt as _, EventMask, ImageFormat, ImageOrder,
+};
 use x11rb::rust_connection::RustConnection;
 
 use crate::Compositor;
@@ -111,7 +114,10 @@ impl IconTracker {
         let mut changed = Vec::new();
         loop {
             match self.connection.poll_for_event() {
-                Ok(Some(Event::PropertyNotify(notify))) if notify.atom == self.net_wm_icon => {
+                Ok(Some(Event::PropertyNotify(notify)))
+                    if notify.atom == self.net_wm_icon
+                        || notify.atom == u32::from(AtomEnum::WM_HINTS) =>
+                {
                     if !changed.contains(&notify.window) {
                         changed.push(notify.window);
                     }
@@ -150,7 +156,9 @@ impl IconTracker {
                     .unwrap_or_default()
             });
         let icon = match values {
-            Ok(values) => decode(&values),
+            // A program that sets no `_NET_WM_ICON` may still hand over an
+            // icon bitmap in its `WM_HINTS` (xterm does).
+            Ok(values) => decode(&values).or_else(|| self.hinted_icon(window)),
             Err(error) => {
                 tracing::debug!(error, window, "a window's icon could not be read");
                 return false;
@@ -163,6 +171,160 @@ impl IconTracker {
         self.icons.insert(window, icon);
         true
     }
+}
+
+impl IconTracker {
+    /// The `WM_HINTS` flag that says `icon_pixmap` is set.
+    const ICON_PIXMAP_HINT: u32 = 1 << 2;
+    /// The `WM_HINTS` flag that says `icon_mask` is set.
+    const ICON_MASK_HINT: u32 = 1 << 5;
+
+    /// Returns the icon in the `WM_HINTS` of the X window `window`: the
+    /// bitmap (or picture) it names, shaped by its mask if it has one.
+    fn hinted_icon(&self, window: u32) -> Option<vaht_ui::Icon> {
+        let reply = self
+            .connection
+            .get_property(false, window, AtomEnum::WM_HINTS, AtomEnum::WM_HINTS, 0, 9)
+            .ok()?
+            .reply()
+            .ok()?;
+        // flags, input, initial_state, icon_pixmap, icon_window, icon_x,
+        // icon_y, icon_mask, window_group.
+        let hints: Vec<u32> = reply.value32()?.collect();
+        let (flags, pixmap, mask) = (*hints.first()?, *hints.get(3)?, *hints.get(7)?);
+        if flags & Self::ICON_PIXMAP_HINT == 0 || pixmap == 0 {
+            return None;
+        }
+        let picture = self.read_pixmap(pixmap)?;
+        let mask = (flags & Self::ICON_MASK_HINT != 0 && mask != 0)
+            .then(|| self.read_pixmap(mask))
+            .flatten();
+        hinted_pixels(&picture, mask.as_ref())
+    }
+
+    /// Reads the pixmap `pixmap`: a bitmap (depth 1) or a picture.
+    fn read_pixmap(&self, pixmap: u32) -> Option<Bitmap> {
+        let geometry = self.connection.get_geometry(pixmap).ok()?.reply().ok()?;
+        let (width, height) = (u32::from(geometry.width), u32::from(geometry.height));
+        if !(1..=Self::MAX_SIDE).contains(&width) || !(1..=Self::MAX_SIDE).contains(&height) {
+            return None;
+        }
+        let image = self
+            .connection
+            .get_image(
+                ImageFormat::Z_PIXMAP,
+                pixmap,
+                0,
+                0,
+                geometry.width,
+                geometry.height,
+                !0,
+            )
+            .ok()?
+            .reply()
+            .ok()?;
+        let setup = self.connection.setup();
+        let format = setup
+            .pixmap_formats
+            .iter()
+            .find(|format| format.depth == image.depth)?;
+        Some(Bitmap {
+            width,
+            height,
+            depth: image.depth,
+            bits_per_pixel: u32::from(format.bits_per_pixel),
+            row_padding: u32::from(format.scanline_pad),
+            is_most_significant_first: if image.depth == 1 {
+                setup.bitmap_format_bit_order == ImageOrder::MSB_FIRST
+            } else {
+                setup.image_byte_order == ImageOrder::MSB_FIRST
+            },
+            data: image.data,
+        })
+    }
+}
+
+/// A pixmap read from the X server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Bitmap {
+    /// Pixels across.
+    width: u32,
+    /// Pixels down.
+    height: u32,
+    /// The pixmap's depth: 1 for a bitmap.
+    depth: u8,
+    /// Bits to a pixel in the data.
+    bits_per_pixel: u32,
+    /// Every row is padded to a multiple of this many bits.
+    row_padding: u32,
+    /// For a bitmap, whether the first pixel of a byte is its high bit; for
+    /// a picture, whether a pixel's bytes are most significant first.
+    is_most_significant_first: bool,
+    /// The rows.
+    data: Vec<u8>,
+}
+
+impl Bitmap {
+    /// Returns the bytes in a row.
+    const fn stride(&self) -> usize {
+        let bits = self.width * self.bits_per_pixel;
+        let padded = bits.div_ceil(self.row_padding) * self.row_padding;
+        (padded / 8) as usize
+    }
+
+    /// Returns whether the pixel at (`x`, `y`) of a bitmap is set.
+    fn bit(&self, x: u32, y: u32) -> bool {
+        let row = y as usize * self.stride();
+        let byte = self.data.get(row + (x / 8) as usize).copied().unwrap_or(0);
+        let place = x % 8;
+        let shift = if self.is_most_significant_first {
+            7 - place
+        } else {
+            place
+        };
+        byte >> shift & 1 == 1
+    }
+
+    /// Returns the red, green and blue of the pixel at (`x`, `y`) of a
+    /// picture of 32 bits to a pixel (24 bits of color), if it is one.
+    fn rgb(&self, x: u32, y: u32) -> Option<[u8; 3]> {
+        if self.bits_per_pixel != 32 {
+            return None;
+        }
+        let at = y as usize * self.stride() + x as usize * 4;
+        let bytes: [u8; 4] = self.data.get(at..at + 4)?.try_into().ok()?;
+        // The pixel is 0x00RRGGBB, stored in the server's byte order.
+        let pixel = if self.is_most_significant_first {
+            u32::from_be_bytes(bytes)
+        } else {
+            u32::from_le_bytes(bytes)
+        };
+        let [_, red, green, blue] = pixel.to_be_bytes();
+        Some([red, green, blue])
+    }
+}
+
+/// Returns the icon of `picture`, the icon pixmap of a window's `WM_HINTS`,
+/// shaped by `mask` where the program gave one (a set bit is a pixel that
+/// shows). A bitmap is black where it is set and white where it is not, so
+/// it is seen against any taskbar; a picture keeps its colors.
+fn hinted_pixels(picture: &Bitmap, mask: Option<&Bitmap>) -> Option<vaht_ui::Icon> {
+    let mut bytes = Vec::with_capacity((picture.width * picture.height * 4) as usize);
+    for y in 0..picture.height {
+        for x in 0..picture.width {
+            let shows = mask.is_none_or(|mask| {
+                x < mask.width && y < mask.height && mask.depth == 1 && mask.bit(x, y)
+            });
+            let [red, green, blue] = if picture.depth == 1 {
+                let value = if picture.bit(x, y) { 0 } else { 255 };
+                [value; 3]
+            } else {
+                picture.rgb(x, y)?
+            };
+            bytes.extend_from_slice(&[if shows { 255 } else { 0 }, red, green, blue]);
+        }
+    }
+    vaht_ui::Icon::from_argb_bytes(picture.width, picture.height, &bytes)
 }
 
 /// Returns the largest picture in a `_NET_WM_ICON` property's `values`:
@@ -251,5 +413,82 @@ mod tests {
         assert!(decode(&[]).is_none());
         assert!(decode(&[0, 0]).is_none(), "an empty picture");
         assert!(decode(&[5000, 1, 0]).is_none(), "truncated and too wide");
+    }
+
+    /// A `width` × `height` bitmap whose rows are `rows` (a `#` is a set
+    /// bit), packed as the X server sends them: 32-bit padded rows.
+    fn bitmap(rows: &[&str], is_most_significant_first: bool) -> Bitmap {
+        let width = u32::try_from(rows[0].len()).expect("small");
+        let mut data = Vec::new();
+        for row in rows {
+            let mut bytes = vec![0_u8; 4];
+            for (x, character) in row.chars().enumerate() {
+                if character == '#' {
+                    let place = u32::try_from(x % 8).expect("small");
+                    let shift = if is_most_significant_first {
+                        7 - place
+                    } else {
+                        place
+                    };
+                    bytes[x / 8] |= 1 << shift;
+                }
+            }
+            data.extend(bytes);
+        }
+        Bitmap {
+            width,
+            height: u32::try_from(rows.len()).expect("small"),
+            depth: 1,
+            bits_per_pixel: 1,
+            row_padding: 32,
+            is_most_significant_first,
+            data,
+        }
+    }
+
+    /// Returns the red, green, blue and alpha of `icon`'s pixel at (`x`, `y`),
+    /// with `icon` the size of a 4 by 2 bitmap (unscaled).
+    fn at(icon: &vaht_ui::Icon, x: u32, y: u32) -> [u8; 4] {
+        let color = icon.pixels().pixel(x, y).expect("inside").demultiply();
+        [color.red(), color.green(), color.blue(), color.alpha()]
+    }
+
+    #[test]
+    fn a_hinted_bitmap_is_black_ink_on_white_whichever_way_its_bits_are_ordered() {
+        for most_significant_first in [false, true] {
+            let ink = bitmap(&["#..#", ".##."], most_significant_first);
+            let icon = hinted_pixels(&ink, None).expect("an icon");
+            // Fitted into a square 4 wide, 2 rows centered: rows 1 and 2.
+            assert_eq!(at(&icon, 0, 1), [0, 0, 0, 255], "set: black");
+            assert_eq!(at(&icon, 1, 1), [255, 255, 255, 255], "clear: white");
+            assert_eq!(at(&icon, 1, 2), [0, 0, 0, 255]);
+            assert_eq!(at(&icon, 0, 2), [255, 255, 255, 255]);
+        }
+    }
+
+    #[test]
+    fn a_hinted_mask_leaves_the_pixels_outside_it_clear() {
+        let ink = bitmap(&["####", "####"], true);
+        let mask = bitmap(&[".##.", ".##."], true);
+        let icon = hinted_pixels(&ink, Some(&mask)).expect("an icon");
+        assert_eq!(at(&icon, 0, 1)[3], 0, "outside the mask");
+        assert_eq!(at(&icon, 1, 1), [0, 0, 0, 255], "inside it");
+    }
+
+    #[test]
+    fn a_hinted_picture_keeps_its_colors() {
+        // 32 bits to a pixel, least significant byte first: blue, green, red.
+        let picture = Bitmap {
+            width: 2,
+            height: 1,
+            depth: 24,
+            bits_per_pixel: 32,
+            row_padding: 32,
+            is_most_significant_first: false,
+            data: vec![0x00, 0x00, 0xff, 0x00, 0xff, 0x00, 0x00, 0x00],
+        };
+        let icon = hinted_pixels(&picture, None).expect("an icon");
+        assert_eq!(at(&icon, 0, 0), [255, 0, 0, 255], "red");
+        assert_eq!(at(&icon, 1, 0), [0, 0, 255, 255], "blue");
     }
 }

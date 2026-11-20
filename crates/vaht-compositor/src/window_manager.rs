@@ -1512,6 +1512,7 @@ mod tests {
             let committed = CommittedState {
                 title: format!("window {window}"),
                 app_id: app_id.to_owned(),
+                app_id_alternate: String::new(),
                 icon: None,
                 geometry: Rectangle::from_size(size.into()),
                 size_limits: SizeLimits::default(),
@@ -1528,6 +1529,7 @@ mod tests {
             let committed = CommittedState {
                 title: format!("window {window}"),
                 app_id: "self".to_owned(),
+                app_id_alternate: String::new(),
                 icon: None,
                 geometry: Rectangle::from_size((400, 300).into()),
                 size_limits: SizeLimits::default(),
@@ -1552,6 +1554,7 @@ mod tests {
             let committed = CommittedState {
                 title: format!("dialog {window}"),
                 app_id: "app".to_owned(),
+                app_id_alternate: String::new(),
                 icon: None,
                 geometry: Rectangle::from_size((200, 100).into()),
                 size_limits: SizeLimits::default(),

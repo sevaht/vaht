@@ -27,6 +27,10 @@ pub(crate) struct CommittedState {
     pub(crate) title: String,
     /// The application id (or X11 class); empty when the client set none.
     pub(crate) app_id: String,
+    /// A second name for finding the application's icon: an X11 window's
+    /// instance name (the class is `Firefox`, the instance `Navigator`);
+    /// empty when there is none.
+    pub(crate) app_id_alternate: String,
     /// The icon the client chose for the window (xdg-toplevel-icon), if
     /// it chose one.
     pub(crate) icon: Option<ClientIcon>,

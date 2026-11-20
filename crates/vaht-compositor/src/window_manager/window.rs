@@ -249,6 +249,12 @@ impl Window {
             None => None,
         }
         .or_else(|| store.app_icon(self.app_id(), size))
+        .or_else(|| {
+            let alternate = &self.committed.app_id_alternate;
+            (alternate != self.app_id())
+                .then(|| store.app_icon(alternate, size))
+                .flatten()
+        })
     }
 
     /// Returns the application id its client set.

@@ -150,7 +150,7 @@ impl Icon {
             error,
         })?;
         let decoded = match path.extension().and_then(|extension| extension.to_str()) {
-            Some("svg") => Self::render_svg(path, &data, size)?,
+            Some("svg" | "svgz") => Self::render_svg(path, &data, size)?,
             Some("xpm") => Self::read_xpm(path, &data)?,
             _ => crate::raster::decode(&data, path).map_err(|error| IconError::Decode {
                 path: path.to_path_buf(),
