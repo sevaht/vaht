@@ -346,22 +346,6 @@ impl Toplevel {
         }
     }
 
-    /// Returns the elements that draw the window and its popups, with the
-    /// surface origin at `origin`, at opacity `alpha` (0.0 to 1.0).
-    pub(crate) fn render_elements<R>(
-        &self,
-        renderer: &mut R,
-        origin: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> Vec<WaylandSurfaceRenderElement<R>>
-    where
-        R: Renderer + ImportAll,
-        R::TextureId: Clone + 'static,
-    {
-        self.window.render_elements(renderer, origin, scale, alpha)
-    }
-
     /// Lets the client know a frame including it was shown on `output`.
     pub(crate) fn send_frame(&self, output: &Output, time: Duration) {
         self.window
