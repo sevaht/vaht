@@ -749,3 +749,23 @@ fn what_a_window_draws_outside_its_window_geometry_is_not_shown() {
         "the window is its geometry, no more"
     );
 }
+
+#[test]
+fn a_window_shared_alone_is_clipped_to_its_window_geometry_too() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_window_drawing_outside_its_geometry(24);
+    let shared = vaht_test_support::WindowCapturer::connect(vaht.socket()).capture("test window 1");
+    assert_eq!(
+        shared.bounds_of(vaht_test_support::OUTSIDE_COLOR),
+        None,
+        "nothing of the rim is in what is shared"
+    );
+    assert!(
+        shared.bounds_of(WINDOW_COLOR).is_some(),
+        "the window's content is"
+    );
+}
