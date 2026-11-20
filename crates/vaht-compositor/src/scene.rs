@@ -620,13 +620,15 @@ impl<'state> Scene<'state> {
         };
         let offset = window.surface_origin() - window.content_area().loc;
         let origin = offset.to_physical_precise_round(scale);
-        // As on screen: popups wherever they are, the window's own surfaces
-        // only inside its window geometry.
+        // No clip to the window geometry is needed: the capture is the
+        // content rectangle, which has the window's geometry at its origin,
+        // so whatever lies outside the geometry is outside the capture.
         let (popups, own) = toplevel.render_elements_apart(renderer, origin, scale, 1.0);
-        let shape = toplevel.geometry_shape();
-        let mut elements: Vec<SceneElement<R>> =
-            popups.into_iter().map(SceneElement::Surface).collect();
-        elements.extend(Self::clipped(own, shape.as_ref(), origin, scale));
+        let elements: Vec<SceneElement<R>> = popups
+            .into_iter()
+            .chain(own)
+            .map(SceneElement::Surface)
+            .collect();
         // A shared window is shown in sRGB, as a stream's viewers see it.
         self.in_colors_of(elements, ImageDescription::SRGB, (Point::default(), scale))
     }
