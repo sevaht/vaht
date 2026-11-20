@@ -2158,6 +2158,53 @@ mod tests {
     }
 
     #[test]
+    fn a_program_that_opens_maximized_is_floated_at_a_real_size_not_a_sliver() {
+        // Brave asks to be maximized before it has drawn anything, so the
+        // window remembers, as the size to return to, a frame round nothing.
+        let mut desk = Desk::new();
+        let window = desk.manager.add_window(&desk.config.settings, &desk.ledger);
+        assert!(desk.manager.honor(window, ClientRequest::Maximize));
+        let committed = CommittedState {
+            title: "browser".to_owned(),
+            app_id: "brave-browser".to_owned(),
+            app_id_alternate: String::new(),
+            icon: None,
+            geometry: Rectangle::from_size((1918, 1000).into()),
+            size_limits: SizeLimits::default(),
+            is_self_decorated: false,
+        };
+        desk.commit(window, committed);
+        desk.settle();
+        assert!(desk.window(window).placement().is_fully_maximized());
+        for drag in [
+            WindowDrag::Move,
+            WindowDrag::Resize {
+                edges: ResizeEdges {
+                    horizontal: HorizontalEdge::Right,
+                    vertical: VerticalEdge::Bottom,
+                },
+            },
+        ] {
+            desk.manager.begin_drag(window, drag, (960.0, 40.0).into());
+            // The size the client is asked to be: what the drag floats it at.
+            let asked = desk
+                .manager
+                .window_mut(window)
+                .expect("the window exists")
+                .take_request()
+                .and_then(|request| request.size)
+                .expect("the client is asked for a size");
+            assert!(
+                asked.w >= 400 && asked.h >= 300,
+                "{drag:?} floats it at a size a window can have: {asked:?}"
+            );
+            desk.manager.end_drag(window);
+            // Back to maximized for the next kind of drag.
+            desk.manager.honor(window, ClientRequest::Maximize);
+        }
+    }
+
+    #[test]
     fn rules_place_a_new_window_where_they_say() {
         let mut config = Config::built_in();
         config.rules = toml::from_str::<Rules>(

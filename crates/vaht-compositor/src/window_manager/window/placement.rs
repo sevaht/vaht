@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::{Logical, Point, Rectangle, Size};
 
 use super::client::PlacementKind;
 
@@ -102,14 +102,31 @@ impl Placement {
         }
     }
 
+    /// The smallest frame a window is returned to as it was: a window that
+    /// was maximized, tiled or made fullscreen before its client had given it
+    /// any size (a program that opens maximized) remembers an empty frame,
+    /// which would float it as a sliver the client then draws wrongly.
+    const SMALLEST_RESTORED: (i32, i32) = (80, 50);
+
     /// Returns the area to return to when the window floats again, given
-    /// its `current` area.
+    /// its `current` area. One too small to be a window it was ever shown at
+    /// (see [`Self::SMALLEST_RESTORED`]) is replaced by the middle two
+    /// thirds of `current`, the area it fills now.
     pub(crate) fn restore_area(&self, current: Area) -> Area {
         match self {
             Self::Floating => current,
             Self::Maximized { restore, .. }
             | Self::Tiled { restore, .. }
-            | Self::Fullscreen { restore, .. } => *restore,
+            | Self::Fullscreen { restore, .. } => {
+                let (width, height) = Self::SMALLEST_RESTORED;
+                if restore.size.w >= width && restore.size.h >= height {
+                    *restore
+                } else {
+                    let size = Size::from((current.size.w * 2 / 3, current.size.h * 2 / 3));
+                    let offset = (current.size - size).downscale(2);
+                    Rectangle::new(current.loc + Point::from((offset.w, offset.h)), size)
+                }
+            }
         }
     }
 
@@ -524,10 +541,8 @@ impl Row {
 
 #[cfg(test)]
 mod tests {
-    use rstest::rstest;
-    use smithay::utils::{Point, Size};
-
     use super::*;
+    use rstest::rstest;
 
     /// The usable area of a 1920×1080 output.
     fn usable() -> Area {
@@ -706,5 +721,36 @@ mod tests {
         assert!(TileCell::new(500, 0, 500, 1000).is_some());
         assert!(TileCell::new(600, 0, 500, 1000).is_none());
         assert!(TileCell::new(0, 0, 0, 1000).is_none());
+    }
+
+    #[test]
+    fn a_window_that_was_empty_when_it_was_maximized_returns_as_two_thirds_of_where_it_is() {
+        // A program that opens maximized: its frame was empty (2 by 23).
+        let empty = Rectangle::new((-1, -22).into(), (2, 23).into());
+        let maximized = Placement::Maximized {
+            axes: Axes::Both,
+            restore: empty,
+            return_to: None,
+        };
+        assert_eq!(
+            maximized.restore_area(usable()),
+            Rectangle::new((320, 180).into(), (1280, 720).into()),
+            "the middle two thirds of the screen it fills"
+        );
+        let tiled = Placement::Tiled {
+            cell: SnapCell::new(Side::Left, Row::Whole).cell(),
+            restore: empty,
+        };
+        assert_eq!(tiled.restore_area(usable()).size, Size::from((1280, 720)));
+    }
+
+    #[test]
+    fn a_window_that_was_a_real_size_returns_to_it() {
+        let maximized = Placement::Maximized {
+            axes: Axes::Both,
+            restore: floating_area(),
+            return_to: None,
+        };
+        assert_eq!(maximized.restore_area(usable()), floating_area());
     }
 }
