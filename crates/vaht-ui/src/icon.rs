@@ -151,6 +151,7 @@ impl Icon {
         })?;
         let decoded = match path.extension().and_then(|extension| extension.to_str()) {
             Some("svg") => Self::render_svg(path, &data, size)?,
+            Some("xpm") => Self::read_xpm(path, &data)?,
             _ => crate::raster::decode(&data, path).map_err(|error| IconError::Decode {
                 path: path.to_path_buf(),
                 error: Box::new(error),
@@ -169,6 +170,24 @@ impl Icon {
     #[must_use]
     pub fn pixels(&self) -> &Pixmap {
         &self.pixels
+    }
+
+    /// Reads the XPM `data`, from `path`: the picture older applications
+    /// (xterm among them) install in `pixmaps`.
+    fn read_xpm(path: &Path, data: &[u8]) -> Result<Pixmap, IconError> {
+        let decode_error = |error: Box<dyn std::error::Error + Send + Sync>| IconError::Decode {
+            path: path.to_path_buf(),
+            error,
+        };
+        let text = String::from_utf8_lossy(data);
+        let image =
+            crate::image::Image::from_xpm(&text).map_err(|error| decode_error(Box::new(error)))?;
+        let mut pixmap = Pixmap::new(image.width(), image.height())
+            .ok_or_else(|| IconError::Empty(path.to_path_buf()))?;
+        for (slot, color) in pixmap.pixels_mut().iter_mut().zip(image.pixels()) {
+            *slot = color.to_skia().premultiply().to_color_u8();
+        }
+        Ok(pixmap)
     }
 
     /// Renders the SVG `data`, read from `path`, at `size` along its longer

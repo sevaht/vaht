@@ -137,7 +137,7 @@ impl IconStore {
         }
         let own = own_directory.filter(|directory| directory.is_absolute());
         let own_file = own.and_then(|directory| {
-            ["png", "svg"]
+            ["png", "svg", "xpm"]
                 .into_iter()
                 .map(|extension| directory.join(format!("{name}.{extension}")))
                 .find(|file| file.is_file())
@@ -154,7 +154,8 @@ impl IconStore {
             .or_else(|| Self::best_in_themes(&own_themes, name, size))
             .or_else(|| Self::best_in_themes(&shared_themes, name, size))
             .or_else(|| {
-                ["png", "svg"].into_iter().find_map(|extension| {
+                // Older applications (xterm) install an XPM here.
+                ["png", "svg", "xpm"].into_iter().find_map(|extension| {
                     self.data_directories
                         .iter()
                         .map(|directory| directory.join(format!("pixmaps/{name}.{extension}")))
@@ -418,6 +419,34 @@ mod tests {
             assert!(store.app_icon(app_id, 20).is_some(), "{app_id}");
         }
         assert!(store.app_icon("nothing", 20).is_none());
+    }
+
+    #[test]
+    fn an_xpm_in_pixmaps_is_an_icon_found_through_the_desktop_entry() {
+        // How xterm installs its icon: an XPM in pixmaps, named by an entry
+        // that matches the window's class.
+        let data = DataDirectory::new();
+        data.file(
+            "pixmaps/xterm-color_48x48.xpm",
+            "/* XPM */\nstatic char *icon[] = {\n\"2 2 2 1\",\n\"a c #ff0000\",\n\"b c None\",\n\
+             \"ab\",\n\"ba\"\n};\n",
+        );
+        data.file(
+            "applications/xterm.desktop",
+            "[Desktop Entry]\nIcon=xterm-color_48x48\nStartupWMClass=XTerm\n",
+        );
+        let icon = data
+            .store()
+            .app_icon("XTerm", 20)
+            .expect("the XPM is found and read");
+        let pixel = icon.pixels().pixel(2, 2).expect("inside");
+        assert_eq!(
+            (pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()),
+            (255, 0, 0, 255),
+            "the red half, opaque"
+        );
+        let corner = icon.pixels().pixel(17, 2).expect("inside");
+        assert_eq!(corner.alpha(), 0, "the None half is clear");
     }
 
     #[test]
