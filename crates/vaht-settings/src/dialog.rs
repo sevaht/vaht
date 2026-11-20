@@ -19,6 +19,8 @@ pub struct DialogApp {
     shown_title: String,
     /// Whether the field has been given the keyboard yet.
     is_focused: bool,
+    /// The height the window was last made, to fit the field.
+    fitted_height: Option<f32>,
     /// Why the dialog failed, once it has: the program then ends
     /// unsuccessfully, saying so.
     failure: Arc<Mutex<Option<String>>>,
@@ -29,6 +31,12 @@ impl DialogApp {
     fn field_id() -> egui::Id {
         egui::Id::NULL.with("dialog-line")
     }
+
+    /// The room kept free round the field, in points.
+    const MARGIN: i8 = 4;
+
+    /// The window's size, in points: a line of text and the margin round it.
+    const SIZE: [f32; 2] = [560.0, 36.0];
 
     /// The keys the dialog owns, and what they ask of it.
     const KEYS: [(egui::Key, EditKey); 5] = [
@@ -47,6 +55,7 @@ impl DialogApp {
             shown_title: dialog.title().to_owned(),
             dialog,
             is_focused: false,
+            fitted_height: None,
             failure,
         }
     }
@@ -58,7 +67,7 @@ impl DialogApp {
     /// Returns why the window cannot open, or why the dialog failed.
     pub fn run(dialog: Box<dyn LineDialog>) -> anyhow::Result<()> {
         let failure = Arc::new(Mutex::new(None));
-        let size = [520.0, 40.0];
+        let size = Self::SIZE;
         let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_title(dialog.title())
@@ -104,6 +113,24 @@ impl DialogApp {
         state.store(ctx, Self::field_id());
     }
 
+    /// Makes the window exactly as tall as a field `field_height` tall and
+    /// the margin round it, once the font is known: a window made for a
+    /// guessed height has room left over, or cuts the line.
+    fn fit_window(&mut self, ctx: &egui::Context, field_height: f32) {
+        let height = field_height + 2.0 * f32::from(Self::MARGIN);
+        if self
+            .fitted_height
+            .is_some_and(|fitted| (fitted - height).abs() < 0.5)
+        {
+            return;
+        }
+        self.fitted_height = Some(height);
+        let size = egui::vec2(Self::SIZE[0], height);
+        ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(size));
+        ctx.send_viewport_cmd(egui::ViewportCommand::MaxInnerSize(size));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+    }
+
     /// Draws the window in `ui` and does what the keys ask.
     pub fn show(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
@@ -134,11 +161,20 @@ impl DialogApp {
             self.dialog.text().clone_into(&mut self.text);
             Self::put_cursor(&ctx, &self.text, self.dialog.cursor());
         }
-        let output = egui::TextEdit::singleline(&mut self.text)
-            .id(Self::field_id())
-            .desired_width(f32::INFINITY)
-            .lock_focus(true)
-            .show(ui);
+        // The field fills the window's width, a few points in from its edges.
+        // Its height is a line of text, so the window is made as tall as that
+        // and the margins round it (below): no room is left over.
+        let output = egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(Self::MARGIN)))
+            .show(ui, |ui| {
+                egui::TextEdit::singleline(&mut self.text)
+                    .id(Self::field_id())
+                    .desired_width(f32::INFINITY)
+                    .lock_focus(true)
+                    .show(ui)
+            })
+            .inner;
+        self.fit_window(&ctx, output.response.rect.height());
         // The window's title names the field for a screen reader.
         let response = egui::Response::clone(&output.response).accessible_name(self.dialog.title());
         if !self.is_focused {
@@ -197,7 +233,7 @@ mod tests {
     /// A window on `dialog`, in a harness.
     fn harness_of(app: &mut DialogApp) -> Harness<'_> {
         Harness::builder()
-            .with_size([520.0, 40.0])
+            .with_size(DialogApp::SIZE)
             .build_ui(|ui| app.show(ui))
     }
 
@@ -256,5 +292,25 @@ mod tests {
         drop(harness);
         assert_eq!(app.text, "dance", "the line stays");
         assert_eq!(app.dialog.title(), "Command: unknown action `dance`");
+    }
+
+    #[test]
+    fn the_window_is_made_as_tall_as_its_field_and_margins() {
+        let mut app = app_of(Box::new(RunDialog::detached(Box::new(Recorder::default()))));
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        let field = harness.get_by_role(egui::accesskit::Role::TextInput).rect();
+        drop(harness);
+        let margin = f32::from(DialogApp::MARGIN);
+        assert_eq!(
+            app.fitted_height,
+            Some(field.height() + 2.0 * margin),
+            "a line and the margins, nothing more: {field:?}"
+        );
+        // (The test harness adds a margin of its own to the window.)
+        assert!(
+            field.width() > DialogApp::SIZE[0] - 2.0 * (margin + 8.0) - 1.0,
+            "as wide as the window less its margins: {field:?}"
+        );
     }
 }
