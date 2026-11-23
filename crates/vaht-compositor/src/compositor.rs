@@ -2831,6 +2831,7 @@ impl Compositor {
             }
         }
         self.sync_keyboard_focus();
+        self.refresh_pointer_focus();
         if self.window_manager.take_redraw() {
             self.schedule_render();
         }
@@ -3711,6 +3712,45 @@ impl Compositor {
         // where it went only in a new frame; elsewhere the host draws it.
         if self.backend.draws_pointer() && moved_from != location {
             self.schedule_render();
+        }
+    }
+
+    /// Tells the client surface that came under a still pointer that it is
+    /// there now. Windows open, move, change stack order and go fullscreen
+    /// without the mouse moving; without this the old surface keeps
+    /// `wl_pointer` focus, so a game that hides its cursor or locks the
+    /// pointer on enter does not get to do either until the mouse jiggles.
+    fn refresh_pointer_focus(&mut self) {
+        let pointer = self
+            .seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup");
+        if pointer.is_grabbed() {
+            return;
+        }
+        let location = self.pointer_location();
+        let dragged = self.dragged_window().map(|(window, _)| window);
+        let target = if self.menus.covers(location) {
+            None
+        } else {
+            self.scene().passing_through(dragged).target_at(location)
+        };
+        let under = target.as_ref().and_then(PointerTarget::client_surface);
+        if under.as_ref().map(|(surface, _)| surface) == pointer.current_focus().as_ref() {
+            return;
+        }
+        pointer.motion(
+            self,
+            under.clone(),
+            &MotionEvent {
+                location,
+                serial: SERIAL_COUNTER.next_serial(),
+                time: InputTime::now(),
+            },
+        );
+        pointer.frame(self);
+        if let Some((surface, _)) = under {
+            self.activate_pointer_constraint(&surface);
         }
     }
 

@@ -322,6 +322,17 @@ impl TestClient {
         self.state.pointer_position
     }
 
+    /// Returns whether vaht has told this client that the pointer is over
+    /// one of its surfaces.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn pointer_is_over_surface(&mut self) -> bool {
+        self.roundtrip();
+        self.state.pointer_entered.is_some()
+    }
+
     /// Redraws window `index` once for each of `colors`, as fast as it
     /// can, each frame waiting for the last to show (fifo, as Vulkan's
     /// FIFO present mode does); returns how vaht reported the last frame.
@@ -464,6 +475,21 @@ impl TestClient {
         // wait forever; once vaht has the commits, screenshots show them.
         let expected = self.state.first_draws + count;
         self.dispatch_until(|state| state.first_draws >= expected);
+        self.roundtrip();
+    }
+
+    /// Asks vaht to make window `index` fullscreen, as a game starting up
+    /// does, without moving the pointer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, or the connection to vaht fails.
+    pub fn make_window_fullscreen(&mut self, index: usize) {
+        let window = self.state.windows.get(index).expect("a window");
+        smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::XdgToplevel::set_fullscreen(
+            window.xdg_toplevel(),
+            None,
+        );
         self.roundtrip();
     }
 

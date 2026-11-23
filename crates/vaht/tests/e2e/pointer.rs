@@ -43,6 +43,24 @@ fn the_window_under_the_pointer_hears_how_the_mouse_moved() {
 }
 
 #[test]
+fn a_fullscreen_window_opening_under_a_still_pointer_takes_pointer_focus() {
+    let (vaht, mut game_client, _) = game();
+    assert!(game_client.pointer_is_over_surface());
+    let mut game = TestClient::connect(vaht.socket());
+    game.open_windows(1);
+    game.make_window_fullscreen(0);
+
+    assert!(
+        game.pointer_is_over_surface(),
+        "the game hears the pointer without it moving"
+    );
+    assert!(
+        !game_client.pointer_is_over_surface(),
+        "the game below no longer has it"
+    );
+}
+
+#[test]
 fn a_locked_pointer_stays_put_while_the_game_hears_the_mouse() {
     let (_vaht, mut client, middle) = game();
     assert!(
