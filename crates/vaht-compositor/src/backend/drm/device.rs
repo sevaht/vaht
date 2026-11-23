@@ -343,18 +343,13 @@ impl GpuDevice {
         Some(output)
     }
 
-    /// The `linux-dmabuf` versions a tranche for another GPU's sampling
-    /// is sent to, as Smithay's own compositor has them.
-    const SAMPLING_VERSIONS: std::ops::RangeInclusive<u32> = 3..=6;
-
     /// The `linux-dmabuf` versions the scan-out tranches are sent to.
     const SCANOUT_VERSIONS: std::ops::RangeInclusive<u32> = 4..=6;
 
     /// Returns the `linux-dmabuf` feedback for client surfaces on the
     /// display `surface` drives, as `context`'s GPUs read and its planes
-    /// scan out: the scan-out tranche lists only formats the renderer
-    /// reads too, so a buffer that cannot go on a plane can always be
-    /// drawn instead.
+    /// scan out: the scanout tranche lists only formats the renderer reads
+    /// too, so a buffer that cannot go on a plane can always be drawn.
     fn dmabuf_feedback(
         context: &DeviceContext<'_, '_>,
         surface: &DrmSurface,
@@ -383,41 +378,27 @@ impl GpuDevice {
             .intersection(&readable)
             .copied()
             .collect();
-        let builder = DmabufFeedbackBuilder::new(primary.dev_id(), context.primary_formats.clone());
-        let render = if render_node == primary {
-            builder.clone().build()
-        } else {
-            builder
-                .clone()
+        let feedback =
+            DmabufFeedbackBuilder::new(primary.dev_id(), context.primary_formats.clone())
+                .add_preference_tranche(
+                    surface.device_fd().dev_id().ok()?,
+                    TrancheFlags::Scanout,
+                    plane_formats,
+                    Self::SCANOUT_VERSIONS,
+                )
                 .add_preference_tranche(
                     render_node.dev_id(),
                     TrancheFlags::Sampling,
-                    render_formats.clone(),
-                    Self::SAMPLING_VERSIONS,
+                    render_formats,
+                    Self::SCANOUT_VERSIONS,
                 )
                 .build()
-        };
-        let scanout = builder
-            .add_preference_tranche(
-                surface.device_fd().dev_id().ok()?,
-                TrancheFlags::Scanout,
-                plane_formats,
-                Self::SCANOUT_VERSIONS,
-            )
-            .add_preference_tranche(
-                render_node.dev_id(),
-                TrancheFlags::Sampling,
-                render_formats,
-                Self::SCANOUT_VERSIONS,
-            )
-            .build();
-        match (render, scanout) {
-            (Ok(render), Ok(scanout)) => Some(SurfaceDmabufFeedback { render, scanout }),
-            (Err(error), _) | (_, Err(error)) => {
-                tracing::warn!(%error, "no dmabuf feedback for the monitor");
-                None
-            }
-        }
+                .map_err(|error| {
+                    tracing::warn!(%error, "no dmabuf feedback for the monitor");
+                    error
+                })
+                .ok()?;
+        Some(SurfaceDmabufFeedback { feedback })
     }
 
     /// Leaves the headset on `connector` dark, driven by `crtc` once a
@@ -831,7 +812,7 @@ impl Screen {
         let is_changed = !result.is_empty;
         let drawn = started.elapsed();
         if let Some(dmabuf_feedback) = &self.dmabuf_feedback {
-            scene.send_dmabuf_feedback(&self.output, dmabuf_feedback, &result.states);
+            scene.send_dmabuf_feedback(&self.output, dmabuf_feedback);
         }
         if is_changed {
             let feedback = scene.presentation_feedback(&self.output, &result.states);

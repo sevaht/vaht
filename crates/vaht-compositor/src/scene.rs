@@ -31,7 +31,6 @@ use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
-use smithay::backend::renderer::element::utils::select_dmabuf_feedback;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
 use smithay::backend::renderer::element::{AsRenderElements as _, Element as _};
 use smithay::backend::renderer::element::{
@@ -240,13 +239,16 @@ pub(crate) struct Scene<'state> {
 }
 
 /// The `linux-dmabuf` feedback for a client surface on one output.
+///
+/// Every tranche is one the renderer can read, including the scanout-preferred
+/// tranche, so this single feedback works whether vaht puts a surface straight
+/// on a plane or composites it. Keeping it unchanged is essential: NVIDIA's
+/// Vulkan WSI invalidates Wine's swapchain whenever the tranches change, which
+/// recreates the Steam overlay renderer and respawns its helper every frame.
 #[derive(Debug, Clone)]
 pub(crate) struct SurfaceDmabufFeedback {
-    /// For a surface vaht composites: formats the renderer reads.
-    pub(crate) render: DmabufFeedback,
-    /// For a surface put straight on a display plane: formats the plane
-    /// takes, first.
-    pub(crate) scanout: DmabufFeedback,
+    /// Scanout-friendly formats first, followed by every renderable format.
+    pub(crate) feedback: DmabufFeedback,
 }
 
 /// What vaht draws itself: the windows' frames, the taskbar, the menus and
@@ -389,25 +391,18 @@ impl<'state> Scene<'state> {
         feedback
     }
 
-    /// Tells each client surface shown mostly on `output` which buffers
-    /// suit it now (`linux-dmabuf` feedback): one the frame just put
-    /// straight on a display plane (`states`) is told the formats that
-    /// plane takes, so a fullscreen game keeps drawing buffers that can be
-    /// scanned out without a copy; the rest, those vaht composites.
-    pub(crate) fn send_dmabuf_feedback(
-        &self,
-        output: &Output,
-        feedback: &SurfaceDmabufFeedback,
-        states: &RenderElementStates,
-    ) {
+    /// Tells each client surface shown mostly on `output` which buffers suit
+    /// it now (`linux-dmabuf` feedback). The feedback is deliberately the same
+    /// for every surface and every frame, even when a framebuffer could not be
+    /// scanned out: a fullscreen game keeps drawing scanout-friendly buffers,
+    /// and vaht still composites any buffer whose format it can render.
+    pub(crate) fn send_dmabuf_feedback(&self, output: &Output, feedback: &SurfaceDmabufFeedback) {
         for root in self.client_surfaces(output) {
             send_dmabuf_feedback_surface_tree(
                 &root,
                 output,
                 surface_primary_scanout_output,
-                |surface, _| {
-                    select_dmabuf_feedback(surface, states, &feedback.render, &feedback.scanout)
-                },
+                |_, _| &feedback.feedback,
             );
         }
     }
