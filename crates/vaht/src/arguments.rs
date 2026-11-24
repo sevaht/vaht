@@ -380,6 +380,17 @@ pub enum ImportSource {
         /// them anyway; several print how many).
         #[arg(long)]
         notes: bool,
+        /// Keeps every variant a style of its own. By default variants of
+        /// one style (`Accents-blue_red`, `Accents-blue_pink`; or `Race`
+        /// and `Race-Sakura`) that differ only in values fold into one
+        /// style whose options choose them.
+        #[arg(long)]
+        separate: bool,
+        /// What to call the options of a folded family whose names have
+        /// several parts, in order: `--options base,accent` for
+        /// `Accents-blue_red` [default: `variant_1`, `variant_2`, ...].
+        #[arg(long, value_delimiter = ',')]
+        options: Vec<String>,
     },
 }
 

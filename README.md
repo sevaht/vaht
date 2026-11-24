@@ -15,7 +15,10 @@ to them.
 reports every line it could not convert. `vaht import fluxbox-style <path>...`
 converts just styles (colors, fonts, textures), from a style, a style
 directory, or a whole directory of them such as `/usr/share/fluxbox/styles`,
-without touching the rest of your configuration.
+without touching the rest of your configuration. Variants of one style (a
+style in many colors, as `Name-blue_red` and `Name-blue_pink` files) fold into
+one style with options, so a folder of 182 files becomes one style whose
+options choose its colors (`--separate` keeps them apart).
 
 Colors, fonts and textures are a *style* (`styles/<name>.toml`, the `style`
 setting). Which taskbar widgets, clock and window buttons are shown is a *layout*

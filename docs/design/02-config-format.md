@@ -1298,13 +1298,15 @@ height = "$bar"                    # `$name` inside text is the variable's text
   slate, red, orange, gold, cyan, indigo, pink, brown); they set the first seven
   variables and leave `dim` (unfocused text) alone. Any style that declares a
   `scheme` option with those variables can take them.
-- `vaht import` writes styles without options.
+- `vaht import fluxbox` writes styles without options; `fluxbox-style` folds
+  variants into options (§11).
 
 ## 11. `vaht import`
 
 ```
 vaht import fluxbox  [--from ~/.fluxbox] [--to ~/.config/vaht] [--force]
 vaht import fluxbox-style <path>... [--to ~/.config/vaht/styles] [--force] [--notes]
+                          [--separate] [--options base,accent]
 ```
 
 - **There is one importer, for the Fluxbox format (decided).** fluxland was
@@ -1325,8 +1327,8 @@ vaht import fluxbox-style <path>... [--to ~/.config/vaht/styles] [--force] [--no
   holding `theme.cfg`), or a directory of styles, which is searched through,
   nested directories included: a file in it counts when it reads as a Fluxbox
   style (a line setting a `window.`, `toolbar.` or `menu.` resource), so a
-  `README` is left alone. A style `Name` (or `Name.style`, or a directory
-  `Name/`) becomes `<to>/Name.toml`, `--to` being a directory, by default the
+  `README` is left alone. A style `Name` (or `Name.style` or `Name.cfg`, or a
+  directory `Name/`) becomes `<to>/Name.toml`, `--to` being a directory, by default the
   configuration directory's `styles`. Nothing is replaced without `--force`
   (so a second run over the same styles leaves the ones already there alone),
   a style that fails does not stop the others, and each is read as vaht reads
@@ -1334,6 +1336,25 @@ vaht import fluxbox-style <path>... [--to ~/.config/vaht/styles] [--force] [--no
   several print how many, and `--notes` lists them. Two styles of one run with
   the same name are not both written. Choosing the result is `vaht config set
   style Name`.
+- **Variants fold into options.** Style authors ship one style in many colors
+  as many files: `Accents-blue_red`, `Accents-blue_pink`, ..., or a style
+  and its `Name-Sakura` and `Name-Bubbles`. Converted one by one they are
+  hundreds of styles that differ in a few values, so a family is folded into
+  one style whose options choose those values (§10.5). A family is the
+  styles of one directory whose names share a start and differ by parts
+  joined with `_` (each part an option: `blue_red` is the choices `blue` and
+  `red` of two options, named `variant_1` and `variant_2`, or by `--options`),
+  or a style and the `<style>-<word>` styles beside it (one option, `variant`,
+  the style itself the choice `original`). The values that differ become
+  variables, one for each set of values that change together; when they are
+  all colors the variables are the option's shades, from the darkest
+  (`base_1` ... `base_4`), and otherwise they are named for where they are
+  used. It folds only when it holds: the styles are the same but for values,
+  and each value that differs follows one part of the name alone (one that
+  follows two cannot be said by options), or they stay the separate styles
+  they were. Each choice is every file's value, so the fold gives every
+  variant back, and the pairs that never were a file besides. `--separate`
+  keeps every variant a style of its own.
 - **Built so far:** `init` to `settings.toml`, `keys` to `bindings.toml`,
   `apps` to `rules.toml`, and the style `session.styleFile` names (a file,
   or a directory with `theme.cfg`) to `styles/<name>.toml`. What `init` sets

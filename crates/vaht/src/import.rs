@@ -56,10 +56,22 @@ enum Outcome {
     Failed,
 }
 
+/// How variants of one style are written: folded into one style with
+/// options, or each a style of its own.
+#[derive(Debug, Clone, Copy)]
+pub struct Folding<'names> {
+    /// Whether every variant stays a style of its own.
+    pub is_separate: bool,
+    /// What the options of a family whose names have several parts are
+    /// called, in order.
+    pub option_names: &'names [String],
+}
+
 /// Converts the Fluxbox styles at `paths` (each a style, or a directory of
-/// them) into the directory `to`, one `<name>.toml` each. `replace` replaces
-/// styles that exist; `all_notes` prints every line not converted (one style
-/// prints them anyway).
+/// them) into the directory `to`, one `<name>.toml` each (variants of one
+/// style folded into one, unless `folding` keeps them apart). `replace`
+/// replaces styles that exist; `all_notes` prints every line not converted
+/// (one style prints them anyway).
 ///
 /// A style that fails does not stop the others. The exit code is a failure if
 /// any failed, or if the one style asked for was left alone.
@@ -68,6 +80,7 @@ pub fn fluxbox_styles(
     paths: &[PathBuf],
     to: &Path,
     (replace, all_notes): (bool, bool),
+    folding: &Folding<'_>,
 ) -> ExitCode {
     let mut styles = Vec::new();
     for path in paths {
@@ -86,12 +99,29 @@ pub fn fluxbox_styles(
             }
         }
     }
-    let show_notes = all_notes || styles.len() == 1;
-    let mut taken = HashSet::new();
+    let sources = styles.len();
     let mut outcomes = Vec::new();
-    for style in &styles {
-        let outcome = convert_one(style, to, (replace, show_notes), &mut taken);
-        outcomes.push(outcome);
+    let mut converted = Vec::new();
+    for path in &styles {
+        match vaht_import::convert_style(path) {
+            Ok(style) => converted.push(style),
+            Err(error) => {
+                terminal::report_error(
+                    &anyhow::Error::new(error).context(path.display().to_string()),
+                );
+                outcomes.push(Outcome::Failed);
+            }
+        }
+    }
+    let unfolded = converted.len();
+    if !folding.is_separate {
+        converted = vaht_import::fold_variants(converted, folding.option_names);
+    }
+    let folded = unfolded - converted.len();
+    let show_notes = all_notes || sources == 1;
+    let mut taken = HashSet::new();
+    for style in &converted {
+        outcomes.push(write_one(style, to, (replace, show_notes), &mut taken));
     }
     let written = outcomes
         .iter()
@@ -105,7 +135,7 @@ pub fn fluxbox_styles(
         .iter()
         .filter(|outcome| matches!(outcome, Outcome::Failed))
         .count();
-    if styles.len() > 1 {
+    if sources > 1 {
         let notes: usize = outcomes
             .iter()
             .map(|outcome| match outcome {
@@ -114,9 +144,13 @@ pub fn fluxbox_styles(
             })
             .sum();
         terminal::print(&format!(
-            "\nConverted {written} of {} styles into {} ({left} left alone, {failed} failed); \
-             {notes} lines not converted{}.\n",
-            styles.len(),
+            "\nConverted {} in {} ({left} left alone, {failed} failed); {notes} lines not \
+             converted{}.\n",
+            if folded > 0 {
+                format!("{sources} styles into {written}")
+            } else {
+                format!("{written} of {sources} styles")
+            },
             to.display(),
             if all_notes {
                 ""
@@ -125,32 +159,25 @@ pub fn fluxbox_styles(
             },
         ));
     }
-    if failed > 0 || (styles.len() == 1 && left == 1) {
+    if failed > 0 || (sources == 1 && left == 1) {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
     }
 }
 
-/// Converts and writes the style at `path`, printing what happened.
-fn convert_one(
-    path: &Path,
+/// Writes the converted `converted` style, printing what happened.
+fn write_one(
+    converted: &vaht_import::ConvertedStyle,
     to: &Path,
     (replace, show_notes): (bool, bool),
     taken: &mut HashSet<String>,
 ) -> Outcome {
-    let converted = match vaht_import::convert_style(path) {
-        Ok(converted) => converted,
-        Err(error) => {
-            terminal::report_error(&anyhow::Error::new(error).context(path.display().to_string()));
-            return Outcome::Failed;
-        }
-    };
     if !taken.insert(converted.name().to_owned()) {
         terminal::report_error(&anyhow::anyhow!(
             "{}: its name, {}, is taken by another style of this run; convert them separately \
              or into other directories",
-            path.display(),
+            converted.source().display(),
             converted.name()
         ));
         return Outcome::Failed;
@@ -159,6 +186,14 @@ fn convert_one(
         Ok(written) => {
             let notes = converted.report().notes().len();
             let mut output = format!("Wrote {}", written.display());
+            if converted.variants() > 1 {
+                write!(
+                    output,
+                    " ({} variants folded into options)",
+                    converted.variants()
+                )
+                .expect("writing to a String cannot fail");
+            }
             if notes > 0 {
                 write!(output, " ({notes} lines not converted)")
                     .expect("writing to a String cannot fail");
@@ -179,7 +214,9 @@ fn convert_one(
             Outcome::Left
         }
         Err(error) => {
-            terminal::report_error(&anyhow::Error::new(error).context(path.display().to_string()));
+            terminal::report_error(
+                &anyhow::Error::new(error).context(converted.source().display().to_string()),
+            );
             Outcome::Failed
         }
     }

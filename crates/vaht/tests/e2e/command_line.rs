@@ -390,6 +390,109 @@ fn a_fluxbox_style_of_images_is_converted_with_its_images() {
     );
 }
 
+/// A style whose titlebar is `base` and whose label is `accent`.
+fn two_colored_style(base: &str, accent: &str) -> String {
+    format!(
+        "window.title.focus: Flat Solid\nwindow.title.focus.color: {base}\n\
+         window.label.focus: Flat Solid\nwindow.label.focus.color: {accent}\n\
+         menu.frame: Flat Solid\nmenu.frame.color: black\nmenu.frame.textColor: white\n"
+    )
+}
+
+#[test]
+fn variants_of_a_fluxbox_style_fold_into_one_style_with_options() {
+    let logs = log_directory();
+    let work = tempfile::tempdir().expect("a temporary directory");
+    let source = work.path().join("Pack");
+    std::fs::create_dir_all(&source).expect("made");
+    for (name, base, accent) in [
+        ("Pack-red_green", "#800000", "#008000"),
+        ("Pack-red_blue", "#800000", "#000080"),
+        ("Pack-dark-blue_green", "#000040", "#008000"),
+        ("Pack-dark-blue_red", "#000040", "#ff0000"),
+    ] {
+        std::fs::write(source.join(name), two_colored_style(base, accent)).expect("written");
+    }
+    let configuration = work.path().join("config");
+    let styles = configuration.join("styles");
+    let output = run_executable(
+        &[
+            "import",
+            "fluxbox-style",
+            source.to_str().expect("UTF-8"),
+            "--to",
+            styles.to_str().expect("UTF-8"),
+            "--options",
+            "base,accent",
+        ],
+        logs.path(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("4 variants folded into options"),
+        "{output:?}"
+    );
+    let written: Vec<String> = std::fs::read_dir(&styles)
+        .expect("read")
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(written, ["Pack.toml"], "one style, not four");
+    let style = std::fs::read_to_string(styles.join("Pack.toml")).expect("written");
+    assert!(style.contains("[options.base.dark_blue]"), "{style}");
+    assert!(style.contains("[options.accent.green]"), "{style}");
+    // A pair that never was a file is a choice of two options.
+    std::fs::write(
+        configuration.join("settings.toml"),
+        "style = \"Pack\"\nstyle_options = { base = \"red\", accent = \"red\" }\n",
+    )
+    .expect("written");
+    let checked = run_executable(
+        &[
+            "config",
+            "check",
+            "--config-directory",
+            configuration.to_str().expect("UTF-8"),
+        ],
+        logs.path(),
+    );
+    assert!(checked.status.success(), "{checked:?}");
+}
+
+#[test]
+fn variants_stay_separate_styles_when_asked() {
+    let logs = log_directory();
+    let work = tempfile::tempdir().expect("a temporary directory");
+    let source = work.path().join("Pack");
+    std::fs::create_dir_all(&source).expect("made");
+    for (name, base, accent) in [
+        ("Pack-red_green", "#800000", "#008000"),
+        ("Pack-red_blue", "#800000", "#000080"),
+    ] {
+        std::fs::write(source.join(name), two_colored_style(base, accent)).expect("written");
+    }
+    let styles = work.path().join("styles");
+    let output = run_executable(
+        &[
+            "import",
+            "fluxbox-style",
+            source.to_str().expect("UTF-8"),
+            "--to",
+            styles.to_str().expect("UTF-8"),
+            "--separate",
+        ],
+        logs.path(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let mut written: Vec<String> = std::fs::read_dir(&styles)
+        .expect("read")
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    written.sort();
+    assert_eq!(written, ["Pack-red_blue.toml", "Pack-red_green.toml"]);
+}
+
 #[test]
 fn a_fluxbox_style_converts_on_its_own_and_vaht_accepts_it() {
     let logs = log_directory();

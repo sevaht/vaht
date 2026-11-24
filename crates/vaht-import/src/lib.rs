@@ -19,6 +19,7 @@
 
 mod apps;
 mod command;
+mod fold;
 mod input;
 mod keys;
 mod menu;
@@ -34,6 +35,7 @@ mod wallpaper;
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub use fold::fold_variants;
 pub use pattern::RUN_DIALOG_APP_ID;
 pub use report::{Note, Reason, Report};
 
@@ -334,7 +336,7 @@ impl FluxboxSetup {
 
 /// Returns the name the vaht style converted from the style at `path` gets:
 /// the style's own (its directory's, for a `theme.cfg`, and without a
-/// `.style` extension), with anything but letters, digits, `-` and `_` made
+/// `.style` or `.cfg` extension), with anything but letters, digits, `-` and `_` made
 /// `-`; a style called `default` is `fluxbox-default`.
 pub(crate) fn style_name(path: &Path) -> String {
     let named = if path.file_name().is_some_and(|name| name == "theme.cfg") {
@@ -348,6 +350,7 @@ pub(crate) fn style_name(path: &Path) -> String {
         .unwrap_or_default();
     let name: String = file_name
         .strip_suffix(".style")
+        .or_else(|| file_name.strip_suffix(".cfg"))
         .unwrap_or(&file_name)
         .chars()
         .map(|character| {
@@ -438,9 +441,19 @@ pub struct ConvertedStyle {
     images: Vec<StyleImage>,
     /// What was not converted.
     report: Report,
+    /// How many variants of a style this folds into one with options: one if
+    /// it is a style as it was.
+    variants: usize,
 }
 
 impl ConvertedStyle {
+    /// Returns how many variants of a style this folds into one with options
+    /// (one for a style as it was).
+    #[must_use]
+    pub const fn variants(&self) -> usize {
+        self.variants
+    }
+
     /// Returns where the style came from.
     #[must_use]
     pub fn source(&self) -> &Path {
@@ -539,6 +552,7 @@ pub fn convert_style(path: &Path) -> Result<ConvertedStyle, ImportError> {
         ),
         images,
         report,
+        variants: 1,
     })
 }
 

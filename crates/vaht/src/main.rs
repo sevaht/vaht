@@ -68,12 +68,18 @@ fn main() -> ExitCode {
                     to,
                     force,
                     notes,
+                    separate,
+                    options,
                 },
         }) => {
             let to = to
                 .clone()
                 .unwrap_or_else(|| arguments.config_directory().join("styles"));
-            return vaht::import::fluxbox_styles(paths, &to, (*force, *notes));
+            let folding = vaht::import::Folding {
+                is_separate: *separate,
+                option_names: options,
+            };
+            return vaht::import::fluxbox_styles(paths, &to, (*force, *notes), &folding);
         }
         Some(Subcommand::IpcSchema) => return vaht::message::print_schema(),
         Some(Subcommand::Live(command)) => return run_live(command, arguments.json),
