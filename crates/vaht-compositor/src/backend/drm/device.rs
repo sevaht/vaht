@@ -16,7 +16,9 @@ use smithay::backend::allocator::gbm::GbmAllocator;
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
 use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
-use smithay::backend::drm::{DrmDeviceFd, DrmEventMetadata, DrmNode, DrmSurface, VrrSupport};
+use smithay::backend::drm::{
+    DrmDeviceFd, DrmEventMetadata, DrmNode, DrmSurface, NodeType, VrrSupport,
+};
 use smithay::backend::renderer::ImportDma as _;
 use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1::TrancheFlags;
 use smithay::wayland::dmabuf::DmabufFeedbackBuilder;
@@ -343,6 +345,18 @@ impl GpuDevice {
         Some(output)
     }
 
+    /// Returns whether the DRM node `display` (a device number) is a node of
+    /// the GPU `node` is one of: its primary, control and render nodes are
+    /// the one GPU.
+    fn is_same_gpu(display: u64, node: DrmNode) -> bool {
+        let primary_of = |node: DrmNode| {
+            node.node_with_type(NodeType::Primary)
+                .and_then(Result::ok)
+                .map_or(node.dev_id(), |primary| primary.dev_id())
+        };
+        DrmNode::from_dev_id(display).is_ok_and(|display| primary_of(display) == primary_of(node))
+    }
+
     /// The `linux-dmabuf` versions the scan-out tranches are sent to.
     const SCANOUT_VERSIONS: std::ops::RangeInclusive<u32> = 4..=6;
 
@@ -350,6 +364,15 @@ impl GpuDevice {
     /// display `surface` drives, as `context`'s GPUs read and its planes
     /// scan out: the scanout tranche lists only formats the renderer reads
     /// too, so a buffer that cannot go on a plane can always be drawn.
+    ///
+    /// It is the same whether a surface is on a plane now or not, and for as
+    /// long as the monitor lasts: a client that sees its feedback change
+    /// rebuilds its swapchain, and NVIDIA's Vulkan stack made a fullscreen
+    /// game do so every frame when the feedback followed each frame's
+    /// scan-out decision. The scanout tranche is offered only where the
+    /// display is on the GPU that renders: from a display on another GPU it
+    /// would send every client's buffers to that GPU, including the many
+    /// that are only composited.
     fn dmabuf_feedback(
         context: &DeviceContext<'_, '_>,
         surface: &DrmSurface,
@@ -378,26 +401,33 @@ impl GpuDevice {
             .intersection(&readable)
             .copied()
             .collect();
-        let feedback =
-            DmabufFeedbackBuilder::new(primary.dev_id(), context.primary_formats.clone())
-                .add_preference_tranche(
-                    surface.device_fd().dev_id().ok()?,
-                    TrancheFlags::Scanout,
-                    plane_formats,
-                    Self::SCANOUT_VERSIONS,
-                )
-                .add_preference_tranche(
-                    render_node.dev_id(),
-                    TrancheFlags::Sampling,
-                    render_formats,
-                    Self::SCANOUT_VERSIONS,
-                )
-                .build()
-                .map_err(|error| {
-                    tracing::warn!(%error, "no dmabuf feedback for the monitor");
-                    error
-                })
-                .ok()?;
+        let display = surface.device_fd().dev_id().ok()?;
+        let mut builder =
+            DmabufFeedbackBuilder::new(primary.dev_id(), context.primary_formats.clone());
+        let is_scanout_offered =
+            Self::is_same_gpu(display, primary) && plane_formats.iter().next().is_some();
+        tracing::debug!(is_scanout_offered, "dmabuf feedback for a monitor");
+        if is_scanout_offered {
+            builder = builder.add_preference_tranche(
+                display,
+                TrancheFlags::Scanout,
+                plane_formats,
+                Self::SCANOUT_VERSIONS,
+            );
+        }
+        let feedback = builder
+            .add_preference_tranche(
+                render_node.dev_id(),
+                TrancheFlags::Sampling,
+                render_formats,
+                Self::SCANOUT_VERSIONS,
+            )
+            .build()
+            .map_err(|error| {
+                tracing::warn!(%error, "no dmabuf feedback for the monitor");
+                error
+            })
+            .ok()?;
         Some(SurfaceDmabufFeedback { feedback })
     }
 

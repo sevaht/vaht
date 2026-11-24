@@ -448,13 +448,19 @@ rest only carries the decisions out.
 - **Input settings** (`[input]`, 02 §3) are applied to each pointing
   device as libinput reports it, and to all again on reload
   (`pointing_devices.rs`, tested with a recording device).
-- **Direct scan-out.** Each monitor builds `linux-dmabuf` feedback from
-  its planes when it connects (`device.rs`): after each frame, a surface
-  the frame put straight on a plane (a fullscreen game) is told the
-  formats those planes take first, so it keeps drawing buffers that need
-  no copy; the rest are told what the renderer reads. The scan-out
-  tranche lists only formats the renderer reads too, so a buffer that
-  cannot go on a plane is drawn instead.
+- **Direct scan-out.** Each monitor builds one `linux-dmabuf` feedback from
+  its planes when it connects (`device.rs`), and every surface on it is
+  told that feedback, unchanged, for as long as the monitor lasts: the
+  formats its planes take first, so a fullscreen game draws buffers that
+  need no copy, then what the renderer reads. The scan-out tranche lists
+  only formats the renderer reads too, so a buffer that cannot go on a
+  plane is drawn instead, and it is left out where the display is on
+  another GPU than the one that renders. The feedback does not follow each
+  frame's scan-out decision, as Smithay's example compositor's does: a
+  client that sees its feedback change rebuilds its swapchain, and
+  NVIDIA's Vulkan stack made Wine's do so every frame, which juddered a
+  fullscreen game and respawned the Steam overlay's helper at the same
+  rate.
 - **Not yet:** tearing (not in this Smithay; the upstream work is listed in
   "Tearing: not supported" above).
 - **First run on hardware**, from a free terminal: `vaht` (log in
