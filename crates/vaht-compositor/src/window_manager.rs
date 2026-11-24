@@ -308,12 +308,28 @@ impl WindowManager {
     /// focused if `settings` say new windows take focus. It is placed once
     /// its client commits a size.
     pub(crate) fn add_window(&mut self, settings: &Settings, ledger: &ResourceLedger) -> WindowId {
+        self.add_window_on(
+            settings,
+            ledger,
+            self.workspaces.current(),
+            settings.focus.focus_new_windows,
+        )
+    }
+
+    /// Starts managing a new window on `workspace`, focused if `is_focused`:
+    /// for one that takes the place of another of its program's, which
+    /// keeps where the other was and whether it had the focus.
+    pub(crate) fn add_window_on(
+        &mut self,
+        settings: &Settings,
+        ledger: &ResourceLedger,
+        workspace: Workspace,
+        is_focused: bool,
+    ) -> WindowId {
         let frame = Frame::new(settings.windows.frame.titlebar_layout(), ledger);
-        let id = self
-            .windows
-            .insert(frame, self.workspaces.current(), ledger);
+        let id = self.windows.insert(frame, workspace, ledger);
         tracing::debug!(window = %id, "window opened");
-        if settings.focus.focus_new_windows {
+        if is_focused {
             self.focus(Some(id));
         }
         id

@@ -67,6 +67,9 @@ pub(crate) struct Toplevel {
     /// What shows of a Wayland window's surface tree, for the geometry and
     /// extent it was last worked out for.
     visible: std::cell::RefCell<Option<VisibleParts>>,
+    /// Where the window it took the place of was, if it took one's: it is
+    /// first placed there, not by the pointer.
+    placement_hint: Option<Point<i32, Logical>>,
 }
 
 /// The part of a Wayland window's surface tree that shows: its window
@@ -90,6 +93,7 @@ impl Toplevel {
             told_area: None,
             confirmed_origin: None,
             visible: std::cell::RefCell::default(),
+            placement_hint: None,
         }
     }
 
@@ -101,6 +105,7 @@ impl Toplevel {
             told_area: None,
             confirmed_origin: None,
             visible: std::cell::RefCell::default(),
+            placement_hint: None,
         }
     }
 
@@ -128,6 +133,18 @@ impl Toplevel {
     /// confirmation, `placed`, where vaht put it.
     pub(crate) fn pointer_origin(&self, placed: Point<i32, Logical>) -> Point<i32, Logical> {
         self.x11().and(self.confirmed_origin).unwrap_or(placed)
+    }
+
+    /// Has the window first placed where `point` is (the middle of the
+    /// window it takes the place of), if there is one.
+    pub(crate) const fn place_near(&mut self, point: Option<Point<i32, Logical>>) {
+        self.placement_hint = point;
+    }
+
+    /// Returns where the window is to be first placed, in place of the
+    /// pointer, if it took another's place.
+    pub(crate) const fn placement_hint(&self) -> Option<Point<i32, Logical>> {
+        self.placement_hint
     }
 
     /// Returns the X11 side of the window, if it is an X11 window.

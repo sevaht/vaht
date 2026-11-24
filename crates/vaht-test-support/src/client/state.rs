@@ -28,7 +28,8 @@ use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::z
 use smithay_client_toolkit::reexports::protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::{self, ZwpRelativePointerV1};
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
 use smithay_client_toolkit::reexports::protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
-use smithay_client_toolkit::reexports::client::{Connection, QueueHandle, WEnum};
+use smithay_client_toolkit::reexports::client::{Connection, Dispatch, QueueHandle, WEnum};
+use smithay_client_toolkit::reexports::protocols::xdg::shell::client::{xdg_surface, xdg_toplevel};
 use smithay_client_toolkit::reexports::protocols::wp::presentation_time::client::wp_presentation::{self, WpPresentation};
 use smithay_client_toolkit::reexports::protocols::wp::pointer_warp::v1::client::wp_pointer_warp_v1::WpPointerWarpV1;
 use smithay_client_toolkit::reexports::protocols::wp::fifo::v1::client::wp_fifo_manager_v1::WpFifoManagerV1;
@@ -113,6 +114,13 @@ pub(super) struct ClientState {
     pub(super) dialogs: XdgWmDialogV1,
     /// The buffers of icons the client drew, kept while vaht may read them.
     pub(super) icon_buffers: Vec<smithay_client_toolkit::shm::slot::Buffer>,
+    /// The windows whose roles were given up, kept so that dropping them
+    /// does not destroy the surfaces, which have new roles.
+    pub(super) retired_windows: Vec<Window>,
+    /// The xdg surfaces and toplevels made by hand.
+    pub(super) hand_made_roles: Vec<(xdg_surface::XdgSurface, xdg_toplevel::XdgToplevel)>,
+    /// How many times a surface made by hand was configured.
+    pub(super) hand_made_configures: usize,
     /// Shared-memory buffers.
     pub(super) shm: Shm,
     /// Where buffers are allocated.
@@ -234,6 +242,9 @@ impl ClientState {
             toplevel_icons: bind(globals, handle, "xdg_toplevel_icon_manager_v1"),
             dialogs: bind(globals, handle, "xdg_wm_dialog_v1"),
             icon_buffers: Vec::new(),
+            retired_windows: Vec::new(),
+            hand_made_roles: Vec::new(),
+            hand_made_configures: 0,
             pool: SlotPool::new(pool_size, &shm).expect("a shared-memory pool"),
             shm,
             windows: Vec::new(),
@@ -386,6 +397,40 @@ impl ClientState {
 /// User data for objects whose events the client ignores or has none.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct NoEvents;
+
+/// The events of an xdg surface and toplevel a test made by hand, to give a
+/// surface a new role: the surface is configured, and the configure is
+/// acknowledged.
+#[derive(Debug)]
+pub(super) struct HandMadeRole;
+
+impl Dispatch<xdg_surface::XdgSurface, HandMadeRole> for ClientState {
+    fn event(
+        state: &mut Self,
+        proxy: &xdg_surface::XdgSurface,
+        event: xdg_surface::Event,
+        _: &HandMadeRole,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            proxy.ack_configure(serial);
+            state.hand_made_configures += 1;
+        }
+    }
+}
+
+impl Dispatch<xdg_toplevel::XdgToplevel, HandMadeRole> for ClientState {
+    fn event(
+        _: &mut Self,
+        _: &xdg_toplevel::XdgToplevel,
+        _: xdg_toplevel::Event,
+        _: &HandMadeRole,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
 
 /// Implements [`Dispatch2`] for interfaces whose events are ignored.
 macro_rules! ignore_events {

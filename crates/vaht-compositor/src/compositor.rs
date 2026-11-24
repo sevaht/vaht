@@ -119,7 +119,7 @@ use crate::toplevel_list::{ForeignToplevels, ToplevelList};
 use crate::toplevel_management::{
     Covering, HandleRequest, ToplevelManagement, ToplevelStates, WindowFacts,
 };
-use crate::toplevels::{Toplevel, Toplevels};
+use crate::toplevels::{Succession, Toplevel, Toplevels};
 use crate::touch;
 use crate::tray::{TrayAction, TrayMenu};
 use crate::window_manager::{
@@ -1871,19 +1871,50 @@ impl Compositor {
     }
 
     /// Starts managing the window of a new xdg-shell toplevel.
+    ///
+    /// A program may give its surface a new toplevel in place of the one it
+    /// destroyed (Wine does when a window gains a caption), which is the
+    /// same window to the person using it: it takes the focus only if the
+    /// old one had it, and is placed where the old one was.
     pub(crate) fn add_window(&mut self, surface: ToplevelSurface) {
-        let window = self
-            .window_manager
-            .add_window(&self.config.settings, &self.ledger);
-        self.toplevels
-            .insert(window, Toplevel::from_xdg(surface), &self.ledger);
+        let successor = self.toplevels.take_succession_of(surface.wl_surface());
+        let window = match &successor {
+            Some(removed) => self.window_manager.add_window_on(
+                &self.config.settings,
+                &self.ledger,
+                removed.workspace,
+                removed.was_focused,
+            ),
+            None => self
+                .window_manager
+                .add_window(&self.config.settings, &self.ledger),
+        };
+        let mut toplevel = Toplevel::from_xdg(surface);
+        toplevel.place_near(successor.map(|removed| removed.center));
+        self.toplevels.insert(window, toplevel, &self.ledger);
     }
 
     /// Stops managing the window whose root surface is `surface`.
     pub(crate) fn remove_window(&mut self, surface: &WlSurface) {
         if let Some(window) = self.toplevels.remove(surface) {
+            let succession = self.succession_of(window, surface);
+            self.toplevels.expect_successor(succession);
             self.window_manager.remove_window(window);
         }
+    }
+
+    /// Returns what the next toplevel of `surface` takes from `window`,
+    /// which is going: where it was and whether it had the focus. Only a
+    /// Wayland window's surface outlives it.
+    fn succession_of(&self, window: WindowId, surface: &WlSurface) -> Option<Succession> {
+        let removed = self.window_manager.window(window)?;
+        let area = removed.content_area();
+        Some(Succession::new(
+            surface.clone(),
+            self.window_manager.focused() == Some(window),
+            removed.workspace(),
+            area.loc + Point::from((area.size.w / 2, area.size.h / 2)),
+        ))
     }
 
     /// Returns the window attached to the drag and drop in progress
@@ -2992,7 +3023,13 @@ impl Compositor {
         // Before the commit, so a new dialog is placed over its parent.
         let parent = parent.and_then(|link| self.toplevels.window_named(&link));
         self.window_manager.set_family(window, parent, is_modal);
-        let pointer = self.pointer_location().to_i32_round();
+        // A window that took another's place is placed by where that was,
+        // not by where the pointer is.
+        let pointer = self
+            .toplevels
+            .get(window)
+            .and_then(Toplevel::placement_hint)
+            .unwrap_or_else(|| self.pointer_location().to_i32_round());
         self.window_manager
             .commit(window, committed, &self.config, pointer);
         // The first configure carries what the window manager asked.

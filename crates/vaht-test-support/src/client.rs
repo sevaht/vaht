@@ -43,6 +43,9 @@ use smithay_client_toolkit::reexports::protocols::wp::commit_timing::v1::client:
 use smithay_client_toolkit::reexports::protocols::ext::image_capture_source::v1::client::ext_image_capture_source_v1::ExtImageCaptureSourceV1;
 use smithay_client_toolkit::reexports::protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
 use smithay_client_toolkit::shell::WaylandSurface as _;
+use smithay_client_toolkit::globals::ProvidesBoundGlobal;
+use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
+use smithay_client_toolkit::shell::xdg::XdgSurface as _;
 use smithay_client_toolkit::shell::wlr_layer::{
     Anchor, KeyboardInteractivity, Layer, LayerSurface,
 };
@@ -54,8 +57,8 @@ use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::z
 use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::zwp_text_input_v3::ZwpTextInputV3;
 use self::state::{
     CaptureFrameEvents, CaptureSessionEvents, ClientState, FeedbackEvents, IdleEvents,
-    KeyboardEvents, LockEvents, LockSurfaceEvents, NoEvents, PointerEvents, PresentationEvents,
-    RelativeMotionEvents, SessionLockEvents, TextFieldEvents, bind,
+    HandMadeRole, KeyboardEvents, LockEvents, LockSurfaceEvents, NoEvents, PointerEvents,
+    PresentationEvents, RelativeMotionEvents, SessionLockEvents, TextFieldEvents, bind,
 };
 use crate::screenshot::Screenshot;
 
@@ -486,6 +489,45 @@ impl TestClient {
         // wait forever; once vaht has the commits, screenshots show them.
         let expected = self.state.first_draws + count;
         self.dispatch_until(|state| state.first_draws >= expected);
+        self.roundtrip();
+    }
+
+    /// Has window `index` give up its toplevel and xdg surface and make new
+    /// ones for the same `wl_surface`, titled "recreated", as Wine does when
+    /// a window gains a caption, and waits until vaht has the new window.
+    /// The window must be one without decoration negotiation
+    /// ([`Self::open_windows_without_decoration_negotiation`]), and is
+    /// no longer one of the client's windows.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, or the connection to vaht fails.
+    pub fn recreate_window_role(&mut self, index: usize) {
+        let handle = self.queue.handle();
+        assert!(index < self.state.windows.len(), "a window");
+        let window = self.state.windows.remove(index);
+        let surface = window.wl_surface().clone();
+        window.xdg_toplevel().destroy();
+        window.xdg_surface().destroy();
+        surface.attach(None, 0, 0);
+        surface.commit();
+        // Dropping the window would destroy the surface, which has a new
+        // role.
+        self.state.retired_windows.push(window);
+        let wm_base: XdgWmBase =
+            ProvidesBoundGlobal::<XdgWmBase, 5>::bound_global(&self.state.xdg_shell)
+                .expect("vaht offers xdg_wm_base");
+        let xdg_surface = wm_base.get_xdg_surface(&surface, &handle, HandMadeRole);
+        let toplevel = xdg_surface.get_toplevel(&handle, HandMadeRole);
+        toplevel.set_app_id("vaht.test".to_owned());
+        toplevel.set_title("recreated".to_owned());
+        surface.commit();
+        let expected = self.state.hand_made_configures + 1;
+        self.dispatch_until(|state| state.hand_made_configures >= expected);
+        let buffer = self.state.icon_buffer(64, WINDOW_COLOR);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        self.state.hand_made_roles.push((xdg_surface, toplevel));
         self.roundtrip();
     }
 

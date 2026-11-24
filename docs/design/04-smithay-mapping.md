@@ -52,13 +52,13 @@ re-renders its buffer only when its content changes.
 
 | Protocol | Why vaht needs it | Note |
 |---|---|---|
-| wlr-output-management | wlr-randr, kanshi, outside tools | **built** (§8.9), through the same output arrangement as `outputs.toml` and its profiles |
-| wlr-foreign-toplevel-management | Taskbars and docks outside the compositor | **built** (§8.6) |
-| ext-workspace | External pagers | **built** (§8.10) |
+| wlr-output-management | wlr-randr, kanshi, outside tools | **built** (§8.10), through the same output arrangement as `outputs.toml` and its profiles |
+| wlr-foreign-toplevel-management | Taskbars and docks outside the compositor | **built** (§8.7) |
+| ext-workspace | External pagers | **built** (§8.11) |
 | wlr-screencopy | Older capture tools (wf-recorder, OBS's wlrobs, grim before 1.5) | **built**, by vaht (not in this Smithay): shared memory, and GPU buffers for a whole output; `copy_with_damage` waits for vaht's next frame; a region is cut from the output's image, shared memory only, not on a rotated output (`protocols/screencopy.rs`). The installed xdg-desktop-portal-wlr 0.8.4 and grim 1.5 use ext-image-copy-capture |
 | xdg-toplevel-drag | Browsers dragging a tab out | **built**, by vaht (not in this Smithay): the window attached to a drag follows the pointer at its offset, is no drop target, and stays where dropped (`protocols/toplevel_drag.rs`) |
-| wlr-gamma-control | Night-light tools | **built** (§8.8) |
-| wlr-output-power-management | DPMS via `wlopm` | **built** (§8.7) |
+| wlr-gamma-control | Night-light tools | **built** (§8.9) |
+| wlr-output-power-management | DPMS via `wlopm` | **built** (§8.8) |
 | **tearing-control** | Games | not built: needs async page flips, which Smithay lacks ([#1948](https://github.com/Smithay/smithay/pull/1948), §3 below) |
 | color-management | HDR | **built**, by vaht (Smithay#982 and #1143 are drafts): `wp_color_manager_v1` v1, parametric descriptions (named or given primaries; sRGB, gamma 2.2/2.8, BT.1886, linear and PQ; luminances and mastering metadata) and Windows-scRGB, no ICC (`protocols/color_management.rs`). Each element is converted from its surface's description into its output's by a texture shader of vaht's (`crate::color`, `scene/color_element.rs`); converted elements stay off planes. A monitor in HDR gets its connector's `Colorspace` and `HDR_OUTPUT_METADATA` set by vaht (`backend/drm/hdr.rs`), since Smithay sets neither. `tools/smithay-watch` follows both drafts |
 | color-representation | YCbCr buffers' matrix and range | later |
@@ -307,7 +307,7 @@ pointer and keyboard, layer shell, and security contexts themselves. The
 test `a_sandboxed_program_is_offered_windows_but_not_the_privileged_globals`
 drives a sandbox engine's socket and lists what each side is offered.
 
-### 8.5 Input methods
+### 8.6 Input methods
 
 fcitx5 or ibus binds `zwp_input_method_v2` and types for the focused
 window through its `zwp_text_input_v3`; Smithay routes the text and
@@ -318,7 +318,7 @@ method, which reads every key. The test
 `an_input_method_types_into_the_focused_window` types Japanese through a
 test input method into a test window.
 
-### 8.6 Taskbars outside vaht
+### 8.7 Taskbars outside vaht
 
 `zwlr_foreign_toplevel_manager_v1` is not in Smithay; vaht serves it
 (`toplevel_management.rs`, `protocols/toplevel_management.rs`), as
@@ -329,7 +329,7 @@ close a window go to the window manager. Sandboxed programs are not
 offered it. The test `a_taskbar_outside_vaht_sees_and_works_the_windows`
 works two windows through it.
 
-### 8.7 Monitors off and on
+### 8.8 Monitors off and on
 
 `zwlr_output_power_manager_v1` (`output_power.rs`) turns an output's
 monitor off without changing the layout, as `wlopm` and swayidle's
@@ -340,7 +340,7 @@ with no way back; each control is told the mode whenever it changes. The
 test `an_output_turned_off_comes_on_again_when_asked_or_at_any_input`
 drives two controls and the pointer.
 
-### 8.8 Night light
+### 8.9 Night light
 
 `zwlr_gamma_control_manager_v1` (`gamma.rs`) lets one program at a time
 set an output's gamma ramps, as wlsunset and gammastep do: it is told the
@@ -353,7 +353,7 @@ test `one_night_light_at_a_time_changes_an_outputs_colors` drives three
 controls. Not yet seen on hardware: whether NVIDIA's driver takes the
 legacy call.
 
-### 8.9 Outputs arranged by other programs
+### 8.10 Outputs arranged by other programs
 
 `zwlr_output_manager_v1` (`output_management.rs`) gives each program a
 head per connected output with its modes and state, told again with a
@@ -367,7 +367,7 @@ made for outputs since changed is cancelled. The test
 `a_program_arranging_outputs_sees_them_and_moves_them` swaps two outputs,
 is cancelled, fails to turn both off, and turns one off.
 
-### 8.10 Pagers outside vaht
+### 8.11 Pagers outside vaht
 
 `ext_workspace_manager_v1` (`workspace_pager.rs`): vaht's workspaces are
 shared by every output, as Fluxbox's are, so a pager gets one group on
@@ -377,7 +377,7 @@ removed, and the group can make one at the end, named; requests wait for
 the commit. The test `a_pager_outside_vaht_sees_and_switches_the_workspaces`
 switches, makes and removes workspaces through it.
 
-### 8.11 Dialogs
+### 8.12 Dialogs
 
 A window names the window it is a dialog of (xdg-shell `set_parent`, X11
 `WM_TRANSIENT_FOR`), and may be modal (`xdg_wm_dialog_v1`'s `set_modal`,
@@ -392,6 +392,20 @@ loops. Rules and other matchers tell dialogs apart with `transient`, which
 `vaht import` writes for Fluxbox's `[app]` (`false`) and `[transient]`
 (`true`) blocks; IPC gives each window's `parent`.
 
+
+### 8.13 A program that remakes its window's toplevel
+
+A program may destroy a window's `xdg_toplevel` and `xdg_surface` and make
+new ones for the same `wl_surface`: Wine does when a window gains a caption
+(it can only ask for a server-side frame for a toplevel that is not yet
+mapped), as a game does when it leaves fullscreen on losing the focus. To
+vaht that was one window closing and another opening, and a new window takes
+the focus and is placed under the pointer: leaving the game with Alt+Tab
+handed the focus straight back, and a game on one monitor followed the
+pointer to another. A toplevel of the surface a window just had (within a
+second) now takes that window's place: the focus only if the old window had
+it, its workspace, and its output (`Succession`, in `toplevels.rs`). The
+tests are `a_window_that_replaces_its_toplevel_*`.
 
 ## 9. The DRM backend (built; not yet run on hardware)
 

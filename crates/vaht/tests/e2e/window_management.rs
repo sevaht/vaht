@@ -6,7 +6,9 @@
 //! defaults bind what they say; only the placement is set, to cascade.
 
 use std::path::Path;
+use std::process::Command;
 
+use vaht_ipc::{Reply, WindowInfo};
 use vaht_test_support::{
     BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR,
     WINDOW_SIZE, keys,
@@ -283,5 +285,102 @@ fn a_window_taking_every_key_gets_super_up_instead_of_vaht() {
         desktop.client.received_keys(),
         [keys::LEFT_SUPER, keys::UP],
         "the window got the keys"
+    );
+}
+
+/// Returns the windows `vaht windows` lists, topmost first.
+fn listed_windows(vaht: &HeadlessVaht) -> Vec<WindowInfo> {
+    let output = Command::new(EXECUTABLE)
+        .args(["--json", "windows"])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .output()
+        .expect("vaht runs");
+    let reply: Reply = serde_json::from_slice(&output.stdout).expect("one JSON reply");
+    let Reply::Windows { windows } = reply else {
+        panic!("not a window list: {reply:?}");
+    };
+    windows
+}
+
+/// Returns the title of the window that has the focus.
+fn focused_title(vaht: &HeadlessVaht) -> String {
+    listed_windows(vaht)
+        .into_iter()
+        .find(|window| window.is_focused)
+        .map(|window| window.title)
+        .expect("a window has the focus")
+}
+
+#[test]
+fn a_window_that_replaces_its_toplevel_does_not_take_the_focus_it_did_not_have() {
+    // Wine destroys and makes a window's toplevel when the window gains a
+    // caption, which a game does as it loses the focus: the new window must
+    // not take the focus back, or the game could not be left.
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows_without_decoration_negotiation(2);
+    assert_eq!(focused_title(&vaht), "test window 2");
+    client.recreate_window_role(0);
+    assert_eq!(
+        listed_windows(&vaht).len(),
+        2,
+        "one window replaced the other"
+    );
+    assert_eq!(
+        focused_title(&vaht),
+        "test window 2",
+        "the focus stayed where it was"
+    );
+}
+
+#[test]
+fn a_window_that_replaces_its_toplevel_keeps_the_focus_it_had() {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows_without_decoration_negotiation(2);
+    client.recreate_window_role(1);
+    assert_eq!(focused_title(&vaht), "recreated");
+}
+
+#[test]
+fn a_window_that_replaces_its_toplevel_stays_on_its_output() {
+    // The pointer is on the other output when the new toplevel appears: the
+    // window is placed where the old one was, not where the pointer is.
+    let vaht = HeadlessVaht::start_with_outputs(
+        Path::new(EXECUTABLE),
+        "800x600,640x480",
+        &[("settings.toml", b"[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.move_pointer_to(1000, 300);
+    client.open_windows_without_decoration_negotiation(1);
+    assert!(
+        client
+            .screenshot_of("HEADLESS-2")
+            .bounds_of(WINDOW_COLOR)
+            .is_some(),
+        "the window opened on the second output, where the pointer was"
+    );
+    client.move_pointer_to(400, 300);
+    client.recreate_window_role(0);
+    assert!(
+        client
+            .screenshot_of("HEADLESS-2")
+            .bounds_of(WINDOW_COLOR)
+            .is_some(),
+        "the new window is on the second output"
+    );
+    assert!(
+        client
+            .screenshot_of("HEADLESS-1")
+            .bounds_of(WINDOW_COLOR)
+            .is_none(),
+        "and not on the one the pointer is on"
     );
 }
