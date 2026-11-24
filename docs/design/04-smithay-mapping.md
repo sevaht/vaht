@@ -402,14 +402,16 @@ mapped), as a game does when it leaves fullscreen on losing the focus. To
 vaht that was one window closing and another opening, and a new window takes
 the focus and is placed under the pointer: leaving the game with Alt+Tab
 handed the focus straight back, and a game on one monitor followed the
-pointer to another. A toplevel made for the surface a window had, in the
-same batch of requests that destroyed that window's toplevel, now takes the
-window's place: the focus only if the old window had it, its workspace, and
-its output (`Succession`, in `toplevels.rs`). The window is remembered only
-until the event loop has handled the batch (an idle callback), not for a
-length of time: a program that destroys a window and makes another a moment
-later has made another window. The tests are
-`a_window_that_replaces_its_toplevel_*`.
+pointer to another. The window's identity to its program is its `wl_surface`,
+which outlives the toplevel, so the surface now remembers the window it had
+(`Succession`, in `toplevels.rs`) until it gets a new toplevel or is
+destroyed: the new toplevel takes the window's place, with the focus only if
+the old window had it, and on its workspace and output. It is not a matter of
+time or of one batch of requests: Dark Souls Remastered destroys its toplevel
+about 40 ms before it makes the next one, and a first version that matched
+within one batch or one second did not keep it from taking the focus. The
+tests are `a_window_that_replaces_its_toplevel_*` and
+`a_window_remade_after_*`.
 
 ## 9. The DRM backend (built; not yet run on hardware)
 

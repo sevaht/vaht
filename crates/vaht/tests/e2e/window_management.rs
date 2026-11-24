@@ -386,9 +386,10 @@ fn a_window_that_replaces_its_toplevel_stays_on_its_output() {
 }
 
 #[test]
-fn a_window_made_after_another_was_closed_is_a_new_window_that_takes_the_focus() {
-    // Only a toplevel made in the same batch of requests as the old one's
-    // destruction is the same window remade: no length of time makes it so.
+fn a_window_remade_after_vaht_handled_the_old_toplevel_s_destruction_is_the_same_window() {
+    // Dark Souls Remastered's toplevel is destroyed about 40 ms before the
+    // new one is made, in another batch of requests: no length of time and no
+    // batch makes it a different window, only the surface being another.
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),
         &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
@@ -396,5 +397,10 @@ fn a_window_made_after_another_was_closed_is_a_new_window_that_takes_the_focus()
     let mut client = TestClient::connect(vaht.socket());
     client.open_windows_without_decoration_negotiation(2);
     client.replace_window_after_closing_it(0);
-    assert_eq!(focused_title(&vaht), "recreated");
+    assert_eq!(listed_windows(&vaht).len(), 2);
+    assert_eq!(
+        focused_title(&vaht),
+        "test window 2",
+        "the remade window did not take the focus"
+    );
 }

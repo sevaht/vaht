@@ -1899,10 +1899,6 @@ impl Compositor {
         if let Some(window) = self.toplevels.remove(surface) {
             let succession = self.succession_of(window, surface);
             self.toplevels.expect_successor(succession);
-            // A program that remakes its toplevel does it in one batch of
-            // requests, which is handled before the loop idles.
-            self.loop_handle
-                .insert_idle(|compositor| compositor.toplevels.expect_successor(None));
             self.window_manager.remove_window(window);
         }
     }

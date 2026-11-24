@@ -10,6 +10,7 @@ mod toplevel;
 
 use std::collections::HashMap;
 
+use smithay::reexports::wayland_server::Resource as _;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point};
 use smithay::xwayland::X11Surface;
@@ -18,13 +19,14 @@ pub(crate) use self::toplevel::{ParentLink, Toplevel};
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 use crate::window_manager::{WindowId, Workspace};
 
-/// A window that was just removed, whose surface its program may give a new
-/// toplevel in the same batch of requests: Wine destroys and makes the
-/// toplevel of a window that gains a caption, and that is the same window to
-/// the person using it. It is forgotten when the batch has been handled.
+/// What a surface remembers of the window it had, for a new toplevel its
+/// program may give it: Wine destroys and makes the toplevel of a window that
+/// gains a caption, and that is the same window to the person using it. The
+/// surface is the window's identity; it is forgotten with the surface, not
+/// after a length of time.
 #[derive(Debug)]
 pub(crate) struct Succession {
-    /// The surface the next toplevel is of.
+    /// The surface, which the window was of and the next toplevel is of.
     surface: WlSurface,
     /// Whether the window had the keyboard focus.
     pub(crate) was_focused: bool,
@@ -35,7 +37,7 @@ pub(crate) struct Succession {
 }
 
 impl Succession {
-    /// Returns the succession of a window of `surface` that was on
+    /// Returns what the surface `surface` remembers of a window that was on
     /// `workspace`, its content around `center`, and had the focus if
     /// `was_focused`, which has just gone.
     pub(crate) fn new(
@@ -57,6 +59,12 @@ impl Succession {
     fn is_succeeded_by(&self, surface: &WlSurface) -> bool {
         self.surface == *surface
     }
+
+    /// Returns whether the surface lives, so that it may have a new
+    /// toplevel.
+    fn is_alive(&self) -> bool {
+        self.surface.is_alive()
+    }
 }
 
 /// Every window's toplevel, by window.
@@ -64,24 +72,32 @@ impl Succession {
 pub(crate) struct Toplevels {
     /// Each toplevel, with its count, by the window it stands for.
     by_window: HashMap<WindowId, (Toplevel, Tracked)>,
-    /// The window removed last, if its surface may be given a new toplevel
-    /// at once.
-    succession: Option<Succession>,
+    /// What each surface that lost its toplevel remembers of the window,
+    /// until it gets a new one or is destroyed.
+    successions: Vec<Succession>,
 }
 
 impl Toplevels {
-    /// Notes the window that was just removed, if its surface may get a new
-    /// toplevel.
+    /// Notes what the surface of the window that was just removed
+    /// remembers of it, in case its program gives the surface a new
+    /// toplevel; what the surfaces destroyed since remembered is dropped.
     pub(crate) fn expect_successor(&mut self, succession: Option<Succession>) {
-        self.succession = succession;
+        self.successions.retain(Succession::is_alive);
+        if let Some(succession) = succession {
+            self.successions
+                .retain(|known| !known.is_succeeded_by(&succession.surface));
+            self.successions.push(succession);
+        }
     }
 
-    /// Takes the succession of the window removed last, if a new toplevel of
-    /// `surface` takes its place.
+    /// Takes what `surface` remembers of the window it had, if it had one
+    /// and a new toplevel of it takes the window's place.
     pub(crate) fn take_succession_of(&mut self, surface: &WlSurface) -> Option<Succession> {
-        self.succession
-            .take()
-            .filter(|removed| removed.is_succeeded_by(surface))
+        let position = self
+            .successions
+            .iter()
+            .position(|known| known.is_succeeded_by(surface))?;
+        Some(self.successions.swap_remove(position))
     }
 
     /// Returns the toplevel of `window`, if it has one.

@@ -507,8 +507,8 @@ impl TestClient {
     }
 
     /// Like [`Self::recreate_window_role`], but the new toplevel is made
-    /// only after vaht has handled the destruction of the old one: another
-    /// window, not the same one remade.
+    /// only after vaht has handled the destruction of the old one, as
+    /// Dark Souls Remastered's is.
     ///
     /// # Panics
     ///
