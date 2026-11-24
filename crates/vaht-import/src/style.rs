@@ -1048,12 +1048,16 @@ impl StyleFile {
         if spec.contains("parentrelative") || spec.contains("parent_relative") {
             return TextureSource::Parent;
         }
-        // The image is the texture where the style asks for a pixmap, or asks
-        // for nothing else (an empty texture beside a pixmap, as Neon's).
-        let asks_for_an_image = spec.trim().is_empty() || spec.contains("pixmap");
-        if let Some(image) = asks_for_an_image.then(|| self.pixmap_image(name)).flatten() {
+        // A pixmap the style gives is the texture, whatever the rest of the
+        // texture says (Fluxbox draws a `flat solid` toolbar with the
+        // `toolbar.pixmap` it names, as the RK styles' do); `tiled` repeats it
+        // at its own size, else it is stretched.
+        if let Some(image) = self.pixmap_image(name) {
             let mut texture = InlineTable::new();
             texture.insert("image", Value::from(image));
+            if spec.contains("tiled") {
+                texture.insert("fit", Value::from("tile"));
+            }
             return TextureSource::Own(Written(Value::InlineTable(texture)));
         }
         let from = self

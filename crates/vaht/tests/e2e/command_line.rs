@@ -336,6 +336,49 @@ const FLUXBOX_STYLE: &str = "toolbar: Raised Gradient Vertical\n\
     menu.frame: Flat Solid\nmenu.frame.color: black\nmenu.frame.textColor: white\n";
 
 #[test]
+fn a_pixmap_a_style_gives_is_its_texture_whatever_the_texture_says() {
+    // Fluxbox draws a `flat solid` toolbar with the `toolbar.pixmap` it names,
+    // and `tiled` repeats the picture at its own size.
+    let logs = log_directory();
+    let work = tempfile::tempdir().expect("a temporary directory");
+    let source = work.path().join("Textured");
+    std::fs::create_dir_all(source.join("pixmaps")).expect("made");
+    std::fs::write(
+        source.join("theme.cfg"),
+        "toolbar: flat solid\ntoolbar.pixmap: bar.xpm\n\
+         toolbar.iconbar.empty: flat tiled\ntoolbar.iconbar.empty.pixmap: bar.xpm\n\
+         toolbar.clock.textColor: white\n",
+    )
+    .expect("written");
+    std::fs::write(
+        source.join("pixmaps/bar.xpm"),
+        "/* XPM */\nstatic char * bar[] = {\n\"1 2 2 1\",\n\".\tc #202020\",\n\"+\tc #101010\",\n\".\",\n\"+\"};\n",
+    )
+    .expect("written");
+    let styles = work.path().join("styles");
+    let output = run_executable(
+        &[
+            "import",
+            "fluxbox-style",
+            &path(&source),
+            "--to",
+            &path(&styles),
+        ],
+        logs.path(),
+    );
+    assert!(output.status.success(), "{output:?}");
+    let style = std::fs::read_to_string(styles.join("Textured.toml")).expect("written");
+    assert!(
+        style.contains("[taskbar]\ntexture = { image = \"Textured/bar.xpm\" }"),
+        "the solid toolbar draws its pixmap: {style}"
+    );
+    assert!(
+        style.contains("image = \"Textured/bar.xpm\", fit = \"tile\""),
+        "a tiled texture repeats it: {style}"
+    );
+}
+
+#[test]
 fn a_fluxbox_style_of_images_is_converted_with_its_images() {
     let logs = log_directory();
     let work = tempfile::tempdir().expect("a temporary directory");

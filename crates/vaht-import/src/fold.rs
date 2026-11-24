@@ -415,7 +415,11 @@ fn build(
             }
             variables.sort_by(|(one, _, _), (other, _, _)| one.cmp(other));
         }
-        let default = choices[position].first()?;
+        // The style as it was, where there is one; else the first.
+        let default = choices[position]
+            .iter()
+            .find(|choice| *choice == "original")
+            .or_else(|| choices[position].first())?;
         let _ = write!(
             options,
             "\n[options.{option}]\nlabel = \"{}\"\ndefault = \"{default}\"\n",
@@ -600,7 +604,11 @@ mod tests {
         );
         assert!(folded[0].text.contains("[options.variant.original]"));
         assert!(folded[0].text.contains("[options.variant.Sakura]"));
-        assert!(folded[0].text.contains("default = \"Bubbles\""));
+        assert!(
+            folded[0].text.contains("default = \"original\""),
+            "the style itself is the default: {}",
+            folded[0].text
+        );
     }
 
     #[test]
