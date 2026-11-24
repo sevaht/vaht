@@ -5,8 +5,8 @@
 use std::path::Path;
 
 use vaht_test_support::{
-    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR,
-    solid_png,
+    BUILT_IN_METRICS, BUTTON_LEFT, BUTTON_RIGHT, Bounds, HeadlessVaht, Screenshot, TestClient,
+    WINDOW_COLOR, solid_png,
 };
 
 /// The executable cargo built for these tests.
@@ -142,6 +142,38 @@ fn activate_window_list_entry_does_what_clicking_the_entry_does() {
     );
     run("activate-window-list-entry 3");
     assert_eq!(entries(&mut client), [UNFOCUSED, FOCUSED], "no third entry");
+}
+
+#[test]
+fn right_clicking_an_entry_opens_its_windows_menu() {
+    // A window menu of one item, which touches a file when chosen.
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let marker = files.path().join("chosen");
+    let menus = format!(
+        "[menu.root]\nitems = []\n[menu.workspace]\nitems = []\n\
+         [menu.window]\nitems = [{{ label = \"Touch\", command = \"exec touch '{}'\" }}]\n",
+        marker.display()
+    );
+    let settings = "style = \"test\"\n[taskbar]\nwidgets = [\"window-list\"]\n";
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[
+            ("settings.toml", settings),
+            ("styles/test.toml", STYLE),
+            ("menus.toml", &menus),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let height = client.screenshot().height();
+    client.click(ENTRY_WIDTH / 2, height - HEIGHT / 2, BUTTON_RIGHT);
+    // Opened at the pointer, which is on the taskbar, the menu is moved up
+    // to clear it: its one item sits just above the taskbar.
+    // A screenshot waits until the menu is drawn.
+    client.screenshot();
+    let item = (ENTRY_WIDTH / 2 + 5, height - HEIGHT - 1 - 10);
+    client.click(item.0, item.1, BUTTON_LEFT);
+    vaht_test_support::wait_for_file(&marker, |_| true);
 }
 
 #[test]
@@ -559,8 +591,8 @@ fn a_title_too_long_for_its_entry_shows_in_a_tooltip_until_a_click() {
     let shown = client.screenshot().rgb(spot.0, spot.1);
     assert_eq!(shown, [0, 0, 0], "the built-in tooltip is black");
     assert_ne!(before, shown);
-    client.press(vaht_test_support::BUTTON_RIGHT);
-    client.release(vaht_test_support::BUTTON_RIGHT);
+    client.press(BUTTON_RIGHT);
+    client.release(BUTTON_RIGHT);
     assert_eq!(
         client.screenshot().rgb(spot.0, spot.1),
         before,

@@ -27,6 +27,7 @@ serde_json.workspace = true
 vaht-dialog = { path = "../vaht-dialog" }
 vaht-ipc = { path = "../vaht-ipc" }
 vaht-settings-model = { path = "../vaht-settings-model" }
+vaht-ui = { path = "../vaht-ui" }
 
 [dev-dependencies]
 egui_kittest.workspace = true

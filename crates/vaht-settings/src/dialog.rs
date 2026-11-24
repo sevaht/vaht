@@ -79,8 +79,15 @@ impl DialogApp {
             ..eframe::NativeOptions::default()
         };
         let app = Self::new(dialog, Arc::clone(&failure));
-        eframe::run_native("vaht dialog", options, Box::new(|_| Ok(Box::new(app))))
-            .map_err(|error| anyhow::anyhow!("the dialog window failed: {error}"))?;
+        eframe::run_native(
+            "vaht dialog",
+            options,
+            Box::new(|creation| {
+                crate::fonts::install(&creation.egui_ctx);
+                Ok(Box::new(app))
+            }),
+        )
+        .map_err(|error| anyhow::anyhow!("the dialog window failed: {error}"))?;
         // A poisoned lock still holds what was stored.
         let failure = failure
             .lock()

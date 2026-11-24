@@ -10,4 +10,5 @@
 pub mod app;
 pub mod controls;
 pub mod dialog;
+pub mod fonts;
 pub mod link;

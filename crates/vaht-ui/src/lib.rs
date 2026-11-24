@@ -41,7 +41,7 @@ pub use panel::{Panel, PanelContent};
 #[doc(inline)]
 pub use style::{Style, StyleElement, WidgetState};
 #[doc(inline)]
-pub use text::Typesetter;
+pub use text::{FontWeight, Typesetter, system_font};
 /// The pixels panels and corner arcs are painted into.
 pub use tiny_skia::Pixmap;
 #[doc(inline)]

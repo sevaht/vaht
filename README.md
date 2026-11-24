@@ -45,7 +45,9 @@ $ sudo packaging/install.sh --uninstall     # removes what it installed
 On Arch Linux, `cd packaging/arch && makepkg -si` builds a package that
 installs the same files. vaht needs logind or seatd for the seat, and
 `xdg-desktop-portal-wlr` for screen sharing in programs (the package
-depends on it); `xdg-desktop-portal-gtk` gives programs file choosers.
+depends on it); `xdg-desktop-portal-gtk` gives programs file choosers. The
+default style, and vaht's own windows, use DejaVu Sans (`ttf-dejavu` on Arch,
+which the package depends on); without it another font stands in.
 
 Working from this checkout, `./launch.sh` starts the installed vaht with
 the logging it sets, after checking that the installed vaht was built from

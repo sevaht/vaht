@@ -212,6 +212,9 @@ pub(crate) struct Input {
 }
 
 impl Input {
+    /// The left button's Linux input code.
+    const BUTTON_LEFT: u32 = 0x110;
+
     /// How long a held key waits before repeating; repeating key bindings
     /// use it too.
     pub(crate) const KEY_REPEAT_DELAY: Duration = Duration::from_millis(200);
@@ -312,7 +315,17 @@ impl Input {
                 (Some(TaskbarHit::TrayItem(item)), Some(action)) if is_plain => {
                     AfterClick::AskTrayItem(*item, action)
                 }
-                (Some(hit), _) if hit.is_button() && is_plain => AfterClick::HoldTaskbarButton,
+                // Only the left button presses a button, and a window's entry
+                // takes the others as bindings: a right click is its window
+                // menu.
+                (Some(hit), _)
+                    if hit.is_button()
+                        && is_plain
+                        && (press.button == Self::BUTTON_LEFT
+                            || !matches!(hit, TaskbarHit::Entry(_))) =>
+                {
+                    AfterClick::HoldTaskbarButton
+                }
                 (Some(_) | None, _) => self.bound_or_border(press, config),
             };
             return PressOutcome::ClickTaskbar {

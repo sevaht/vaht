@@ -17,6 +17,35 @@ use tiny_skia::{Pixmap, PixmapPaint, PremultipliedColorU8, Transform};
 use crate::color::Color;
 use crate::geometry::Rect;
 
+/// The bytes of the font file the system's fonts give for the family `family`
+/// at the weight asked (and not italic), and the index of the face in the
+/// file: what a program that draws its own text (the settings window) needs
+/// to use the same typeface vaht's styles name. None if no such font is
+/// installed.
+#[must_use]
+pub fn system_font(family: &str, weight: FontWeight) -> Option<(Vec<u8>, u32)> {
+    use cosmic_text::fontdb::{Database, Family as FamilyName, Query, Stretch, Style};
+
+    let mut database = Database::new();
+    database.load_system_fonts();
+    let id = database.query(&Query {
+        families: &[FamilyName::Name(family)],
+        weight: match weight {
+            FontWeight::Normal => Weight::NORMAL,
+            FontWeight::Bold => Weight::BOLD,
+        },
+        stretch: Stretch::Normal,
+        style: Style::Normal,
+    })?;
+    // `query` falls back to a similar font: only the family asked for counts.
+    let face = database.face(id)?;
+    face.families
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case(family))
+        .then_some(())?;
+    database.with_face_data(id, |data, index| (data.to_vec(), index))
+}
+
 /// A typeface at a size.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Font {
@@ -710,5 +739,20 @@ mod tests {
         // of any real font add up to more of it.
         assert!(typesetter.font_height(&small) >= typesetter.line_height(&small));
         assert!(typesetter.font_height(&large) > typesetter.font_height(&small));
+    }
+
+    #[test]
+    fn a_font_that_is_not_installed_is_none_and_one_that_is_gives_its_file() {
+        assert!(system_font("No Such Typeface 7", FontWeight::Normal).is_none());
+        // The default style names DejaVu Sans; where this machine has it, its
+        // file is a font file (TrueType, `00 01 00 00`, or `true`).
+        if let Some((bytes, _)) = system_font("DejaVu Sans", FontWeight::Normal) {
+            assert!(
+                bytes.starts_with(&[0, 1, 0, 0])
+                    || bytes.starts_with(b"true")
+                    || bytes.starts_with(b"OTTO"),
+                "a font file"
+            );
+        }
     }
 }

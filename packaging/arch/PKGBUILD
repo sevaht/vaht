@@ -20,6 +20,7 @@ depends=(
   'pixman'
   'seatd'     # libseat; logind is used when it runs, seatd otherwise
   'systemd-libs'
+  'ttf-dejavu'  # DejaVu Sans, which the default style and vaht's own windows use
   'wayland'
   # Screen sharing and screenshots in programs (OBS, browsers): the portal
   # backend vaht-portals.conf picks, which asks with vaht's own menu.

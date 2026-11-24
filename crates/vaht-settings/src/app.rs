@@ -78,6 +78,7 @@ impl SettingsApp<VahtLink> {
             "vaht settings",
             options,
             Box::new(|creation| {
+                crate::fonts::install(&creation.egui_ctx);
                 let context = creation.egui_ctx.clone();
                 let link = VahtLink::connect(move || context.request_repaint())
                     .map_err(|error| format!("vaht cannot be reached: {error}"))?;

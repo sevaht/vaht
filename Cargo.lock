@@ -4678,6 +4678,7 @@ dependencies = [
  "vaht-dialog",
  "vaht-ipc",
  "vaht-settings-model",
+ "vaht-ui",
 ]
 
 [[package]]

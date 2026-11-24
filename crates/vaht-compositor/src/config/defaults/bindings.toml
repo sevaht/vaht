@@ -51,6 +51,11 @@
 "ScrollUp" = "workspace previous"
 "ScrollDown" = "workspace next"
 
+# A window's entry on the taskbar: its window menu, as its titlebar gives, so a
+# window that draws its own frame still has one.
+[mouse.window-list-entry]
+"Right" = "window-menu"
+
 [mouse.window]
 "Alt+Left" = ["raise", "focus", "start-moving"]
 "Alt+Right" = ["raise", "focus", "start-resizing nearest-corner"]
