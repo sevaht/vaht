@@ -404,3 +404,22 @@ fn a_window_remade_after_vaht_handled_the_old_toplevel_s_destruction_is_the_same
         "the remade window did not take the focus"
     );
 }
+
+#[test]
+fn a_window_remade_while_another_has_the_focus_stays_below_it() {
+    // Alt+Tab out of a game that remakes its window must not put the game's
+    // window back over the one that was chosen.
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows_without_decoration_negotiation(2);
+    client.replace_window_after_closing_it(0);
+    let listed = listed_windows(&vaht);
+    assert_eq!(
+        listed.first().map(|window| window.title.as_str()),
+        Some("test window 2"),
+        "the focused window is still on top: {listed:?}"
+    );
+}

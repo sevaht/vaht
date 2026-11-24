@@ -91,6 +91,38 @@ impl Stack {
             .map(|(_, layer)| *layer)
     }
 
+    /// Returns the window directly above `id`, if one is.
+    pub(crate) fn above(&self, id: WindowId) -> Option<WindowId> {
+        let position = self
+            .bottom_to_top
+            .iter()
+            .position(|(stacked, _)| *stacked == id)?;
+        self.bottom_to_top
+            .get(position + 1)
+            .map(|(above, _)| *above)
+    }
+
+    /// Moves `id` to directly below `other`, if both are stacked and in the
+    /// same layer; returns whether it moved.
+    pub(crate) fn place_below(&mut self, id: WindowId, other: WindowId) -> bool {
+        let (Some(layer), Some(other_layer)) = (self.layer_of(id), self.layer_of(other)) else {
+            return false;
+        };
+        if id == other || layer != other_layer {
+            return false;
+        }
+        self.remove(id);
+        let Some(position) = self
+            .bottom_to_top
+            .iter()
+            .position(|(stacked, _)| *stacked == other)
+        else {
+            return false;
+        };
+        self.bottom_to_top.insert(position, (id, layer));
+        true
+    }
+
     /// Places `id` above every other window of the normal layer.
     ///
     /// # Panics
@@ -180,6 +212,32 @@ mod tests {
     fn new_windows_go_on_top() {
         let stack = three_windows();
         assert_eq!(top_down(&stack), [3, 2, 1]);
+    }
+
+    #[test]
+    fn a_window_can_be_placed_directly_below_another() {
+        let mut stack = three_windows();
+        assert_eq!(stack.above(WindowId::new(1)), Some(WindowId::new(2)));
+        assert_eq!(
+            stack.above(WindowId::new(3)),
+            None,
+            "nothing is above the top"
+        );
+        assert!(stack.place_below(WindowId::new(3), WindowId::new(2)));
+        assert_eq!(top_down(&stack), [2, 3, 1]);
+        assert!(
+            !stack.place_below(WindowId::new(3), WindowId::new(9)),
+            "an unknown window is not stacked"
+        );
+        assert_eq!(top_down(&stack), [2, 3, 1]);
+    }
+
+    #[test]
+    fn a_window_is_not_placed_below_one_of_another_layer() {
+        let mut stack = three_windows();
+        assert!(stack.set_layer(WindowId::new(2), StackLayer::Top));
+        assert!(!stack.place_below(WindowId::new(1), WindowId::new(2)));
+        assert_eq!(top_down(&stack), [2, 3, 1]);
     }
 
     #[test]

@@ -1875,7 +1875,8 @@ impl Compositor {
     /// A program may give its surface a new toplevel in place of the one it
     /// destroyed (Wine does when a window gains a caption), which is the
     /// same window to the person using it: it takes the focus only if the
-    /// old one had it, and is placed where the old one was.
+    /// old one had it, and is placed where the old one was, below the
+    /// window that was above it.
     pub(crate) fn add_window(&mut self, surface: ToplevelSurface) {
         let successor = self.toplevels.take_succession_of(surface.wl_surface());
         let window = match &successor {
@@ -1889,6 +1890,9 @@ impl Compositor {
                 .window_manager
                 .add_window(&self.config.settings, &self.ledger),
         };
+        if let Some(above) = successor.as_ref().and_then(|removed| removed.above) {
+            self.window_manager.place_below(window, above);
+        }
         let mut toplevel = Toplevel::from_xdg(surface);
         toplevel.place_near(successor.map(|removed| removed.center));
         self.toplevels.insert(window, toplevel, &self.ledger);
@@ -1914,6 +1918,7 @@ impl Compositor {
             self.window_manager.focused() == Some(window),
             removed.workspace(),
             area.loc + Point::from((area.size.w / 2, area.size.h / 2)),
+            self.window_manager.window_above(window),
         ))
     }
 

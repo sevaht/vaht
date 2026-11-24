@@ -445,6 +445,17 @@ impl WindowManager {
         }
     }
 
+    /// Returns the window directly above `window`, if one is.
+    pub(crate) fn window_above(&self, window: WindowId) -> Option<WindowId> {
+        self.windows.above(window)
+    }
+
+    /// Moves `window` to directly below `other`, if both are in the same
+    /// layer.
+    pub(crate) fn place_below(&mut self, window: WindowId, other: WindowId) {
+        self.is_redraw_needed |= self.windows.place_below(window, other);
+    }
+
     /// Moves `window` above all others, its dialogs above it.
     pub(crate) fn raise(&mut self, window: WindowId) {
         for member in self.family_bottom_up(window) {

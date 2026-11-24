@@ -95,6 +95,17 @@ impl Windows {
         self.stack.raise(id)
     }
 
+    /// Returns the window directly above the window with `id`, if one is.
+    pub(crate) fn above(&self, id: WindowId) -> Option<WindowId> {
+        self.stack.above(id)
+    }
+
+    /// Moves the window with `id` to directly below `other`, if both are
+    /// stacked in the same layer; returns whether it moved.
+    pub(crate) fn place_below(&mut self, id: WindowId, other: WindowId) -> bool {
+        self.stack.place_below(id, other)
+    }
+
     /// Moves the window with `id` to the top of `layer`; returns whether it
     /// exists.
     pub(crate) fn set_layer(&mut self, id: WindowId, layer: StackLayer) -> bool {

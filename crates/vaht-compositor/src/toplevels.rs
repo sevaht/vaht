@@ -34,6 +34,10 @@ pub(crate) struct Succession {
     pub(crate) workspace: Workspace,
     /// The middle of its content.
     pub(crate) center: Point<i32, Logical>,
+    /// The window that was directly above it, which the new window goes
+    /// below if that is still there: leaving a game does not put it back on
+    /// top.
+    pub(crate) above: Option<WindowId>,
 }
 
 impl Succession {
@@ -45,12 +49,14 @@ impl Succession {
         was_focused: bool,
         workspace: Workspace,
         center: Point<i32, Logical>,
+        above: Option<WindowId>,
     ) -> Self {
         Self {
             surface,
             was_focused,
             workspace,
             center,
+            above,
         }
     }
 
