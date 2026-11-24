@@ -46,7 +46,7 @@ use smithay::desktop::utils::{
 use smithay::desktop::{PopupManager, WindowSurfaceType, layer_map_for_output};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Physical, Point, Scale};
+use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
 use smithay::wayland::compositor::{TraversalAction, with_surface_tree_downward};
 use smithay::wayland::dmabuf::DmabufFeedback;
 use smithay::wayland::shell::wlr_layer::Layer;
@@ -346,7 +346,7 @@ impl<'state> Scene<'state> {
                 })
         };
         self.unmanaged_at(point)
-            .or_else(|| layer(self.layers_above_windows(), false))
+            .or_else(|| layer(self.layers_above_windows_at(point), false))
             .or_else(|| self.window_at(point, true).map(PointerTarget::Window))
             .or_else(|| {
                 self.shown_taskbars()
@@ -482,14 +482,19 @@ impl<'state> Scene<'state> {
                 .and_then(|server| server.shape_of(window));
             elements.extend(Self::clipped(surface_elements, shape, origin, scale));
         }
-        self.push_layers(&mut elements, renderer, self.layers_above_windows(), scale);
+        self.push_layers(
+            &mut elements,
+            renderer,
+            |whole| self.layers_above_windows(whole),
+            scale,
+        );
         self.push_windows(&mut elements, renderer, scale, true);
         elements.extend(
             self.shown_taskbars()
                 .filter_map(|taskbar| taskbar.render_element(renderer, scale)),
         );
         self.push_windows(&mut elements, renderer, scale, false);
-        self.push_layers(&mut elements, renderer, &BELOW_WINDOWS, scale);
+        self.push_layers(&mut elements, renderer, |_| &BELOW_WINDOWS, scale);
         elements.extend(self.drawn.backdrop.render_elements(renderer, scale));
         elements
     }
@@ -762,34 +767,43 @@ impl<'state> Scene<'state> {
             .collect()
     }
 
-    /// Returns whether the topmost window shown is fullscreen: it then
-    /// covers the top layer and the taskbar, which neither show nor take
-    /// clicks, and only the overlay layer is above it (01 §9).
-    fn is_fullscreen_on_top(&self) -> bool {
+    /// Returns whether the topmost window shown on the output covering
+    /// `whole` is fullscreen: it then covers that output's top layer and
+    /// taskbar, which neither show nor take clicks, and only the overlay
+    /// layer is above it (01 §9). The other outputs are not covered.
+    fn is_fullscreen_on_top_of(&self, whole: Rectangle<i32, Logical>) -> bool {
+        let metrics = self.window_manager.metrics();
         self.window_manager
             .shown_top_down()
-            .next()
+            .find(|window| window.outer_area(metrics).overlaps(whole))
             .is_some_and(|window| window.placement().is_fullscreen())
     }
 
-    /// Returns the layers above the windows: the overlay and top layers, or
-    /// only the overlay above a fullscreen window.
-    fn layers_above_windows(&self) -> &'static [Layer] {
-        if self.is_fullscreen_on_top() {
+    /// Returns the layers above the windows on the output covering
+    /// `whole`: the overlay and top layers, or only the overlay above a
+    /// fullscreen window.
+    fn layers_above_windows(&self, whole: Rectangle<i32, Logical>) -> &'static [Layer] {
+        if self.is_fullscreen_on_top_of(whole) {
             &ABOVE_FULLSCREEN
         } else {
             &ABOVE_WINDOWS
         }
     }
 
-    /// Returns the taskbars shown: none while a fullscreen window covers
-    /// them, nor those auto-hidden.
+    /// Returns the layers above the windows on the output under `point`.
+    fn layers_above_windows_at(&self, point: Point<f64, Logical>) -> &'static [Layer] {
+        self.layers
+            .area_at(point)
+            .map_or(&ABOVE_WINDOWS, |whole| self.layers_above_windows(whole))
+    }
+
+    /// Returns the taskbars shown: none on an output a fullscreen window
+    /// covers, nor those auto-hidden.
     fn shown_taskbars(&self) -> impl Iterator<Item = &'state Taskbar> {
-        let is_covered = self.is_fullscreen_on_top();
         self.drawn
             .taskbars
             .iter()
-            .filter(move |taskbar| taskbar.is_shown() && !is_covered)
+            .filter(|taskbar| taskbar.is_shown() && !self.is_fullscreen_on_top_of(taskbar.area()))
     }
 
     /// Returns the topmost shown window's client surface or frame at
@@ -886,13 +900,13 @@ impl<'state> Scene<'state> {
         &self,
         elements: &mut Vec<SceneElement<R>>,
         renderer: &mut R,
-        layers: &[Layer],
+        layers_for: impl Fn(Rectangle<i32, Logical>) -> &'static [Layer],
         scale: Scale<f64>,
     ) where
         R: SceneRenderer,
         R::TextureId: Send + Clone + 'static,
     {
-        self.layers.each(layers, |surface, origin| {
+        self.layers.each_by_output(layers_for, |surface, origin| {
             let origin = origin.to_physical_precise_round(scale);
             let surface_elements: Vec<WaylandSurfaceRenderElement<R>> =
                 surface.render_elements(renderer, origin, scale, 1.0);

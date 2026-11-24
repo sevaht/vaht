@@ -311,8 +311,24 @@ impl<'outputs> LayerMaps<'outputs> {
         layers: &[Layer],
         mut visit: impl FnMut(&LayerSurface, Point<i32, Logical>),
     ) {
+        self.each_by_output(|_| layers, &mut visit);
+    }
+
+    /// Calls `visit` with each layer surface on every output, in the layers
+    /// `layers_for` chooses for the output given the area it covers,
+    /// topmost first within each, and its origin in global coordinates.
+    pub(crate) fn each_by_output<'layers>(
+        self,
+        layers_for: impl Fn(Rectangle<i32, Logical>) -> &'layers [Layer],
+        mut visit: impl FnMut(&LayerSurface, Point<i32, Logical>),
+    ) {
         for output in self.each_output() {
-            output.each(layers, &mut visit);
+            output.each(layers_for(output.whole), &mut visit);
         }
+    }
+
+    /// Returns the area of the output under `point`, if there is one.
+    pub(crate) fn area_at(self, point: Point<f64, Logical>) -> Option<Rectangle<i32, Logical>> {
+        self.outputs.at(point).map(Outputs::geometry)
     }
 }

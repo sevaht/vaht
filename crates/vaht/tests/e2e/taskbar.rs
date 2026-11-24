@@ -644,6 +644,37 @@ fn every_output_with(windows: &str) -> ([u8; 3], [u8; 3]) {
 }
 
 #[test]
+fn a_fullscreen_window_covers_only_its_own_output_s_taskbar() {
+    let settings = "style = \"test\"\n[taskbar]\nwidgets = [\"window-list\"]\n\
+                    on_every_output = true\nwindows = \"all\"\n";
+    let vaht = HeadlessVaht::start_with_outputs(
+        Path::new(EXECUTABLE),
+        "800x600,640x480",
+        &[
+            ("settings.toml", settings.as_bytes()),
+            ("styles/test.toml", STYLE.as_bytes()),
+        ],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    client.make_window_fullscreen(0);
+    let spot = |client: &mut TestClient, output: &str| {
+        let screenshot = client.screenshot_of(output);
+        screenshot.rgb(5, screenshot.height() - HEIGHT / 2)
+    };
+    assert_eq!(
+        spot(&mut client, "HEADLESS-1"),
+        WINDOW_COLOR,
+        "the window is over its own output's taskbar"
+    );
+    assert_eq!(
+        spot(&mut client, "HEADLESS-2"),
+        FOCUSED,
+        "the other output's taskbar stays, with the window in its list"
+    );
+}
+
+#[test]
 fn every_output_can_have_a_taskbar_listing_all_windows_or_its_own() {
     assert_eq!(
         every_output_with("all"),

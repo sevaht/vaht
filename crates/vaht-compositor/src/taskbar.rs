@@ -308,6 +308,11 @@ impl Taskbar {
         self.rows.saturating_mul(row_height)
     }
 
+    /// Returns the area the taskbar takes, in global coordinates.
+    pub(crate) const fn area(&self) -> Area {
+        self.area
+    }
+
     /// Returns whether the taskbar covers global `point`.
     pub(crate) fn covers(&self, point: Point<f64, Logical>) -> bool {
         self.area.contains(point.to_i32_floor())
