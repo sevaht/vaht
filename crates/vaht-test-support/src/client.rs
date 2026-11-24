@@ -766,6 +766,30 @@ impl TestClient {
     }
 
     /// Returns how many times vaht asked this client to close a window.
+    /// Has every window draw its own icon like [`Self::draw_window_icons`],
+    /// and also give it the empty name Wine's Wayland driver gives its
+    /// icons (xdg-toplevel-icon).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn draw_window_icons_with_empty_name(&mut self, size: u32, color: [u8; 3]) {
+        let handle = self.queue.handle();
+        for index in 0..self.state.windows.len() {
+            let buffer = self.state.icon_buffer(size, color);
+            let drawn = self.state.toplevel_icons.create_icon(&handle, NoEvents);
+            drawn.add_buffer(&buffer, 1);
+            drawn.set_name(String::new());
+            let window = &self.state.windows[index];
+            self.state
+                .toplevel_icons
+                .set_icon(window.xdg_toplevel(), Some(&drawn));
+            drawn.destroy();
+            window.commit();
+        }
+        self.roundtrip();
+    }
+
     #[must_use]
     pub const fn close_requests(&self) -> usize {
         self.state.close_requests

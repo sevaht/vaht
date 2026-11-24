@@ -177,7 +177,11 @@ impl Toplevel {
             let mut cached = states.cached_state.get::<ToplevelIconCachedState>();
             let icon = cached.current();
             (
-                icon.icon_name().map(str::to_owned),
+                // Wine's driver names its icons "" besides drawing them:
+                // no name at all, so the picture shows.
+                icon.icon_name()
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned),
                 Self::largest_buffer(icon.buffers()),
             )
         });

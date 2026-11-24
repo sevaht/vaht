@@ -573,6 +573,20 @@ fn a_window_s_drawn_icon_is_shown() {
 }
 
 #[test]
+fn a_drawn_icon_with_an_empty_name_is_shown_as_drawn() {
+    // Wine's Wayland driver names every icon "" as well as drawing it, which
+    // is no name: the picture shows, not the nothing the name finds.
+    const DRAWN_ICON: [u8; 3] = [0xff, 0xff, 0x00];
+    let (_vaht, mut client) = start_with_icon("");
+    client.draw_window_icons_with_empty_name(16, DRAWN_ICON);
+    let screenshot = client.screenshot();
+    assert_eq!(
+        screenshot.rgb(9, screenshot.height() - HEIGHT / 2),
+        DRAWN_ICON
+    );
+}
+
+#[test]
 fn a_title_too_long_for_its_entry_shows_in_a_tooltip_until_a_click() {
     let settings = "[taskbar]\nwidgets = [\"window-list\"]\n[taskbar.tooltips]\ndelay_ms = 10\n\
                     [taskbar.window_list]\nentry_width = { max = 30 }\n";
