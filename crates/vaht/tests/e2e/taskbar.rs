@@ -675,6 +675,30 @@ fn a_fullscreen_window_covers_only_its_own_output_s_taskbar() {
 }
 
 #[test]
+fn a_window_over_the_fullscreen_one_brings_the_taskbar_back() {
+    // Alt+Tab from a fullscreen game to a small window: the taskbar shows,
+    // though the small window does not reach it.
+    let settings = "style = \"test\"\n[taskbar]\nwidgets = [\"window-list\"]\nwindows = \"all\"\n";
+    let vaht = HeadlessVaht::start_with_files(
+        Path::new(EXECUTABLE),
+        &[
+            ("settings.toml", settings.as_bytes()),
+            ("styles/test.toml", STYLE.as_bytes()),
+        ],
+        &[],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(2);
+    client.make_window_fullscreen(0);
+    let screenshot = client.screenshot();
+    assert_ne!(
+        screenshot.rgb(5, screenshot.height() - HEIGHT / 2),
+        WINDOW_COLOR,
+        "the window over the fullscreen one is on top, so the taskbar shows"
+    );
+}
+
+#[test]
 fn every_output_can_have_a_taskbar_listing_all_windows_or_its_own() {
     assert_eq!(
         every_output_with("all"),

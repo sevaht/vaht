@@ -798,12 +798,17 @@ impl<'state> Scene<'state> {
     }
 
     /// Returns the taskbars shown: none on an output a fullscreen window
-    /// covers, nor those auto-hidden.
+    /// covers, nor those auto-hidden. A window on top of the fullscreen one
+    /// on the same output uncovers the taskbar, wherever it is on the output.
     fn shown_taskbars(&self) -> impl Iterator<Item = &'state Taskbar> {
-        self.drawn
-            .taskbars
-            .iter()
-            .filter(|taskbar| taskbar.is_shown() && !self.is_fullscreen_on_top_of(taskbar.area()))
+        self.drawn.taskbars.iter().filter(|taskbar| {
+            let taskbar_area = taskbar.area();
+            let output = self
+                .layers
+                .area_at(taskbar_area.loc.to_f64())
+                .unwrap_or(taskbar_area);
+            taskbar.is_shown() && !self.is_fullscreen_on_top_of(output)
+        })
     }
 
     /// Returns the topmost shown window's client surface or frame at
