@@ -503,6 +503,23 @@ impl TestClient {
     ///
     /// Panics if there is no such window, or the connection to vaht fails.
     pub fn recreate_window_role(&mut self, index: usize) {
+        self.remake_window_role(index, false);
+    }
+
+    /// Like [`Self::recreate_window_role`], but the new toplevel is made
+    /// only after vaht has handled the destruction of the old one: another
+    /// window, not the same one remade.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no such window, or the connection to vaht fails.
+    pub fn replace_window_after_closing_it(&mut self, index: usize) {
+        self.remake_window_role(index, true);
+    }
+
+    /// Gives window `index`'s surface a new role, after a roundtrip if
+    /// `is_paused`.
+    fn remake_window_role(&mut self, index: usize, is_paused: bool) {
         let handle = self.queue.handle();
         assert!(index < self.state.windows.len(), "a window");
         let window = self.state.windows.remove(index);
@@ -514,6 +531,9 @@ impl TestClient {
         // Dropping the window would destroy the surface, which has a new
         // role.
         self.state.retired_windows.push(window);
+        if is_paused {
+            self.roundtrip();
+        }
         let wm_base: XdgWmBase =
             ProvidesBoundGlobal::<XdgWmBase, 5>::bound_global(&self.state.xdg_shell)
                 .expect("vaht offers xdg_wm_base");

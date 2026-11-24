@@ -9,7 +9,6 @@
 mod toplevel;
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
 
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point};
@@ -20,8 +19,9 @@ use crate::resources::{ResourceKind, ResourceLedger, Tracked};
 use crate::window_manager::{WindowId, Workspace};
 
 /// A window that was just removed, whose surface its program may give a new
-/// toplevel at once: Wine destroys and makes the toplevel of a window that
-/// gains a caption, and that is the same window to the person using it.
+/// toplevel in the same batch of requests: Wine destroys and makes the
+/// toplevel of a window that gains a caption, and that is the same window to
+/// the person using it. It is forgotten when the batch has been handled.
 #[derive(Debug)]
 pub(crate) struct Succession {
     /// The surface the next toplevel is of.
@@ -32,15 +32,9 @@ pub(crate) struct Succession {
     pub(crate) workspace: Workspace,
     /// The middle of its content.
     pub(crate) center: Point<i32, Logical>,
-    /// When it was removed.
-    at: Instant,
 }
 
 impl Succession {
-    /// How long after a window goes that a toplevel of its surface is
-    /// taken to be its successor: a program makes it in the same breath.
-    const WINDOW: Duration = Duration::from_secs(1);
-
     /// Returns the succession of a window of `surface` that was on
     /// `workspace`, its content around `center`, and had the focus if
     /// `was_focused`, which has just gone.
@@ -55,14 +49,13 @@ impl Succession {
             was_focused,
             workspace,
             center,
-            at: Instant::now(),
         }
     }
 
     /// Returns whether a new toplevel of `surface` takes this window's
     /// place.
     fn is_succeeded_by(&self, surface: &WlSurface) -> bool {
-        self.surface == *surface && self.at.elapsed() < Self::WINDOW
+        self.surface == *surface
     }
 }
 

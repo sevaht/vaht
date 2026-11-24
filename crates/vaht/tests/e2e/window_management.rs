@@ -384,3 +384,17 @@ fn a_window_that_replaces_its_toplevel_stays_on_its_output() {
         "and not on the one the pointer is on"
     );
 }
+
+#[test]
+fn a_window_made_after_another_was_closed_is_a_new_window_that_takes_the_focus() {
+    // Only a toplevel made in the same batch of requests as the old one's
+    // destruction is the same window remade: no length of time makes it so.
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows_without_decoration_negotiation(2);
+    client.replace_window_after_closing_it(0);
+    assert_eq!(focused_title(&vaht), "recreated");
+}
