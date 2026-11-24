@@ -18,6 +18,16 @@ pub(crate) enum CycleDirection {
     Backward,
 }
 
+/// Where a window stood in the order windows had focus in, for another that
+/// takes its place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FocusPlace {
+    /// How many windows had focus more recently, if it ever had it.
+    recency: Option<usize>,
+    /// Where it was in the cycle in progress, if one is.
+    cycle_position: Option<usize>,
+}
+
 /// Which window has keyboard focus, and which had it before.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Focus {
@@ -101,6 +111,33 @@ impl Focus {
         }
     }
 
+    /// Returns where `window` stands in the order windows had focus in, and
+    /// in the cycle in progress.
+    pub(crate) fn place_of(&self, window: WindowId) -> FocusPlace {
+        FocusPlace {
+            recency: self.history.iter().position(|known| *known == window),
+            cycle_position: self
+                .cycle
+                .as_ref()
+                .and_then(|cycle| cycle.windows.iter().position(|known| *known == window)),
+        }
+    }
+
+    /// Puts `window` where `place` was: as recently as the window it takes
+    /// the place of had focus, and in its place in the cycle in progress.
+    pub(crate) fn give_place(&mut self, window: WindowId, place: FocusPlace) {
+        if let Some(recency) = place.recency {
+            self.history.retain(|known| *known != window);
+            self.history.insert(recency.min(self.history.len()), window);
+        }
+        if let (Some(cycle), Some(position)) = (&mut self.cycle, place.cycle_position) {
+            cycle.windows.retain(|known| *known != window);
+            cycle
+                .windows
+                .insert(position.min(cycle.windows.len()), window);
+        }
+    }
+
     /// Forgets `window`, which is gone.
     pub(crate) fn forget(&mut self, window: WindowId) {
         self.history.retain(|known| *known != window);
@@ -161,6 +198,16 @@ mod tests {
         focus.set(stopped_at);
         focus.finish_cycle();
         assert_eq!(focus.by_recency(ids(&[1, 2, 3])), ids(&[2, 3, 1]));
+    }
+
+    #[test]
+    fn a_window_that_takes_anothers_place_is_as_recent_as_it_was() {
+        let mut focus = three_focused();
+        let place = focus.place_of(WindowId::new(2));
+        focus.forget(WindowId::new(2));
+        assert_eq!(focus.by_recency(ids(&[1, 3, 4])), ids(&[3, 1, 4]));
+        focus.give_place(WindowId::new(4), place);
+        assert_eq!(focus.by_recency(ids(&[1, 3, 4])), ids(&[3, 4, 1]));
     }
 
     #[test]

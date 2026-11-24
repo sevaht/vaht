@@ -119,7 +119,7 @@ use crate::toplevel_list::{ForeignToplevels, ToplevelList};
 use crate::toplevel_management::{
     Covering, HandleRequest, ToplevelManagement, ToplevelStates, WindowFacts,
 };
-use crate::toplevels::{Succession, Toplevel, Toplevels};
+use crate::toplevels::{Standing, Succession, Toplevel, Toplevels};
 use crate::touch;
 use crate::tray::{TrayAction, TrayMenu};
 use crate::window_manager::{
@@ -1883,18 +1883,22 @@ impl Compositor {
             Some(removed) => self.window_manager.add_window_on(
                 &self.config.settings,
                 &self.ledger,
-                removed.workspace,
+                removed.standing.workspace,
                 removed.was_focused,
             ),
             None => self
                 .window_manager
                 .add_window(&self.config.settings, &self.ledger),
         };
-        if let Some(above) = successor.as_ref().and_then(|removed| removed.above) {
-            self.window_manager.place_below(window, above);
+        if let Some(removed) = &successor {
+            if let Some(above) = removed.standing.above {
+                self.window_manager.place_below(window, above);
+            }
+            self.window_manager
+                .give_focus_place(window, removed.standing.focus_place);
         }
         let mut toplevel = Toplevel::from_xdg(surface);
-        toplevel.place_near(successor.map(|removed| removed.center));
+        toplevel.place_near(successor.map(|removed| removed.standing.center));
         self.toplevels.insert(window, toplevel, &self.ledger);
     }
 
@@ -1916,9 +1920,12 @@ impl Compositor {
         Some(Succession::new(
             surface.clone(),
             self.window_manager.focused() == Some(window),
-            removed.workspace(),
-            area.loc + Point::from((area.size.w / 2, area.size.h / 2)),
-            self.window_manager.window_above(window),
+            Standing {
+                workspace: removed.workspace(),
+                center: area.loc + Point::from((area.size.w / 2, area.size.h / 2)),
+                above: self.window_manager.window_above(window),
+                focus_place: self.window_manager.focus_place_of(window),
+            },
         ))
     }
 

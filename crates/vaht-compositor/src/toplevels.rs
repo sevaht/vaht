@@ -17,7 +17,24 @@ use smithay::xwayland::X11Surface;
 
 pub(crate) use self::toplevel::{ParentLink, Toplevel};
 use crate::resources::{ResourceKind, ResourceLedger, Tracked};
-use crate::window_manager::{WindowId, Workspace};
+use crate::window_manager::{FocusPlace, WindowId, Workspace};
+
+/// Where a window stood among the others: its workspace, where it was, what
+/// was above it and when it had the focus.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Standing {
+    /// The workspace it was on.
+    pub(crate) workspace: Workspace,
+    /// The middle of its content.
+    pub(crate) center: Point<i32, Logical>,
+    /// The window that was directly above it, which the new window goes
+    /// below if that is still there: leaving a game does not put it back on
+    /// top.
+    pub(crate) above: Option<WindowId>,
+    /// Where it stood in the order windows had focus in: Alt+Tab goes back
+    /// to a game that was just left, not on to the next window.
+    pub(crate) focus_place: FocusPlace,
+}
 
 /// What a surface remembers of the window it had, for a new toplevel its
 /// program may give it: Wine destroys and makes the toplevel of a window that
@@ -30,33 +47,19 @@ pub(crate) struct Succession {
     surface: WlSurface,
     /// Whether the window had the keyboard focus.
     pub(crate) was_focused: bool,
-    /// The workspace it was on.
-    pub(crate) workspace: Workspace,
-    /// The middle of its content.
-    pub(crate) center: Point<i32, Logical>,
-    /// The window that was directly above it, which the new window goes
-    /// below if that is still there: leaving a game does not put it back on
-    /// top.
-    pub(crate) above: Option<WindowId>,
+    /// Where it stood.
+    pub(crate) standing: Standing,
 }
 
 impl Succession {
-    /// Returns what the surface `surface` remembers of a window that was on
-    /// `workspace`, its content around `center`, and had the focus if
-    /// `was_focused`, which has just gone.
-    pub(crate) fn new(
-        surface: WlSurface,
-        was_focused: bool,
-        workspace: Workspace,
-        center: Point<i32, Logical>,
-        above: Option<WindowId>,
-    ) -> Self {
+    /// Returns what the surface `surface` remembers of a window that stood
+    /// as `standing` and had the focus if `was_focused`, which has just
+    /// gone.
+    pub(crate) const fn new(surface: WlSurface, was_focused: bool, standing: Standing) -> Self {
         Self {
             surface,
             was_focused,
-            workspace,
-            center,
-            above,
+            standing,
         }
     }
 

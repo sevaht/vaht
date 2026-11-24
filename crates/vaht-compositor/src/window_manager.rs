@@ -29,8 +29,8 @@ use vaht_ui::style::Metrics;
 use vaht_ui::{IconStore, Style, Typesetter, WidgetIcon};
 
 pub(crate) use self::arrange::ArrangeStyle;
-pub(crate) use self::focus::CycleDirection;
 use self::focus::Focus;
+pub(crate) use self::focus::{CycleDirection, FocusPlace};
 pub(crate) use self::output_areas::{OutputAreas, OutputTarget};
 pub(crate) use self::placement_strategy::{ColumnDirection, PlacementStrategy, Room, RowDirection};
 use self::snap_zones::{LayoutPicker, SnapTarget};
@@ -443,6 +443,16 @@ impl WindowManager {
         } else {
             self.activate(window);
         }
+    }
+
+    /// Returns where `window` stands in the order windows had focus in.
+    pub(crate) fn focus_place_of(&self, window: WindowId) -> FocusPlace {
+        self.focus.place_of(window)
+    }
+
+    /// Puts `window` where `place` was in the order windows had focus in.
+    pub(crate) fn give_focus_place(&mut self, window: WindowId, place: FocusPlace) {
+        self.focus.give_place(window, place);
     }
 
     /// Returns the window directly above `window`, if one is.

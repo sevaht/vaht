@@ -423,3 +423,27 @@ fn a_window_remade_while_another_has_the_focus_stays_below_it() {
         "the focused window is still on top: {listed:?}"
     );
 }
+
+#[test]
+fn alt_tab_goes_back_to_a_window_that_was_remade_after_being_left() {
+    // From the terminal to the friends list to the game: Alt+Tab goes to the
+    // friends list, the game's window is remade, and Alt+Tab again goes back
+    // to the game (as recent as the window it replaced), not on to the
+    // terminal.
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows_without_decoration_negotiation(3);
+    assert_eq!(focused_title(&vaht), "test window 3");
+    client.type_chord(&[keys::LEFT_ALT, keys::TAB]);
+    assert_eq!(focused_title(&vaht), "test window 2");
+    client.replace_window_after_closing_it(2);
+    client.type_chord(&[keys::LEFT_ALT, keys::TAB]);
+    assert_eq!(
+        focused_title(&vaht),
+        "recreated",
+        "back to the game, not on to the terminal"
+    );
+}
