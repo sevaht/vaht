@@ -264,6 +264,58 @@ fn a_shape_of_many_rectangles_is_clipped_exactly() {
 }
 
 #[test]
+fn a_click_goes_to_the_x11_window_vaht_shows_on_top() {
+    let mut desktop = XDesktop::new();
+    let lower = desktop
+        .x11
+        .open_window(X_SIZE, X_COLOR, "the lower", "lower");
+    desktop.vaht.wait_for_logged("placed first", 1);
+    let upper = desktop
+        .x11
+        .open_window(X_SIZE, MENU_COLOR, "the upper", "upper");
+    desktop.vaht.wait_for_logged("placed first", 2);
+    desktop.wait_for_color(MENU_COLOR);
+    let lower_at = desktop.x11.position_of(lower);
+    let upper_at = desktop.x11.position_of(upper);
+    let width = i16::try_from(X_SIZE.0).expect("a small width");
+    let height = i16::try_from(X_SIZE.1).expect("a small height");
+    // Where both show their contents: the upper over the lower's corner.
+    let overlap = (upper_at.0 + 10, upper_at.1 + 10);
+    assert!(
+        overlap.0 < lower_at.0 + width && overlap.1 < lower_at.1 + height,
+        "the windows overlap: {lower_at:?} {upper_at:?}"
+    );
+    // Where only the lower shows: the lower's bottom left corner.
+    let clear = (lower_at.0 + 5, lower_at.1 + height - 5);
+    assert!(
+        clear.0 < upper_at.0 - 8 || clear.1 > upper_at.1 + height,
+        "the lower has a part the upper leaves clear: {lower_at:?} {upper_at:?}"
+    );
+    // A click on the lower's clear part raises it over the upper, in vaht's
+    // stacking.
+    let point = |(x, y): (i16, i16)| (u32::try_from(x).unwrap(), u32::try_from(y).unwrap());
+    let (x, y) = point(clear);
+    desktop.wayland.click(x, y, BUTTON_LEFT);
+    assert!(desktop.x11.wait_for_button_presses(lower, 1));
+    assert!(
+        desktop.wait_for_color_at(point((upper_at.0 + 10, upper_at.1 + 10)), X_COLOR),
+        "the lower window shows over the upper"
+    );
+    // A click where both are goes to the one on top, which is now the lower.
+    let (x, y) = point(overlap);
+    desktop.wayland.click(x, y, BUTTON_LEFT);
+    assert!(
+        desktop.x11.wait_for_button_presses(lower, 2),
+        "the window shown on top took the click"
+    );
+    assert_eq!(
+        desktop.x11.button_presses_of(upper),
+        0,
+        "the window shown beneath took none"
+    );
+}
+
+#[test]
 fn a_click_in_a_hole_goes_to_the_window_below() {
     let mut desktop = XDesktop::new();
     desktop.wayland.open_windows(1);

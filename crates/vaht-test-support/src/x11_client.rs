@@ -43,6 +43,8 @@ pub struct X11Client {
     /// The windows that received a key press, so far, with each key's
     /// code.
     key_presses: Vec<(Window, u8)>,
+    /// The windows that received a button press, so far, in order.
+    button_presses: Vec<Window>,
     /// The text this program holds on each selection it owns, by the
     /// selection's atom.
     copied: HashMap<Atom, String>,
@@ -79,6 +81,7 @@ impl X11Client {
             wm_delete_window,
             close_requests: Vec::new(),
             key_presses: Vec::new(),
+            button_presses: Vec::new(),
             copied: HashMap::new(),
             pasted: HashMap::new(),
         }
@@ -538,6 +541,45 @@ impl X11Client {
         true
     }
 
+    /// Waits until `window` has received `count` button presses in all;
+    /// returns whether it did in time.
+    pub fn wait_for_button_presses(&mut self, window: Window, count: usize) -> bool {
+        let deadline = Instant::now() + PATIENCE;
+        while self.button_presses_of(window) < count {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            self.wait_for_events(left, None);
+        }
+        true
+    }
+
+    /// Returns the X server's top-level windows from the bottom of its
+    /// stacking to the top.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the X server refuses the request.
+    #[must_use]
+    pub fn stacking_bottom_up(&self) -> Vec<Window> {
+        self.connection
+            .query_tree(self.root)
+            .expect("the request is sent")
+            .reply()
+            .expect("the X server answers")
+            .children
+    }
+
+    /// Returns how many button presses `window` received so far.
+    #[must_use]
+    pub fn button_presses_of(&self, window: Window) -> usize {
+        self.button_presses
+            .iter()
+            .filter(|pressed| **pressed == window)
+            .count()
+    }
+
     /// Returns the X keycodes of the keys `window` received so far, in
     /// order.
     #[must_use]
@@ -745,7 +787,10 @@ impl X11Client {
             .background_pixel(pixel)
             .override_redirect(u32::from(is_override_redirect))
             .event_mask(
-                EventMask::STRUCTURE_NOTIFY | EventMask::KEY_PRESS | EventMask::POINTER_MOTION,
+                EventMask::STRUCTURE_NOTIFY
+                    | EventMask::KEY_PRESS
+                    | EventMask::BUTTON_PRESS
+                    | EventMask::POINTER_MOTION,
             );
         self.connection
             .create_window(
@@ -795,7 +840,7 @@ impl X11Client {
         {
             #[expect(
                 clippy::wildcard_enum_match_arm,
-                reason = "of the X server's hundred events, a test hears four"
+                reason = "of the X server's hundred events, a test hears five"
             )]
             match event {
                 Event::ClientMessage(message)
@@ -805,6 +850,7 @@ impl X11Client {
                     self.close_requests.push(message.window);
                 }
                 Event::KeyPress(press) => self.key_presses.push((press.event, press.detail)),
+                Event::ButtonPress(press) => self.button_presses.push(press.event),
                 Event::SelectionRequest(request) => self.answer_selection_request(&request),
                 Event::SelectionNotify(notify) => {
                     self.pasted.insert(notify.requestor, notify.property);

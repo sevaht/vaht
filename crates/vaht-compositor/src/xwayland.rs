@@ -76,6 +76,9 @@ pub(crate) struct XwaylandServer {
     display_number: Option<u32>,
     /// The override-redirect windows mapped, bottom first.
     unmanaged: Vec<X11Surface>,
+    /// The managed windows' stacking the X server was last told, topmost
+    /// first (by X window id).
+    stacking: Vec<u32>,
     /// Every window's shape, once Xwayland is ready.
     shapes: Option<ShapeTracker>,
     /// Every managed window's icon, once Xwayland is ready.
@@ -133,6 +136,7 @@ impl XwaylandServer {
             wm: None,
             display_number: None,
             unmanaged: Vec::new(),
+            stacking: Vec::new(),
             shapes: None,
             icons: None,
             _source: source,
@@ -163,6 +167,29 @@ impl XwaylandServer {
             .inspect_err(|error| tracing::warn!(error, "X11 windows' icons are not read"))
             .ok();
         tracing::info!(display = display_number, "Xwayland is ready");
+    }
+
+    /// Tells the X server how the managed windows are stacked, `top_down`,
+    /// if that is not what it was last told.
+    ///
+    /// The X server hands the pointer to the X window it finds under it
+    /// by its own stacking, whichever surface vaht stacked on top, so a
+    /// window vaht raised would not get a click over one that was mapped
+    /// later.
+    pub(crate) fn restack(&mut self, top_down: &[X11Surface]) {
+        let order: Vec<u32> = top_down.iter().map(X11Surface::window_id).collect();
+        if order == self.stacking {
+            return;
+        }
+        let Some(wm) = &mut self.wm else {
+            return;
+        };
+        match wm.update_stacking_order_downwards(top_down.iter()) {
+            Ok(()) => self.stacking = order,
+            Err(error) => {
+                tracing::debug!(%error, "X windows' stacking could not be sent");
+            }
+        }
     }
 
     /// Stops following the shape of `window`, unmapped or gone.

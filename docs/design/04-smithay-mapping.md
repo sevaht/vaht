@@ -264,7 +264,20 @@ request setting the window position and the pointer together would end it).
 Test it with the ROTK launcher, and with `xdotool getmouselocation` during
 and after a drag, which should follow the real pointer.
 
-### 8.3 The clipboard between X11 and Wayland programs
+### 8.3 The stacking of X11 windows
+
+The X server hands a click to the X window it finds under the pointer by
+*its own* stacking, whichever surface vaht drew and hit-tested on top. Left
+alone, that stacking is the order the windows were mapped in, so a window
+vaht raised (a click on Steam's game list, over its friends list, which was
+mapped later) lost its clicks to the window beneath it. Whenever things
+settle, `Compositor::restack_x11_windows` gives Smithay's X window manager
+the managed windows topmost first (`XwaylandServer::restack`, which sends it
+only when it changed), and the test
+`a_click_goes_to_the_x11_window_vaht_shows_on_top` clicks through two
+overlapping X windows after raising the lower one.
+
+### 8.4 The clipboard between X11 and Wayland programs
 
 Smithay's X window manager stands in for X programs in both directions,
 but the compositor must connect it to the Wayland selections itself
@@ -280,7 +293,7 @@ the window manager next wrote to X; vaht sends it at once
 directions, and both selections, through a clipboard manager (data
 control) and an X program of the tests' own.
 
-### 8.4 Sandboxed programs
+### 8.5 Sandboxed programs
 
 A sandbox engine (Flatpak) asks over `wp_security_context_v1` for a socket
 of its own; vaht listens there until the engine closes its end

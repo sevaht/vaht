@@ -2830,10 +2830,26 @@ impl Compositor {
                 toplevel.end(ending, &self.display_handle);
             }
         }
+        self.restack_x11_windows();
         self.sync_keyboard_focus();
         self.refresh_pointer_focus();
         if self.window_manager.take_redraw() {
             self.schedule_render();
+        }
+    }
+
+    /// Tells Xwayland how the X11 windows are stacked, topmost first.
+    fn restack_x11_windows(&mut self) {
+        if self.xwayland.is_none() {
+            return;
+        }
+        let order: Vec<X11Surface> = self
+            .window_manager
+            .windows_top_down()
+            .filter_map(|window| self.toplevels.get(window.id())?.x11().cloned())
+            .collect();
+        if let Some(xwayland) = &mut self.xwayland {
+            xwayland.restack(&order);
         }
     }
 
