@@ -152,6 +152,34 @@ fn a_window_that_asks_to_draw_its_own_decorations_gets_no_frame() {
 }
 
 #[test]
+fn a_window_that_never_negotiates_decorations_gets_no_frame() {
+    // With no xdg-decoration object a window draws its own decorations,
+    // which is how Wine's windows without a caption (Electron's frameless
+    // ones) are made.
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows_without_decoration_negotiation(1);
+    let screenshot = client.screenshot();
+    let content = screenshot
+        .bounds_of(WINDOW_COLOR)
+        .expect("the window's content is on screen");
+    let desktop = screenshot.rgb(2, 2);
+    assert_eq!(
+        screenshot.rgb(content.left + 40, content.top - 5),
+        desktop,
+        "no titlebar above it"
+    );
+    assert_eq!(
+        screenshot.rgb(content.left - 1, content.top + 10),
+        desktop,
+        "no border beside it"
+    );
+}
+
+#[test]
 fn a_frame_rule_frames_a_window_that_draws_its_own() {
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),

@@ -199,11 +199,15 @@ impl Toplevel {
             geometry: self.window.geometry(),
             size_limits: self.size_limits(),
             // A window that agreed with vaht to draw its own frame
-            // (xdg-decoration's client side) gets none from vaht.
+            // (xdg-decoration's client side), or that never spoke of
+            // decorations (no decoration object, which means it draws its
+            // own: Wine's windows without a caption), gets none from vaht.
             is_self_decorated: self.xdg().is_some_and(|toplevel| {
                 toplevel.with_committed_state(|state| {
-                    state.and_then(|state| state.decoration_mode)
-                        == Some(zxdg_toplevel_decoration_v1::Mode::ClientSide)
+                    matches!(
+                        state.and_then(|state| state.decoration_mode),
+                        None | Some(zxdg_toplevel_decoration_v1::Mode::ClientSide)
+                    )
                 })
             }),
         }

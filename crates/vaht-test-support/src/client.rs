@@ -455,6 +455,17 @@ impl TestClient {
         self.open_windows_decorated(count, WindowDecorations::RequestClient);
     }
 
+    /// Opens `count` windows that never speak of decorations (no
+    /// xdg-decoration object), as Wine's frameless windows and GTK's do,
+    /// and waits until each has been shown once.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn open_windows_without_decoration_negotiation(&mut self, count: usize) {
+        self.open_windows_decorated(count, WindowDecorations::ClientOnly);
+    }
+
     /// Opens `count` windows asking for `decorations`, and waits until each
     /// has been shown once.
     fn open_windows_decorated(&mut self, count: usize, decorations: WindowDecorations) {
@@ -755,17 +766,6 @@ impl TestClient {
         self.roundtrip();
     }
 
-    /// Closes every window and waits until vaht has processed it.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the connection to vaht fails.
-    pub fn close_windows(&mut self) {
-        self.state.windows.clear();
-        self.roundtrip();
-    }
-
-    /// Returns how many times vaht asked this client to close a window.
     /// Has every window draw its own icon like [`Self::draw_window_icons`],
     /// and also give it the empty name Wine's Wayland driver gives its
     /// icons (xdg-toplevel-icon).
@@ -790,6 +790,17 @@ impl TestClient {
         self.roundtrip();
     }
 
+    /// Closes every window and waits until vaht has processed it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn close_windows(&mut self) {
+        self.state.windows.clear();
+        self.roundtrip();
+    }
+
+    /// Returns how many times vaht asked this client to close a window.
     #[must_use]
     pub const fn close_requests(&self) -> usize {
         self.state.close_requests
