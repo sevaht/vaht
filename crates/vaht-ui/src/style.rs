@@ -238,6 +238,8 @@ pub struct ElementStyle {
     pub bullet: Bullet,
     /// Which side of a menu item its bullet, and a toggle's check, are on.
     pub bullet_side: MarkSide,
+    /// The mark of a chosen menu item.
+    pub check: CheckMark,
     /// How opaque the whole of it is drawn, 0 (clear) to 255 (opaque): the
     /// taskbar's, a menu's (its `menu.frame`) or a tooltip's.
     pub alpha: u8,
@@ -255,6 +257,31 @@ pub enum Bullet {
     Square,
     /// A small diamond.
     Diamond,
+    /// A chevron: `>`.
+    Chevron,
+    /// Two chevrons: `>>`.
+    DoubleChevron,
+}
+
+/// The mark of a chosen menu item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum CheckMark {
+    /// A filled square (Fluxbox's).
+    #[default]
+    Box,
+    /// A tick.
+    Tick,
+}
+
+impl CheckMark {
+    /// Returns the picture of this mark.
+    #[must_use]
+    pub const fn glyph(self) -> Glyph {
+        match self {
+            Self::Box => Glyph::Check,
+            Self::Tick => Glyph::Tick,
+        }
+    }
 }
 
 impl Bullet {
@@ -267,6 +294,8 @@ impl Bullet {
             (Self::Triangle, MarkSide::Left) => Some(Glyph::BulletLeft),
             (Self::Square, _) => Some(Glyph::BulletSquare),
             (Self::Diamond, _) => Some(Glyph::BulletDiamond),
+            (Self::Chevron, _) => Some(Glyph::BulletChevron),
+            (Self::DoubleChevron, _) => Some(Glyph::BulletDoubleChevron),
         }
     }
 }
@@ -310,6 +339,7 @@ impl ElementStyle {
             rounded_corners: CornerSet::ALL,
             bullet: Bullet::Triangle,
             bullet_side: MarkSide::Right,
+            check: CheckMark::Box,
             alpha: u8::MAX,
         }
     }
@@ -352,6 +382,8 @@ pub struct ElementStylePatch {
     pub bullet: Option<Bullet>,
     /// The bullet's side, if this layer sets it.
     pub bullet_side: Option<MarkSide>,
+    /// The mark of a chosen item, if this layer sets it.
+    pub check: Option<CheckMark>,
     /// How opaque the whole element is, if this layer sets it.
     pub alpha: Option<u8>,
 }
@@ -435,6 +467,9 @@ impl ElementStylePatch {
         }
         if let Some(side) = self.bullet_side {
             style.bullet_side = side;
+        }
+        if let Some(check) = self.check {
+            style.check = check;
         }
         if let Some(corners) = self.rounded_corners {
             style.rounded_corners = corners;

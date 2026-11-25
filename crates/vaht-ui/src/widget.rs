@@ -255,9 +255,31 @@ pub enum Glyph {
     BulletSquare,
     /// A small diamond (Fluxbox's `diamond`).
     BulletDiamond,
+    /// A chevron (`>`), pointing right.
+    BulletChevron,
+    /// Two chevrons (`>>`), pointing right.
+    BulletDoubleChevron,
+    /// A tick: a chosen menu item, as a style that wants a real checkmark has it.
+    Tick,
 }
 
 impl Glyph {
+    /// Returns whether this is a submenu item's mark, which the style's
+    /// `bullet` in the item's state chooses.
+    #[must_use]
+    pub const fn is_submenu_mark(self) -> bool {
+        matches!(
+            self,
+            Self::Submenu
+                | Self::BulletRight
+                | Self::BulletLeft
+                | Self::BulletSquare
+                | Self::BulletDiamond
+                | Self::BulletChevron
+                | Self::BulletDoubleChevron
+        )
+    }
+
     /// Returns the button picture this one is the other look of: what a
     /// button shows once clicked (restore, unshade, stuck), for a style that
     /// has an image for the usual one and none for it.
@@ -280,7 +302,10 @@ impl Glyph {
             | Self::BulletRight
             | Self::BulletLeft
             | Self::BulletSquare
-            | Self::BulletDiamond => None,
+            | Self::BulletDiamond
+            | Self::BulletChevron
+            | Self::BulletDoubleChevron
+            | Self::Tick => None,
         }
     }
 }

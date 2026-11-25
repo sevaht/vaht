@@ -1010,11 +1010,15 @@ exactly what each element gets.
   - text: `font = { family, size, weight, style }`, `text_color`,
     `text_effect` (`{ halo = color }` or `{ shadow = color, offset = [x, y] }`),
     `justify`;
-  - menu items: `bullet` (`empty`, `triangle`, `square`, `diamond`: a
-    submenu's mark, in the text color) and `bullet_position` (`left` or
-    `right`: where it and a chosen toggle's check go; the check takes
-    `glyph_color`), from Fluxbox's `menu.bullet`, `menu.bullet.position`
-    and `menu.hilite.color`;
+  - menu items: `bullet` (`empty`, `triangle`, `square`, `diamond`,
+    `chevron`, `double-chevron`: a submenu's mark, in the text color; a
+    state's layer may give another, so a hovered item shows `double-chevron`
+    where the others show `chevron`), `check` (`box`, the default, or `tick`:
+    a chosen toggle's mark) and `bullet_position` (`left` or `right`: where
+    it and the check go; the check takes `glyph_color`), from Fluxbox's
+    `menu.bullet`, `menu.bullet.position` and `menu.hilite.color`; the
+    chevrons and the tick are drawn by vaht, so they scale with the item and
+    take the style's colors;
   - **lengths:** every length in a style (`padding`, `spacing`, `height`,
     a `border`'s `width`, `corner_radius`) is a plain number of logical pixels
     (which the output's scale then multiplies), or text of terms added and

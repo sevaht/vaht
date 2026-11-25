@@ -118,7 +118,19 @@ impl<'pixmap> Canvas<'pixmap> {
                 let square = Rect::new(placed.rect.x + offset, placed.rect.y, side, side);
                 // A chosen item's check is the glyph color; a bullet is the
                 // text's, as Fluxbox draws them.
-                let color = if mark == Glyph::Check {
+                // The mark a submenu item or a chosen item has is the style's
+                // in the item's state, so a hovered item may show another.
+                let mark = if mark.is_submenu_mark() {
+                    style
+                        .bullet
+                        .glyph(placed.mark_side)
+                        .unwrap_or(Glyph::Submenu)
+                } else if matches!(mark, Glyph::Check | Glyph::Tick) {
+                    style.check.glyph()
+                } else {
+                    mark
+                };
+                let color = if matches!(mark, Glyph::Check | Glyph::Tick) {
                     style.glyph_color
                 } else {
                     style.text.color
@@ -474,7 +486,10 @@ impl<'pixmap> Canvas<'pixmap> {
             | Glyph::Stuck
             | Glyph::Menu
             | Glyph::Submenu
-            | Glyph::BulletSquare => {
+            | Glyph::BulletSquare
+            | Glyph::BulletChevron
+            | Glyph::BulletDoubleChevron
+            | Glyph::Tick => {
                 return None;
             }
         };
@@ -576,6 +591,16 @@ impl<'pixmap> Canvas<'pixmap> {
                     path.push_rect(square);
                 }
             }
+            Glyph::BulletChevron => Self::chevron(&mut path, left, top, side, 0.0),
+            Glyph::BulletDoubleChevron => {
+                Self::chevron(&mut path, left, top, side, -0.14);
+                Self::chevron(&mut path, left, top, side, 0.14);
+            }
+            Glyph::Tick => {
+                path.move_to(left + side * 0.28, top + side * 0.56);
+                path.line_to(left + side * 0.42, top + side * 0.7);
+                path.line_to(left + side * 0.75, top + side * 0.3);
+            }
             Glyph::Submenu
             | Glyph::ArrowLeft
             | Glyph::ArrowRight
@@ -585,6 +610,15 @@ impl<'pixmap> Canvas<'pixmap> {
             | Glyph::BulletDiamond => {}
         }
         path
+    }
+
+    /// Adds a chevron (`>`) to `path`, `shift` of the square to the right of
+    /// the middle.
+    fn chevron(path: &mut PathBuilder, left: f32, top: f32, side: f32, shift: f32) {
+        let x = left + side * (0.46 + shift);
+        path.move_to(x - side * 0.12, top + side * 0.3);
+        path.line_to(x + side * 0.1, top + side * 0.5);
+        path.line_to(x - side * 0.12, top + side * 0.7);
     }
 
     /// Strokes `glyph` in `color`, centered in the largest square inside `rect`.
@@ -622,7 +656,15 @@ impl<'pixmap> Canvas<'pixmap> {
             paint.set_color(color.to_skia());
             paint.anti_alias = true;
             let stroke = Stroke {
-                width: GLYPH_STROKE_WIDTH * self.scale,
+                // A chevron and a tick are bolder: they are marks to read.
+                width: if matches!(
+                    glyph,
+                    Glyph::BulletChevron | Glyph::BulletDoubleChevron | Glyph::Tick
+                ) {
+                    2.0
+                } else {
+                    GLYPH_STROKE_WIDTH
+                } * self.scale,
                 ..Stroke::default()
             };
             self.pixmap

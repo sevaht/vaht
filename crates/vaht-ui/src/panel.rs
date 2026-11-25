@@ -852,6 +852,74 @@ mod tests {
         }
     }
 
+    /// A menu item with a mark on its right, in `state`.
+    struct MarkedIn(Glyph, WidgetState);
+
+    impl PanelContent for MarkedIn {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            Widget::text(StyleElement::MenuItem, String::new())
+                .with_mark_on(self.0, crate::widget::MarkSide::Right)
+        }
+
+        fn state(&self) -> WidgetState {
+            self.1
+        }
+    }
+
+    /// Returns which pixels of the mark's square (the right 20 of a 100 by 20
+    /// panel) are lit, painting `glyph` as `style` has it in `state`.
+    fn lit_mark(style: &str, glyph: Glyph, state: WidgetState) -> Vec<bool> {
+        let layers = crate::style::StyleLayers::from_toml(style).expect("a valid style");
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(MarkedIn(glyph, state), Size::new(100, 20));
+        assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
+        let pixels = panel.pixels().expect("painted");
+        (0..20)
+            .flat_map(|y| (80..100).map(move |x| (x, y)))
+            .map(|(x, y)| pixels.pixel(x, y).expect("inside").red() > 128)
+            .collect()
+    }
+
+    const MARKS: &str = "[menu.item]\ntexture = { solid = \"black\" }\n\
+                         text_color = \"white\"\nglyph_color = \"white\"\n";
+
+    #[test]
+    fn an_item_shows_the_bullet_its_state_has() {
+        let style = |bullet: &str, hovered: &str| {
+            format!("{MARKS}bullet = \"{bullet}\"\n[menu.item.hovered]\nbullet = \"{hovered}\"\n")
+        };
+        let marks = |style: &str, state| lit_mark(style, Glyph::BulletRight, state);
+        let chevron = marks(&style("chevron", "chevron"), WidgetState::Focused);
+        let double = marks(&style("chevron", "double-chevron"), WidgetState::Hovered);
+        let none = marks(&style("chevron", "empty"), WidgetState::Hovered);
+        assert!(chevron.iter().any(|lit| *lit), "a chevron is drawn");
+        assert_ne!(chevron, double, "the hovered item has the other bullet");
+        assert!(
+            double.iter().filter(|lit| **lit).count() > chevron.iter().filter(|lit| **lit).count(),
+            "two chevrons light more than one"
+        );
+        assert!(none.iter().all(|lit| !lit), "an empty bullet draws nothing");
+        assert_eq!(
+            chevron,
+            marks(&style("chevron", "double-chevron"), WidgetState::Focused),
+            "an item not hovered keeps its own"
+        );
+    }
+
+    #[test]
+    fn a_chosen_item_has_the_check_the_style_gives() {
+        let boxed = lit_mark(MARKS, Glyph::Check, WidgetState::Focused);
+        let ticked = lit_mark(
+            &format!("{MARKS}check = \"tick\"\n"),
+            Glyph::Check,
+            WidgetState::Focused,
+        );
+        assert!(boxed.iter().any(|lit| *lit) && ticked.iter().any(|lit| *lit));
+        assert_ne!(boxed, ticked, "a tick is not the box");
+    }
+
     /// A window-list entry filling its panel.
     struct Entry;
 

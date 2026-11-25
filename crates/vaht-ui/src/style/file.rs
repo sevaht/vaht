@@ -21,7 +21,8 @@ use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 
 use super::options::{self, NoLibrary, Selection, Variables};
 use super::{
-    BorderPatch, Bullet, ElementStylePatch, GlyphImages, StyleElement, StyleLayers, WidgetState,
+    BorderPatch, Bullet, CheckMark, ElementStylePatch, GlyphImages, StyleElement, StyleLayers,
+    WidgetState,
 };
 use crate::color::Color;
 use crate::corner::{Corner, CornerSet};
@@ -438,6 +439,7 @@ impl ElementStylePatch {
             "corner_radius" => self.corner_radius = Some(images.value(map)?),
             "corners" => self.rounded_corners = Some(images.value::<_, CornersFile>(map)?.0),
             "bullet" => self.bullet = Some(images.value::<_, BulletName>(map)?.into_bullet()),
+            "check" => self.check = Some(images.value::<_, CheckName>(map)?.into_check()),
             "bullet_position" => {
                 self.bullet_side = Some(images.value::<_, SideName>(map)?.into_side());
             }
@@ -599,8 +601,10 @@ impl GlyphName {
                 Glyph::BulletLeft,
                 Glyph::BulletSquare,
                 Glyph::BulletDiamond,
+                Glyph::BulletChevron,
+                Glyph::BulletDoubleChevron,
             ],
-            Self::Check => &[Glyph::Check],
+            Self::Check => &[Glyph::Check, Glyph::Tick],
         }
     }
 }
@@ -708,6 +712,30 @@ enum BulletName {
     Square,
     /// A diamond.
     Diamond,
+    /// A chevron.
+    Chevron,
+    /// Two chevrons.
+    DoubleChevron,
+}
+
+/// A chosen item's mark as written.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum CheckName {
+    /// A filled square.
+    Box,
+    /// A tick.
+    Tick,
+}
+
+impl CheckName {
+    /// Returns the mark.
+    const fn into_check(self) -> CheckMark {
+        match self {
+            Self::Box => CheckMark::Box,
+            Self::Tick => CheckMark::Tick,
+        }
+    }
 }
 
 impl BulletName {
@@ -718,6 +746,8 @@ impl BulletName {
             Self::Triangle => Bullet::Triangle,
             Self::Square => Bullet::Square,
             Self::Diamond => Bullet::Diamond,
+            Self::Chevron => Bullet::Chevron,
+            Self::DoubleChevron => Bullet::DoubleChevron,
         }
     }
 }
