@@ -109,6 +109,17 @@ pub(crate) struct MenuStack {
     search_mode: MenuSearch,
     /// What was typed in the last menu, to find an item by.
     search: String,
+    /// A menu's title held by the pointer, to move the menu by.
+    dragging: Option<Drag>,
+}
+
+/// A menu being moved by its title.
+#[derive(Debug, Clone, Copy)]
+struct Drag {
+    /// The menu's level in the stack.
+    level: usize,
+    /// Where in the menu it was taken, from its top-left corner.
+    grab: Point<i32, Logical>,
 }
 
 /// A pipe menu open, waiting for what its command prints.
@@ -135,6 +146,8 @@ pub(crate) struct MenuSnapshot {
     pub(crate) at: Point<i32, Logical>,
     /// The item highlighted in each menu, first to last.
     pub(crate) path: Vec<Option<usize>>,
+    /// Where each menu was moved to by its title, if it was.
+    pub(crate) moved: Vec<Option<Point<i32, Logical>>>,
 }
 
 /// One open menu.
@@ -146,6 +159,8 @@ struct OpenMenu {
     geometry: MenuGeometry,
     /// Its buffers.
     texture: MenuTexture,
+    /// Where it was moved to by its title, if it was.
+    moved: Option<Point<i32, Logical>>,
 }
 
 impl MenuStack {
@@ -242,6 +257,9 @@ impl MenuStack {
         delay: Duration,
         event_loop: (&LoopHandle<'static, Compositor>, &ResourceLedger),
     ) -> bool {
+        if self.dragging.is_some() {
+            return false;
+        }
         let Some((level, Some(item))) = self.item_at(point) else {
             return false;
         };
@@ -279,6 +297,16 @@ impl MenuStack {
             self.close();
             return false;
         }
+        // A title is held to move its menu by, as in Fluxbox.
+        if let Some(level) = self.title_at(point) {
+            let corner = self.menus[level].geometry.outer.loc;
+            self.dragging = Some(Drag {
+                level,
+                grab: point.to_i32_floor() - corner,
+            });
+            self.pressed = None;
+            return true;
+        }
         self.pressed = self
             .item_at(point)
             .and_then(|(level, item)| Some((level, item?)));
@@ -295,6 +323,10 @@ impl MenuStack {
         keep_open: bool,
     ) -> Option<MenuChoice> {
         self.pressed = None;
+        // Letting go of a title ends the move and chooses nothing.
+        if self.dragging.take().is_some() {
+            return None;
+        }
         let (level, item) = self.item_at(point)?;
         let item = item?;
         self.menus[level]
@@ -317,18 +349,75 @@ impl MenuStack {
                 .iter()
                 .map(|menu| menu.panel.content().hovered())
                 .collect(),
+            moved: self.menus.iter().map(|menu| menu.moved).collect(),
         })
+    }
+
+    /// Returns the level of the menu whose title is at global `point`.
+    fn title_at(&self, point: Point<f64, Logical>) -> Option<usize> {
+        let (level, menu) = self
+            .menus
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, menu)| menu.geometry.covers(point))?;
+        let line = menu.geometry.lines[4];
+        let is_titled = line.size.w > 0;
+        let pixel: Point<i32, Logical> = point.to_i32_floor();
+        (is_titled && pixel.y < line.loc.y).then_some(level)
+    }
+
+    /// Moves the menu being dragged by its title so the pointer, at global
+    /// `point`, keeps its place in it, within the output; returns whether it
+    /// moved.
+    pub(crate) fn drag_to(&mut self, point: Point<f64, Logical>) -> bool {
+        let Some(drag) = self.dragging else {
+            return false;
+        };
+        self.move_menu(drag.level, point.to_i32_floor() - drag.grab)
+    }
+
+    /// Puts the corner of the menu of `level` at `wanted`, or as near as keeps
+    /// it on the output; returns whether it moved.
+    fn move_menu(&mut self, level: usize, wanted: Point<i32, Logical>) -> bool {
+        let bounds = self.bounds;
+        let Some(menu) = self.menus.get_mut(level) else {
+            return false;
+        };
+        let outer = menu.geometry.outer;
+        let origin = Self::fitted(wanted, (outer.size.w, outer.size.h), bounds);
+        if origin == outer.loc {
+            return false;
+        }
+        let panel = menu.geometry.panel.size;
+        let size = vaht_ui::Size::new(
+            u32::try_from(panel.w).unwrap_or(0),
+            u32::try_from(panel.h).unwrap_or(0),
+        );
+        menu.geometry = MenuGeometry::at(origin, size, menu.panel.content());
+        menu.moved = Some(origin);
+        true
     }
 
     /// Highlights the items of `path`, opening the submenu of each but the
     /// last: the menus as `snapshot` found them.
-    pub(crate) fn restore(&mut self, path: &[Option<usize>], style: (&Style, &mut Typesetter)) {
+    pub(crate) fn restore(
+        &mut self,
+        path: &[Option<usize>],
+        moved: &[Option<Point<i32, Logical>>],
+        style: (&Style, &mut Typesetter),
+    ) {
         let (style, typesetter) = style;
         for (position, item) in path.iter().enumerate() {
             let Some(menu) = self.menus.last_mut() else {
                 return;
             };
             menu.panel.update_if(|content| content.set_hovered(*item));
+            // A menu moved by its title stays where it was put, and its
+            // submenu opens beside it there.
+            if let Some(Some(origin)) = moved.get(position) {
+                self.move_menu(position, *origin);
+            }
             if position + 1 < path.len() {
                 self.open_highlighted_submenu((style, &mut *typesetter));
             }
@@ -517,6 +606,7 @@ impl MenuStack {
             panel: Panel::new(content, size),
             geometry,
             texture: MenuTexture::new(),
+            moved: None,
         });
     }
 
@@ -895,7 +985,7 @@ mod tests {
             (&style, &mut typesetter),
         );
         stack.mark_opened_by(MenuRequest::Root, None);
-        stack.restore(&[Some(2), Some(0)], (&style, &mut typesetter));
+        stack.restore(&[Some(2), Some(0)], &[], (&style, &mut typesetter));
         assert_eq!(stack.menus.len(), 2, "the submenu is open");
         assert_eq!(
             stack.snapshot().expect("a request").path,
@@ -969,5 +1059,92 @@ mod tests {
                 .all(|item| !matches!(item, MenuItem::Choice { mark: Some(_), .. }))),
             "without a window, the window menu has no toggles"
         );
+    }
+
+    /// A point on the title of the menu opened at (100, 100) by `model()`.
+    fn on_the_title() -> Point<f64, Logical> {
+        (130.0, 108.0).into()
+    }
+
+    #[test]
+    fn a_menu_is_moved_by_holding_its_title_and_chooses_nothing_when_let_go() {
+        let (style, mut typesetter) = style();
+        let mut stack = MenuStack::default();
+        stack.open(
+            model(),
+            (100, 100).into(),
+            bounds(),
+            (&style, &mut typesetter),
+        );
+        let before = stack.menus[0].geometry.outer.loc;
+        assert!(stack.press(on_the_title()), "the title is on the menu");
+        assert!(stack.drag_to((330.0, 308.0).into()));
+        let after = stack.menus[0].geometry.outer.loc;
+        assert_eq!(
+            (after.x - before.x, after.y - before.y),
+            (200, 200),
+            "the menu goes where the pointer does"
+        );
+        assert!(
+            stack.menus[0].geometry.covers((330.0, 308.0).into()),
+            "its parts moved with it"
+        );
+        assert_eq!(
+            stack.release((330.0, 308.0).into(), (&style, &mut typesetter), false),
+            None,
+            "letting go of a title chooses nothing"
+        );
+        assert!(stack.is_open(), "and the menu stays");
+        assert!(!stack.drag_to((600.0, 600.0).into()), "the move is over");
+    }
+
+    #[test]
+    fn a_menu_moved_stays_on_the_output_and_an_item_is_not_a_handle() {
+        let (style, mut typesetter) = style();
+        let mut stack = MenuStack::default();
+        stack.open(
+            model(),
+            (100, 100).into(),
+            bounds(),
+            (&style, &mut typesetter),
+        );
+        assert!(stack.press(on_the_title()));
+        stack.drag_to((-500.0, -500.0).into());
+        let corner = stack.menus[0].geometry.outer.loc;
+        assert_eq!((corner.x, corner.y), (0, 0), "no further than the output");
+        stack.release((0.0, 0.0).into(), (&style, &mut typesetter), false);
+        // A press on an item does not start a move.
+        let item = {
+            let outer = stack.menus[0].geometry.outer;
+            Point::<f64, Logical>::from((
+                f64::from(outer.loc.x) + 20.0,
+                f64::from(outer.loc.y) + 40.0,
+            ))
+        };
+        assert!(stack.press(item));
+        assert!(!stack.drag_to((500.0, 500.0).into()));
+    }
+
+    #[test]
+    fn a_moved_menu_is_put_back_where_it_was_moved_when_the_menus_open_again() {
+        let (style, mut typesetter) = style();
+        let mut stack = MenuStack::default();
+        stack.open(
+            model(),
+            (100, 100).into(),
+            bounds(),
+            (&style, &mut typesetter),
+        );
+        stack.mark_opened_by(MenuRequest::Root, None);
+        stack.press(on_the_title());
+        stack.drag_to((430.0, 408.0).into());
+        stack.release((430.0, 408.0).into(), (&style, &mut typesetter), false);
+        let moved_to = stack.menus[0].geometry.outer.loc;
+        let snapshot = stack.snapshot().expect("opened by a request");
+        // The menus are made again where they first opened, then restored.
+        stack.open(model(), snapshot.at, bounds(), (&style, &mut typesetter));
+        assert_ne!(stack.menus[0].geometry.outer.loc, moved_to);
+        stack.restore(&snapshot.path, &snapshot.moved, (&style, &mut typesetter));
+        assert_eq!(stack.menus[0].geometry.outer.loc, moved_to);
     }
 }

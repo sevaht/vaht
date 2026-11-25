@@ -3230,8 +3230,11 @@ impl Compositor {
     fn reopen_menus(&mut self, snapshot: &MenuSnapshot) {
         self.menus.close();
         if self.open_menu_at(&snapshot.request, snapshot.window, snapshot.at) {
-            self.menus
-                .restore(&snapshot.path, (&self.config.style, &mut self.typesetter));
+            self.menus.restore(
+                &snapshot.path,
+                &snapshot.moved,
+                (&self.config.style, &mut self.typesetter),
+            );
         }
         self.schedule_render();
     }
@@ -3721,6 +3724,9 @@ impl Compositor {
             self.schedule_render();
         }
         self.follow_tooltip(location);
+        if self.menus.drag_to(location) {
+            self.schedule_render();
+        }
         if self.menus.is_open()
             && self.menus.follow_pointer(
                 location,
