@@ -1263,6 +1263,10 @@ height = "$bar"                    # `$name` inside text is the variable's text
   which must be text or a number. Names are letters, digits and `_`, and not
   start with a digit. Each variable belongs to one option, and a variable a
   property uses that no option defines is an error at its line.
+  A variable's value may itself use variables, of its own option or another
+  (`face = { gradient = "vertical", from = "$light", to = "$dark" }`): a
+  choice that gives `light` anew changes `face` too. Variables that lead back
+  to themselves are an error naming the circle.
 - **The default choice is inline**, so a style loads with no other file: that
   is what the variables are when nothing is chosen, and it is the vocabulary
   of the option (a choice only takes the variables the default choice defines).

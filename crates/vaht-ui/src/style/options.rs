@@ -110,27 +110,53 @@ pub(super) struct Variables(HashMap<String, toml::Value>);
 impl Eq for Variables {}
 
 impl Variables {
-    /// Returns the value of `name`, or why there is none.
-    fn get(&self, name: &str) -> Result<&toml::Value, String> {
-        self.0
+    /// Returns the value of `name` with the variables it refers to put in, or
+    /// why there is none. `chain` holds the variables being put in, so a
+    /// variable that leads back to itself is told.
+    fn get(&self, name: &str, chain: &mut Vec<String>) -> Result<toml::Value, String> {
+        let value = self
+            .0
             .get(name)
-            .ok_or_else(|| format!("`${name}` is not a variable this style defines"))
+            .ok_or_else(|| format!("`${name}` is not a variable this style defines"))?;
+        if chain.iter().any(|known| known == name) {
+            let path = chain
+                .iter()
+                .chain(std::iter::once(&name.to_owned()))
+                .map(|link| format!("${link}"))
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            return Err(format!("variables refer to each other in a circle: {path}"));
+        }
+        chain.push(name.to_owned());
+        let value = self.substitute_in(value.clone(), chain);
+        chain.pop();
+        value
     }
 
     /// Returns `value` with every variable it refers to replaced: a string
     /// that is `"$name"` by the variable's value, whatever it is, and
-    /// `$name` inside a string by the variable's text.
+    /// `$name` inside a string by the variable's text. A variable's value may
+    /// itself refer to variables.
     pub(super) fn substitute(&self, value: toml::Value) -> Result<toml::Value, String> {
+        self.substitute_in(value, &mut Vec::new())
+    }
+
+    /// [`Self::substitute`], inside the variables of `chain`.
+    fn substitute_in(
+        &self,
+        value: toml::Value,
+        chain: &mut Vec<String>,
+    ) -> Result<toml::Value, String> {
         match value {
-            toml::Value::String(text) => self.in_text(&text),
+            toml::Value::String(text) => self.in_text(&text, chain),
             toml::Value::Array(items) => items
                 .into_iter()
-                .map(|item| self.substitute(item))
+                .map(|item| self.substitute_in(item, chain))
                 .collect::<Result<_, _>>()
                 .map(toml::Value::Array),
             toml::Value::Table(table) => table
                 .into_iter()
-                .map(|(key, item)| Ok((key, self.substitute(item)?)))
+                .map(|(key, item)| Ok((key, self.substitute_in(item, chain)?)))
                 .collect::<Result<toml::Table, String>>()
                 .map(toml::Value::Table),
             other @ (toml::Value::Integer(_)
@@ -141,14 +167,14 @@ impl Variables {
     }
 
     /// Returns the value `text` stands for.
-    fn in_text(&self, text: &str) -> Result<toml::Value, String> {
+    fn in_text(&self, text: &str, chain: &mut Vec<String>) -> Result<toml::Value, String> {
         if !text.contains('$') {
             return Ok(toml::Value::String(text.to_owned()));
         }
         if let Some(name) = text.strip_prefix('$')
             && is_name(name)
         {
-            return self.get(name).cloned();
+            return self.get(name, chain);
         }
         let mut out = String::new();
         let mut rest = text;
@@ -164,8 +190,8 @@ impl Variables {
                 rest = after;
                 continue;
             }
-            match self.get(name)? {
-                toml::Value::String(part) => out.push_str(part),
+            match self.get(name, chain)? {
+                toml::Value::String(part) => out.push_str(&part),
                 toml::Value::Integer(part) => out.push_str(&part.to_string()),
                 toml::Value::Float(part) => out.push_str(&part.to_string()),
                 toml::Value::Boolean(_)
@@ -449,7 +475,7 @@ bar = "navy"
     fn value(resolved: &Resolved, name: &str) -> String {
         resolved
             .variables
-            .get(name)
+            .get(name, &mut Vec::new())
             .expect("defined")
             .as_str()
             .expect("text")
@@ -483,7 +509,7 @@ bar = "navy"
         let resolved = pick(STYLE, &[("scheme", "blue")], &library).expect("valid");
         assert_eq!(value(&resolved, "bar"), "teal");
         assert!(
-            resolved.variables.get("extra").is_err(),
+            resolved.variables.get("extra", &mut Vec::new()).is_err(),
             "not a variable of the style"
         );
     }
@@ -619,6 +645,72 @@ bar = "navy"
             variables.substitute("cost: 5$".into()),
             Ok(toml::Value::String("cost: 5$".to_owned())),
             "a dollar sign that names nothing is a dollar sign"
+        );
+    }
+
+    /// A style whose `look` variable is made of the scheme's colors.
+    const NESTED: &str = r#"
+[options.scheme]
+default = "graphite"
+[options.scheme.graphite]
+light = "grey55"
+dark = "grey5"
+[options.look]
+default = "plain"
+[options.look.plain]
+face = { gradient = "vertical", from = "$light", to = "$dark" }
+caption = "$face and $light"
+"#;
+
+    #[test]
+    fn a_variable_may_be_made_of_others() {
+        let resolved = pick(NESTED, &[], &NoLibrary).expect("valid");
+        assert_eq!(
+            resolved.variables.substitute("$face".into()),
+            Ok(toml::Value::Table(
+                toml::from_str("gradient = \"vertical\"\nfrom = \"grey55\"\nto = \"grey5\"")
+                    .expect("TOML")
+            ))
+        );
+    }
+
+    #[test]
+    fn a_choice_changing_an_inner_variable_changes_what_is_made_of_it() {
+        let library = Library(vec![("scheme", "blue", "light = \"navy\"\n")]);
+        let resolved = pick(NESTED, &[("scheme", "blue")], &library).expect("valid");
+        let face = resolved
+            .variables
+            .substitute("$face".into())
+            .expect("resolves");
+        assert_eq!(face["from"].as_str(), Some("navy"));
+    }
+
+    #[test]
+    fn variables_leading_back_to_themselves_are_an_error_naming_the_circle() {
+        let resolved = pick(
+            "[options.loop]\ndefault = \"a\"\n[options.loop.a]\none = \"$two\"\ntwo = \"$one\"\n",
+            &[],
+            &NoLibrary,
+        )
+        .expect("valid");
+        let error = resolved
+            .variables
+            .substitute("$one".into())
+            .expect_err("a circle");
+        assert!(error.contains("$one -> $two -> $one"), "{error}");
+    }
+
+    #[test]
+    fn text_has_a_variable_made_of_others_put_in() {
+        let resolved = pick(
+            "[options.s]\ndefault = \"a\"\n[options.s.a]\npad = 4\nbar = \"1lh + $pad\"\n",
+            &[],
+            &NoLibrary,
+        )
+        .expect("valid");
+        assert_eq!(
+            resolved.variables.substitute("x: $bar".into()),
+            Ok(toml::Value::String("x: 1lh + 4".to_owned()))
         );
     }
 }
