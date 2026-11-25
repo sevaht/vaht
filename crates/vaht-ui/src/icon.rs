@@ -403,6 +403,46 @@ mod tests {
         );
     }
 
+    /// Returns `bytes` as base64 text, for a `data:` URL.
+    fn base64(bytes: &[u8]) -> String {
+        const DIGITS: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut text = String::new();
+        for chunk in bytes.chunks(3) {
+            let word = chunk.iter().enumerate().fold(0_u32, |word, (index, byte)| {
+                word | u32::from(*byte) << (16 - 8 * index)
+            });
+            for index in 0..=chunk.len() {
+                let digit = usize::try_from(word >> (18 - 6 * index) & 63).expect("six bits");
+                text.push(char::from(DIGITS[digit]));
+            }
+            text.push_str(&"=".repeat(3 - chunk.len()));
+        }
+        text
+    }
+
+    #[test]
+    fn an_svg_holding_a_picture_draws_it() {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let png = directory.path().join("inner.png");
+        red(8, 8).save_png(&png).expect("written");
+        let svg = directory.path().join("app.svg");
+        std::fs::write(
+            &svg,
+            format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" \
+                 xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"16\" height=\"16\">\
+                 <image width=\"16\" height=\"16\" \
+                 xlink:href=\"data:image/png;base64,{}\"/></svg>",
+                base64(&std::fs::read(&png).expect("read"))
+            ),
+        )
+        .expect("written");
+        let icon = Icon::load(&svg, 16).expect("loads");
+        let pixel = icon.pixels().pixel(8, 8).expect("inside");
+        assert_eq!((pixel.alpha(), pixel.red()), (255, 255), "the embedded red");
+    }
+
     #[test]
     fn png_and_svg_files_load_at_the_size_asked() {
         let directory = tempfile::tempdir().expect("a temporary directory");
