@@ -1,0 +1,49 @@
+# nord: a color scheme for styles with a `scheme` option (the default style
+# has one): the palette of the fluxland default (a Nord palette) Fluxbox style, with what each part of the
+# style is made of it. Colors only are taken from that style, none of its files.
+# Installed as /usr/share/vaht/options/scheme/nord.toml; copy it to
+# ~/.config/vaht/options/scheme/<name>.toml and change it to make your own, and
+# choose it with `style_options = { scheme = "nord" }` in settings.toml.
+
+dark = "#2e3440"
+mid = "#3b4252"
+light = "#434c5e"
+dim = "#4c566a"
+edge = "#1a1d23"
+press_dark = "#2e3440"
+press_light = "#2e3440"
+menu = "#2e3440"
+
+text = "#d8dee9"
+text_effect = "none"
+glyph = "#d8dee9"
+surface = { solid = "$dark" }
+
+titlebar = { gradient = "vertical", from = "$mid", to = "$dark", bevel = "raised" }
+titlebar_unfocused = { solid = "$dark" }
+caption = { solid = "$mid" }
+caption_text = "#eceff4"
+caption_unfocused = { solid = "$dark" }
+caption_text_unfocused = "$dim"
+button = { gradient = "vertical", from = "$light", to = "$mid", bevel = "raised" }
+button_unfocused = { solid = "$mid" }
+button_pressed = { solid = "$dark", bevel = "sunken" }
+handle = { solid = "$mid" }
+grip = { solid = "$dim" }
+grip_unfocused = { solid = "$mid" }
+
+# The workspace label is on the taskbar's own background, not a lighter one.
+workspace = "$surface"
+entry = { solid = "#5e81ac" }
+entry_text = "#eceff4"
+entry_unfocused = { solid = "$mid" }
+entry_text_unfocused = "#7b88a1"
+
+menu_frame = { solid = "$menu" }
+menu_title_face = { gradient = "vertical", from = "$mid", to = "$dark", bevel = "raised" }
+menu_title_text = "#eceff4"
+menu_hover = { solid = "#5e81ac" }
+menu_hover_text = "#eceff4"
+menu_check = "#88c0d0"
+menu_check_hovered = "#eceff4"
+menu_disabled = "$dim"

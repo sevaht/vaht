@@ -1310,11 +1310,13 @@ height = "$bar"                    # `$name` inside text is the variable's text
   `menu_title` (`scheme`, the scheme's own title, and `slate`, a grey-blue
   horizontal gradient that goes with any scheme) and `menu_marks` (`classic`:
   a triangle and a filled box; `chevrons`: `>`, `>>` on the hovered item, and a
-  tick). vaht installs more schemes in `/usr/share/vaht/options/scheme/` (blue,
+  tick). vaht installs more schemes in `/usr/share/vaht/options/scheme/`: blue,
   teal, green, amber, crimson, purple, slate, red, orange, gold, cyan, indigo,
-  pink, brown set the colors only, so every part follows; others also give
-  roles whole). Any style that declares a `scheme` option with those variables
-  can take them.
+  pink and brown set the colors only, so every part follows them; `nord`,
+  `sage`, `green_tea` and `minimo` take their palettes from Fluxbox styles of
+  those names and give the roles whole (flat or gradient surfaces, dark text on
+  a light titlebar, no text halo, the corners rounded). Any style that declares
+  a `scheme` option with those variables can take them.
 - `vaht import fluxbox` writes styles without options; `fluxbox-style` folds
   variants into options (§11).
 

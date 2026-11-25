@@ -1,0 +1,49 @@
+# green_tea: a color scheme for styles with a `scheme` option (the default style
+# has one): the palette of the green_tea Fluxbox style, with what each part of the
+# style is made of it. Colors only are taken from that style, none of its files.
+# Installed as /usr/share/vaht/options/scheme/green_tea.toml; copy it to
+# ~/.config/vaht/options/scheme/<name>.toml and change it to make your own, and
+# choose it with `style_options = { scheme = "green_tea" }` in settings.toml.
+
+dark = "#212121"
+mid = "#212121"
+light = "#3f5f42"
+dim = "#6f6f6f"
+edge = "#4f6f55"
+press_dark = "#4c4c4c"
+press_light = "#4c4c4c"
+menu = "#212121"
+
+text = "#e7e7e7"
+text_effect = "none"
+glyph = "#c5c5c5"
+surface = { solid = "$dark" }
+
+titlebar = { solid = "$dark" }
+titlebar_unfocused = { solid = "$dark" }
+caption = { solid = "$light" }
+caption_unfocused = { solid = "$dark" }
+caption_text_unfocused = "$dim"
+button = { solid = "#4c4c4c" }
+button_unfocused = { solid = "#4c4c4c" }
+button_glyph_unfocused = "#797979"
+button_pressed = { solid = "#4c4c4c", bevel = "sunken" }
+handle = { solid = "$dark" }
+grip = { solid = "$light" }
+grip_unfocused = { solid = "$dark" }
+
+taskbar_border = { width = 1, color = "$edge" }
+workspace = { solid = "#4c4c4c" }
+clock = { solid = "#4c4c4c" }
+entry = { solid = "$light" }
+entry_unfocused = { solid = "$dark" }
+entry_text_unfocused = "$dim"
+
+menu_frame = { solid = "$menu" }
+menu_title_face = { solid = "$light" }
+menu_hover = { solid = "#4c4c4c" }
+menu_hover_text = "#ffffff"
+# A chosen item's mark is not the color of the item under the pointer.
+menu_check = "$edge"
+menu_check_hovered = "#9ccfa2"
+menu_disabled = "$edge"

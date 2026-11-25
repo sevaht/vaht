@@ -1,0 +1,48 @@
+# minimo: a color scheme for styles with a `scheme` option (the default style
+# has one): the palette of the Minimo (MX Linux) Fluxbox style, with what each part of the
+# style is made of it. Colors only are taken from that style, none of its files.
+# Installed as /usr/share/vaht/options/scheme/minimo.toml; copy it to
+# ~/.config/vaht/options/scheme/<name>.toml and change it to make your own, and
+# choose it with `style_options = { scheme = "minimo" }` in settings.toml.
+
+dark = "#252525"
+mid = "#404040"
+light = "#c5aa7c"
+dim = "#909090"
+edge = "#404040"
+press_dark = "#505050"
+press_light = "#505050"
+menu = "#252525"
+
+text = "#cdcdcd"
+text_effect = "none"
+glyph = "#cdcdcd"
+surface = { solid = "$dark" }
+
+titlebar = { solid = "$dark" }
+titlebar_unfocused = { solid = "$mid" }
+caption = { solid = "$dark" }
+caption_unfocused = { solid = "$mid" }
+caption_text_unfocused = "$dim"
+button = { solid = "$dark" }
+button_unfocused = { solid = "$mid" }
+button_glyph_unfocused = "#858585"
+button_pressed = { solid = "#505050" }
+handle = { solid = "#303030" }
+grip = { solid = "#303030" }
+grip_unfocused = { solid = "$mid" }
+border_color = "$dark"
+
+taskbar_border = { width = 4, color = "$dark" }
+entry = { solid = "$light" }
+entry_text = "#050505"
+entry_unfocused = { solid = "#666059" }
+entry_text_unfocused = "#ababab"
+
+menu_frame = { solid = "$menu" }
+menu_title_face = { solid = "#181818" }
+menu_hover = { solid = "#303030" }
+menu_hover_text = "#c99c4e"
+menu_check = "#c99c4e"
+menu_check_hovered = "#c99c4e"
+menu_disabled = "#ec8b42"

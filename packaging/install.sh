@@ -26,7 +26,7 @@
 #   /etc/xdg/xdg-desktop-portal-wlr/vaht               screen share picks with vaht's menu
 #   PREFIX/share/vaht/styles/default.toml                 the default style, to read and copy
 #   PREFIX/share/vaht/layouts/*.toml                   the default layout, and a few more
-#   PREFIX/share/vaht/options/scheme/*.toml            color schemes for the default style
+#   PREFIX/share/vaht/options/scheme/*.toml            color schemes for the default style (14 tints, nord, sage, green_tea, minimo)
 #   PREFIX/share/doc/vaht/                             README and design notes
 #   PREFIX/share/licenses/vaht/LICENSE
 # and for one user (--user):
@@ -116,11 +116,15 @@ if [[ -n ${session_dir} ]]; then
         "data/options/scheme/cyan.toml ${schemes_dir}/cyan.toml 644"
         "data/options/scheme/gold.toml ${schemes_dir}/gold.toml 644"
         "data/options/scheme/green.toml ${schemes_dir}/green.toml 644"
+        "data/options/scheme/green_tea.toml ${schemes_dir}/green_tea.toml 644"
         "data/options/scheme/indigo.toml ${schemes_dir}/indigo.toml 644"
+        "data/options/scheme/minimo.toml ${schemes_dir}/minimo.toml 644"
+        "data/options/scheme/nord.toml ${schemes_dir}/nord.toml 644"
         "data/options/scheme/orange.toml ${schemes_dir}/orange.toml 644"
         "data/options/scheme/pink.toml ${schemes_dir}/pink.toml 644"
         "data/options/scheme/purple.toml ${schemes_dir}/purple.toml 644"
         "data/options/scheme/red.toml ${schemes_dir}/red.toml 644"
+        "data/options/scheme/sage.toml ${schemes_dir}/sage.toml 644"
         "data/options/scheme/slate.toml ${schemes_dir}/slate.toml 644"
         "data/options/scheme/teal.toml ${schemes_dir}/teal.toml 644"
         "data/vaht-settings.desktop ${application_dir}/vaht-settings.desktop 644"

@@ -97,7 +97,9 @@ menu_title_face = "$surface"
 menu_title_text = "$text"
 menu_hover = { gradient = "vertical", from = "$light", to = "$dark", bevel = "raised" }
 menu_hover_text = "$text"
-menu_check = "$dim"     # a chosen item's mark: not the hover's color
+menu_check = "$dim"     # a chosen item's mark
+menu_check_hovered = "$menu_check"   # and on the item under the pointer, whose
+                                     # background it must not match
 menu_disabled = "$dim"
 
 # The heights and font sizes of a window's titlebar, the taskbar and a menu,
@@ -304,6 +306,7 @@ check = "$check"
 texture = "$menu_hover"
 font = { family = "$font_family", size = "$menu_font_size", weight = "bold" }
 text_color = "$menu_hover_text"
+glyph_color = "$menu_check_hovered"
 bullet = "$bullet_hovered"
 
 [menu.item.disabled]
