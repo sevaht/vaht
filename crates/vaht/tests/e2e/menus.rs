@@ -85,6 +85,27 @@ fn a_right_click_on_the_desktop_opens_the_root_menu_and_an_item_runs_its_command
 }
 
 #[test]
+fn the_pointer_starts_in_the_middle_of_the_screen() {
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let (vaht, mut client) = start(&files.path().join("touched"));
+    // A menu opens at the pointer, so where it opens is where the pointer is.
+    run(&vaht, "root-menu");
+    let opened = client.screenshot();
+    let (x, y) = (960, 540);
+    let first_item = (
+        x + BORDER + 5,
+        y + BORDER + TITLE_HEIGHT + BORDER + ITEM_HEIGHT / 2,
+    );
+    assert_eq!(
+        at(&opened, first_item),
+        MENU_BODY,
+        "the menu is at the middle of the 1920 by 1080 screen"
+    );
+    let corner_item = (BORDER + 5, BORDER + TITLE_HEIGHT + BORDER + ITEM_HEIGHT / 2);
+    assert_ne!(at(&opened, corner_item), MENU_BODY, "and not in its corner");
+}
+
+#[test]
 fn the_keyboard_moves_through_a_menu_and_escape_closes_it() {
     let files = tempfile::tempdir().expect("a temporary directory");
     let marker = files.path().join("touched");

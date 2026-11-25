@@ -299,6 +299,7 @@ impl Compositor {
             EventLoop::try_new().map_err(RunError::EventLoop)?;
         let mut display: Display<Self> = Display::new().map_err(RunError::Display)?;
         let mut compositor = Self::new(&event_loop.handle(), &display, options, signals)?;
+        compositor.center_pointer();
         tracing::info!(
             socket = %compositor.listener.socket_name().to_string_lossy(),
             "accepting clients; start them with WAYLAND_DISPLAY set to the socket"
@@ -2831,6 +2832,21 @@ impl Compositor {
             (&self.config.style, &mut self.typesetter),
         );
         self.schedule_render();
+    }
+
+    /// Puts the pointer in the middle of the primary output, where it
+    /// starts: not in the corner of the layout, which is where it would be
+    /// left otherwise.
+    fn center_pointer(&self) {
+        let area = self.outputs.primary_geometry();
+        let middle = Point::<f64, Logical>::from((
+            f64::from(area.loc.x) + f64::from(area.size.w) / 2.0,
+            f64::from(area.loc.y) + f64::from(area.size.h) / 2.0,
+        ));
+        self.seat
+            .get_pointer()
+            .expect("the seat gets a pointer at startup")
+            .set_location(middle);
     }
 
     /// Returns where the pointer is.
