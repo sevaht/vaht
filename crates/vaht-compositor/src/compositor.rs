@@ -538,7 +538,12 @@ impl Compositor {
     /// built-in version of each file that is not; and the banner naming what
     /// was left out.
     fn first_config(source: &ConfigSource) -> (Config, ConfigBanner) {
+        let started = Instant::now();
         let loaded = Config::load_lenient(source.directory(), &SettingOverrides::default(), None);
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "the configuration is read"
+        );
         Self::log_problems(&loaded.problems);
         let mut banner = ConfigBanner::default();
         banner.set_problems(loaded.problems);

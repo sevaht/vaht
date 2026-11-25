@@ -19,7 +19,7 @@ pub(crate) mod plan;
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::format::FormatSet;
@@ -315,8 +315,23 @@ impl DrmBackend {
             )
             .map_err(|error| format!("the seat would not open it: {error}"))?;
         let fd = DrmDeviceFd::new(DeviceFd::from(fd));
-        let (drm, notifier) = DrmDevice::new(fd.clone(), true)
+        // Smithay can blank every connector, plane and CRTC with one atomic
+        // commit as it opens the device. On NVIDIA's driver that commit took
+        // ten seconds with three screens lit (the console's), and none of
+        // them showed vaht until it was done. Each output is modeset by its
+        // own first commit anyway, so the blanking is left out; an output
+        // vaht does not light may go on showing what it showed before.
+        // `VAHT_RESET_DISPLAYS` brings it back, for a GPU left in a state
+        // the first commits do not clear.
+        let reset = std::env::var_os("VAHT_RESET_DISPLAYS").is_some();
+        let started = Instant::now();
+        let (drm, notifier) = DrmDevice::new(fd.clone(), reset)
             .map_err(|error| format!("not a DRM device: {error}"))?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            reset,
+            "the display device is open"
+        );
         if node == self.primary_gpu && self.syncobj.is_none() {
             self.syncobj = Self::explicit_sync(&self.display, &fd);
         }
