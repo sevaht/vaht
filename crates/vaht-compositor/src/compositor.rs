@@ -3254,6 +3254,7 @@ impl Compositor {
             self.menus.restore(
                 &snapshot.path,
                 &snapshot.moved,
+                snapshot.bounds,
                 (&self.config.style, &mut self.typesetter),
             );
         }
@@ -3745,8 +3746,11 @@ impl Compositor {
             self.schedule_render();
         }
         self.follow_tooltip(location);
-        if self.menus.drag_to(location) {
-            self.schedule_render();
+        if self.menus.is_dragging() {
+            let bounds = self.output_areas().at(location.to_i32_round()).usable;
+            if self.menus.drag_to(location, bounds) {
+                self.schedule_render();
+            }
         }
         if self.menus.is_open()
             && self.menus.follow_pointer(
