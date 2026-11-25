@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn every_shipped_scheme_and_size_loads_with_the_default_style_and_looks_different() {
+    fn every_shipped_scheme_and_choice_loads_with_the_default_style_and_looks_different() {
         use std::collections::BTreeMap;
 
         use vaht_ui::style::options::Selection;
@@ -247,29 +247,65 @@ mod tests {
             // It sets only variables the default style defines.
             let known = load(&[]);
             assert_ne!(style, known, "{name} changes the look");
+            let vocabulary: toml::Table = toml::from_str(Style::BUILT_IN).expect("TOML");
+            let vocabulary = vocabulary["options"]["scheme"]["graphite"]
+                .as_table()
+                .expect("the default scheme");
             for key in table.keys() {
                 assert!(
-                    [
-                        "dark",
-                        "mid",
-                        "light",
-                        "dim",
-                        "edge",
-                        "press_dark",
-                        "press_light",
-                        "menu"
-                    ]
-                    .contains(&key.as_str()),
+                    vocabulary.contains_key(key),
                     "{name} sets `{key}`, which the default style has no variable for"
                 );
             }
             count += 1;
         }
         assert!(count >= 14, "the shipped schemes: {count}");
-        for size in ["small", "large"] {
-            let style = load(&[("size", size)]);
-            assert_eq!(style.option_problems(), Vec::<String>::new(), "{size}");
-            assert_ne!(style, default, "{size} changes the look");
+        for (option, choice) in [
+            ("titlebar_size", "small"),
+            ("titlebar_size", "large"),
+            ("taskbar_size", "small"),
+            ("taskbar_size", "xlarge"),
+            ("menu_size", "small"),
+            ("menu_size", "large"),
+            ("font", "liberation_sans"),
+            ("menu_title", "slate"),
+            ("menu_marks", "chevrons"),
+        ] {
+            let style = load(&[(option, choice)]);
+            assert_eq!(
+                style.option_problems(),
+                Vec::<String>::new(),
+                "{option} {choice}"
+            );
+            assert_ne!(style, default, "{option} {choice} changes the look");
+        }
+        // Every choice of every option works with every scheme.
+        let schemes: Vec<String> = std::fs::read_dir(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/options/scheme"),
+        )
+        .expect("the shipped schemes")
+        .map(|entry| {
+            entry
+                .expect("an entry")
+                .path()
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .expect("a name")
+                .to_owned()
+        })
+        .collect();
+        for option in &default.options().options {
+            for choice in &option.choices {
+                for scheme in &schemes {
+                    let style = load(&[(option.name.as_str(), choice), ("scheme", scheme)]);
+                    assert_eq!(
+                        style.option_problems(),
+                        Vec::<String>::new(),
+                        "{} = {choice} with {scheme}",
+                        option.name
+                    );
+                }
+            }
         }
     }
 }

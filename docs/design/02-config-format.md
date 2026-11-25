@@ -1286,7 +1286,7 @@ height = "$bar"                    # `$name` inside text is the variable's text
 - A choice that does not exist, or cannot be read, is noted as a problem
   (against its own file) and the option's default is used. Options are listed
   sorted by name, each with its default choice first.
-- **Choosing.** `settings.toml`'s `style_options = { scheme = "blue", size =
+- **Choosing.** `settings.toml`'s `style_options = { scheme = "blue", taskbar_size =
   "large" }` makes a choice for each option it names; an option left out has its
   default. `set-setting style_options.scheme blue` (and the `style-options` menu
   list, a submenu of choices for each option of the style in use, the one in
@@ -1298,14 +1298,23 @@ height = "$bar"                    # `$name` inside text is the variable's text
   green.toml`, named `file = "<style>/green.toml"`), not beside the style: a
   `.toml` directly in `styles/` is a style. The directories under `options/` and
   `styles/` are watched, so editing a choice file restyles open windows.
-- **The default style has two options**: `scheme` (default `graphite`, the greys;
-  variables `dark`, `mid`, `light`, `dim`, `edge`, `press_dark`, `press_light`
-  and `menu`) and `size` (`small`, `medium`, the default, and `large`; variables
-  `font_size`, `bar` and `button_pad`). vaht installs 14 more schemes in
-  `/usr/share/vaht/options/scheme/` (blue, teal, green, amber, crimson, purple,
-  slate, red, orange, gold, cyan, indigo, pink, brown); they set the first seven
-  variables and leave `dim` (unfocused text) alone. Any style that declares a
-  `scheme` option with those variables can take them.
+- **The default style has seven options**, each its own set of variables:
+  `scheme` (default `graphite`, the greys: the colors `dark`, `mid`, `light`,
+  `dim`, `edge`, `press_dark`, `press_light` and `menu`, and the roles made of
+  them: `surface`, `titlebar`, `caption`, `button`, `entry`, `menu_hover` and
+  the rest of the list in `data/styles/default.toml`), `titlebar_size`,
+  `taskbar_size` and `menu_size` (each `small`, `medium`, the default, and
+  `large`, the taskbar also `xlarge`: the heights and font sizes of that part),
+  `font` (`dejavu_sans`, the default, `liberation_sans` and `sans`, fontconfig's
+  choice; yours go in `options/font/<name>.toml` as `font_family = "..."`),
+  `menu_title` (`scheme`, the scheme's own title, and `slate`, a grey-blue
+  horizontal gradient that goes with any scheme) and `menu_marks` (`classic`:
+  a triangle and a filled box; `chevrons`: `>`, `>>` on the hovered item, and a
+  tick). vaht installs more schemes in `/usr/share/vaht/options/scheme/` (blue,
+  teal, green, amber, crimson, purple, slate, red, orange, gold, cyan, indigo,
+  pink, brown set the colors only, so every part follows; others also give
+  roles whole). Any style that declares a `scheme` option with those variables
+  can take them.
 - `vaht import fluxbox` writes styles without options; `fluxbox-style` folds
   variants into options (§11).
 

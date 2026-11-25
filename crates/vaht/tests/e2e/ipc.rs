@@ -447,8 +447,20 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
         .iter()
         .map(|option| option.name.as_str())
         .collect();
-    assert_eq!(declared, ["scheme", "size"], "the built-in style's options");
-    assert_eq!(style_options[0].chosen, "graphite");
+    assert_eq!(
+        declared,
+        [
+            "font",
+            "menu_marks",
+            "menu_size",
+            "menu_title",
+            "scheme",
+            "taskbar_size",
+            "titlebar_size"
+        ],
+        "the built-in style's options"
+    );
+    assert_eq!(style_options[4].chosen, "graphite");
     assert_eq!(
         problems,
         Vec::<String>::new(),
