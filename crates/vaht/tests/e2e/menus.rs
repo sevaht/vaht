@@ -147,6 +147,71 @@ fn the_window_menu_toggles_the_window_it_was_opened_on() {
     );
 }
 
+/// Returns whether a window of vaht has the focus, from its window list.
+fn has_a_focused_window(vaht: &HeadlessVaht) -> bool {
+    let output = std::process::Command::new(EXECUTABLE)
+        .args(["--json", "windows"])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .output()
+        .expect("vaht runs");
+    let reply: vaht_ipc::Reply = serde_json::from_slice(&output.stdout).expect("one JSON reply");
+    let vaht_ipc::Reply::Windows { windows } = reply else {
+        panic!("not a window list: {reply:?}");
+    };
+    windows.iter().any(|window| window.is_focused)
+}
+
+/// Runs `vaht run <command>` on `vaht`.
+fn run(vaht: &HeadlessVaht, command: &str) {
+    let status = std::process::Command::new(EXECUTABLE)
+        .args(["run", command])
+        .env(vaht_ipc::SOCKET_VARIABLE, vaht.ipc_socket())
+        .status()
+        .expect("vaht runs");
+    assert!(status.success(), "{command}");
+}
+
+#[test]
+fn opening_a_menu_from_the_desktop_lets_go_of_the_focus_as_a_click_there_does() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    assert!(has_a_focused_window(&vaht), "the window has the focus");
+    client.click(1500, 900, BUTTON_RIGHT);
+    assert!(
+        !has_a_focused_window(&vaht),
+        "the menu is up and no window looks active"
+    );
+}
+
+#[test]
+fn a_style_option_changed_from_the_menu_leaves_the_windows_unfocused_while_it_stays_up() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    client.click(1500, 900, BUTTON_RIGHT);
+    assert!(!has_a_focused_window(&vaht), "the menu is up");
+    run(&vaht, "set-setting style_options.palette blue");
+    assert!(
+        !has_a_focused_window(&vaht),
+        "the reload did not hand the focus back to a window"
+    );
+}
+
+#[test]
+fn changing_a_style_option_does_not_give_the_focus_to_a_window_when_none_had_it() {
+    let vaht = HeadlessVaht::start(Path::new(EXECUTABLE));
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    client.click(1500, 900, BUTTON_LEFT);
+    assert!(!has_a_focused_window(&vaht), "nothing has the focus");
+    run(&vaht, "set-setting style_options.palette blue");
+    assert!(
+        !has_a_focused_window(&vaht),
+        "the reload left nothing focused"
+    );
+}
+
 /// Opens a window whose application has a solid icon, then the window-list
 /// menu at the pointer, with `settings`; returns the color where the first
 /// item's icon goes.

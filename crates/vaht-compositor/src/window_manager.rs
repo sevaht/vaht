@@ -968,7 +968,12 @@ impl WindowManager {
             self.frame = settings.windows.frame.clone();
             self.restyle(self.style_metrics);
         }
-        self.focus_most_recent();
+        // A window is chosen to focus only where the focused one was taken
+        // away (its workspace went); a reload never gives focus to a window
+        // when none had it.
+        if self.focused().is_some() {
+            self.focus_most_recent();
+        }
         self.is_redraw_needed = true;
     }
 
