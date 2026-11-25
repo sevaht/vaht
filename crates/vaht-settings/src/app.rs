@@ -339,6 +339,26 @@ impl<L: Link> SettingsApp<L> {
         }
         ui.strong("Appearance");
         ui.separator();
+        let is_changed = self.style_options.iter().any(|option| {
+            self.pending_options
+                .get(&option.name)
+                .unwrap_or(&option.chosen)
+                != &option.default
+        });
+        if ui
+            .add_enabled(is_changed, egui::Button::new("Reset all to defaults"))
+            .clicked()
+        {
+            edits.push(ConfigEdit::Unset {
+                path: ConfigPath::from_parts(vec!["style_options".to_owned()])
+                    .expect("style_options is a key"),
+            });
+            self.pending_options = self
+                .style_options
+                .iter()
+                .map(|option| (option.name.clone(), option.default.clone()))
+                .collect();
+        }
         for option in &self.style_options {
             let now = self
                 .pending_options
@@ -1140,6 +1160,28 @@ mod tests {
                 path: ConfigPath::parse("style_options.scheme").expect("a key"),
                 value: json!("red"),
             }]
+        );
+    }
+
+    #[test]
+    fn one_button_puts_every_option_back_to_its_default() {
+        let (mut app, link) = styled_window();
+        let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_label("Reset all to defaults").click();
+        harness.run();
+        assert_eq!(
+            edits_sent(&link),
+            [ConfigEdit::Unset {
+                path: ConfigPath::parse("style_options").expect("a key"),
+            }]
+        );
+        assert!(
+            egui_kittest::kittest::NodeT::accesskit_node(
+                &harness.get_by_label("Reset all to defaults")
+            )
+            .is_disabled(),
+            "nothing is left to reset"
         );
     }
 

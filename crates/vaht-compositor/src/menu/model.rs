@@ -470,39 +470,61 @@ impl<'state> MenuBuilder<'state> {
         })
     }
 
-    /// Returns the `style-options` list: a submenu for each option of the
-    /// style in use, with its choices, the one in effect checked.
+    /// Returns the `style-options` list: first an item putting every option
+    /// back to its default, then a submenu for each option of the style in
+    /// use, with its choices, the one in effect checked. The default choice
+    /// comes first, a line under it if others follow, as in the list of
+    /// styles.
     fn style_option_items(options: &[ListedOption]) -> Vec<MenuItem> {
         if options.is_empty() {
             return vec![MenuItem::Inert {
                 label: "(this style has no options)".to_owned(),
             }];
         }
-        options
-            .iter()
-            .map(|option| MenuItem::Submenu {
+        let reset = MenuItem::Choice {
+            label: "Reset all to defaults".to_owned(),
+            choice: MenuChoice::Run {
+                command: Command::Run(Action::SetSetting(SettingChange::unset(vec![
+                    "style_options".to_owned(),
+                ]))),
+                window: None,
+            },
+            mark: None,
+            icon: None,
+        };
+        let submenus = options.iter().map(|option| {
+            let mut choices: Vec<MenuItem> = option
+                .choices
+                .iter()
+                .map(|choice| MenuItem::Choice {
+                    label: choice.clone(),
+                    choice: MenuChoice::Run {
+                        command: Command::Run(Action::SetSetting(SettingChange::style_option(
+                            &option.name,
+                            choice,
+                        ))),
+                        window: None,
+                    },
+                    mark: Some(*choice == option.chosen),
+                    icon: None,
+                })
+                .collect();
+            if choices.len() > 1 {
+                choices.insert(1, MenuItem::Separator);
+            }
+            MenuItem::Submenu {
                 label: option.title().to_owned(),
                 menu: MenuModel {
                     title: Some(option.title().to_owned()),
-                    items: option
-                        .choices
-                        .iter()
-                        .map(|choice| MenuItem::Choice {
-                            label: choice.clone(),
-                            choice: MenuChoice::Run {
-                                command: Command::Run(Action::SetSetting(
-                                    SettingChange::style_option(&option.name, choice),
-                                )),
-                                window: None,
-                            },
-                            mark: Some(*choice == option.chosen),
-                            icon: None,
-                        })
-                        .collect(),
+                    items: choices,
                 },
                 icon: None,
                 pipe: None,
-            })
+            }
+        });
+        std::iter::once(reset)
+            .chain(std::iter::once(MenuItem::Separator))
+            .chain(submenus)
             .collect()
     }
 
@@ -789,9 +811,26 @@ mod tests {
             choices: vec!["graphite".to_owned(), "blue".to_owned()],
         };
         let items = MenuBuilder::style_option_items(&[option]);
-        let [MenuItem::Submenu { label, menu, .. }] = items.as_slice() else {
-            panic!("one submenu: {items:?}");
+        let [
+            MenuItem::Choice { label: reset, .. },
+            MenuItem::Separator,
+            MenuItem::Submenu { label, menu, .. },
+        ] = items.as_slice()
+        else {
+            panic!("a reset, a line, one submenu: {items:?}");
         };
+        assert_eq!(reset, "Reset all to defaults");
+        assert!(
+            matches!(items[0], MenuItem::Choice {
+                choice: MenuChoice::Run { command: Command::Run(Action::SetSetting(ref change)), .. },
+                ..
+            } if change.is_style_option()),
+            "the reset changes the options, so the menu stays open"
+        );
+        assert!(
+            matches!(menu.items[1], MenuItem::Separator),
+            "a line under the default choice"
+        );
         assert_eq!(label, "Color scheme");
         let marks: Vec<(String, Option<bool>)> = menu
             .items

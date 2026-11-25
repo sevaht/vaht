@@ -188,10 +188,34 @@ bullet = "chevron"
 bullet_hovered = "double-chevron"   # the item under the pointer
 check = "tick"
 
+# Whether text has an outline (a halo): what the scheme says, always a black
+# one, or none. A black outline keeps light text readable on any background.
+[options.text_outline]
+label = "Text outline"
+default = "scheme"
+[options.text_outline.scheme]
+outline = "$text_effect"
+[options.text_outline.black]
+outline = { halo = "black" }
+[options.text_outline.none]
+outline = "none"
+
+# Whether a window's buttons (minimize, maximize, close) have a background of
+# their own, as the scheme gives them, or are drawn straight on the titlebar.
+[options.buttons]
+label = "Window buttons"
+default = "backed"
+[options.buttons.backed]
+button_face = "$button"
+button_face_unfocused = "$button_unfocused"
+[options.buttons.flat]
+button_face = "parent"
+button_face_unfocused = "parent"
+
 [default]
 texture = "$surface"
 font = { family = "$font_family", size = "$title_font_size", weight = "bold" }
-text_effect = "$text_effect"
+text_effect = "$outline"
 text_color = "$text"
 glyph_color = "$glyph"
 justify = "center"
@@ -213,7 +237,7 @@ texture = "$caption_unfocused"
 text_color = "$caption_text_unfocused"
 
 [window.button]
-texture = "$button"
+texture = "$button_face"
 glyph_color = "$button_glyph"
 # The room round a button's picture: the button is 20 pixels, so 4 leaves a
 # 12 pixel picture (Fluxbox draws it 2 pixels inside, a 16 pixel picture).
@@ -223,7 +247,7 @@ padding = "$button_pad"
 # restore_glyph = false
 
 [window.button.unfocused]
-texture = "$button_unfocused"
+texture = "$button_face_unfocused"
 glyph_color = "$button_glyph_unfocused"
 
 [window.button.pressed]

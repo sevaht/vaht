@@ -450,17 +450,19 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
     assert_eq!(
         declared,
         [
+            "buttons",
             "font",
             "menu_marks",
             "menu_size",
             "menu_title",
             "scheme",
             "taskbar_size",
+            "text_outline",
             "titlebar_size"
         ],
         "the built-in style's options"
     );
-    assert_eq!(style_options[4].chosen, "graphite");
+    assert_eq!(style_options[5].chosen, "graphite");
     assert_eq!(
         problems,
         Vec::<String>::new(),

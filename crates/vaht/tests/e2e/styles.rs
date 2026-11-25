@@ -190,6 +190,28 @@ fn a_choice_of_a_styles_option_is_made_in_settings_toml_or_in_place() {
 }
 
 #[test]
+fn every_option_is_put_back_to_its_default_at_once_in_place() {
+    let settings = "style = \"mine\"\n[style_options]\nscheme = \"cyan\"\n";
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", settings), ("styles/mine.toml", OPTIONAL)],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(1);
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(color, [0, 255, 255], "the settings' choice");
+    print(&vaht, &["run", "unset-setting style_options"]);
+    let (color, _) = titlebar_above_content(&client.screenshot(), [0, 0, 0]);
+    assert_eq!(color, [255, 0, 255], "the style's default, magenta");
+    let file = vaht.config_directory().join("settings.toml");
+    assert_eq!(
+        std::fs::read_to_string(file).expect("the settings are there"),
+        settings,
+        "nothing is written until save-settings"
+    );
+}
+
+#[test]
 fn a_choice_in_the_shared_library_can_be_made_and_wins_over_the_styles_own() {
     let vaht = HeadlessVaht::start_with_config(
         Path::new(EXECUTABLE),

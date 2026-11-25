@@ -1293,12 +1293,16 @@ height = "$bar"                    # `$name` inside text is the variable's text
   effect checked, which leaves the menus open as `styles` does) change it in
   place until `save-settings`. `vaht config files` lists each option's choices,
   the one in effect marked `*`, and the settings window's `ConfigFiles` reply
-  carries them (`style_options`).
+  carries them (`style_options`). A choice is listed with the default first and
+  a line under it, as the styles are. `unset-setting style_options` puts every
+  option back to its default at once: the first item of the `style-options` list
+  ("Reset all to defaults") and the button under Appearance in the settings
+  window do it.
 - A style's own choice files go in a directory of their own (`styles/<style>/
   green.toml`, named `file = "<style>/green.toml"`), not beside the style: a
   `.toml` directly in `styles/` is a style. The directories under `options/` and
   `styles/` are watched, so editing a choice file restyles open windows.
-- **The default style has seven options**, each its own set of variables:
+- **The default style has nine options**, each its own set of variables:
   `scheme` (default `graphite`, the greys: the colors `dark`, `mid`, `light`,
   `dim`, `edge`, `press_dark`, `press_light` and `menu`, and the roles made of
   them: `surface`, `titlebar`, `caption`, `button`, `entry`, `menu_hover` and
@@ -1308,7 +1312,11 @@ height = "$bar"                    # `$name` inside text is the variable's text
   `font` (`dejavu_sans`, the default, `liberation_sans` and `sans`, fontconfig's
   choice; yours go in `options/font/<name>.toml` as `font_family = "..."`),
   `menu_title` (`scheme`, the scheme's own title, and `slate`, a grey-blue
-  horizontal gradient that goes with any scheme) and `menu_marks` (`classic`:
+  horizontal gradient that goes with any scheme), `text_outline` (`scheme`,
+  the default: what the scheme says, a black outline for graphite; `black`, an
+  outline for any scheme; `none`), `buttons` (`backed`, the default: each
+  window button has the scheme's background; `flat`: drawn straight on the
+  titlebar) and `menu_marks` (`classic`:
   a triangle and a filled box; `chevrons`: `>`, `>>` on the hovered item, and a
   tick). vaht installs more schemes in `/usr/share/vaht/options/scheme/`: blue,
   teal, green, amber, crimson, purple, slate, red, orange, gold, cyan, indigo,

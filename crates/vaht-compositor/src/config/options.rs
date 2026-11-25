@@ -142,6 +142,8 @@ impl ChoiceLibrary for OptionLibrary<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vaht_ui::text::TextEffect;
+    use vaht_ui::{StyleElement, WidgetState};
 
     fn configuration(files: &[(&str, &str)]) -> tempfile::TempDir {
         let directory = tempfile::tempdir().expect("a temporary directory");
@@ -206,60 +208,80 @@ mod tests {
         }
     }
 
-    #[test]
-    fn every_shipped_scheme_and_choice_loads_with_the_default_style_and_looks_different() {
+    /// The default style with `chosen` made, from the shipped choices.
+    fn load(chosen: &[(&str, &str)]) -> Style {
         use std::collections::BTreeMap;
 
         use vaht_ui::style::options::Selection;
 
-        let load = |chosen: &[(&str, &str)]| {
-            let chosen: BTreeMap<String, String> = chosen
-                .iter()
-                .map(|(option, choice)| ((*option).to_owned(), (*choice).to_owned()))
-                .collect();
-            Style::built_in_selecting(&Selection {
-                directory: None,
-                chosen: &chosen,
-                library: &Shipped,
+        let chosen: BTreeMap<String, String> = chosen
+            .iter()
+            .map(|(option, choice)| ((*option).to_owned(), (*choice).to_owned()))
+            .collect();
+        Style::built_in_selecting(&Selection {
+            directory: None,
+            chosen: &chosen,
+            library: &Shipped,
+        })
+    }
+
+    /// The shipped schemes: their names and files.
+    fn shipped_schemes() -> Vec<(String, PathBuf)> {
+        std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/options/scheme"))
+            .expect("the shipped schemes")
+            .map(|entry| {
+                let path = entry.expect("an entry").path();
+                let name = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .expect("a name")
+                    .to_owned();
+                (name, path)
             })
-        };
+            .collect()
+    }
+
+    #[test]
+    fn every_shipped_scheme_loads_with_the_default_style_and_looks_different() {
         let default = load(&[]);
         assert_eq!(default.option_problems(), Vec::<String>::new());
-        let schemes = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/options/scheme");
-        let mut count = 0;
-        for entry in std::fs::read_dir(schemes).expect("the shipped schemes") {
-            let path = entry.expect("an entry").path();
-            let name = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .expect("a name");
+        let vocabulary: toml::Table = toml::from_str(Style::BUILT_IN).expect("TOML");
+        let vocabulary = vocabulary["options"]["scheme"]["graphite"]
+            .as_table()
+            .expect("the default scheme");
+        let schemes = shipped_schemes();
+        assert!(
+            schemes.len() >= 18,
+            "the shipped schemes: {}",
+            schemes.len()
+        );
+        for (name, path) in schemes {
             let table: toml::Table =
                 toml::from_str(&std::fs::read_to_string(&path).expect("readable")).expect("TOML");
-            let style = load(&[("scheme", name)]);
+            let style = load(&[("scheme", &name)]);
             assert_eq!(style.option_problems(), Vec::<String>::new(), "{name}");
-            let scheme = style
+            let chosen = &style
                 .options()
                 .options
                 .iter()
                 .find(|option| option.name == "scheme")
-                .expect("the default style has a scheme option");
-            assert_eq!(scheme.chosen, name);
+                .expect("the default style has a scheme option")
+                .chosen;
+            assert_eq!(chosen, &name);
+            assert_ne!(style, default, "{name} changes the look");
             // It sets only variables the default style defines.
-            let known = load(&[]);
-            assert_ne!(style, known, "{name} changes the look");
-            let vocabulary: toml::Table = toml::from_str(Style::BUILT_IN).expect("TOML");
-            let vocabulary = vocabulary["options"]["scheme"]["graphite"]
-                .as_table()
-                .expect("the default scheme");
             for key in table.keys() {
                 assert!(
                     vocabulary.contains_key(key),
                     "{name} sets `{key}`, which the default style has no variable for"
                 );
             }
-            count += 1;
         }
-        assert!(count >= 14, "the shipped schemes: {count}");
+    }
+
+    #[test]
+    fn every_other_choice_of_the_default_style_loads_and_looks_different() {
+        let default = load(&[]);
         for (option, choice) in [
             ("titlebar_size", "small"),
             ("titlebar_size", "large"),
@@ -270,6 +292,9 @@ mod tests {
             ("font", "liberation_sans"),
             ("menu_title", "slate"),
             ("menu_marks", "chevrons"),
+            ("text_outline", "black"),
+            ("text_outline", "none"),
+            ("buttons", "flat"),
         ] {
             let style = load(&[(option, choice)]);
             assert_eq!(
@@ -279,25 +304,47 @@ mod tests {
             );
             assert_ne!(style, default, "{option} {choice} changes the look");
         }
-        // Every choice of every option works with every scheme.
-        let schemes: Vec<String> = std::fs::read_dir(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/options/scheme"),
-        )
-        .expect("the shipped schemes")
-        .map(|entry| {
-            entry
-                .expect("an entry")
-                .path()
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .expect("a name")
-                .to_owned()
-        })
-        .collect();
+    }
+
+    #[test]
+    fn the_text_outline_and_buttons_choices_change_what_they_name() {
+        let looks = |style: &Style| {
+            (
+                style
+                    .element_style(StyleElement::Label, WidgetState::Focused)
+                    .text
+                    .effect,
+                style
+                    .element_style(StyleElement::Button, WidgetState::Focused)
+                    .texture
+                    .clone(),
+            )
+        };
+        let (effect, button) = looks(&load(&[]));
+        assert_ne!(effect, TextEffect::None, "graphite has an outline");
+        let (flat_effect, flat_button) = looks(&load(&[("buttons", "flat")]));
+        assert_eq!(flat_effect, effect, "buttons leave the text alone");
+        assert_ne!(flat_button, button, "flat buttons have no background");
+        let (none_effect, none_button) = looks(&load(&[("text_outline", "none")]));
+        assert_eq!(none_effect, TextEffect::None);
+        assert_eq!(none_button, button, "the outline leaves buttons alone");
+        let (nord_effect, _) = looks(&load(&[("scheme", "nord")]));
+        assert_eq!(
+            nord_effect,
+            TextEffect::None,
+            "nord has no outline of its own"
+        );
+        let (nord_outlined, _) = looks(&load(&[("scheme", "nord"), ("text_outline", "black")]));
+        assert_ne!(nord_outlined, TextEffect::None, "but one can be asked for");
+    }
+
+    #[test]
+    fn every_choice_of_every_option_works_with_every_scheme() {
+        let default = load(&[]);
         for option in &default.options().options {
             for choice in &option.choices {
-                for scheme in &schemes {
-                    let style = load(&[(option.name.as_str(), choice), ("scheme", scheme)]);
+                for (scheme, _) in shipped_schemes() {
+                    let style = load(&[(option.name.as_str(), choice), ("scheme", &scheme)]);
                     assert_eq!(
                         style.option_problems(),
                         Vec::<String>::new(),
