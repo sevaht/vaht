@@ -28,6 +28,7 @@ items = [
     { label = "Appearance", submenu = "appearance" },
     { label = "Settings", command = "settings" },
     { label = "Reload", command = "reload" },
+    { label = "Save Config", command = "save-settings" },
     { label = "Exit", command = "exit" },
 ]
 
