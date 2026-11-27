@@ -225,7 +225,8 @@ pub(crate) struct SettingOverrides {
 
 impl SettingOverrides {
     /// Returns these changes with `change` made too, `file` being what
-    /// `settings.toml` says now.
+    /// `settings.toml` says now. A change that puts its key back to what the
+    /// file said when it was first changed leaves no change.
     #[must_use]
     pub(crate) fn with(&self, change: SettingChange, file: &toml::Table) -> Self {
         let mut changes = self.changes.clone();
@@ -236,7 +237,10 @@ impl SettingOverrides {
             Some(index) => changes.remove(index).file_said,
             None => change.read_from(file).cloned(),
         };
-        changes.push(Override { change, file_said });
+        // A change back to what the file says is no change.
+        if change.value() != file_said {
+            changes.push(Override { change, file_said });
+        }
         Self { changes }
     }
 
@@ -375,5 +379,28 @@ mod tests {
         followed.follow_file(&original);
         assert_eq!(followed, overrides);
         assert!(!followed.is_empty());
+    }
+
+    #[test]
+    fn changing_a_key_back_to_what_its_file_says_leaves_no_change() {
+        let original = file("[focus]\nmodel = \"click\"\n");
+        let changed = SettingOverrides::default().with(change("focus.model sloppy"), &original);
+        assert!(!changed.is_empty());
+        let back = changed.with(change("focus.model click"), &original);
+        assert!(back.is_empty(), "set back to the file's value");
+        // A key the file leaves out is back when it is unset.
+        let bare = file("");
+        let set = SettingOverrides::default().with(change("focus.model sloppy"), &bare);
+        let unset = set.with(
+            SettingChange::unset(vec!["focus".to_owned(), "model".to_owned()]),
+            &bare,
+        );
+        assert!(unset.is_empty(), "unset where the file has none");
+        // Changing it to what the file says at once is no change either.
+        assert!(
+            SettingOverrides::default()
+                .with(change("focus.model click"), &original)
+                .is_empty()
+        );
     }
 }

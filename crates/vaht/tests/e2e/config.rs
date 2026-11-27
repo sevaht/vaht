@@ -200,7 +200,8 @@ fn a_change_in_place_is_made_with_the_set_setting_action_too() {
     config(&vaht, &["set", "blur.spread", "9"]);
     let output = message(&vaht, &["run", "unset-setting", "blur.spread"]);
     assert!(output.status.success(), "{output:?}");
-    assert!(config(&vaht, &["get"]).contains("* blur.spread = 3\n"));
+    // Back at what the file says, so no longer a change in place.
+    assert!(config(&vaht, &["get"]).contains("  blur.spread = 3\n"));
 }
 
 /// Collects the dotted path of every setting `value` holds: the leaves, and
