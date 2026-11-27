@@ -1289,11 +1289,13 @@ height = "$bar"                    # `$name` inside text is the variable's text
 - An option may say `checkbox = "Menus"`: with exactly two choices it is then
   one checkbox in the `style-options` menu, checked when its second choice (not
   the default) is chosen, or the one `checked = "<choice>"` names, and
-  independent of every other. A group (`group = "Misc"`) holds its options in
-  one submenu, checkboxes and lists alike, the group called Misc last. The
-  default style groups its two text outlines under Text Outlines (both
-  checked, as both are on), its sizes under Sizes, and the filled-in menu
-  background and the softer shading under Misc. The built-in menu has an
+  independent of every other. A group (`group = "Menus"`) holds its options in
+  one submenu, checkboxes and lists alike, groups in the order of their options' `order` numbers (an option that
+  says none comes after those that do, by name). The
+  default style has its two global checkboxes loose (Text Outlines, checked as
+  it is on, and Softer Gradient Shading) and groups the rest by the part of the
+  look they are for (Taskbar, Focused windows, Unfocused windows, Menus) and
+  Sizes. The built-in menu has an
   Appearance submenu (the styles, then this list inline); the list ends with
   "Reset all to defaults".
 - A choice that does not exist, or cannot be read, is noted as a problem
@@ -1309,45 +1311,50 @@ height = "$bar"                    # `$name` inside text is the variable's text
   carries them (`style_options`). A choice is listed with the default first and
   a line under it, as the styles are. `unset-setting style_options` puts every
   option back to its default at once: the first item of the `style-options` list
-  ("Reset all to defaults") and the button under Appearance in the settings
+  ("Reset all to defaults") and the button in the settings window's collapsible Style options section (under the Style setting, shown only when the style has options)
   window do it.
 - A style's own choice files go in a directory of their own (`styles/<style>/
   green.toml`, named `file = "<style>/green.toml"`), not beside the style: a
   `.toml` directly in `styles/` is a style. The directories under `options/` and
   `styles/` are watched, so editing a choice file restyles open windows.
-- **The default style has nine options**, each its own set of variables. Its
-  look is one appearance, used wherever it applies: a *focused face* is the
-  palette's `accent`, a gradient, in the focused window's titlebar, the
-  taskbar's focused entry and a menu's title, and the border of a focused
-  window and of a menu is the accent too; an *unfocused face* is in an
-  unfocused titlebar and the taskbar's other entries (an unfocused window's
-  border is its own muted color); the *ground* is what the taskbar's bar sits
-  on. Window buttons and the title draw on the titlebar, which is in one
-  piece. The choices are `palette` (default `graphite`: colors only),
-  `unfocused` (whose colors the unfocused faces are in: `matching`, the
-  default, the palette's own, or the name of any palette, whose are in
-  `options/unfocused/<name>.toml`: graphite's gives a grey style with only the
-  focused window in color) and `shading` (`deep`, the default: gradients fade
-  to the palette's `dark`, near black; `soft`: to its muted `dark_soft`, and the
-  unfocused faces are the `mid_soft` and `dark_soft` of the palette they are
-  in). A menu's body is the one exception: `menu_body` is `dark`, or `filled`
-  (a dark, muted body in the palette's hue), and the palette gives each its own
-  color and its own selection (a tint behind the item, and a bright color for
-  its text and marks). A menu's marks are always the modern ones, chevrons
-  (`>>` on the item under the pointer) and a tick; a style may use the classic
-  ones (`bullet = "triangle"`, `check = "box"`). Windows are square and menus
-  rounded. A palette is the seven colors a tint sets (`dark`, `mid`, `light`,
-  `dim`, `press_dark`, `press_light`, `menu`) with the soft forms `dark_soft`
-  and `mid_soft`, and the colors made of them (`menu_filled`, `text`,
-  `accent`, `on_accent`, `select_bg` and `select_text` and their `_filled`
-  forms, `halo`, the color of the text outline, and the rest of the list in
-  `data/styles/default.toml`), which a palette may give whole. Then the
-  one-thing options: `bar_outline` and `menu_outline` (the text outline, on by
-  default, of the titlebars and taskbar and of menus with their marks, each
-  turned off alone) and `titlebar_size`, `taskbar_size` and `menu_size` (each
-  `small`, `medium`, the default, and `large`, the taskbar also `xlarge`: the
-  heights and font sizes of that part). The font is DejaVu Sans; a font's size
-  may be a number or a sum written as text, `"8 + 2"`, the way lengths are.
+- **An option may take its choices from another's.** `library = "palette"`
+  reads the choice files of `options/palette` instead of its own directory;
+  `follows = "palette"` makes the option's variables a copy of that option's,
+  named after its `prefix` (`prefix = "fc_"` gives `fc_accent` for `accent`,
+  and every `$name` of the palette's values is renamed the same), and its
+  `match_taskbar` choice (any name), empty in the style, is whatever the followed option chose.
+  The followed option's default choice (`graphite`) is a choice of the follower
+  too. An option follows one that follows none.
+- **The default style has eighteen options.** Its look is four parts, each
+  with its own palette, outline and shading: the *taskbar* (the bar, workspace,
+  tray and clock; `palette`, default `graphite`), *focused windows* (a
+  focused titlebar, title, buttons, border and handles, and the taskbar's
+  focused entry; `focused_palette`), *unfocused windows* (the same, and the
+  taskbar's other entries; `unfocused_palette`) and *menus* (`menu_palette`).
+  The last three are `match_taskbar`, the taskbar's unless one is chosen, so one choice
+  colors everything and any part may be another palette. A focused face is the
+  palette's `accent`, a gradient; the border of a focused window and of a menu
+  is the accent too, and an unfocused window's is its own muted color. Each
+  part's `<part>_outline` (`match_global`, `on`, `off`) and `<part>_shading`
+  (`match_global`, `deep`, `soft`) defaults to the global `outline` (on) and
+  `shading` (`deep`; `soft`, "Softer Gradient Shading", fades to the palette's
+  muted `dark_soft` instead of its near-black `dark`). A menu's body is the one
+  exception: `menu_body` is `dark`, or `filled` (a dark, muted body in the
+  palette's hue), and the palette gives each its own color and its own
+  selection (a tint behind the item, and a bright color for its text and
+  marks). A menu's marks are always the modern ones, chevrons (`>>` on the item
+  under the pointer) and a tick; a style may use the classic ones (`bullet =
+  "triangle"`, `check = "box"`). Windows are square and menus rounded. A palette
+  is the seven colors a tint sets (`dark`, `mid`, `light`, `dim`, `press_dark`,
+  `press_light`, `menu`) with the soft forms `dark_soft` and `mid_soft`, and the
+  colors made of them (`menu_filled`, `text`, `accent`, `on_accent`,
+  `select_bg` and `select_text` and their `_filled` forms, `halo`, the color of
+  the text outline, and the rest of the list in `data/styles/default.toml`),
+  which a palette may give whole. Then `titlebar_size`, `taskbar_size` and
+  `menu_size` (each `small`, `medium`, the default, and `large`, the taskbar
+  also `xlarge`: the heights and font sizes of that part). The font is DejaVu
+  Sans; a font's size may be a number or a sum written as text, `"8 + 2"`, the
+  way lengths are.
 - vaht installs the palettes in `/usr/share/vaht/options/palette/`: blue, teal,
   green, amber, crimson, purple, slate, red, orange, gold, cyan, indigo, pink and
   brown set the seven colors, so every part follows (`blue` is the muted frost

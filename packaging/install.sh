@@ -27,7 +27,6 @@
 #   PREFIX/share/vaht/styles/default.toml                 the default style, to read and copy
 #   PREFIX/share/vaht/layouts/*.toml                   the default layout, and a few more
 #   PREFIX/share/vaht/options/palette/*.toml           color palettes for the default style
-#   PREFIX/share/vaht/options/unfocused/*.toml         the same colors, for unfocused windows
 #   PREFIX/share/doc/vaht/                             README and design notes
 #   PREFIX/share/licenses/vaht/LICENSE
 # and for one user (--user):
@@ -78,7 +77,6 @@ if [[ ${mode} == user ]]; then
     styles_dir=
     layouts_dir=
     palettes_dir=
-    unfocused_dir=
     license_dir=
 else
     bin_dir=${destdir}${prefix}/bin
@@ -92,7 +90,6 @@ else
     styles_dir=${destdir}${prefix}/share/vaht/styles
     layouts_dir=${destdir}${prefix}/share/vaht/layouts
     palettes_dir=${destdir}${prefix}/share/vaht/options/palette
-    unfocused_dir=${destdir}${prefix}/share/vaht/options/unfocused
     license_dir=${destdir}${prefix}/share/licenses/vaht
 fi
 
@@ -126,21 +123,6 @@ if [[ -n ${session_dir} ]]; then
         "data/options/palette/red.toml ${palettes_dir}/red.toml 644"
         "data/options/palette/slate.toml ${palettes_dir}/slate.toml 644"
         "data/options/palette/teal.toml ${palettes_dir}/teal.toml 644"
-        "data/options/unfocused/amber.toml ${unfocused_dir}/amber.toml 644"
-        "data/options/unfocused/blue.toml ${unfocused_dir}/blue.toml 644"
-        "data/options/unfocused/brown.toml ${unfocused_dir}/brown.toml 644"
-        "data/options/unfocused/crimson.toml ${unfocused_dir}/crimson.toml 644"
-        "data/options/unfocused/cyan.toml ${unfocused_dir}/cyan.toml 644"
-        "data/options/unfocused/gold.toml ${unfocused_dir}/gold.toml 644"
-        "data/options/unfocused/graphite.toml ${unfocused_dir}/graphite.toml 644"
-        "data/options/unfocused/green.toml ${unfocused_dir}/green.toml 644"
-        "data/options/unfocused/indigo.toml ${unfocused_dir}/indigo.toml 644"
-        "data/options/unfocused/orange.toml ${unfocused_dir}/orange.toml 644"
-        "data/options/unfocused/pink.toml ${unfocused_dir}/pink.toml 644"
-        "data/options/unfocused/purple.toml ${unfocused_dir}/purple.toml 644"
-        "data/options/unfocused/red.toml ${unfocused_dir}/red.toml 644"
-        "data/options/unfocused/slate.toml ${unfocused_dir}/slate.toml 644"
-        "data/options/unfocused/teal.toml ${unfocused_dir}/teal.toml 644"
         "data/vaht-settings.desktop ${application_dir}/vaht-settings.desktop 644"
         "README.md ${doc_dir}/README.md 644"
         "DESIGN.md ${doc_dir}/DESIGN.md 644"
@@ -155,7 +137,7 @@ if [[ ${action} == uninstall ]]; then
             rm -v -- "${destination}"
         fi
     done
-    for directory in "${doc_dir}" "${license_dir}" "${styles_dir}" "${layouts_dir}" "${palettes_dir}" "${unfocused_dir}" "${palettes_dir%/*}"; do
+    for directory in "${doc_dir}" "${license_dir}" "${styles_dir}" "${layouts_dir}" "${palettes_dir}" "${palettes_dir%/*}"; do
         [[ -n ${directory} && -d ${directory} ]] && rmdir --ignore-fail-on-non-empty -- "${directory}"
     done
     exit 0

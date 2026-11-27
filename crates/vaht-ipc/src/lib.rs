@@ -24,6 +24,13 @@ pub use message::{
     Reply, Request, StyleOptionInfo, WindowInfo, WorkspaceInfo,
 };
 
+/// Returns what to call a style option's choice for people: its name with
+/// each `_` a space (`match_taskbar` is "match taskbar").
+#[must_use]
+pub fn choice_title(choice: &str) -> String {
+    choice.replace('_', " ")
+}
+
 /// The environment variable that names vaht's IPC socket, set for every
 /// program vaht starts.
 pub const SOCKET_VARIABLE: &str = "VAHT_SOCKET";

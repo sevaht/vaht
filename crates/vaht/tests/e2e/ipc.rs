@@ -450,19 +450,29 @@ fn the_configuration_files_are_listed_with_their_state_and_the_styles() {
     assert_eq!(
         declared,
         [
-            "bar_outline",
-            "menu_body",
-            "menu_outline",
-            "menu_size",
-            "palette",
+            "outline",
             "shading",
+            "palette",
+            "taskbar_outline",
+            "taskbar_shading",
+            "focused_palette",
+            "focused_outline",
+            "focused_shading",
+            "unfocused_palette",
+            "unfocused_outline",
+            "unfocused_shading",
+            "menu_palette",
+            "menu_outline",
+            "menu_shading",
+            "menu_body",
             "taskbar_size",
             "titlebar_size",
-            "unfocused"
+            "menu_size"
         ],
         "the built-in style's options"
     );
-    assert_eq!(style_options[4].chosen, "graphite");
+    assert_eq!(style_options[2].name, "palette");
+    assert_eq!(style_options[2].chosen, "graphite");
     assert_eq!(
         problems,
         Vec::<String>::new(),

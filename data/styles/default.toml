@@ -31,41 +31,43 @@
 
 # Options: choices this style offers (02 §10.5). A choice is a table of
 # variables, and the values below refer to them as "$name"; a variable may be
-# made of others (`focused` is made of `accent`), so a choice that gives
-# `accent` anew changes everything made of it. Each option's `default` is
+# made of others (`fc_face` is made of `fc_accent`), so a choice that gives
+# `fc_accent` anew changes everything made of it. Each option's `default` is
 # written here, so this file works alone. Choose with `style_options` in
 # settings.toml:
-# style_options = { palette = "blue", shading = "soft", taskbar_size = "large" }.
+# style_options = { palette = "blue", focused_palette = "amber", shading = "soft" }.
 #
-# The look is one appearance, used wherever it applies:
-#   a focused face     the focused window's titlebar, the taskbar's focused
-#                      entry and a menu's title: the palette's `accent`, a
-#                      gradient; its border, and a menu's, are the accent too;
-#   an unfocused face  an unfocused window's titlebar and the taskbar's other
-#                      entries;
-#   the ground         what the taskbar's bar and its clock sit on.
-# Its choices are:
-#   `palette`    the colors, named for what they look like (more are
-#                installed in /usr/share/vaht/options/palette; yours go in
-#                ~/.config/vaht/options/palette). A palette may set any of the
-#                colors below and leaves the rest as they are here, made of
-#                the first seven; it may also say `group = "Blues"`, which a
-#                list of palettes shows it under;
-#   `unfocused`  whose colors the unfocused windows and the taskbar's other
-#                faces are in: `matching`, the palette's own, so the palette
-#                colors everything, or any other palette's (graphite's greys
-#                for a grey style with only the focused window in color);
-#                /usr/share/vaht/options/unfocused has one for each palette;
-#   `shading`    how dark the fades go: deep (near black) or soft (muted).
-# What a menu holds is the one exception: `menu_body` is dark or filled in, and
-# the palette gives each its own color and its own selection. A menu's marks
-# are always the modern ones (chevrons and a tick); a style may use the classic
+# The look is made of four parts, each its own palette, outline and shading:
+#   the taskbar          its bar, the workspace name and arrows, the tray and the
+#                        clock: `palette`, graphite unless chosen;
+#   focused windows      a focused window's titlebar, title, buttons, border and
+#                        handles, and the taskbar's focused entry
+#                        (`focused_palette`);
+#   unfocused windows    the same for the others, and the taskbar's other
+#                        entries (`unfocused_palette`);
+#   menus                a menu's title, border, body, items and marks
+#                        (`menu_palette`).
+# The other three palettes are `match_taskbar` (the taskbar's) unless chosen, so one
+# choice colors everything, and any of them may be another palette: graphite's
+# greys with only the focused windows in color, say. A palette is a file in
+# /usr/share/vaht/options/palette (yours go in ~/.config/vaht/options/palette)
+# that may set any of the colors below and leaves the rest as they are here,
+# made of the first seven; it may also say `group = "Blues"`, which a list of
+# palettes shows it under. Every part's list is the same palettes.
+#
+# Each part also has an outline (a halo that keeps light text readable on any
+# background) and a shading (how dark its gradients fade: deep, near black, or
+# soft, muted); each is `match_global`, the global one, `outline` (on) and
+# `shading` (deep, "Softer Gradient Shading" off), unless chosen. A menu's body
+# is dark or filled in, and the palette gives each its own selection. A menu's
+# marks are the modern ones (chevrons and a tick); a style may use the classic
 # ones (`bullet = "triangle"`, `check = "box"`). Windows are square and menus
-# rounded. The rest are one thing each: the text outline, on for the titlebars
-# and taskbar and for menus (marks included) separately, and three sizes.
+# rounded. Three sizes are the rest.
 
 [options.palette]
 label = "Palette"
+order = 10
+group = "Taskbar"
 default = "graphite"
 [options.palette.graphite]
 dark = "grey5"          # the dark end of gradients; the ground, flat
@@ -90,92 +92,205 @@ select_text_filled = "white"
 disabled = "$dim"       # a menu item that does nothing
 halo = "black"          # the color of the text outline
 
-# The unfocused colors: those of the unfocused windows and of the faces of the
-# taskbar that are not the focused one. `matching` takes them from the palette's
-# own darks, so the whole style is in its hue; another palette's name takes
-# that palette's, so any palette is a color on, say, graphite's greys. (A
-# palette of yours is another by a file of the same name in
-# ~/.config/vaht/options/unfocused.)
-[options.unfocused]
-label = "Unfocused windows"
-default = "matching"
-[options.unfocused.matching]
-unf_dark = "$dark"
-unf_mid = "$mid"
-unf_dark_soft = "$dark_soft"
-unf_mid_soft = "$mid_soft"
-unf_press_dark = "$press_dark"
-unf_press_light = "$press_light"
-unf_dim = "$dim"
-unf_text = "$text"
+# Whether text has an outline, for every part that does not say: on, by default.
+[options.outline]
+label = "Text outlines"
+order = 1
+checkbox = "Text Outlines"
+checked = "on"
+default = "on"
+[options.outline.on]
+g_tb_outline = { halo = "$halo" }
+g_fc_outline = { halo = "$fc_halo" }
+g_uf_outline = { halo = "$uf_halo" }
+g_mn_outline = { halo = "$mn_halo" }
+[options.outline.off]
+g_tb_outline = "none"
+g_fc_outline = "none"
+g_uf_outline = "none"
+g_mn_outline = "none"
 
-# How dark the shading goes: `deep` fades to the palette's `dark`, near black;
-# `soft` to its `dark_soft`, a muted one, and the unfocused faces are the
-# `mid_soft` and `dark_soft` of the palette they are in. A face is a gradient;
-# only a pressed button has a bevel, and the taskbar has no border line.
+# How dark gradients fade, for every part that does not say: `deep` fades to the
+# palette's `dark`, near black; `soft` to its `dark_soft`, a muted one.
 [options.shading]
-label = "Shading"
-group = "Misc"
-checkbox = "Softer shading"
+label = "Gradient shading"
+order = 2
+checkbox = "Softer Gradient Shading"
 default = "deep"
 [options.shading.deep]
-shade_fade = "$dark"
-shade_dark = "$unf_dark"
-shade_mid = "$unf_mid"
-focused = { gradient = "vertical", from = "$accent", to = "$shade_fade" }
-unfocused = { gradient = "vertical", from = "$shade_mid", to = "$shade_dark" }
-ground = "$unfocused"
-pressed = { gradient = "cross-diagonal", from = "$unf_press_dark", to = "$unf_press_light", bevel = "sunken" }
+g_tb_dark = "$dark"
+g_tb_mid = "$mid"
+g_fc_fade = "$fc_dark"
+g_uf_dark = "$uf_dark"
+g_uf_mid = "$uf_mid"
+g_mn_fade = "$mn_dark"
 [options.shading.soft]
-shade_fade = "$dark_soft"
-shade_dark = "$unf_dark_soft"
-shade_mid = "$unf_mid_soft"
+g_tb_dark = "$dark_soft"
+g_tb_mid = "$mid_soft"
+g_fc_fade = "$fc_dark_soft"
+g_uf_dark = "$uf_dark_soft"
+g_uf_mid = "$uf_mid_soft"
+g_mn_fade = "$mn_dark_soft"
+
+[options.taskbar_outline]
+label = "Text outline"
+order = 11
+group = "Taskbar"
+default = "match_global"
+[options.taskbar_outline.match_global]
+tb_outline = "$g_tb_outline"
+[options.taskbar_outline.on]
+tb_outline = { halo = "$halo" }
+[options.taskbar_outline.off]
+tb_outline = "none"
+
+[options.taskbar_shading]
+label = "Gradient shading"
+order = 12
+group = "Taskbar"
+default = "match_global"
+[options.taskbar_shading.match_global]
+tb_dark = "$g_tb_dark"
+tb_mid = "$g_tb_mid"
+tb_ground = { gradient = "vertical", from = "$tb_mid", to = "$tb_dark" }
+tb_pressed = { gradient = "cross-diagonal", from = "$press_dark", to = "$press_light", bevel = "sunken" }
+[options.taskbar_shading.deep]
+tb_dark = "$dark"
+tb_mid = "$mid"
+[options.taskbar_shading.soft]
+tb_dark = "$dark_soft"
+tb_mid = "$mid_soft"
+
+[options.focused_palette]
+label = "Palette"
+order = 20
+group = "Focused windows"
+default = "match_taskbar"
+library = "palette"
+prefix = "fc_"
+follows = "palette"
+[options.focused_palette.match_taskbar]
+
+[options.focused_outline]
+label = "Text outline"
+order = 21
+group = "Focused windows"
+default = "match_global"
+[options.focused_outline.match_global]
+fc_outline = "$g_fc_outline"
+[options.focused_outline.on]
+fc_outline = { halo = "$fc_halo" }
+[options.focused_outline.off]
+fc_outline = "none"
+
+[options.focused_shading]
+label = "Gradient shading"
+order = 22
+group = "Focused windows"
+default = "match_global"
+[options.focused_shading.match_global]
+fc_fade = "$g_fc_fade"
+fc_face = { gradient = "vertical", from = "$fc_accent", to = "$fc_fade" }
+[options.focused_shading.deep]
+fc_fade = "$fc_dark"
+[options.focused_shading.soft]
+fc_fade = "$fc_dark_soft"
+
+[options.unfocused_palette]
+label = "Palette"
+order = 30
+group = "Unfocused windows"
+default = "match_taskbar"
+library = "palette"
+prefix = "uf_"
+follows = "palette"
+[options.unfocused_palette.match_taskbar]
+
+[options.unfocused_outline]
+label = "Text outline"
+order = 31
+group = "Unfocused windows"
+default = "match_global"
+[options.unfocused_outline.match_global]
+uf_outline = "$g_uf_outline"
+[options.unfocused_outline.on]
+uf_outline = { halo = "$uf_halo" }
+[options.unfocused_outline.off]
+uf_outline = "none"
+
+[options.unfocused_shading]
+label = "Gradient shading"
+order = 32
+group = "Unfocused windows"
+default = "match_global"
+[options.unfocused_shading.match_global]
+uf_shade_dark = "$g_uf_dark"
+uf_shade_mid = "$g_uf_mid"
+uf_face = { gradient = "vertical", from = "$uf_shade_mid", to = "$uf_shade_dark" }
+[options.unfocused_shading.deep]
+uf_shade_dark = "$uf_dark"
+uf_shade_mid = "$uf_mid"
+[options.unfocused_shading.soft]
+uf_shade_dark = "$uf_dark_soft"
+uf_shade_mid = "$uf_mid_soft"
+
+[options.menu_palette]
+label = "Palette"
+order = 40
+group = "Menus"
+default = "match_taskbar"
+library = "palette"
+prefix = "mn_"
+follows = "palette"
+[options.menu_palette.match_taskbar]
+
+[options.menu_outline]
+label = "Text outline"
+order = 41
+group = "Menus"
+default = "match_global"
+[options.menu_outline.match_global]
+mn_outline = "$g_mn_outline"
+[options.menu_outline.on]
+mn_outline = { halo = "$mn_halo" }
+[options.menu_outline.off]
+mn_outline = "none"
+
+[options.menu_shading]
+label = "Gradient shading"
+order = 42
+group = "Menus"
+default = "match_global"
+[options.menu_shading.match_global]
+mn_fade = "$g_mn_fade"
+mn_face = { gradient = "vertical", from = "$mn_accent", to = "$mn_fade" }
+[options.menu_shading.deep]
+mn_fade = "$mn_dark"
+[options.menu_shading.soft]
+mn_fade = "$mn_dark_soft"
 
 # A menu's body: dark, or filled in a little (about halfway to a flat panel).
 # The palette gives each its own selection.
 [options.menu_body]
-label = "Menu background"
-group = "Misc"
+label = "Background"
+order = 43
+group = "Menus"
 checkbox = "Filled-in menu background"
 default = "dark"
 [options.menu_body.dark]
-menu_body = "$menu"
-menu_select_bg = "$select_bg"
-menu_select_text = "$select_text"
+menu_body = "$mn_menu"
+menu_select_bg = "$mn_select_bg"
+menu_select_text = "$mn_select_text"
 [options.menu_body.filled]
-menu_body = "$menu_filled"
-menu_select_bg = "$select_bg_filled"
-menu_select_text = "$select_text_filled"
-
-# Whether text has an outline (a halo), which keeps light text readable on any
-# background: on, by default, for the text of the titlebars and the taskbar and
-# for the text of menus (and their marks), each on its own.
-[options.bar_outline]
-label = "Taskbar/Titlebar text outline"
-group = "Text Outlines"
-checkbox = "Taskbar/Titlebar"
-checked = "on"
-default = "on"
-[options.bar_outline.on]
-bar_outline = { halo = "$halo" }
-[options.bar_outline.off]
-bar_outline = "none"
-
-[options.menu_outline]
-label = "Menu text outline"
-group = "Text Outlines"
-checkbox = "Menus"
-checked = "on"
-default = "on"
-[options.menu_outline.on]
-menu_outline = { halo = "$halo" }
-[options.menu_outline.off]
-menu_outline = "none"
+menu_body = "$mn_menu_filled"
+menu_select_bg = "$mn_select_bg_filled"
+menu_select_text = "$mn_select_text_filled"
 
 # The heights and font sizes of a window's titlebar, the taskbar and a menu,
 # each its own option.
 [options.titlebar_size]
-label = "Titlebar size"
+label = "Titlebar"
+order = 51
 group = "Sizes"
 default = "medium"
 [options.titlebar_size.small]
@@ -192,7 +307,8 @@ title_font_size = 10
 button_pad = 5
 
 [options.taskbar_size]
-label = "Taskbar size"
+label = "Taskbar"
+order = 50
 group = "Sizes"
 default = "medium"
 [options.taskbar_size.small]
@@ -209,7 +325,8 @@ taskbar_height = 30
 taskbar_font_size = 11
 
 [options.menu_size]
-label = "Menu size"
+label = "Menu"
+order = 52
 group = "Sizes"
 default = "medium"
 [options.menu_size.small]
@@ -226,33 +343,33 @@ menu_title_height = 26
 menu_font_size = 10
 
 [default]
-texture = "$ground"
+texture = "$tb_ground"
 font = { family = "DejaVu Sans", size = "$title_font_size", weight = "bold" }
-text_effect = "$bar_outline"
-text_color = "$unf_text"
-glyph_color = "$unf_text"
+text_effect = "$tb_outline"
+text_color = "$text"
+glyph_color = "$text"
 justify = "center"
 
 [window.titlebar]
-texture = "$focused"
+texture = "$fc_face"
 height = "$titlebar_height"
 
 [window.titlebar.unfocused]
-texture = "$unfocused"
+texture = "$uf_face"
 
 [window.label]
 texture = "parent"
-text_color = "$on_accent"
-text_effect = "$bar_outline"
+text_color = "$fc_on_accent"
+text_effect = "$fc_outline"
 padding = [0, 4, 0, 4]
 
 [window.label.unfocused]
-text_color = "$unf_dim"
-text_effect = "$bar_outline"
+text_color = "$uf_dim"
+text_effect = "$uf_outline"
 
 [window.button]
 texture = "parent"
-glyph_color = "$on_accent"
+glyph_color = "$fc_on_accent"
 # The room round a button's picture: the button is 20 pixels, so 4 leaves a
 # 12 pixel picture (Fluxbox draws it 2 pixels inside, a 16 pixel picture).
 padding = "$button_pad"
@@ -261,32 +378,32 @@ padding = "$button_pad"
 # restore_glyph = false
 
 [window.button.unfocused]
-glyph_color = "$unf_dim"
+glyph_color = "$uf_dim"
 
 [window.button.pressed]
-texture = "$pressed"
+texture = "$tb_pressed"
 
 [window.handle]
-texture = "$focused"
+texture = "$fc_face"
 height = 1
 
 [window.handle.unfocused]
-texture = "$unfocused"
+texture = "$uf_face"
 
 [window.grip]
-texture = "$focused"
+texture = "$fc_face"
 
 [window.grip.unfocused]
-texture = "$unfocused"
+texture = "$uf_face"
 
 [window.border]
-border = { width = 1, color = "$accent" }
+border = { width = 1, color = "$fc_accent" }
 
 [window.border.unfocused]
-border = { width = 1, color = "$shade_mid" }
+border = { width = 1, color = "$uf_shade_mid" }
 
 [taskbar]
-texture = "$ground"
+texture = "$tb_ground"
 border = { width = 0, color = "$accent" }
 height = "$taskbar_height"
 
@@ -294,52 +411,52 @@ height = "$taskbar_height"
 padding = 0
 
 [taskbar.button.pressed]
-texture = "$pressed"
+texture = "$tb_pressed"
 
 [taskbar.workspace]
-texture = "$ground"
+texture = "$tb_ground"
 font = { family = "DejaVu Sans", size = "$taskbar_font_size", weight = "bold" }
 padding = [0, 1, 0, 1]
 
 [taskbar.clock]
-texture = "$ground"
+texture = "$tb_ground"
 font = { family = "DejaVu Sans", size = "$taskbar_font_size", weight = "bold" }
 padding = [0, 8, 0, 8]
 
 [taskbar.window-list.entry]
-texture = "$focused"
+texture = "$fc_face"
 font = { family = "DejaVu Sans", size = "$taskbar_font_size", weight = "bold" }
-text_color = "$on_accent"
-text_effect = "$bar_outline"
+text_color = "$fc_on_accent"
+text_effect = "$fc_outline"
 padding = [0, 5, 0, 5]
 
 [taskbar.window-list.entry.unfocused]
-texture = "$unfocused"
-text_color = "$unf_dim"
-text_effect = "$bar_outline"
+texture = "$uf_face"
+text_color = "$uf_dim"
+text_effect = "$uf_outline"
 
 [menu.title]
-texture = "$focused"
+texture = "$mn_face"
 font = { family = "DejaVu Sans", size = "$menu_font_size", weight = "bold" }
-text_color = "$on_accent"
-text_effect = "$menu_outline"
+text_color = "$mn_on_accent"
+text_effect = "$mn_outline"
 height = "$menu_title_height"
 
 [menu.frame]
 texture = { solid = "$menu_body" }
 font = { family = "DejaVu Sans", size = "$menu_font_size" }
-text_color = "$text"
-text_effect = "$menu_outline"
+text_color = "$mn_text"
+text_effect = "$mn_outline"
 justify = "left"
-border = { width = 1, color = "$accent" }
+border = { width = 1, color = "$mn_accent" }
 corner_radius = 8
 
 [menu.item]
 texture = "parent"
 font = { family = "DejaVu Sans", size = "$menu_font_size" }
-text_color = "$text"
-text_effect = "$menu_outline"
-glyph_color = "$text"
+text_color = "$mn_text"
+text_effect = "$mn_outline"
+glyph_color = "$mn_text"
 justify = "left"
 padding = [0, 20, 0, 21]
 height = "$menu_item_height"
@@ -351,12 +468,12 @@ check = "tick"
 texture = { solid = "$menu_select_bg" }
 font = { family = "DejaVu Sans", size = "$menu_font_size", weight = "bold" }
 text_color = "$menu_select_text"
-text_effect = "$menu_outline"
+text_effect = "$mn_outline"
 glyph_color = "$menu_select_text"
 bullet = "double-chevron"
 
 [menu.item.disabled]
-text_color = "$disabled"
+text_color = "$mn_disabled"
 
 [wireframe]
 border = { width = 2, color = "#ffffffcc" }

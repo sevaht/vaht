@@ -82,18 +82,20 @@ impl<'directory> OptionLibrary<'directory> {
             .options
             .iter()
             .map(|option| {
+                // An option may take its choices from another's directory.
+                let directory = option.library.as_deref().unwrap_or(&option.name);
                 let mut choices: Vec<String> = option
                     .choices
                     .iter()
                     .cloned()
-                    .chain(self.choices(&option.name))
+                    .chain(self.choices(directory))
                     .collect();
                 choices.sort_by_key(|choice| (*choice != option.default, choice.clone()));
                 choices.dedup();
                 // A file in the library says its group, over the style's own.
                 let mut groups = option.groups.clone();
                 for choice in &choices {
-                    if let Ok(Some(table)) = self.variables(&option.name, choice)
+                    if let Ok(Some(table)) = self.variables(directory, choice)
                         && let Some(group) = table.get("group").and_then(toml::Value::as_str)
                     {
                         groups.insert(choice.clone(), group.to_owned());
@@ -299,33 +301,32 @@ mod tests {
     }
 
     #[test]
-    fn every_shipped_unfocused_choice_loads_with_every_palette_and_sets_only_its_variables() {
-        let vocabulary: toml::Table = toml::from_str(Style::BUILT_IN).expect("TOML");
-        let vocabulary = vocabulary["options"]["unfocused"]["matching"]
-            .as_table()
-            .expect("the default choice");
+    fn every_shipped_palette_is_a_choice_of_all_four_parts() {
         let palettes: Vec<String> = shipped("palette")
             .into_iter()
             .map(|(name, _)| name)
             .collect();
-        let unfocused = shipped("unfocused");
-        assert_eq!(
-            unfocused.len(),
-            palettes.len() + 1,
-            "one for each palette, and graphite's"
-        );
-        for (name, path) in unfocused {
-            let table: toml::Table =
-                toml::from_str(&std::fs::read_to_string(&path).expect("readable")).expect("TOML");
-            for key in table.keys().filter(|key| *key != "group") {
-                assert!(vocabulary.contains_key(key), "{name} sets `{key}`");
-            }
+        for option in [
+            "palette",
+            "focused_palette",
+            "unfocused_palette",
+            "menu_palette",
+        ] {
             for palette in &palettes {
-                let style = load(&[("palette", palette), ("unfocused", &name)]);
+                let style = load(&[(option, palette)]);
                 assert_eq!(
                     style.option_problems(),
                     Vec::<String>::new(),
-                    "{palette} with {name}'s unfocused windows"
+                    "{option} {palette}"
+                );
+                assert_eq!(
+                    style
+                        .options()
+                        .options
+                        .iter()
+                        .find(|listed| listed.name == option)
+                        .map(|listed| listed.chosen.as_str()),
+                    Some(palette.as_str())
                 );
             }
         }
@@ -335,11 +336,19 @@ mod tests {
     fn every_other_choice_of_the_default_style_loads_and_looks_different() {
         let default = load(&[]);
         for (option, choice) in [
-            ("unfocused", "graphite"),
-            ("unfocused", "amber"),
+            ("focused_palette", "amber"),
+            ("unfocused_palette", "amber"),
+            ("menu_palette", "amber"),
             ("shading", "soft"),
+            ("focused_shading", "soft"),
+            ("unfocused_shading", "soft"),
+            ("menu_shading", "soft"),
+            ("taskbar_shading", "soft"),
             ("menu_body", "filled"),
-            ("bar_outline", "off"),
+            ("outline", "off"),
+            ("taskbar_outline", "off"),
+            ("focused_outline", "off"),
+            ("unfocused_outline", "off"),
             ("menu_outline", "off"),
             ("titlebar_size", "small"),
             ("titlebar_size", "large"),
@@ -373,12 +382,18 @@ mod tests {
         let menu_title = |style: &Style| focused(style, StyleElement::MenuTitle).text.effect;
         let bar_label = |style: &Style| focused(style, StyleElement::Label).text.effect;
         assert_ne!(menu_title(&default), TextEffect::None);
-        let no_bars = load(&[("bar_outline", "off")]);
+        let no_bars = load(&[("focused_outline", "off")]);
         assert_eq!(bar_label(&no_bars), TextEffect::None);
         assert_eq!(
             focused(&no_bars, StyleElement::WindowListEntry).text.effect,
             TextEffect::None
         );
+        let unfocused_label = |style: &Style| {
+            element(style, StyleElement::Label, WidgetState::Unfocused)
+                .text
+                .effect
+        };
+        assert_ne!(unfocused_label(&no_bars), TextEffect::None, "its own part");
         assert_ne!(menu_title(&no_bars), TextEffect::None, "menus keep theirs");
         let no_menus = load(&[("menu_outline", "off")]);
         assert_eq!(menu_title(&no_menus), TextEffect::None);
@@ -435,7 +450,10 @@ mod tests {
             element(style, StyleElement::WindowListEntry, WidgetState::Unfocused).texture
         };
         assert_eq!(
-            unfocused(&load(&[("palette", "purple"), ("unfocused", "graphite")])),
+            unfocused(&load(&[
+                ("palette", "purple"),
+                ("unfocused_palette", "graphite")
+            ])),
             unfocused(&default)
         );
         // An unfocused window's border is its own color, not the focused one's.
@@ -447,6 +465,115 @@ mod tests {
             element(&orange, StyleElement::Border, WidgetState::Unfocused)
                 .border
                 .color
+        );
+    }
+
+    #[test]
+    fn each_part_has_its_own_palette_outline_and_shading() {
+        let element = |style: &Style, element, state| style.element_style(element, state).clone();
+        let fill = |style: &Style, which, state| element(style, which, state).texture.fill;
+        let default = load(&[]);
+        let mixed = load(&[
+            ("palette", "purple"),
+            ("focused_palette", "amber"),
+            ("unfocused_palette", "graphite"),
+            ("menu_palette", "blue"),
+        ]);
+        assert_eq!(mixed.option_problems(), Vec::<String>::new());
+        let titlebar = |style: &Style| fill(style, StyleElement::Titlebar, WidgetState::Focused);
+        let purple_only = load(&[("palette", "purple")]);
+        // Each part is the palette it was given and no other's.
+        assert_ne!(titlebar(&mixed), titlebar(&purple_only));
+        assert_eq!(
+            titlebar(&mixed),
+            titlebar(&load(&[("focused_palette", "amber")]))
+        );
+        assert_eq!(
+            fill(&mixed, StyleElement::Titlebar, WidgetState::Unfocused),
+            fill(&default, StyleElement::Titlebar, WidgetState::Unfocused)
+        );
+        assert_eq!(
+            fill(&mixed, StyleElement::Taskbar, WidgetState::Focused),
+            fill(&purple_only, StyleElement::Taskbar, WidgetState::Focused)
+        );
+        assert_eq!(
+            element(&mixed, StyleElement::MenuFrame, WidgetState::Focused).border,
+            element(
+                &load(&[("menu_palette", "blue")]),
+                StyleElement::MenuFrame,
+                WidgetState::Focused
+            )
+            .border
+        );
+        // By default every part matches the taskbar's palette.
+        let blue = load(&[("palette", "blue")]);
+        let all_blue = load(&[
+            ("palette", "blue"),
+            ("focused_palette", "blue"),
+            ("unfocused_palette", "blue"),
+            ("menu_palette", "blue"),
+        ]);
+        assert_eq!(
+            blue.element_style(StyleElement::Titlebar, WidgetState::Focused),
+            all_blue.element_style(StyleElement::Titlebar, WidgetState::Focused)
+        );
+        assert_eq!(
+            blue.element_style(StyleElement::MenuTitle, WidgetState::Focused),
+            all_blue.element_style(StyleElement::MenuTitle, WidgetState::Focused)
+        );
+    }
+
+    #[test]
+    fn a_part_overrides_the_global_outline_and_shading_and_defaults_to_them() {
+        let effect = |style: &Style, which, state| style.element_style(which, state).text.effect;
+        let label = |style: &Style| effect(style, StyleElement::Label, WidgetState::Focused);
+        let menu = |style: &Style| effect(style, StyleElement::MenuTitle, WidgetState::Focused);
+        // Outlines are on by default; the global turns every part's off, and a
+        // part that says on keeps its own.
+        assert_ne!(label(&load(&[])), TextEffect::None);
+        let off = load(&[("outline", "off")]);
+        assert_eq!(label(&off), TextEffect::None);
+        assert_eq!(menu(&off), TextEffect::None);
+        let one = load(&[("outline", "off"), ("menu_outline", "on")]);
+        assert_eq!(label(&one), TextEffect::None);
+        assert_ne!(menu(&one), TextEffect::None);
+        // Shading is deep by default; the global makes every part soft, and a
+        // part that says deep stays deep.
+        let fade =
+            |style: &Style, which, state| match style.element_style(which, state).texture.fill {
+                Fill::Gradient { to, .. } => to,
+                Fill::Solid(_) | Fill::Image { .. } | Fill::Parent => panic!("a gradient"),
+            };
+        let deep = load(&[("palette", "blue")]);
+        let soft = load(&[("palette", "blue"), ("shading", "soft")]);
+        let mixed = load(&[
+            ("palette", "blue"),
+            ("shading", "soft"),
+            ("menu_shading", "deep"),
+        ]);
+        for which in [StyleElement::Titlebar, StyleElement::MenuTitle] {
+            assert_ne!(
+                fade(&deep, which, WidgetState::Focused),
+                fade(&soft, which, WidgetState::Focused)
+            );
+        }
+        assert_eq!(
+            fade(&mixed, StyleElement::Titlebar, WidgetState::Focused),
+            fade(&soft, StyleElement::Titlebar, WidgetState::Focused)
+        );
+        assert_eq!(
+            fade(&mixed, StyleElement::MenuTitle, WidgetState::Focused),
+            fade(&deep, StyleElement::MenuTitle, WidgetState::Focused)
+        );
+        // A part can be soft alone.
+        let alone = load(&[("palette", "blue"), ("focused_shading", "soft")]);
+        assert_eq!(
+            fade(&alone, StyleElement::Titlebar, WidgetState::Focused),
+            fade(&soft, StyleElement::Titlebar, WidgetState::Focused)
+        );
+        assert_eq!(
+            fade(&alone, StyleElement::MenuTitle, WidgetState::Focused),
+            fade(&deep, StyleElement::MenuTitle, WidgetState::Focused)
         );
     }
 
@@ -651,12 +778,15 @@ mod tests {
         // The unfocused colors of the palette, of graphite and of blue, whose
         // muted ones are the least like the rest.
         let designs = [
-            [("unfocused", "matching"), ("shading", "deep")],
-            [("unfocused", "graphite"), ("shading", "deep")],
-            [("unfocused", "blue"), ("shading", "deep")],
-            [("unfocused", "matching"), ("shading", "soft")],
-            [("unfocused", "graphite"), ("shading", "soft")],
-            [("unfocused", "blue"), ("shading", "soft")],
+            [("unfocused_palette", "match_taskbar"), ("shading", "deep")],
+            [("unfocused_palette", "graphite"), ("shading", "deep")],
+            [("unfocused_palette", "blue"), ("shading", "deep")],
+            [("unfocused_palette", "match_taskbar"), ("shading", "soft")],
+            [("unfocused_palette", "graphite"), ("shading", "soft")],
+            [("unfocused_palette", "blue"), ("shading", "soft")],
+            // The other parts in another palette than the taskbar's.
+            [("focused_palette", "graphite"), ("shading", "deep")],
+            [("menu_palette", "blue"), ("shading", "soft")],
         ];
         let menus = [[("menu_body", "dark")], [("menu_body", "filled")]];
         let pairs = [

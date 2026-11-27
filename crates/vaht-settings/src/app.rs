@@ -262,9 +262,17 @@ impl<L: Link> SettingsApp<L> {
     ) {
         let is_searching = !self.search.trim().is_empty();
         let mut group: Option<&str> = None;
-        for setting in &section.settings {
+        // The layout first, then the style (and its options, which come
+        // with it), then the rest, each in the order the schema has them.
+        let mut settings: Vec<&Setting> = section.settings.iter().collect();
+        settings.sort_by_key(|setting| match setting.path.to_string().as_str() {
+            "layout" => 0,
+            "style" => 1,
+            _ => 2,
+        });
+        for setting in settings {
             if !editor.is_shown(setting) || setting.path.to_string() == "style_options" {
-                // `style_options` is chosen under Appearance, from the lists
+                // `style_options` is chosen in the Style options section, from the lists
                 // the style in use offers.
                 continue;
             }
@@ -281,6 +289,7 @@ impl<L: Link> SettingsApp<L> {
                 self.scopes(ui, editor, setting, edits);
                 continue;
             }
+            let is_style = setting.path.to_string() == "style";
             let value = match self.pending.get(&setting.path) {
                 Some(pending) => pending
                     .as_ref()
@@ -312,6 +321,10 @@ impl<L: Link> SettingsApp<L> {
                 edits.push(edit);
             }
             ui.add_space(4.0);
+            // The style's own options come right under the style that has them.
+            if is_style {
+                self.style_options_section(ui, edits);
+            }
         }
         for inner in &section.sections {
             if !editor.has_shown_settings(inner) {
@@ -330,15 +343,22 @@ impl<L: Link> SettingsApp<L> {
         }
     }
 
-    /// Draws the choices the style in use offers: a list to choose from for
-    /// each of its options. Choosing the default puts the setting back, so
-    /// the file keeps no line for it.
-    fn appearance(&mut self, ui: &mut Ui, edits: &mut Vec<ConfigEdit>) {
+    /// Draws the choices the style in use offers, in a collapsed section of
+    /// its own, if it offers any: a list to choose from for each of its
+    /// options. Choosing the default puts the setting back, so the file keeps
+    /// no line for it.
+    fn style_options_section(&mut self, ui: &mut Ui, edits: &mut Vec<ConfigEdit>) {
         if self.style_options.is_empty() {
             return;
         }
-        ui.strong("Appearance");
-        ui.separator();
+        egui::CollapsingHeader::new("Style options")
+            .id_salt("style-options")
+            .show(ui, |ui| self.style_options_list(ui, edits));
+    }
+
+    /// Draws the lists of the options of the style in use, and the button
+    /// that puts them all back.
+    fn style_options_list(&mut self, ui: &mut Ui, edits: &mut Vec<ConfigEdit>) {
         let is_changed = self.style_options.iter().any(|option| {
             self.pending_options
                 .get(&option.name)
@@ -359,7 +379,15 @@ impl<L: Link> SettingsApp<L> {
                 .map(|option| (option.name.clone(), option.default.clone()))
                 .collect();
         }
+        // A heading where the options' group changes: the options are in the
+        // order the style gives, so a group's are together.
+        let mut shown_group: Option<Option<&str>> = None;
         for option in &self.style_options {
+            if shown_group != Some(option.group.as_deref()) {
+                shown_group = Some(option.group.as_deref());
+                ui.add_space(4.0);
+                ui.strong(option.group.as_deref().unwrap_or("General"));
+            }
             let now = self
                 .pending_options
                 .get(&option.name)
@@ -385,7 +413,10 @@ impl<L: Link> SettingsApp<L> {
                             }
                         }
                         let mut draw = |ui: &mut Ui, choice: &String| {
-                            if ui.selectable_label(choice == now, choice).clicked() && choice != now
+                            if ui
+                                .selectable_label(choice == now, vaht_ipc::choice_title(choice))
+                                .clicked()
+                                && choice != now
                             {
                                 picked = Some(choice.clone());
                             }
@@ -422,7 +453,6 @@ impl<L: Link> SettingsApp<L> {
             }
             ui.add_space(4.0);
         }
-        ui.add_space(8.0);
     }
 
     /// Draws the tables of one shape `setting` holds by name (a device's
@@ -529,7 +559,6 @@ impl<L: Link> SettingsApp<L> {
                         ui.label("Waiting for vaht…");
                         return;
                     };
-                    self.appearance(ui, &mut edits);
                     let root = editor.form().root().clone();
                     self.section(ui, editor, &root, &mut edits);
                 });
@@ -1121,6 +1150,10 @@ mod tests {
         let schema = json!({
             "type": "object",
             "properties": {
+                "style": {
+                    "anyOf": [{ "type": "string" }, { "type": "null" }],
+                    "x-vaht-names": "styles",
+                },
                 "style_options": {
                     "type": "object",
                     "additionalProperties": { "type": "string" },
@@ -1131,8 +1164,8 @@ mod tests {
         link.to_tell.borrow_mut().extend([
             Update::Schema(schema),
             Update::Reading {
-                defaults: json!({ "style_options": {} }),
-                value: json!({ "style_options": { "scheme": "blue" } }),
+                defaults: json!({ "style": null, "style_options": {} }),
+                value: json!({ "style": null, "style_options": { "scheme": "blue" } }),
                 changed: Vec::new(),
                 styles: vec!["default".to_owned()],
                 layouts: vec!["default".to_owned()],
@@ -1167,16 +1200,17 @@ mod tests {
     }
 
     #[test]
-    fn the_choices_a_style_offers_are_chosen_under_appearance() {
+    fn the_choices_a_style_offers_are_chosen_under_style_options() {
         let (mut app, link) = styled_window();
         let mut harness = harness_of(&mut app);
         harness.run();
-        harness.get_by_label("Appearance");
+        harness.get_by_label("Style options").click();
+        harness.run();
         harness.get_by_label("Color scheme");
         harness.get_by_label("size");
         harness
             .get_all_by_role(egui::accesskit::Role::ComboBox)
-            .next()
+            .nth(1) // the style's own list is the first
             .expect("a list for the first option")
             .click();
         harness.run();
@@ -1196,6 +1230,8 @@ mod tests {
     fn one_button_puts_every_option_back_to_its_default() {
         let (mut app, link) = styled_window();
         let mut harness = harness_of(&mut app);
+        harness.run();
+        harness.get_by_label("Style options").click();
         harness.run();
         harness.get_by_label("Reset all to defaults").click();
         harness.run();
@@ -1219,9 +1255,11 @@ mod tests {
         let (mut app, link) = styled_window();
         let mut harness = harness_of(&mut app);
         harness.run();
+        harness.get_by_label("Style options").click();
+        harness.run();
         harness
             .get_all_by_role(egui::accesskit::Role::ComboBox)
-            .next()
+            .nth(1) // the style's own list is the first
             .expect("a list for the first option")
             .click();
         harness.run();

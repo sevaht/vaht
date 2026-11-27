@@ -525,7 +525,7 @@ impl<'state> MenuBuilder<'state> {
     /// group, then a submenu for each group.
     fn option_submenu(option: &ListedOption) -> MenuItem {
         let item_of = |choice: &String| MenuItem::Choice {
-            label: choice.clone(),
+            label: vaht_ipc::choice_title(choice),
             choice: Self::option_choice(option, choice),
             mark: Some(*choice == option.chosen),
             icon: None,
@@ -551,6 +551,19 @@ impl<'state> MenuBuilder<'state> {
         Self::submenu_of(option.title(), choices)
     }
 
+    /// Puts `item` in the group called `group`, which is made last if new.
+    fn add_to_group<'name>(
+        grouped: &mut Vec<(&'name str, Vec<MenuItem>)>,
+        group: &'name str,
+        item: MenuItem,
+    ) {
+        if let Some((_, items)) = grouped.iter_mut().find(|(known, _)| *known == group) {
+            items.push(item);
+        } else {
+            grouped.push((group, vec![item]));
+        }
+    }
+
     /// Returns the `style-options` list: a checkbox for each option that has
     /// two choices and a label for it and no group (each its own, so checking
     /// one never changes another), then a submenu for each of the other
@@ -564,25 +577,22 @@ impl<'state> MenuBuilder<'state> {
         }
         let mut items = Vec::new();
         let mut plain: Vec<MenuItem> = Vec::new();
-        let mut grouped: BTreeMap<&str, Vec<MenuItem>> = BTreeMap::new();
+        // The groups in the order their first options come in.
+        let mut grouped: Vec<(&str, Vec<MenuItem>)> = Vec::new();
         for option in options {
             // A checkbox is in its group's submenu, if it has a group, else
             // loose at the top.
             match (Self::option_checkbox(option), &option.group) {
                 (Some(item), None) => items.push(item),
-                (Some(item), Some(group)) => grouped.entry(group).or_default().push(item),
-                (None, Some(group)) => grouped
-                    .entry(group)
-                    .or_default()
-                    .push(Self::option_submenu(option)),
+                (Some(item), Some(group)) => Self::add_to_group(&mut grouped, group, item),
+                (None, Some(group)) => {
+                    Self::add_to_group(&mut grouped, group, Self::option_submenu(option));
+                }
                 (None, None) => plain.push(Self::option_submenu(option)),
             }
         }
-        // The groups in order, and the one called Misc last.
-        let mut groups: Vec<_> = grouped.into_iter().collect();
-        groups.sort_by_key(|(group, _)| (*group == "Misc", *group));
         plain.extend(
-            groups
+            grouped
                 .into_iter()
                 .map(|(group, submenus)| Self::submenu_of(group, submenus)),
         );
@@ -1078,7 +1088,7 @@ mod tests {
                 groups: option.groups.clone(),
             })
             .collect();
-        // The checkboxes are in submenus of their own, and Misc is the last.
+        // The two global checkboxes are loose at the top; the parts are submenus.
         let items = MenuBuilder::style_option_items(&listed);
         let checkboxes_in = |group: &str| -> Vec<(String, Option<bool>)> {
             let menu = items
@@ -1100,19 +1110,8 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            checkboxes_in("Text Outlines"),
-            [
-                ("Taskbar/Titlebar".to_owned(), Some(true)),
-                ("Menus".to_owned(), Some(true))
-            ],
-            "both outlines are on, and checked for it"
-        );
-        assert_eq!(
-            checkboxes_in("Misc"),
-            [
-                ("Filled-in menu background".to_owned(), Some(false)),
-                ("Softer shading".to_owned(), Some(false))
-            ]
+            checkboxes_in("Menus"),
+            [("Filled-in menu background".to_owned(), Some(false))]
         );
         let labels: Vec<String> = MenuBuilder::style_option_items(&listed)
             .iter()
@@ -1126,11 +1125,14 @@ mod tests {
         assert_eq!(
             labels,
             [
-                "Palette",
-                "Unfocused windows",
-                "Sizes",
                 "Text Outlines",
-                "Misc",
+                "Softer Gradient Shading",
+                "-",
+                "Taskbar",
+                "Focused windows",
+                "Unfocused windows",
+                "Menus",
+                "Sizes",
                 "-",
                 "Reset all to defaults"
             ]

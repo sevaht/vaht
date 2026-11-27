@@ -89,6 +89,11 @@ pub struct StyleOption {
     pub checked: Option<String>,
     /// The group of options a menu or window lists it with, if the style says.
     pub group: Option<String>,
+    /// Where it comes in a list, if the style says: lower first.
+    pub order: Option<i64>,
+    /// The directory of the library its choices come from, if it is not the
+    /// option's own: `options/<library>`.
+    pub library: Option<String>,
     /// The choice made when none is: always one the style holds itself.
     pub default: String,
     /// The choices the style holds itself: the default first, then the rest
@@ -262,27 +267,176 @@ pub(super) fn resolve(text: &str, selection: &Selection<'_>) -> Result<Resolved,
         .ok_or_else(|| toml::de::Error::custom("`options` is a table of options"))?;
     let mut resolved = Resolved::default();
     let mut owners: HashMap<String, String> = HashMap::new();
-    for (name, option) in declared {
-        checked_name(name, "an option")?;
-        let option = option.as_table().ok_or_else(|| {
-            toml::de::Error::custom(format!(
-                "option `{name}` is a table: its default and choices"
-            ))
-        })?;
-        let (declaration, variables) =
-            read_option(name, option, selection, &mut resolved.problems)?;
-        for (variable, value) in variables {
-            if let Some(other) = owners.insert(variable.clone(), name.clone()) {
-                return Err(toml::de::Error::custom(format!(
-                    "the variable `{variable}` is defined by the options `{other}` and `{name}`: \
-                     each variable belongs to one option"
-                )));
+    // What each option chose, for the options that follow it.
+    let mut chosen_variables: HashMap<String, toml::Table> = HashMap::new();
+    // The options that follow none first, then the ones that follow one.
+    for is_follower in [false, true] {
+        for (name, option) in declared {
+            checked_name(name, "an option")?;
+            let option = option.as_table().ok_or_else(|| {
+                toml::de::Error::custom(format!(
+                    "option `{name}` is a table: its default and choices"
+                ))
+            })?;
+            if option.contains_key("follows") != is_follower {
+                continue;
             }
-            resolved.variables.0.insert(variable, value);
+            let follow = if is_follower {
+                Some(follow_of(name, option, declared, &chosen_variables)?)
+            } else {
+                None
+            };
+            let (declaration, variables) = read_option(
+                name,
+                option,
+                (selection, follow.as_ref()),
+                &mut resolved.problems,
+            )?;
+            chosen_variables.insert(name.clone(), variables.clone());
+            for (variable, value) in variables {
+                if let Some(other) = owners.insert(variable.clone(), name.clone()) {
+                    return Err(toml::de::Error::custom(format!(
+                        "the variable `{variable}` is defined by the options `{other}` and \
+                         `{name}`: each variable belongs to one option"
+                    )));
+                }
+                resolved.variables.0.insert(variable, value);
+            }
+            resolved.options.options.push(declaration);
         }
-        resolved.options.options.push(declaration);
     }
+    resolved
+        .options
+        .options
+        .sort_by_key(|option| (option.order.unwrap_or(i64::MAX), option.name.clone()));
     Ok(resolved)
+}
+
+/// What an option that follows another takes from it.
+struct Follow {
+    /// What its variables are named in front of.
+    prefix: String,
+    /// The variables of the followed option's default choice, which are the
+    /// names a library choice may set.
+    vocabulary: toml::Table,
+    /// The variables the followed option chose.
+    chosen: toml::Table,
+    /// The name of the followed option's default choice, which is its
+    /// vocabulary: a choice of the follower too.
+    vocabulary_name: String,
+}
+
+/// Returns what the option `name`, which says `follows`, takes from the
+/// option it names.
+fn follow_of(
+    name: &str,
+    option: &toml::Table,
+    declared: &toml::Table,
+    chosen_variables: &HashMap<String, toml::Table>,
+) -> Result<Follow, toml::de::Error> {
+    let fail = |message: String| toml::de::Error::custom(format!("option `{name}`: {message}"));
+    let followed = option
+        .get("follows")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| fail("`follows` names an option".to_owned()))?;
+    let prefix = option
+        .get("prefix")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| fail("an option that follows another says its `prefix`".to_owned()))?;
+    checked_name(prefix, "a prefix")?;
+    let target = declared
+        .get(followed)
+        .and_then(toml::Value::as_table)
+        .ok_or_else(|| fail(format!("it follows `{followed}`, which is not an option")))?;
+    if target.contains_key("follows") {
+        return Err(fail(format!(
+            "it follows `{followed}`, which follows another: an option follows one that does not"
+        )));
+    }
+    let vocabulary_name = target
+        .get("default")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| fail(format!("`{followed}` has no default")))?
+        .to_owned();
+    let vocabulary = target
+        .get(&vocabulary_name)
+        .and_then(toml::Value::as_table)
+        .map(variables_of)
+        .ok_or_else(|| fail(format!("`{followed}` has no default choice written inline")))?;
+    let chosen = chosen_variables
+        .get(followed)
+        .cloned()
+        .ok_or_else(|| fail(format!("`{followed}` was not read")))?;
+    Ok(Follow {
+        prefix: prefix.to_owned(),
+        vocabulary,
+        chosen,
+        vocabulary_name,
+    })
+}
+
+/// Returns `table` as the variables of an option that follows another: each
+/// name of the `vocabulary` it sets put after `prefix`, and each reference to
+/// one of those names inside its values put after `prefix` too, so the copy
+/// is made of itself.
+fn prefixed(table: &toml::Table, prefix: &str, vocabulary: &toml::Table) -> toml::Table {
+    table
+        .iter()
+        .filter(|(key, _)| vocabulary.contains_key(key.as_str()))
+        .map(|(key, value)| {
+            (
+                format!("{prefix}{key}"),
+                with_prefixed_references(value.clone(), prefix, vocabulary),
+            )
+        })
+        .collect()
+}
+
+/// Returns `value` with every `$name` in its text, where `name` is of the
+/// `vocabulary`, written `$` and `prefix` and `name`.
+fn with_prefixed_references(
+    value: toml::Value,
+    prefix: &str,
+    vocabulary: &toml::Table,
+) -> toml::Value {
+    match value {
+        toml::Value::String(text) => {
+            let mut out = String::new();
+            let mut rest = text.as_str();
+            while let Some(at) = rest.find('$') {
+                out.push_str(&rest[..=at]);
+                let after = &rest[at + 1..];
+                let length = after
+                    .find(|character: char| {
+                        !(character.is_ascii_alphanumeric() || character == '_')
+                    })
+                    .unwrap_or(after.len());
+                if vocabulary.contains_key(&after[..length]) {
+                    out.push_str(prefix);
+                }
+                out.push_str(&after[..length]);
+                rest = &after[length..];
+            }
+            out.push_str(rest);
+            toml::Value::String(out)
+        }
+        toml::Value::Array(items) => toml::Value::Array(
+            items
+                .into_iter()
+                .map(|item| with_prefixed_references(item, prefix, vocabulary))
+                .collect(),
+        ),
+        toml::Value::Table(table) => toml::Value::Table(
+            table
+                .into_iter()
+                .map(|(key, item)| (key, with_prefixed_references(item, prefix, vocabulary)))
+                .collect(),
+        ),
+        other @ (toml::Value::Integer(_)
+        | toml::Value::Float(_)
+        | toml::Value::Boolean(_)
+        | toml::Value::Datetime(_)) => other,
+    }
 }
 
 /// Returns the names of the choices of the option `name`, in the order its
@@ -296,7 +450,15 @@ fn choices_of(
     for (key, value) in option {
         if matches!(
             key.as_str(),
-            "label" | "default" | "checkbox" | "checked" | "group"
+            "label"
+                | "default"
+                | "checkbox"
+                | "checked"
+                | "group"
+                | "order"
+                | "library"
+                | "prefix"
+                | "follows"
         ) {
             continue;
         }
@@ -314,11 +476,28 @@ fn choices_of(
     Ok((choices, groups))
 }
 
+/// Returns the variables of an option's default choice `base`, and the ones
+/// that choice has when the option follows another: that one's choice, copied.
+fn defaults_of(base: &toml::Table, follow: Option<&Follow>) -> (toml::Table, toml::Table) {
+    let Some(follow) = follow else {
+        let base = variables_of(base);
+        return (base.clone(), base);
+    };
+    let mut at_default = prefixed(&follow.vocabulary, &follow.prefix, &follow.vocabulary);
+    let vocabulary = at_default.clone();
+    layer(
+        &mut at_default,
+        &prefixed(&follow.chosen, &follow.prefix, &follow.vocabulary),
+    );
+    (vocabulary, at_default)
+}
+
 /// Reads one option's declaration and the variables of its chosen choice.
+#[expect(clippy::too_many_lines, reason = "one pass over an option's keys")]
 fn read_option(
     name: &str,
     option: &toml::Table,
-    selection: &Selection<'_>,
+    (selection, follow): (&Selection<'_>, Option<&Follow>),
     problems: &mut Vec<String>,
 ) -> Result<(StyleOption, toml::Table), toml::de::Error> {
     let fail = |message: String| toml::de::Error::custom(format!("option `{name}`: {message}"));
@@ -328,15 +507,21 @@ fn read_option(
             .and_then(toml::Value::as_str)
             .map(str::to_owned)
     };
-    let (label, checkbox, group, checked) = (
+    let (label, checkbox, group, checked, library) = (
         text_of("label"),
         text_of("checkbox"),
         text_of("group"),
         text_of("checked"),
+        text_of("library"),
     );
     let default = text_of("default")
         .ok_or_else(|| fail("`default` names the choice made when none is".to_owned()))?;
     let (mut choices, groups) = choices_of(name, option)?;
+    if let Some(follow) = follow
+        && !choices.contains(&follow.vocabulary_name)
+    {
+        choices.push(follow.vocabulary_name.clone());
+    }
     // The default first; a TOML table has no order to keep, so the rest are
     // sorted.
     choices.sort_by_key(|choice| (*choice != default, choice.clone()));
@@ -353,28 +538,44 @@ fn read_option(
             "the default, `{default}`, is written inline, not in a file"
         )));
     }
-    let base = variables_of(base);
+    // An option that follows another has what it follows for its default
+    // choice, named with its prefix, and its default is a copy of what that
+    // option chose.
+    let (base, at_default) = defaults_of(base, follow);
+    let rename = |table: toml::Table| match follow {
+        Some(follow) => prefixed(&table, &follow.prefix, &follow.vocabulary),
+        None => table,
+    };
     let wanted = selection
         .chosen
         .get(name)
         .cloned()
         .unwrap_or_else(|| default.clone());
-    let mut variables = base.clone();
-    let mut found = wanted == default;
+    let mut variables = if wanted == default {
+        at_default.clone()
+    } else {
+        base.clone()
+    };
+    // The followed option's own default is a choice with nothing to layer.
+    let mut found =
+        wanted == default || follow.is_some_and(|followed| followed.vocabulary_name == wanted);
     if wanted != default
         && let Some(own) = option.get(&wanted).and_then(toml::Value::as_table)
     {
         match own_variables(own, selection.directory) {
             Ok(own) => {
-                layer(&mut variables, &own);
+                layer(&mut variables, &rename(own));
                 found = true;
             }
             Err(message) => problems.push(format!("option `{name}`, choice `{wanted}`: {message}")),
         }
     }
-    match selection.library.variables(name, &wanted) {
+    match selection
+        .library
+        .variables(library.as_deref().unwrap_or(name), &wanted)
+    {
         Ok(Some(shared)) => {
-            layer(&mut variables, &shared);
+            layer(&mut variables, &rename(shared));
             found = true;
         }
         Ok(None) => {}
@@ -393,7 +594,7 @@ fn read_option(
                 "option `{name}` has no choice `{wanted}`; the default, `{default}`, is used"
             ));
         }
-        variables = base;
+        variables = at_default;
         default.clone()
     };
     Ok((
@@ -403,6 +604,8 @@ fn read_option(
             checkbox,
             checked,
             group,
+            order: option.get("order").and_then(toml::Value::as_integer),
+            library,
             default,
             choices,
             groups,
@@ -751,5 +954,66 @@ caption = "$face and $light"
             resolved.variables.substitute("x: $bar".into()),
             Ok(toml::Value::String("x: 1lh + 4".to_owned()))
         );
+    }
+
+    const FOLLOWING: &str = r#"
+[options.palette]
+default = "graphite"
+[options.palette.graphite]
+light = "grey55"
+light_end = "$light"
+accent = "$light_end"
+[options.focused]
+default = "matching"
+library = "palette"
+prefix = "fc_"
+follows = "palette"
+[options.focused.matching]
+"#;
+
+    fn following_library() -> Library {
+        Library(vec![(
+            "palette",
+            "blue",
+            "light = \"blue\"\nlight_end = \"navy\"\nother = \"x\"",
+        )])
+    }
+
+    #[test]
+    fn a_follower_matching_copies_what_the_option_it_follows_chose() {
+        let resolved = pick(FOLLOWING, &[("palette", "blue")], &following_library()).expect("ok");
+        assert_eq!(value(&resolved, "fc_light"), "blue");
+        assert_eq!(value(&resolved, "fc_accent"), "navy");
+        let plain = pick(FOLLOWING, &[], &following_library()).expect("ok");
+        assert_eq!(value(&plain, "fc_light"), "grey55");
+    }
+
+    #[test]
+    fn a_follower_choice_file_is_named_and_made_of_its_own_prefixed_names() {
+        let resolved = pick(FOLLOWING, &[("focused", "blue")], &following_library()).expect("ok");
+        assert_eq!(value(&resolved, "fc_light"), "blue");
+        assert_eq!(value(&resolved, "fc_accent"), "navy");
+        // The option it follows is not changed, and a name outside the
+        // vocabulary is not taken.
+        assert_eq!(value(&resolved, "light"), "grey55");
+        assert!(resolved.variables.get("fc_other", &mut Vec::new()).is_err());
+        let option = resolved
+            .options
+            .options
+            .iter()
+            .find(|option| option.name == "focused")
+            .expect("listed");
+        assert_eq!(option.library.as_deref(), Some("palette"));
+        assert_eq!(option.chosen, "blue");
+    }
+
+    #[test]
+    fn an_option_that_follows_a_missing_or_following_option_is_an_error() {
+        let missing = FOLLOWING.replace("follows = \"palette\"", "follows = \"nothing\"");
+        assert!(pick(&missing, &[], &following_library()).is_err());
+        let chained = format!(
+            "{FOLLOWING}\n[options.menu]\ndefault = \"matching\"\nprefix = \"mn_\"\nfollows = \"focused\"\n[options.menu.matching]\n"
+        );
+        assert!(pick(&chained, &[], &following_library()).is_err());
     }
 }
