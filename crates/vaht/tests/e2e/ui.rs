@@ -179,6 +179,38 @@ fn a_window_that_never_negotiates_decorations_gets_no_frame() {
     );
 }
 
+/// Shows that a window asking the server's frame KDE's way (GTK 3 makes no
+/// xdg-decoration object, and draws no frame of its own when it is told,
+/// through KDE's protocol, that the server draws it) gets vaht's.
+fn a_window_asking_the_servers_frame_kdes_way_has_vahts_frame(is_asked_first: bool) {
+    let vaht = HeadlessVaht::start_with_config(
+        Path::new(EXECUTABLE),
+        &[("settings.toml", "[placement]\nstrategy = \"cascade\"\n")],
+    );
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_window_asking_kde_for_the_servers_frame(is_asked_first);
+    let screenshot = client.screenshot();
+    let content = screenshot
+        .bounds_of(WINDOW_COLOR)
+        .expect("the window's content is on screen");
+    let desktop = screenshot.rgb(2, 2);
+    assert_ne!(
+        screenshot.rgb(content.left + 40, content.top - 5),
+        desktop,
+        "a titlebar above it"
+    );
+}
+
+#[test]
+fn a_window_asking_for_the_servers_frame_before_it_is_made_gets_vahts_frame() {
+    a_window_asking_the_servers_frame_kdes_way_has_vahts_frame(true);
+}
+
+#[test]
+fn a_window_asking_for_the_servers_frame_after_it_is_made_gets_vahts_frame() {
+    a_window_asking_the_servers_frame_kdes_way_has_vahts_frame(false);
+}
+
 #[test]
 fn a_frame_rule_frames_a_window_that_draws_its_own() {
     let vaht = HeadlessVaht::start_with_config(

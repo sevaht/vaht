@@ -17,6 +17,7 @@ use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
 use smithay_client_toolkit::reexports::client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm};
 use smithay_client_toolkit::reexports::protocols::wp::pointer_constraints::zv1::client::zwp_pointer_constraints_v1::{self, ZwpPointerConstraintsV1};
 use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
+use smithay_client_toolkit::reexports::protocols_misc::server_decoration::client::org_kde_kwin_server_decoration_manager::OrgKdeKwinServerDecorationManager;
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_manager_v1::ExtSessionLockManagerV1;
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_v1::ExtSessionLockV1;
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
@@ -144,6 +145,8 @@ pub struct TestClient {
     idle_notifier: ExtIdleNotifierV1,
     /// Keeps the session awake.
     idle_inhibitors: ZwpIdleInhibitManagerV1,
+    /// Asks for the server's frame, KDE's way.
+    kde_decorations: OrgKdeKwinServerDecorationManager,
     /// Hears the fractional scale vaht prefers for a surface.
     fractional_scales: WpFractionalScaleManagerV1,
     /// Makes drag sources.
@@ -229,6 +232,8 @@ impl TestClient {
         let idle_notifier: ExtIdleNotifierV1 = bind(&globals, &handle, "ext_idle_notifier_v1");
         let idle_inhibitors: ZwpIdleInhibitManagerV1 =
             bind(&globals, &handle, "zwp_idle_inhibit_manager_v1");
+        let kde_decorations: OrgKdeKwinServerDecorationManager =
+            bind(&globals, &handle, "org_kde_kwin_server_decoration_manager");
         let fractional_scales: WpFractionalScaleManagerV1 =
             bind(&globals, &handle, "wp_fractional_scale_manager_v1");
         let data_devices = DataDeviceManagerState::bind(&globals, &handle)
@@ -274,6 +279,7 @@ impl TestClient {
             shortcut_inhibitors,
             idle_notifier,
             idle_inhibitors,
+            kde_decorations,
             fractional_scales,
             data_device,
             data_devices,
@@ -467,6 +473,39 @@ impl TestClient {
     /// Panics if the connection to vaht fails.
     pub fn open_windows_without_decoration_negotiation(&mut self, count: usize) {
         self.open_windows_decorated(count, WindowDecorations::ClientOnly);
+    }
+
+    /// Opens a window that makes no xdg-decoration object but asks, KDE's way
+    /// (as GTK 3 does), for the server's frame, and waits until it is shown:
+    /// the request made before the window's role (`is_asked_first`) or after.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn open_window_asking_kde_for_the_servers_frame(&mut self, is_asked_first: bool) {
+        use smithay_client_toolkit::reexports::protocols_misc::server_decoration::client::org_kde_kwin_server_decoration::Mode;
+        let handle = self.queue.handle();
+        let surface = self.state.compositor.create_surface(&handle);
+        let ask = |client: &Self| {
+            let decoration = client.kde_decorations.create(&surface, &handle, NoEvents);
+            decoration.request_mode(Mode::Server);
+            decoration
+        };
+        let first = is_asked_first.then(|| ask(self));
+        let window = self.state.xdg_shell.create_window(
+            surface.clone(),
+            WindowDecorations::ClientOnly,
+            &handle,
+        );
+        let second = (!is_asked_first).then(|| ask(self));
+        window.set_title("test window 1");
+        window.set_app_id("vaht.test");
+        window.commit();
+        self.state.windows.push(window);
+        let expected = self.state.first_draws + 1;
+        self.dispatch_until(|state| state.first_draws >= expected);
+        self.roundtrip();
+        drop((first, second));
     }
 
     /// Opens `count` windows asking for `decorations`, and waits until each

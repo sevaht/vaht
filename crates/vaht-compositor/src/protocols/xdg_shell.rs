@@ -20,6 +20,7 @@ impl XdgShellHandler for Compositor {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
+        self.window_made(&surface);
         self.add_window(surface);
     }
 

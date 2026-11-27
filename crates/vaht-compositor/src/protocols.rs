@@ -34,6 +34,7 @@ mod xdg_shell;
 
 use smithay::input::SeatState;
 use smithay::reexports::wayland_server::DisplayHandle;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::wayland::alpha_modifier::AlphaModifierState;
 use smithay::wayland::background_effect::BackgroundEffectState;
 use smithay::wayland::commit_timing::CommitTimingManagerState;
@@ -209,6 +210,9 @@ pub(crate) struct ProtocolStates {
     /// `org_kde_kwin_server_decoration_manager`: vaht draws every frame,
     /// for programs that ask KDE's way.
     pub(crate) kde_decoration: KdeDecorationState,
+    /// The surfaces that asked KDE's way for the server's frame: their
+    /// windows get vaht's, though they never make an xdg-decoration object.
+    pub(crate) kde_decorated: Vec<WlSurface>,
     /// `xdg_wm_dialog_v1`: which windows are modal dialogs.
     _xdg_dialog: XdgDialogState,
     /// `ext_output_image_capture_source_manager_v1`: outputs as things to
@@ -335,6 +339,7 @@ impl ProtocolStates {
             _xdg_decoration: XdgDecorationState::new::<Compositor>(display),
             _xdg_dialog: XdgDialogState::new::<Compositor>(display),
             kde_decoration: KdeDecorationState::new::<Compositor>(display, KdeMode::Server),
+            kde_decorated: Vec::new(),
             _cursor_shape: CursorShapeManagerState::new::<Compositor>(display),
             xwayland_shell: XWaylandShellState::new::<Compositor>(display),
             _xwayland_keyboard_grab: XWaylandKeyboardGrabState::new::<Compositor>(display),

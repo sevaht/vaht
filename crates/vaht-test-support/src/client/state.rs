@@ -15,6 +15,8 @@ use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit
 use smithay_client_toolkit::reexports::protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibitor_v1::ZwpKeyboardShortcutsInhibitorV1;
 use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::{self, ExtIdleNotificationV1};
 use smithay_client_toolkit::reexports::protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
+use smithay_client_toolkit::reexports::protocols_misc::server_decoration::client::org_kde_kwin_server_decoration_manager::OrgKdeKwinServerDecorationManager;
+use smithay_client_toolkit::reexports::protocols_misc::server_decoration::client::org_kde_kwin_server_decoration::OrgKdeKwinServerDecoration;
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_manager_v1::ExtSessionLockManagerV1;
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_surface_v1::{self, ExtSessionLockSurfaceV1};
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_v1::{self, ExtSessionLockV1};
@@ -486,6 +488,8 @@ ignore_events!(
     XdgToplevelIconV1,
     XdgWmDialogV1,
     XdgDialogV1,
+    OrgKdeKwinServerDecorationManager,
+    OrgKdeKwinServerDecoration,
 );
 
 /// User data of the seat's keyboard: records where keyboard focus is.
