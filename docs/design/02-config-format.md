@@ -777,6 +777,13 @@ focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
 Menus are named tables. Submenus refer to other menus by name, which keeps
 deep menus flat and readable in TOML.
 
+A `menus.toml` need only say what it changes: a menu it defines replaces
+vaht's built-in menu of that name (copy one to change it; define it with
+`items = []` to have it empty), and a built-in menu it leaves out stays, so a
+file with only `[menu.root]` still has the window and workspace menus. An item
+`{ builtin = "window" }` puts the items of a built-in menu in place, to add to
+them without copying; naming no built-in menu is an error.
+
 ```toml
 [menu.root]
 title = "vaht"
@@ -821,7 +828,9 @@ items = [
     a line under it if others follow), `style-options`, `positions` (the taskbar's edge,
     `bottom` or `top`, the one in use checked; titled "Position"),
     `workspaces`, `window-list`, `send-to-workspace`, `layer`, `alpha`,
-    `outputs`, `profiles`;
+    `outputs`, `profiles`, and `vaht`, vaht's own menu (Styles, Style Options,
+    Layouts and Position as submenus, then Advanced Configuration..., vaht
+    Command, Reload Config, Save Config and Exit), the same wherever it is put;
   - `pipe` (a command whose output is a menu in this same TOML form);
   - `separator`;
   - `icon` (optional on any item).

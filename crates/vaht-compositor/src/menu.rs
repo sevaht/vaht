@@ -1085,6 +1085,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_root_menus_vaht_submenu_is_generated() {
+        let config = Config::built_in();
+        let output = OutputArea {
+            whole: bounds(),
+            usable: bounds(),
+        };
+        let manager = WindowManager::new(
+            &config.settings,
+            OutputAreas::new(output, Vec::new()),
+            config.style.metrics(),
+        );
+        let builder = MenuBuilder::new(&config.menus, &manager, None);
+        let root = builder.build(Menus::ROOT).expect("built in");
+        let Some(MenuItem::Submenu { label, menu, .. }) = root.items.last() else {
+            panic!("the last item opens vaht's menu");
+        };
+        assert_eq!(label, "vaht");
+        let labels: Vec<&str> = menu
+            .items
+            .iter()
+            .map(|item| match item {
+                MenuItem::Choice { label, .. }
+                | MenuItem::Submenu { label, .. }
+                | MenuItem::Inert { label } => label.as_str(),
+                MenuItem::Separator => "-",
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "Styles",
+                "Style Options",
+                "Layouts",
+                "Position",
+                "-",
+                "Advanced Configuration...",
+                "vaht Command",
+                "Reload Config",
+                "Save Config",
+                "-",
+                "Exit"
+            ]
+        );
+    }
+
     /// A point on the title of the menu opened at (100, 100) by `model()`.
     fn on_the_title() -> Point<f64, Logical> {
         (130.0, 108.0).into()

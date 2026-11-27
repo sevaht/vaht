@@ -1,6 +1,9 @@
-# vaht's built-in menus, used when ~/.config/vaht/menus.toml does not
-# exist. A menus.toml replaces all of them, so copy what you want to keep:
+# vaht's built-in menus. A menu ~/.config/vaht/menus.toml defines replaces the
+# built-in one of its name, and a built-in menu it leaves out stays, so a
+# file need only say what it changes (copy a menu to change it:
 #     vaht config check --print-defaults
+# ). { builtin = "window" } puts a built-in menu's items in place, to add to
+# them without copying.
 #
 # Each [menu.<name>] has an optional title and its items, top to bottom.
 # root-menu opens [menu.root], window-menu [menu.window], workspace-menu
@@ -13,7 +16,10 @@
 #                                          maximize, minimize or fullscreen
 #   { generate = "workspaces" }            lists workspaces, send-to-workspace
 #                                          or window-list, in a submenu, or in
-#                                          place with inline = true
+#                                          place with inline = true; "vaht" is
+#                                          vaht's own menu, the same wherever
+#                                          it is put
+#   { builtin = "window" }                 the items of a built-in menu, in place
 #   { separator = true }                   a line
 #   { label = "..." }                      text that does nothing
 
@@ -25,19 +31,7 @@ items = [
     { generate = "workspaces" },
     { generate = "window-list" },
     { separator = true },
-    { label = "Appearance", submenu = "appearance" },
-    { label = "Settings", command = "settings" },
-    { label = "Reload", command = "reload" },
-    { label = "Save Config", command = "save-settings" },
-    { label = "Exit", command = "exit" },
-]
-
-[menu.appearance]
-title = "Appearance"
-items = [
-    { label = "Style", generate = "styles" },
-    { separator = true },
-    { generate = "style-options", inline = true },
+    { generate = "vaht" },
 ]
 
 [menu.window]
@@ -48,7 +42,10 @@ items = [
     { toggle = "minimize" },
     { label = "Raise", command = "raise" },
     { label = "Lower", command = "lower" },
+    { label = "Set Window Title", command = "set-title-dialog" },
     { generate = "send-to-workspace" },
+    { generate = "layer" },
+    { generate = "alpha" },
     { separator = true },
     { label = "Close", command = "close" },
 ]

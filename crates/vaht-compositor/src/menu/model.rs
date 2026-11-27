@@ -435,6 +435,8 @@ impl<'state> MenuBuilder<'state> {
                         });
                     }
                 }
+                // Reading the file replaced these with the menu's items.
+                MenuEntry::Builtin { .. } => {}
                 MenuEntry::Separator => items.push(MenuItem::Separator),
                 MenuEntry::Inert { label } => items.push(MenuItem::Inert {
                     label: label.clone(),
@@ -615,6 +617,39 @@ impl<'state> MenuBuilder<'state> {
         items
     }
 
+    /// Returns the item running `action`, labeled `label`.
+    fn action_item(label: &str, action: Action) -> MenuItem {
+        MenuItem::Choice {
+            label: label.to_owned(),
+            choice: MenuChoice::Run {
+                command: Command::Run(action),
+                window: None,
+            },
+            mark: None,
+            icon: None,
+        }
+    }
+
+    /// Returns the `vaht` list: vaht's own menu.
+    fn vaht_items(&self) -> Vec<MenuItem> {
+        let list = |generator: MenuGenerator| {
+            Self::submenu_of(generator.label(), self.generate(generator))
+        };
+        vec![
+            list(MenuGenerator::Styles),
+            list(MenuGenerator::StyleOptions),
+            list(MenuGenerator::Layouts),
+            list(MenuGenerator::Positions),
+            MenuItem::Separator,
+            Self::action_item("Advanced Configuration...", Action::Settings),
+            Self::action_item("vaht Command", Action::CommandDialog),
+            Self::action_item("Reload Config", Action::Reload),
+            Self::action_item("Save Config", Action::SaveSettings),
+            MenuItem::Separator,
+            Self::action_item("Exit", Action::Exit),
+        ]
+    }
+
     /// Returns the `profiles` list: each display profile, the one applied
     /// checked.
     fn profile_items(&self) -> Vec<MenuItem> {
@@ -764,6 +799,7 @@ impl<'state> MenuBuilder<'state> {
             ),
             MenuGenerator::Profiles => self.profile_items(),
             MenuGenerator::Outputs => self.output_items(),
+            MenuGenerator::Vaht => self.vaht_items(),
             MenuGenerator::Layer => {
                 let current = self.window.and_then(|window| manager.layer_of(window));
                 StackLayer::ALL

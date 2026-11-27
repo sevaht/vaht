@@ -41,6 +41,7 @@ impl Menus {
                 | MenuEntry::Pipe { .. }
                 | MenuEntry::Toggle { .. }
                 | MenuEntry::Generate { .. }
+                | MenuEntry::Builtin { .. }
                 | MenuEntry::Separator
                 | MenuEntry::Inert { .. } => None,
             })
@@ -59,6 +60,7 @@ impl Menus {
                 | MenuEntry::Pipe { icon, .. } => icon.as_deref(),
                 MenuEntry::Toggle { .. }
                 | MenuEntry::Generate { .. }
+                | MenuEntry::Builtin { .. }
                 | MenuEntry::Separator
                 | MenuEntry::Inert { .. } => None,
             })
@@ -98,6 +100,7 @@ impl Menus {
                 | MenuEntry::Pipe { .. }
                 | MenuEntry::Toggle { .. }
                 | MenuEntry::Generate { .. }
+                | MenuEntry::Builtin { .. }
                 | MenuEntry::Separator
                 | MenuEntry::Inert { .. } => None,
             })
@@ -105,19 +108,62 @@ impl Menus {
     }
 }
 
+/// The file as written: `[menu.<name>]` tables.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MenusFile {
+    /// The menus.
+    #[serde(default)]
+    menu: HashMap<String, MenuDefinition>,
+}
+
+impl Menus {
+    /// Returns the menus of vaht's own `menus.toml`, as written.
+    fn built_in() -> HashMap<String, MenuDefinition> {
+        toml::from_str::<MenusFile>(include_str!("defaults/menus.toml"))
+            .map_or_else(|_| HashMap::new(), |file| file.menu)
+    }
+
+    /// Returns the menus a file defines, as menus: each `builtin` item
+    /// replaced by the items of the built-in menu it names, and the built-in
+    /// menus the file does not define added, so a file need only say what
+    /// it changes.
+    fn with_built_in(mut menus: HashMap<String, MenuDefinition>) -> Result<Self, String> {
+        let built_in = Self::built_in();
+        for (name, menu) in &mut menus {
+            let mut items = Vec::new();
+            for entry in std::mem::take(&mut menu.items) {
+                match entry {
+                    MenuEntry::Builtin { menu: wanted } => {
+                        let Some(found) = built_in.get(&wanted) else {
+                            return Err(format!(
+                                "[menu.{name}]: there is no built-in menu `{wanted}`"
+                            ));
+                        };
+                        items.extend(found.items.iter().cloned());
+                    }
+                    MenuEntry::Command { .. }
+                    | MenuEntry::Submenu { .. }
+                    | MenuEntry::Toggle { .. }
+                    | MenuEntry::Generate { .. }
+                    | MenuEntry::Pipe { .. }
+                    | MenuEntry::Separator
+                    | MenuEntry::Inert { .. } => items.push(entry),
+                }
+            }
+            menu.items = items;
+        }
+        for (name, menu) in built_in {
+            menus.entry(name).or_insert(menu);
+        }
+        Ok(Self { by_name: menus })
+    }
+}
+
 impl<'de> serde::Deserialize<'de> for Menus {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        /// The file as written: `[menu.<name>]` tables.
-        #[derive(serde::Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct MenusFile {
-            /// The menus.
-            #[serde(default)]
-            menu: HashMap<String, MenuDefinition>,
-        }
-
         let file = MenusFile::deserialize(deserializer)?;
-        let menus = Self { by_name: file.menu };
+        let menus = Self::with_built_in(file.menu).map_err(de::Error::custom)?;
         if let Some((menu, submenu)) = menus.missing_submenu() {
             return Err(de::Error::custom(format!(
                 "[menu.{menu}] has a submenu `{submenu}`, which no [menu.{submenu}] is"
@@ -187,6 +233,12 @@ pub(crate) enum MenuEntry {
         /// The icon shown beside it, as a command's.
         icon: Option<String>,
     },
+    /// The items of one of vaht's built-in menus, in place. Reading the file
+    /// puts them there, so no such item is left in a menu read.
+    Builtin {
+        /// The built-in menu's name.
+        menu: String,
+    },
     /// A line between items.
     Separator,
     /// Text that does nothing, drawn disabled (Fluxbox's `[nop]`).
@@ -203,14 +255,17 @@ impl MenuEntry {
             Self::Command { icon, .. } | Self::Submenu { icon, .. } | Self::Pipe { icon, .. } => {
                 icon.as_deref()
             }
-            Self::Toggle { .. } | Self::Generate { .. } | Self::Separator | Self::Inert { .. } => {
-                None
-            }
+            Self::Toggle { .. }
+            | Self::Generate { .. }
+            | Self::Builtin { .. }
+            | Self::Separator
+            | Self::Inert { .. } => None,
         }
     }
 }
 
 impl<'de> serde::Deserialize<'de> for MenuEntry {
+    #[expect(clippy::too_many_lines, reason = "one pass over an item's forms")]
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         /// An item as written: one of its forms' keys, with a label.
         #[derive(serde::Deserialize)]
@@ -228,6 +283,8 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
             generate: Option<MenuGenerator>,
             /// A pipe menu's command line.
             pipe: Option<String>,
+            /// One of vaht's built-in menus, whose items stand here.
+            builtin: Option<String>,
             /// A separator.
             #[serde(default)]
             separator: bool,
@@ -264,6 +321,21 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
             return Err(de::Error::custom(
                 "only an item running a command or opening a submenu shows an icon",
             ));
+        }
+        if let Some(menu) = file.builtin {
+            let is_alone = file.label.is_none()
+                && file.command.is_none()
+                && file.submenu.is_none()
+                && file.toggle.is_none()
+                && file.generate.is_none()
+                && file.icon.is_none()
+                && !file.separator
+                && !file.inline;
+            return if is_alone {
+                Ok(Self::Builtin { menu })
+            } else {
+                Err(de::Error::custom("`builtin` is the whole of its item"))
+            };
         }
         let entry = match (
             file.command,
@@ -396,11 +468,15 @@ pub(crate) enum MenuGenerator {
     /// The outputs on, the primary one checked: choosing one makes it
     /// primary.
     Outputs,
+    /// vaht's own menu: the styles, their options, the layouts and the
+    /// taskbar's position, then settings, the command dialog, reload and
+    /// save, and exit. It is the same wherever it is put.
+    Vaht,
 }
 
 impl MenuGenerator {
     /// The generators by name.
-    const NAMES: [(&str, Self); 11] = [
+    const NAMES: [(&str, Self); 12] = [
         ("workspaces", Self::Workspaces),
         ("send-to-workspace", Self::SendToWorkspace),
         ("window-list", Self::WindowList),
@@ -412,6 +488,7 @@ impl MenuGenerator {
         ("positions", Self::Positions),
         ("profiles", Self::Profiles),
         ("outputs", Self::Outputs),
+        ("vaht", Self::Vaht),
     ];
 
     /// Returns what the item says when its label is not given.
@@ -428,6 +505,7 @@ impl MenuGenerator {
             Self::Positions => "Position",
             Self::Profiles => "Display Profiles",
             Self::Outputs => "Primary Output",
+            Self::Vaht => "vaht",
         }
     }
 }
@@ -441,7 +519,7 @@ impl<'de> serde::Deserialize<'de> for MenuGenerator {
             .map(|&(_, generator)| generator)
             .ok_or_else(|| {
                 de::Error::custom(format!(
-                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list, alpha, layer, styles, layouts, style-options, positions, profiles and outputs"
+                    "`{name}` is no list; they are workspaces, send-to-workspace, window-list, alpha, layer, styles, layouts, style-options, positions, profiles, outputs and vaht"
                 ))
             })
     }
@@ -474,6 +552,49 @@ mod tests {
         for name in [Menus::ROOT, Menus::WINDOW, Menus::WORKSPACE] {
             assert!(menus.get(name).is_some(), "{name}");
         }
+    }
+
+    #[test]
+    fn a_menu_the_file_leaves_out_is_the_built_in_one() {
+        let menus =
+            read("[menu.root]\nitems = [{ label = \"kitty\", command = \"exec kitty\" }]\n")
+                .expect("valid");
+        assert_eq!(menus.get("root").map(|menu| menu.items.len()), Some(1));
+        let built_in = read(include_str!("defaults/menus.toml")).expect("valid");
+        for name in [Menus::WINDOW, Menus::WORKSPACE] {
+            assert_eq!(menus.get(name), built_in.get(name), "{name}");
+        }
+        // One the file defines is its own, even empty.
+        let own = read("[menu.window]\nitems = []\n").expect("valid");
+        assert_eq!(own.get(Menus::WINDOW).map(|menu| menu.items.len()), Some(0));
+    }
+
+    #[test]
+    fn a_builtin_item_puts_the_built_in_menus_items_in_place() {
+        let menus = read(
+            "[menu.window]\nitems = [{ label = \"Mine\", command = \"reload\" }, \
+             { separator = true }, { builtin = \"window\" }]\n",
+        )
+        .expect("valid");
+        let built_in = read(include_str!("defaults/menus.toml")).expect("valid");
+        let built_in = &built_in.get(Menus::WINDOW).expect("built in").items;
+        let items = &menus.get(Menus::WINDOW).expect("read").items;
+        assert_eq!(items.len(), built_in.len() + 2);
+        assert_eq!(&items[2..], built_in.as_slice());
+    }
+
+    #[rstest]
+    #[case::unknown(
+        "[menu.root]\nitems = [{ builtin = \"nothing\" }]\n",
+        "no built-in menu"
+    )]
+    #[case::with_more(
+        "[menu.root]\nitems = [{ builtin = \"window\", label = \"x\" }]\n",
+        "whole of its item"
+    )]
+    fn a_builtin_item_must_name_a_built_in_menu_alone(#[case] text: &str, #[case] expected: &str) {
+        let error = read(text).expect_err(text);
+        assert!(error.to_string().contains(expected), "{error}");
     }
 
     #[test]
