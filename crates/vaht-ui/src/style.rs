@@ -843,10 +843,14 @@ mod tests {
                 .texture
                 .clone()
         };
-        assert_ne!(
+        // A button has no face of its own: it is drawn on the titlebar, in
+        // another color of picture when the window is not focused.
+        assert_eq!(
             texture(WidgetState::Focused),
             texture(WidgetState::Unfocused)
         );
+        let glyph = |state| style.element_style(StyleElement::Button, state).glyph_color;
+        assert_ne!(glyph(WidgetState::Focused), glyph(WidgetState::Unfocused));
         assert_eq!(
             texture(WidgetState::Pressed).bevel,
             crate::texture::Bevel::Sunken
@@ -869,7 +873,7 @@ mod tests {
                     item_height: 20,
                     border_width: 1,
                     corners: CornerRadii::of(8, <crate::Corner as strum::IntoEnumIterator>::iter()),
-                    bullet: Bullet::Triangle,
+                    bullet: Bullet::Chevron,
                     bullet_side: MarkSide::Right,
                 },
             }

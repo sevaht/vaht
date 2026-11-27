@@ -19,6 +19,7 @@ pub mod image;
 pub mod layout;
 pub mod length;
 pub mod panel;
+pub mod point_size;
 pub mod raster;
 pub mod style;
 pub mod text;

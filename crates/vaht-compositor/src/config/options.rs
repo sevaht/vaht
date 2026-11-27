@@ -5,6 +5,7 @@
 //! configuration directory, then in the system's; a style that declares the
 //! option and uses the same variable names takes it up.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::library::system_directory;
@@ -21,6 +22,12 @@ pub(crate) struct ListedOption {
     pub(crate) name: String,
     /// What to call it for people, if the style says.
     pub(crate) label: Option<String>,
+    /// What to call it as a checkbox, if it has two choices.
+    pub(crate) checkbox: Option<String>,
+    /// The choice that shows the checkbox checked, if it says.
+    pub(crate) checked: Option<String>,
+    /// The group of options it is listed with, if the style says.
+    pub(crate) group: Option<String>,
     /// The choice made when none is.
     pub(crate) default: String,
     /// The choice in effect.
@@ -28,6 +35,9 @@ pub(crate) struct ListedOption {
     /// The choices: the style's own and the shared ones, the default first,
     /// the rest sorted.
     pub(crate) choices: Vec<String>,
+    /// The group each choice says it is in (`group = "Blues"` in its table
+    /// or file), by choice.
+    pub(crate) groups: BTreeMap<String, String>,
 }
 
 impl ListedOption {
@@ -80,12 +90,25 @@ impl<'directory> OptionLibrary<'directory> {
                     .collect();
                 choices.sort_by_key(|choice| (*choice != option.default, choice.clone()));
                 choices.dedup();
+                // A file in the library says its group, over the style's own.
+                let mut groups = option.groups.clone();
+                for choice in &choices {
+                    if let Ok(Some(table)) = self.variables(&option.name, choice)
+                        && let Some(group) = table.get("group").and_then(toml::Value::as_str)
+                    {
+                        groups.insert(choice.clone(), group.to_owned());
+                    }
+                }
                 ListedOption {
                     name: option.name.clone(),
                     label: option.label.clone(),
+                    checkbox: option.checkbox.clone(),
+                    checked: option.checked.clone(),
+                    group: option.group.clone(),
                     default: option.default.clone(),
                     chosen: option.chosen.clone(),
                     choices,
+                    groups,
                 }
             })
             .collect()
@@ -142,7 +165,9 @@ impl ChoiceLibrary for OptionLibrary<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vaht_ui::Color;
     use vaht_ui::text::TextEffect;
+    use vaht_ui::texture::Fill;
     use vaht_ui::{StyleElement, WidgetState};
 
     fn configuration(files: &[(&str, &str)]) -> tempfile::TempDir {
@@ -210,8 +235,6 @@ mod tests {
 
     /// The default style with `chosen` made, from the shipped choices.
     fn load(chosen: &[(&str, &str)]) -> Style {
-        use std::collections::BTreeMap;
-
         use vaht_ui::style::options::Selection;
 
         let chosen: BTreeMap<String, String> = chosen
@@ -225,52 +248,48 @@ mod tests {
         })
     }
 
-    /// The shipped schemes: their names and files.
-    fn shipped_schemes() -> Vec<(String, PathBuf)> {
-        std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/options/scheme"))
-            .expect("the shipped schemes")
-            .map(|entry| {
-                let path = entry.expect("an entry").path();
-                let name = path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .expect("a name")
-                    .to_owned();
-                (name, path)
-            })
-            .collect()
+    /// The shipped choices of `option`: their names and files.
+    fn shipped(option: &str) -> Vec<(String, PathBuf)> {
+        std::fs::read_dir(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../data/options")
+                .join(option),
+        )
+        .expect("the shipped choices")
+        .map(|entry| {
+            let path = entry.expect("an entry").path();
+            let name = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .expect("a name")
+                .to_owned();
+            (name, path)
+        })
+        .collect()
     }
 
     #[test]
-    fn every_shipped_scheme_loads_with_the_default_style_and_looks_different() {
+    fn every_shipped_palette_loads_with_the_default_style_and_looks_different() {
         let default = load(&[]);
         assert_eq!(default.option_problems(), Vec::<String>::new());
         let vocabulary: toml::Table = toml::from_str(Style::BUILT_IN).expect("TOML");
-        let vocabulary = vocabulary["options"]["scheme"]["graphite"]
+        let vocabulary = vocabulary["options"]["palette"]["graphite"]
             .as_table()
-            .expect("the default scheme");
-        let schemes = shipped_schemes();
+            .expect("the default palette");
+        let shipped = shipped("palette");
         assert!(
-            schemes.len() >= 18,
-            "the shipped schemes: {}",
-            schemes.len()
+            shipped.len() >= 14,
+            "the shipped palettes: {}",
+            shipped.len()
         );
-        for (name, path) in schemes {
+        for (name, path) in shipped {
             let table: toml::Table =
                 toml::from_str(&std::fs::read_to_string(&path).expect("readable")).expect("TOML");
-            let style = load(&[("scheme", &name)]);
+            let style = load(&[("palette", &name)]);
             assert_eq!(style.option_problems(), Vec::<String>::new(), "{name}");
-            let chosen = &style
-                .options()
-                .options
-                .iter()
-                .find(|option| option.name == "scheme")
-                .expect("the default style has a scheme option")
-                .chosen;
-            assert_eq!(chosen, &name);
             assert_ne!(style, default, "{name} changes the look");
-            // It sets only variables the default style defines.
-            for key in table.keys() {
+            // It sets only colors the default style has a name for.
+            for key in table.keys().filter(|key| *key != "group") {
                 assert!(
                     vocabulary.contains_key(key),
                     "{name} sets `{key}`, which the default style has no variable for"
@@ -280,21 +299,54 @@ mod tests {
     }
 
     #[test]
+    fn every_shipped_unfocused_choice_loads_with_every_palette_and_sets_only_its_variables() {
+        let vocabulary: toml::Table = toml::from_str(Style::BUILT_IN).expect("TOML");
+        let vocabulary = vocabulary["options"]["unfocused"]["matching"]
+            .as_table()
+            .expect("the default choice");
+        let palettes: Vec<String> = shipped("palette")
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        let unfocused = shipped("unfocused");
+        assert_eq!(
+            unfocused.len(),
+            palettes.len() + 1,
+            "one for each palette, and graphite's"
+        );
+        for (name, path) in unfocused {
+            let table: toml::Table =
+                toml::from_str(&std::fs::read_to_string(&path).expect("readable")).expect("TOML");
+            for key in table.keys().filter(|key| *key != "group") {
+                assert!(vocabulary.contains_key(key), "{name} sets `{key}`");
+            }
+            for palette in &palettes {
+                let style = load(&[("palette", palette), ("unfocused", &name)]);
+                assert_eq!(
+                    style.option_problems(),
+                    Vec::<String>::new(),
+                    "{palette} with {name}'s unfocused windows"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn every_other_choice_of_the_default_style_loads_and_looks_different() {
         let default = load(&[]);
         for (option, choice) in [
+            ("unfocused", "graphite"),
+            ("unfocused", "amber"),
+            ("shading", "soft"),
+            ("menu_body", "filled"),
+            ("bar_outline", "off"),
+            ("menu_outline", "off"),
             ("titlebar_size", "small"),
             ("titlebar_size", "large"),
             ("taskbar_size", "small"),
             ("taskbar_size", "xlarge"),
             ("menu_size", "small"),
             ("menu_size", "large"),
-            ("font", "liberation_sans"),
-            ("menu_title", "slate"),
-            ("menu_marks", "chevrons"),
-            ("text_outline", "black"),
-            ("text_outline", "none"),
-            ("buttons", "flat"),
         ] {
             let style = load(&[(option, choice)]);
             assert_eq!(
@@ -307,52 +359,360 @@ mod tests {
     }
 
     #[test]
-    fn the_text_outline_and_buttons_choices_change_what_they_name() {
-        let looks = |style: &Style| {
-            (
-                style
-                    .element_style(StyleElement::Label, WidgetState::Focused)
-                    .text
-                    .effect,
-                style
-                    .element_style(StyleElement::Button, WidgetState::Focused)
-                    .texture
-                    .clone(),
-            )
-        };
-        let (effect, button) = looks(&load(&[]));
-        assert_ne!(effect, TextEffect::None, "graphite has an outline");
-        let (flat_effect, flat_button) = looks(&load(&[("buttons", "flat")]));
-        assert_eq!(flat_effect, effect, "buttons leave the text alone");
-        assert_ne!(flat_button, button, "flat buttons have no background");
-        let (none_effect, none_button) = looks(&load(&[("text_outline", "none")]));
-        assert_eq!(none_effect, TextEffect::None);
-        assert_eq!(none_button, button, "the outline leaves buttons alone");
-        let (nord_effect, _) = looks(&load(&[("scheme", "nord")]));
-        assert_eq!(
-            nord_effect,
+    fn each_option_changes_what_it_names() {
+        let element = |style: &Style, element, state| style.element_style(element, state).clone();
+        let focused = |style: &Style, which| element(style, which, WidgetState::Focused);
+        let default = load(&[]);
+        let default_label = focused(&default, StyleElement::Label);
+        assert_ne!(
+            default_label.text.effect,
             TextEffect::None,
-            "nord has no outline of its own"
+            "graphite has an outline"
         );
-        let (nord_outlined, _) = looks(&load(&[("scheme", "nord"), ("text_outline", "black")]));
-        assert_ne!(nord_outlined, TextEffect::None, "but one can be asked for");
+        // The outlines are on, and each is its own: the bars' and the menus'.
+        let menu_title = |style: &Style| focused(style, StyleElement::MenuTitle).text.effect;
+        let bar_label = |style: &Style| focused(style, StyleElement::Label).text.effect;
+        assert_ne!(menu_title(&default), TextEffect::None);
+        let no_bars = load(&[("bar_outline", "off")]);
+        assert_eq!(bar_label(&no_bars), TextEffect::None);
+        assert_eq!(
+            focused(&no_bars, StyleElement::WindowListEntry).text.effect,
+            TextEffect::None
+        );
+        assert_ne!(menu_title(&no_bars), TextEffect::None, "menus keep theirs");
+        let no_menus = load(&[("menu_outline", "off")]);
+        assert_eq!(menu_title(&no_menus), TextEffect::None);
+        assert_eq!(
+            element(&no_menus, StyleElement::MenuItem, WidgetState::Hovered)
+                .text
+                .effect,
+            TextEffect::None,
+            "and so do the marks, which have the item's"
+        );
+        assert_ne!(bar_label(&no_menus), TextEffect::None, "bars keep theirs");
+        assert_eq!(
+            focused(&no_bars, StyleElement::Label).texture,
+            default_label.texture,
+            "the outline is only the outline"
+        );
+        // Windows are square and menus rounded.
+        let radius = |style: &Style, element| focused(style, element).corner_radius;
+        assert_eq!(radius(&default, StyleElement::Border), 0);
+        assert_eq!(radius(&default, StyleElement::MenuFrame), 8);
+        // Window buttons are drawn on the titlebar.
+        for state in [WidgetState::Focused, WidgetState::Unfocused] {
+            assert_eq!(
+                element(&default, StyleElement::Button, state).texture.fill,
+                Fill::Parent
+            );
+        }
+        // The faces are gradients, and a focused window's titlebar and the
+        // taskbar's focused entry are one: the palette's accent.
+        let titlebar = focused(&default, StyleElement::Titlebar).texture.fill;
+        assert!(matches!(titlebar, Fill::Gradient { .. }));
+        assert_eq!(
+            titlebar,
+            focused(&default, StyleElement::WindowListEntry)
+                .texture
+                .fill
+        );
+        assert!(matches!(
+            focused(&default, StyleElement::Taskbar).texture.fill,
+            Fill::Gradient { .. }
+        ));
+        // The title and the buttons are on the one face: the titlebar's.
+        assert_eq!(
+            focused(&default, StyleElement::Label).texture.fill,
+            Fill::Parent
+        );
+        assert_eq!(
+            focused(&default, StyleElement::Button).texture.fill,
+            Fill::Parent
+        );
+        // Unfocused windows can be in another palette's colors: graphite's
+        // greys, for one, whatever the palette, with the same spread.
+        let unfocused = |style: &Style| {
+            element(style, StyleElement::WindowListEntry, WidgetState::Unfocused).texture
+        };
+        assert_eq!(
+            unfocused(&load(&[("palette", "purple"), ("unfocused", "graphite")])),
+            unfocused(&default)
+        );
+        // An unfocused window's border is its own color, not the focused one's.
+        let orange = load(&[("palette", "orange")]);
+        assert_ne!(
+            element(&orange, StyleElement::Border, WidgetState::Focused)
+                .border
+                .color,
+            element(&orange, StyleElement::Border, WidgetState::Unfocused)
+                .border
+                .color
+        );
     }
 
     #[test]
-    fn every_choice_of_every_option_works_with_every_scheme() {
+    fn a_menus_title_follows_the_chrome_and_its_contents_are_their_own_choices() {
+        let element = |style: &Style, element, state| style.element_style(element, state).clone();
+        let focused = |style: &Style, which| element(style, which, WidgetState::Focused);
+        let green = load(&[("palette", "green")]);
+        // A menu's title is a focused face, as the taskbar's entry is.
+        let title = focused(&green, StyleElement::MenuTitle).texture.fill;
+        assert_eq!(
+            title,
+            focused(&green, StyleElement::WindowListEntry).texture.fill
+        );
+        // A menu's body is lighter only when asked.
+        let body = |choice| {
+            let style = load(&[("menu_body", choice)]);
+            focused(&style, StyleElement::MenuFrame).texture
+        };
+        assert_ne!(body("filled"), body("dark"));
+        // The selected item has its own bright color for its text and marks,
+        // from the palette, on each body.
+        let selected = |palette, body| {
+            let style = load(&[("palette", palette), ("menu_body", body)]);
+            element(&style, StyleElement::MenuItem, WidgetState::Hovered)
+        };
+        for body in ["dark", "filled"] {
+            assert_ne!(
+                selected("amber", body).text.color,
+                selected("purple", body).text.color,
+                "each palette has its own on a {body} menu"
+            );
+            assert_eq!(
+                selected("amber", body).glyph_color,
+                selected("amber", body).text.color,
+                "its marks are its text's color"
+            );
+        }
+        assert_ne!(
+            selected("amber", "dark").text.color,
+            selected("amber", "filled").text.color,
+            "and one for each body"
+        );
+    }
+
+    #[test]
+    fn soft_shading_fades_to_a_muted_dark_in_any_palette_and_deep_to_near_black() {
+        let fade = |palette, shading| {
+            let style = load(&[("palette", palette), ("shading", shading)]);
+            match style
+                .element_style(StyleElement::Titlebar, WidgetState::Focused)
+                .texture
+                .fill
+            {
+                Fill::Gradient { to, .. } => to,
+                Fill::Solid(_) | Fill::Image { .. } | Fill::Parent => panic!("a gradient"),
+            }
+        };
+        for palette in ["blue", "cyan", "amber", "graphite"] {
+            let (deep, soft) = (fade(palette, "deep"), fade(palette, "soft"));
+            assert!(
+                luminance(soft) > luminance(deep) * 2.0,
+                "{palette}: the soft fade is not as dark ({deep:?} against {soft:?})"
+            );
+        }
+        // Blue's soft shading is the muted blue-grey it used to be.
+        assert_eq!(fade("blue", "soft"), Color::rgb(0x2e, 0x34, 0x40));
+    }
+
+    #[test]
+    fn menu_marks_are_the_modern_ones() {
+        let bullet = |state| {
+            load(&[])
+                .element_style(StyleElement::MenuItem, state)
+                .bullet
+        };
+        assert_eq!(
+            bullet(WidgetState::Focused),
+            vaht_ui::style::Bullet::Chevron
+        );
+        assert_eq!(
+            bullet(WidgetState::Hovered),
+            vaht_ui::style::Bullet::DoubleChevron
+        );
+    }
+
+    #[test]
+    fn every_choice_of_every_option_works_with_every_palette() {
         let default = load(&[]);
         for option in &default.options().options {
             for choice in &option.choices {
-                for (scheme, _) in shipped_schemes() {
-                    let style = load(&[(option.name.as_str(), choice), ("scheme", &scheme)]);
+                for (palette, _) in shipped("palette") {
+                    let style = load(&[(option.name.as_str(), choice), ("palette", &palette)]);
                     assert_eq!(
                         style.option_problems(),
                         Vec::<String>::new(),
-                        "{} = {choice} with {scheme}",
+                        "{} = {choice} with {palette}",
                         option.name
                     );
                 }
             }
         }
+    }
+
+    /// The relative luminance of `color`, 0 (black) to 1 (white).
+    fn luminance(color: Color) -> f64 {
+        let channel = |value: u8| {
+            let value = f64::from(value) / 255.0;
+            if value <= 0.03928 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.0722_f64.mul_add(
+            channel(color.blue),
+            0.2126_f64.mul_add(channel(color.red), 0.7152 * channel(color.green)),
+        )
+    }
+
+    /// The contrast of two colors, 1 (none) to 21.
+    fn contrast(first: Color, second: Color) -> f64 {
+        let (first, second) = (luminance(first), luminance(second));
+        (first.max(second) + 0.05) / (first.min(second) + 0.05)
+    }
+
+    /// Returns the colors of `style`'s element in `state` from end to end of
+    /// its face; none for a face that is not colors.
+    fn face_of(style: &Style, element: StyleElement, state: WidgetState) -> Option<Vec<Color>> {
+        match style.element_style(element, state).texture.fill {
+            Fill::Solid(color) => Some(vec![color]),
+            Fill::Gradient { from, to, .. } => Some(vec![from, to]),
+            Fill::Image { .. } | Fill::Parent => None,
+        }
+    }
+
+    /// Returns `color` over `behind`, as it is drawn.
+    fn over(color: Color, behind: Color) -> Color {
+        let alpha = f64::from(color.alpha) / 255.0;
+        let mix = |front: u8, back: u8| {
+            let mixed = f64::from(front).mul_add(alpha, f64::from(back) * (1.0 - alpha));
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "a mix of two bytes is a byte"
+            )]
+            let byte = mixed.round() as u8;
+            byte
+        };
+        Color::rgb(
+            mix(color.red, behind.red),
+            mix(color.green, behind.green),
+            mix(color.blue, behind.blue),
+        )
+    }
+
+    /// Text is readable on the faces it is drawn on, for every palette in
+    /// every look: at least this much contrast against every end of the face.
+    const READABLE: f64 = 3.0;
+
+    /// How much an outline must contrast with its text to carry it, and how
+    /// much a menu item's text on a tint over its menu needs: its color is the
+    /// only thing that says it is selected.
+    const OUTLINED: f64 = 4.5;
+
+    /// The text of `text_element` on the face of `face_element` in `state`
+    /// that cannot be read, as a sentence, if it cannot.
+    fn unreadable_text(
+        style: &Style,
+        (face_element, text_element): (StyleElement, StyleElement),
+        state: WidgetState,
+    ) -> Option<String> {
+        let mut face = face_of(style, face_element, state)?;
+        let looks = style.element_style(text_element, state);
+        let (text, effect) = (looks.text.color, looks.text.effect);
+        let mut needed = READABLE;
+        // A face that lets what is behind it show is on the menu's, and
+        // nothing else says the item is selected: its text must stand out.
+        if face.iter().any(|color| color.alpha < u8::MAX)
+            && let Some(frame) = face_of(style, StyleElement::MenuFrame, WidgetState::Focused)
+        {
+            face = face.iter().map(|color| over(*color, frame[0])).collect();
+            needed = OUTLINED;
+        }
+        let worst = face
+            .iter()
+            .map(|color| contrast(*color, text))
+            .fold(f64::INFINITY, f64::min);
+        // An outline that stands out from the text carries it on any face; one
+        // that does not (dark text, black outline) only smears it.
+        let is_outlined = matches!(
+            effect,
+            TextEffect::Halo(halo) if contrast(halo, text) >= OUTLINED
+        );
+        (worst < needed && !(is_outlined && needed == READABLE))
+            .then(|| format!("{text_element:?} {state:?} on {face_element:?} {worst:.1}:1"))
+    }
+
+    #[test]
+    fn text_is_readable_on_its_face_in_every_palette_and_design() {
+        let mut unreadable = Vec::new();
+        // The unfocused colors of the palette, of graphite and of blue, whose
+        // muted ones are the least like the rest.
+        let designs = [
+            [("unfocused", "matching"), ("shading", "deep")],
+            [("unfocused", "graphite"), ("shading", "deep")],
+            [("unfocused", "blue"), ("shading", "deep")],
+            [("unfocused", "matching"), ("shading", "soft")],
+            [("unfocused", "graphite"), ("shading", "soft")],
+            [("unfocused", "blue"), ("shading", "soft")],
+        ];
+        let menus = [[("menu_body", "dark")], [("menu_body", "filled")]];
+        let pairs = [
+            (
+                StyleElement::Titlebar,
+                StyleElement::Label,
+                WidgetState::Focused,
+            ),
+            (
+                StyleElement::Titlebar,
+                StyleElement::Label,
+                WidgetState::Unfocused,
+            ),
+            (
+                StyleElement::WindowListEntry,
+                StyleElement::WindowListEntry,
+                WidgetState::Focused,
+            ),
+            (
+                StyleElement::WindowListEntry,
+                StyleElement::WindowListEntry,
+                WidgetState::Unfocused,
+            ),
+            (
+                StyleElement::MenuItem,
+                StyleElement::MenuItem,
+                WidgetState::Hovered,
+            ),
+            (
+                StyleElement::MenuTitle,
+                StyleElement::MenuTitle,
+                WidgetState::Focused,
+            ),
+            (
+                StyleElement::MenuFrame,
+                StyleElement::MenuItem,
+                WidgetState::Focused,
+            ),
+        ];
+        for (palette, _) in shipped("palette") {
+            for design in designs {
+                for menu in menus {
+                    let mut chosen = vec![("palette", palette.as_str())];
+                    chosen.extend(design);
+                    chosen.extend(menu);
+                    let style = load(&chosen);
+                    for (face, text, state) in pairs {
+                        if let Some(problem) = unreadable_text(&style, (face, text), state) {
+                            unreadable.push(format!("{chosen:?}: {problem}"));
+                        }
+                    }
+                }
+            }
+        }
+        unreadable.sort();
+        unreadable.dedup();
+        assert!(unreadable.is_empty(), "{}", unreadable.join("\n"));
     }
 }

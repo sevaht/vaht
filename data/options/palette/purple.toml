@@ -1,0 +1,21 @@
+# purple: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted purple. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/purple.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Reds and purples"
+dark = "#0d0812"
+mid = "#4c2e6b"
+dark_soft = "#382f42"
+mid_soft = "#473b54"
+light = "#8c6cac"
+press_dark = "#331f47"
+press_light = "#663d8f"
+menu = "#08050b"
+menu_filled = "#292230"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#8c6cac40"   # behind the selected item
+select_text = "#b09ac6"   # its text, and its marks
+select_bg_filled = "#8c6cac40"   # behind the selected item of a filled-in menu
+select_text_filled = "#baa7cd"   # its text, and its marks

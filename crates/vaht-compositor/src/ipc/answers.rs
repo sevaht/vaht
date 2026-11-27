@@ -112,9 +112,12 @@ impl Compositor {
                 .map(|option| StyleOptionInfo {
                     name: option.name,
                     label: option.label,
+                    checkbox: option.checkbox,
+                    group: option.group,
                     default: option.default,
                     chosen: option.chosen,
                     choices: option.choices,
+                    groups: option.groups,
                 })
                 .collect(),
             problems: self.config_problem_texts(),

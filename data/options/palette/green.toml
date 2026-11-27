@@ -1,0 +1,21 @@
+# green: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted green. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/green.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Greens"
+dark = "#08120b"
+mid = "#2e6b42"
+dark_soft = "#2f4235"
+mid_soft = "#3b5444"
+light = "#6cac82"
+press_dark = "#1f472c"
+press_light = "#3d8f58"
+menu = "#050b07"
+menu_filled = "#223027"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#6cac8240"   # behind the selected item
+select_text = "#86bb98"   # its text, and its marks
+select_bg_filled = "#6cac8240"   # behind the selected item of a filled-in menu
+select_text_filled = "#a4cbb1"   # its text, and its marks

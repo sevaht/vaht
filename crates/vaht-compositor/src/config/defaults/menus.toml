@@ -25,9 +25,18 @@ items = [
     { generate = "workspaces" },
     { generate = "window-list" },
     { separator = true },
+    { label = "Appearance", submenu = "appearance" },
     { label = "Settings", command = "settings" },
     { label = "Reload", command = "reload" },
     { label = "Exit", command = "exit" },
+]
+
+[menu.appearance]
+title = "Appearance"
+items = [
+    { label = "Style", generate = "styles" },
+    { separator = true },
+    { generate = "style-options", inline = true },
 ]
 
 [menu.window]

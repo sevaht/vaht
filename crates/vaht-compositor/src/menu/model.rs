@@ -7,7 +7,7 @@
 //! read the window's state, and generated lists read the workspaces and
 //! windows. The model knows nothing of how it is drawn.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::config::options::ListedOption;
 use crate::config::{
@@ -470,18 +470,128 @@ impl<'state> MenuBuilder<'state> {
         })
     }
 
-    /// Returns the `style-options` list: first an item putting every option
-    /// back to its default, then a submenu for each option of the style in
-    /// use, with its choices, the one in effect checked. The default choice
-    /// comes first, a line under it if others follow, as in the list of
-    /// styles.
+    /// Returns the choice of `option` that setting it to `choice` makes.
+    fn option_choice(option: &ListedOption, choice: &str) -> MenuChoice {
+        MenuChoice::Run {
+            command: Command::Run(Action::SetSetting(SettingChange::style_option(
+                &option.name,
+                choice,
+            ))),
+            window: None,
+        }
+    }
+
+    /// Returns a submenu titled `title` of `items`.
+    fn submenu_of(title: &str, items: Vec<MenuItem>) -> MenuItem {
+        MenuItem::Submenu {
+            label: title.to_owned(),
+            menu: MenuModel {
+                title: Some(title.to_owned()),
+                items,
+            },
+            icon: None,
+            pipe: None,
+        }
+    }
+
+    /// Returns `option` as a checkbox, if it says what to call one and has
+    /// two choices: checked when the one that is not the default is chosen.
+    fn option_checkbox(option: &ListedOption) -> Option<MenuItem> {
+        let label = option.checkbox.clone()?;
+        let [first, second] = option.choices.as_slice() else {
+            return None;
+        };
+        // Checked is the choice the style names, else the one that is not the
+        // default.
+        let checked = option.checked.as_ref().unwrap_or_else(|| {
+            if *first == option.default {
+                second
+            } else {
+                first
+            }
+        });
+        let unchecked = if checked == first { second } else { first };
+        let is_checked = option.chosen == *checked;
+        Some(MenuItem::Choice {
+            label,
+            choice: Self::option_choice(option, if is_checked { unchecked } else { checked }),
+            mark: Some(is_checked),
+            icon: None,
+        })
+    }
+
+    /// Returns `option` as a submenu of its choices, the one in effect
+    /// checked: the default first, a line under it, then the choices in no
+    /// group, then a submenu for each group.
+    fn option_submenu(option: &ListedOption) -> MenuItem {
+        let item_of = |choice: &String| MenuItem::Choice {
+            label: choice.clone(),
+            choice: Self::option_choice(option, choice),
+            mark: Some(*choice == option.chosen),
+            icon: None,
+        };
+        let mut choices: Vec<MenuItem> = Vec::new();
+        let mut grouped: BTreeMap<&str, Vec<MenuItem>> = BTreeMap::new();
+        for choice in &option.choices {
+            match option.groups.get(choice) {
+                Some(group) if *choice != option.default => {
+                    grouped.entry(group).or_default().push(item_of(choice));
+                }
+                _ => choices.push(item_of(choice)),
+            }
+        }
+        choices.extend(
+            grouped
+                .into_iter()
+                .map(|(group, items)| Self::submenu_of(group, items)),
+        );
+        if choices.len() > 1 {
+            choices.insert(1, MenuItem::Separator);
+        }
+        Self::submenu_of(option.title(), choices)
+    }
+
+    /// Returns the `style-options` list: a checkbox for each option that has
+    /// two choices and a label for it and no group (each its own, so checking
+    /// one never changes another), then a submenu for each of the other
+    /// options, and one for each group, which holds its options (checkboxes
+    /// among them), then an item putting every option back to its default.
     fn style_option_items(options: &[ListedOption]) -> Vec<MenuItem> {
         if options.is_empty() {
             return vec![MenuItem::Inert {
                 label: "(this style has no options)".to_owned(),
             }];
         }
-        let reset = MenuItem::Choice {
+        let mut items = Vec::new();
+        let mut plain: Vec<MenuItem> = Vec::new();
+        let mut grouped: BTreeMap<&str, Vec<MenuItem>> = BTreeMap::new();
+        for option in options {
+            // A checkbox is in its group's submenu, if it has a group, else
+            // loose at the top.
+            match (Self::option_checkbox(option), &option.group) {
+                (Some(item), None) => items.push(item),
+                (Some(item), Some(group)) => grouped.entry(group).or_default().push(item),
+                (None, Some(group)) => grouped
+                    .entry(group)
+                    .or_default()
+                    .push(Self::option_submenu(option)),
+                (None, None) => plain.push(Self::option_submenu(option)),
+            }
+        }
+        // The groups in order, and the one called Misc last.
+        let mut groups: Vec<_> = grouped.into_iter().collect();
+        groups.sort_by_key(|(group, _)| (*group == "Misc", *group));
+        plain.extend(
+            groups
+                .into_iter()
+                .map(|(group, submenus)| Self::submenu_of(group, submenus)),
+        );
+        if !items.is_empty() && !plain.is_empty() {
+            items.push(MenuItem::Separator);
+        }
+        items.extend(plain);
+        items.push(MenuItem::Separator);
+        items.push(MenuItem::Choice {
             label: "Reset all to defaults".to_owned(),
             choice: MenuChoice::Run {
                 command: Command::Run(Action::SetSetting(SettingChange::unset(vec![
@@ -491,41 +601,8 @@ impl<'state> MenuBuilder<'state> {
             },
             mark: None,
             icon: None,
-        };
-        let submenus = options.iter().map(|option| {
-            let mut choices: Vec<MenuItem> = option
-                .choices
-                .iter()
-                .map(|choice| MenuItem::Choice {
-                    label: choice.clone(),
-                    choice: MenuChoice::Run {
-                        command: Command::Run(Action::SetSetting(SettingChange::style_option(
-                            &option.name,
-                            choice,
-                        ))),
-                        window: None,
-                    },
-                    mark: Some(*choice == option.chosen),
-                    icon: None,
-                })
-                .collect();
-            if choices.len() > 1 {
-                choices.insert(1, MenuItem::Separator);
-            }
-            MenuItem::Submenu {
-                label: option.title().to_owned(),
-                menu: MenuModel {
-                    title: Some(option.title().to_owned()),
-                    items: choices,
-                },
-                icon: None,
-                pipe: None,
-            }
         });
-        std::iter::once(reset)
-            .chain(std::iter::once(MenuItem::Separator))
-            .chain(submenus)
-            .collect()
+        items
     }
 
     /// Returns the `profiles` list: each display profile, the one applied
@@ -806,22 +883,26 @@ mod tests {
         let option = ListedOption {
             name: "scheme".to_owned(),
             label: Some("Color scheme".to_owned()),
+            checkbox: None,
+            checked: None,
+            group: None,
             default: "graphite".to_owned(),
             chosen: "blue".to_owned(),
             choices: vec!["graphite".to_owned(), "blue".to_owned()],
+            groups: BTreeMap::new(),
         };
         let items = MenuBuilder::style_option_items(&[option]);
         let [
-            MenuItem::Choice { label: reset, .. },
-            MenuItem::Separator,
             MenuItem::Submenu { label, menu, .. },
+            MenuItem::Separator,
+            MenuItem::Choice { label: reset, .. },
         ] = items.as_slice()
         else {
-            panic!("a reset, a line, one submenu: {items:?}");
+            panic!("one submenu, a line, a reset: {items:?}");
         };
         assert_eq!(reset, "Reset all to defaults");
         assert!(
-            matches!(items[0], MenuItem::Choice {
+            matches!(items[2], MenuItem::Choice {
                 choice: MenuChoice::Run { command: Command::Run(Action::SetSetting(ref change)), .. },
                 ..
             } if change.is_style_option()),
@@ -845,6 +926,213 @@ mod tests {
             [
                 ("graphite".to_owned(), Some(false)),
                 ("blue".to_owned(), Some(true))
+            ]
+        );
+    }
+
+    #[test]
+    fn choices_that_say_their_group_are_listed_in_submenus_after_the_default() {
+        use crate::config::options::ListedOption;
+        let names = ["graphite", "blue", "teal", "red", "plain"];
+        let option = ListedOption {
+            name: "palette".to_owned(),
+            label: None,
+            checkbox: None,
+            checked: None,
+            group: None,
+            default: "graphite".to_owned(),
+            chosen: "teal".to_owned(),
+            choices: names.iter().map(|name| (*name).to_owned()).collect(),
+            groups: [
+                ("graphite", "Neutral"),
+                ("blue", "Blues"),
+                ("teal", "Blues"),
+                ("red", "Reds"),
+            ]
+            .into_iter()
+            .map(|(choice, group)| (choice.to_owned(), group.to_owned()))
+            .collect(),
+        };
+        let items = MenuBuilder::style_option_items(&[option]);
+        let MenuItem::Submenu { menu, .. } = &items[0] else {
+            panic!("the option: {items:?}");
+        };
+        let labels: Vec<String> = menu
+            .items
+            .iter()
+            .map(|item| match item {
+                MenuItem::Choice { label, .. } | MenuItem::Submenu { label, .. } => label.clone(),
+                MenuItem::Separator => "-".to_owned(),
+                MenuItem::Inert { .. } => "?".to_owned(),
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            ["graphite", "-", "plain", "Blues", "Reds"],
+            "the default, a line, what has no group, then the groups; the default stays first \
+             though it names a group"
+        );
+        let MenuItem::Submenu { menu: blues, .. } = &menu.items[3] else {
+            panic!("a group");
+        };
+        assert!(
+            matches!(&blues.items[1], MenuItem::Choice { label, mark: Some(true), .. } if label == "teal"),
+            "the chosen choice is checked inside its group: {:?}",
+            blues.items
+        );
+    }
+
+    #[test]
+    fn two_choice_options_with_a_label_are_independent_checkboxes_and_the_rest_are_grouped() {
+        use crate::config::options::ListedOption;
+        let option =
+            |name: &str, checkbox: Option<&str>, group: Option<&str>, chosen: &str| ListedOption {
+                name: name.to_owned(),
+                label: None,
+                checkbox: checkbox.map(str::to_owned),
+                checked: None,
+                group: group.map(str::to_owned),
+                default: "a".to_owned(),
+                chosen: chosen.to_owned(),
+                choices: vec!["a".to_owned(), "b".to_owned()],
+                groups: BTreeMap::new(),
+            };
+        let items = MenuBuilder::style_option_items(&[
+            option("faces", Some("Flat faces"), None, "b"),
+            option("marks", Some("Classic marks"), None, "a"),
+            option("menu", None, None, "a"),
+            option("titlebar", None, Some("Sizes"), "a"),
+            option("taskbar", None, Some("Sizes"), "a"),
+        ]);
+        let shape: Vec<String> = items
+            .iter()
+            .map(|item| match item {
+                MenuItem::Choice { label, mark, .. } => format!(
+                    "[{}] {label}",
+                    match mark {
+                        Some(true) => "x",
+                        Some(false) => " ",
+                        None => "-",
+                    }
+                ),
+                MenuItem::Submenu { label, .. } => format!("{label} >"),
+                MenuItem::Separator => "----".to_owned(),
+                MenuItem::Inert { label } => label.clone(),
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                "[x] Flat faces",
+                "[ ] Classic marks",
+                "----",
+                "menu >",
+                "Sizes >",
+                "----",
+                "[-] Reset all to defaults"
+            ],
+            "each checkbox has its own state; the sizes share a submenu"
+        );
+        // Checking one asks for its own option's other choice and no other.
+        let MenuItem::Choice { choice, .. } = &items[1] else {
+            panic!("a checkbox");
+        };
+        let MenuChoice::Run {
+            command: Command::Run(Action::SetSetting(change)),
+            ..
+        } = choice
+        else {
+            panic!("a setting");
+        };
+        assert_eq!(change.to_string(), "style_options.marks \"b\"");
+        // Unchecking one asks for the default.
+        let MenuItem::Choice { choice, .. } = &items[0] else {
+            panic!("a checkbox");
+        };
+        let MenuChoice::Run {
+            command: Command::Run(Action::SetSetting(change)),
+            ..
+        } = choice
+        else {
+            panic!("a setting");
+        };
+        assert_eq!(change.to_string(), "style_options.faces \"a\"");
+    }
+
+    #[test]
+    fn the_default_styles_options_make_a_short_organized_list() {
+        let style = vaht_ui::Style::built_in();
+        let listed: Vec<ListedOption> = style
+            .options()
+            .options
+            .iter()
+            .map(|option| ListedOption {
+                name: option.name.clone(),
+                label: option.label.clone(),
+                checkbox: option.checkbox.clone(),
+                checked: option.checked.clone(),
+                group: option.group.clone(),
+                default: option.default.clone(),
+                chosen: option.chosen.clone(),
+                choices: option.choices.clone(),
+                groups: option.groups.clone(),
+            })
+            .collect();
+        // The checkboxes are in submenus of their own, and Misc is the last.
+        let items = MenuBuilder::style_option_items(&listed);
+        let checkboxes_in = |group: &str| -> Vec<(String, Option<bool>)> {
+            let menu = items
+                .iter()
+                .find_map(|item| match item {
+                    MenuItem::Submenu { label, menu, .. } if label == group => Some(menu),
+                    MenuItem::Submenu { .. }
+                    | MenuItem::Choice { .. }
+                    | MenuItem::Inert { .. }
+                    | MenuItem::Separator => None,
+                })
+                .expect("the submenu");
+            menu.items
+                .iter()
+                .filter_map(|item| match item {
+                    MenuItem::Choice { label, mark, .. } => Some((label.clone(), *mark)),
+                    MenuItem::Submenu { .. } | MenuItem::Inert { .. } | MenuItem::Separator => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            checkboxes_in("Text Outlines"),
+            [
+                ("Taskbar/Titlebar".to_owned(), Some(true)),
+                ("Menus".to_owned(), Some(true))
+            ],
+            "both outlines are on, and checked for it"
+        );
+        assert_eq!(
+            checkboxes_in("Misc"),
+            [
+                ("Filled-in menu background".to_owned(), Some(false)),
+                ("Softer shading".to_owned(), Some(false))
+            ]
+        );
+        let labels: Vec<String> = MenuBuilder::style_option_items(&listed)
+            .iter()
+            .map(|item| match item {
+                MenuItem::Choice { label, .. }
+                | MenuItem::Submenu { label, .. }
+                | MenuItem::Inert { label } => label.clone(),
+                MenuItem::Separator => "-".to_owned(),
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "Palette",
+                "Unfocused windows",
+                "Sizes",
+                "Text Outlines",
+                "Misc",
+                "-",
+                "Reset all to defaults"
             ]
         );
     }

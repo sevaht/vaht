@@ -1,0 +1,21 @@
+# slate: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted slate. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/slate.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Neutral"
+dark = "#0a0d0f"
+mid = "#3f4c5a"
+dark_soft = "#2f3842"
+mid_soft = "#3b4754"
+light = "#7e8c9b"
+press_dark = "#2a333c"
+press_light = "#546678"
+menu = "#060809"
+menu_filled = "#222930"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#7e8c9b40"   # behind the selected item
+select_text = "#9da8b3"   # its text, and its marks
+select_bg_filled = "#7e8c9b40"   # behind the selected item of a filled-in menu
+select_text_filled = "#afb7c1"   # its text, and its marks

@@ -1,0 +1,21 @@
+# indigo: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted indigo. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/indigo.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Blues"
+dark = "#060613"
+mid = "#262673"
+dark_soft = "#2f2f42"
+mid_soft = "#3b3b54"
+light = "#6464b4"
+press_dark = "#19194d"
+press_light = "#333399"
+menu = "#04040b"
+menu_filled = "#222230"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#6464b440"   # behind the selected item
+select_text = "#9898cd"   # its text, and its marks
+select_bg_filled = "#6464b440"   # behind the selected item of a filled-in menu
+select_text_filled = "#a6a6d4"   # its text, and its marks

@@ -81,11 +81,22 @@ pub struct StyleOption {
     pub name: String,
     /// What to call it for people, if the style says.
     pub label: Option<String>,
+    /// What to call it as a checkbox, if the style says and the option has
+    /// two choices: checked, the one that is not the default is chosen.
+    pub checkbox: Option<String>,
+    /// The choice that shows the checkbox checked, if the style says; else
+    /// the one that is not the default.
+    pub checked: Option<String>,
+    /// The group of options a menu or window lists it with, if the style says.
+    pub group: Option<String>,
     /// The choice made when none is: always one the style holds itself.
     pub default: String,
     /// The choices the style holds itself: the default first, then the rest
     /// sorted by name.
     pub choices: Vec<String>,
+    /// The group each of those choices says it is in (`group = "Blues"`), by
+    /// choice, for a list that folds many choices into a few.
+    pub groups: BTreeMap<String, String>,
     /// The choice in effect: the one asked for, or the default where there
     /// is no such choice.
     pub chosen: String,
@@ -232,7 +243,7 @@ fn checked_name<'name>(name: &'name str, what: &str) -> Result<&'name str, toml:
 }
 
 /// Keys of a choice's table that are not variables.
-const CHOICE_KEYS: [&str; 2] = ["file", "label"];
+const CHOICE_KEYS: [&str; 3] = ["file", "group", "label"];
 
 /// Reads the options of the style `text` and picks the variables of the
 /// choices `selection` makes.
@@ -274,6 +285,35 @@ pub(super) fn resolve(text: &str, selection: &Selection<'_>) -> Result<Resolved,
     Ok(resolved)
 }
 
+/// Returns the names of the choices of the option `name`, in the order its
+/// table has them, and the group each says it is in.
+fn choices_of(
+    name: &str,
+    option: &toml::Table,
+) -> Result<(Vec<String>, BTreeMap<String, String>), toml::de::Error> {
+    let mut choices = Vec::new();
+    let mut groups = BTreeMap::new();
+    for (key, value) in option {
+        if matches!(
+            key.as_str(),
+            "label" | "default" | "checkbox" | "checked" | "group"
+        ) {
+            continue;
+        }
+        checked_name(key, "a choice")?;
+        if !value.is_table() {
+            return Err(toml::de::Error::custom(format!(
+                "option `{name}`: choice `{key}` is a table of variables"
+            )));
+        }
+        if let Some(group) = value.get("group").and_then(toml::Value::as_str) {
+            groups.insert(key.clone(), group.to_owned());
+        }
+        choices.push(key.clone());
+    }
+    Ok((choices, groups))
+}
+
 /// Reads one option's declaration and the variables of its chosen choice.
 fn read_option(
     name: &str,
@@ -282,26 +322,21 @@ fn read_option(
     problems: &mut Vec<String>,
 ) -> Result<(StyleOption, toml::Table), toml::de::Error> {
     let fail = |message: String| toml::de::Error::custom(format!("option `{name}`: {message}"));
-    let label = option
-        .get("label")
-        .and_then(toml::Value::as_str)
-        .map(str::to_owned);
-    let default = option
-        .get("default")
-        .and_then(toml::Value::as_str)
-        .ok_or_else(|| fail("`default` names the choice made when none is".to_owned()))?
-        .to_owned();
-    let mut choices = Vec::new();
-    for (key, value) in option {
-        if matches!(key.as_str(), "label" | "default") {
-            continue;
-        }
-        checked_name(key, "a choice")?;
-        if !value.is_table() {
-            return Err(fail(format!("choice `{key}` is a table of variables")));
-        }
-        choices.push(key.clone());
-    }
+    let text_of = |key: &str| {
+        option
+            .get(key)
+            .and_then(toml::Value::as_str)
+            .map(str::to_owned)
+    };
+    let (label, checkbox, group, checked) = (
+        text_of("label"),
+        text_of("checkbox"),
+        text_of("group"),
+        text_of("checked"),
+    );
+    let default = text_of("default")
+        .ok_or_else(|| fail("`default` names the choice made when none is".to_owned()))?;
+    let (mut choices, groups) = choices_of(name, option)?;
     // The default first; a TOML table has no order to keep, so the rest are
     // sorted.
     choices.sort_by_key(|choice| (*choice != default, choice.clone()));
@@ -365,8 +400,12 @@ fn read_option(
         StyleOption {
             name: name.to_owned(),
             label,
+            checkbox,
+            checked,
+            group,
             default,
             choices,
+            groups,
             chosen,
         },
         variables,

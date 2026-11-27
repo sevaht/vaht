@@ -15,8 +15,8 @@ use vaht_test_support::{
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 
-/// The built-in style's border color (`grey60`).
-const BORDER_COLOR: [u8; 3] = [153, 153, 153];
+/// The built-in style's border color, the focused accent (`grey55`).
+const BORDER_COLOR: [u8; 3] = [140, 140, 140];
 
 /// A headless vaht with one client showing one window.
 struct OneWindow {

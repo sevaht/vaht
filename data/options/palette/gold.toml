@@ -1,0 +1,21 @@
+# gold: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted gold. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/gold.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Warm"
+dark = "#151104"
+mid = "#7e671b"
+dark_soft = "#423d2f"
+mid_soft = "#544e3b"
+light = "#c0a858"
+press_dark = "#544512"
+press_light = "#a88924"
+menu = "#0d0a03"
+menu_filled = "#302d22"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#c0a85840"   # behind the selected item
+select_text = "#cab672"   # its text, and its marks
+select_bg_filled = "#c0a85840"   # behind the selected item of a filled-in menu
+select_text_filled = "#d6c794"   # its text, and its marks

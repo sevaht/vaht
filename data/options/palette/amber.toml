@@ -1,0 +1,21 @@
+# amber: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted amber. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/amber.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Warm"
+dark = "#140e06"
+mid = "#775422"
+dark_soft = "#423a2f"
+mid_soft = "#544a3b"
+light = "#b89460"
+press_dark = "#4f3817"
+press_light = "#9e6f2e"
+menu = "#0c0803"
+menu_filled = "#302a22"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#b8946040"   # behind the selected item
+select_text = "#c5a77d"   # its text, and its marks
+select_bg_filled = "#b8946040"   # behind the selected item of a filled-in menu
+select_text_filled = "#d3bd9c"   # its text, and its marks

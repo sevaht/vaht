@@ -14,7 +14,7 @@ use crate::icon::WidgetIcon;
 use crate::image::Image;
 use crate::layout::{Content, Layout, Placed};
 use crate::style::{BorderStyle, Style, WidgetState};
-use crate::text::Typesetter;
+use crate::text::{TextEffect, Typesetter};
 use crate::texture::render::{self, GradientImage};
 use crate::texture::{Bevel, Fill, ImageFit, Texture};
 use crate::widget::{Glyph, MarkSide};
@@ -138,7 +138,7 @@ impl<'pixmap> Canvas<'pixmap> {
                 match style.glyph_images.get(mark) {
                     // The style's own picture, at its own size.
                     Some(image) => self.draw_centered(image, square),
-                    None => self.draw_glyph(mark, color, square),
+                    None => self.draw_glyph(mark, color, square, style.text.effect),
                 }
             }
             match &placed.content {
@@ -164,7 +164,7 @@ impl<'pixmap> Canvas<'pixmap> {
                     match image {
                         // A picture of the style's own is the whole button.
                         Some(image) => self.draw_stretched(image, placed.rect),
-                        None => self.draw_glyph(glyph, style.glyph_color, inner),
+                        None => self.draw_glyph(glyph, style.glyph_color, inner, TextEffect::None),
                     }
                 }
                 Content::Background => {}
@@ -621,8 +621,10 @@ impl<'pixmap> Canvas<'pixmap> {
         path.line_to(x - side * 0.12, top + side * 0.7);
     }
 
-    /// Strokes `glyph` in `color`, centered in the largest square inside `rect`.
-    fn draw_glyph(&mut self, glyph: Glyph, color: Color, rect: Rect) {
+    /// Draws `glyph` in `color`, centered in the largest square inside `rect`,
+    /// with the text `effect` of the style behind it: an outline round it, or
+    /// a shadow beside it.
+    fn draw_glyph(&mut self, glyph: Glyph, color: Color, rect: Rect, effect: TextEffect) {
         let rect = self.physical(rect);
         let side = rect.width.min(rect.height);
         if side == 0 {
@@ -637,38 +639,95 @@ impl<'pixmap> Canvas<'pixmap> {
             rect.y as f32 + (rect.height - side) as f32 / 2.0,
             side as f32,
         );
-        if let Some(arrow) = Self::filled(glyph, left, top, side) {
-            let mut paint = Paint::default();
-            paint.set_color(color.to_skia());
-            paint.anti_alias = true;
-            self.pixmap.fill_path(
-                &arrow,
-                &paint,
-                tiny_skia::FillRule::Winding,
-                Transform::identity(),
-                None,
-            );
-            return;
-        }
-        let path = Self::strokes(glyph, left, top, side, self.scale);
-        if let Some(path) = path.finish() {
-            let mut paint = Paint::default();
-            paint.set_color(color.to_skia());
-            paint.anti_alias = true;
-            let stroke = Stroke {
-                // A chevron and a tick are bolder: they are marks to read.
-                width: if matches!(
-                    glyph,
-                    Glyph::BulletChevron | Glyph::BulletDoubleChevron | Glyph::Tick
-                ) {
-                    2.0
-                } else {
-                    GLYPH_STROKE_WIDTH
-                } * self.scale,
-                ..Stroke::default()
+        let filled = Self::filled(glyph, left, top, side);
+        let strokes = if filled.is_none() {
+            Self::strokes(glyph, left, top, side, self.scale).finish()
+        } else {
+            None
+        };
+        // A chevron and a tick are bolder: they are marks to read.
+        let width = self.scale
+            * if matches!(
+                glyph,
+                Glyph::BulletChevron | Glyph::BulletDoubleChevron | Glyph::Tick
+            ) {
+                2.0
+            } else {
+                GLYPH_STROKE_WIDTH
             };
+        match effect {
+            TextEffect::None => {}
+            TextEffect::Halo(halo) => {
+                self.paint_glyph(
+                    (filled.as_ref(), strokes.as_ref()),
+                    halo,
+                    (
+                        if filled.is_some() {
+                            2.0 * self.scale
+                        } else {
+                            width + 2.0 * self.scale
+                        },
+                        true,
+                    ),
+                    (0.0, 0.0),
+                );
+            }
+            TextEffect::Shadow {
+                color: shadow,
+                offset_x,
+                offset_y,
+            } => {
+                self.paint_glyph(
+                    (filled.as_ref(), strokes.as_ref()),
+                    shadow,
+                    (width, false),
+                    (
+                        f32::from(offset_x) * self.scale,
+                        f32::from(offset_y) * self.scale,
+                    ),
+                );
+            }
+        }
+        self.paint_glyph(
+            (filled.as_ref(), strokes.as_ref()),
+            color,
+            (width, false),
+            (0.0, 0.0),
+        );
+    }
+
+    /// Paints a glyph's path, `filled` or `strokes`, in `color`, moved by
+    /// `offset`: a filled one is filled, and with `is_outline` also stroked
+    /// to `width`, which makes the halo; a stroked one is stroked to `width`.
+    fn paint_glyph(
+        &mut self,
+        (filled, strokes): (Option<&tiny_skia::Path>, Option<&tiny_skia::Path>),
+        color: Color,
+        (width, is_outline): (f32, bool),
+        offset: (f32, f32),
+    ) {
+        let mut paint = Paint::default();
+        paint.set_color(color.to_skia());
+        paint.anti_alias = true;
+        let transform = Transform::from_translate(offset.0, offset.1);
+        let stroke = Stroke {
+            width,
+            line_cap: tiny_skia::LineCap::Round,
+            line_join: tiny_skia::LineJoin::Round,
+            ..Stroke::default()
+        };
+        if let Some(arrow) = filled {
+            if is_outline {
+                self.pixmap
+                    .stroke_path(arrow, &paint, &stroke, transform, None);
+            } else {
+                self.pixmap
+                    .fill_path(arrow, &paint, tiny_skia::FillRule::Winding, transform, None);
+            }
+        }
+        if let Some(path) = strokes {
             self.pixmap
-                .stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+                .stroke_path(path, &paint, &stroke, transform, None);
         }
     }
 }

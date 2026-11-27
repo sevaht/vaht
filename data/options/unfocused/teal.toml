@@ -1,0 +1,16 @@
+# teal: the colors of unfocused windows, for a style with an `unfocused`
+# option (the default style has one): those of the teal palette, so a style in
+# another palette has its unfocused windows and the rest of the taskbar in them.
+# Installed as /usr/share/vaht/options/unfocused/teal.toml; copy it to
+# ~/.config/vaht/options/unfocused/<name>.toml and change it to make your own,
+# and choose it with `style_options = { unfocused = "<name>" }` in settings.toml.
+
+group = "Greens"
+unf_dark = "#071212"
+unf_mid = "#2a6f6f"
+unf_dark_soft = "#2f4242"
+unf_mid_soft = "#3b5454"
+unf_press_dark = "#1c4a4a"
+unf_press_light = "#389494"
+unf_dim = "grey55"
+unf_text = "white"

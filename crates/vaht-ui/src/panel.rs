@@ -1189,7 +1189,7 @@ mod tests {
 
         fn build(&self) -> Widget<TitlebarHit> {
             let row = || {
-                let row = Widget::row(StyleElement::Label, Vec::new());
+                let row = Widget::row(StyleElement::WindowListEntry, Vec::new());
                 if self.rows_have_background {
                     row
                 } else {
@@ -1324,6 +1324,40 @@ mod tests {
         assert_eq!(
             corners_marked(&drawing_of(Glyph::Restore)),
             [false, true, true, false]
+        );
+    }
+
+    /// Returns how many pixels of the mark's square are the green of an outline.
+    fn outline_pixels(style: &str, glyph: Glyph) -> usize {
+        let layers = crate::style::StyleLayers::from_toml(style).expect("a valid style");
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(MarkedIn(glyph, WidgetState::Focused), Size::new(100, 20));
+        assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
+        let pixels = panel.pixels().expect("painted");
+        (0..20)
+            .flat_map(|y| (80..100).map(move |x| (x, y)))
+            .filter(|(x, y)| {
+                let pixel = pixels.pixel(*x, *y).expect("inside");
+                pixel.green() > 150 && pixel.red() < 100
+            })
+            .count()
+    }
+
+    #[test]
+    fn a_menu_mark_has_the_outline_of_the_text_round_it() {
+        let plain = format!("{MARKS}bullet = \"chevron\"\n");
+        let outlined = format!("{plain}text_effect = {{ halo = \"#00ff00\" }}\n");
+        for glyph in [Glyph::BulletRight, Glyph::Check] {
+            assert_eq!(outline_pixels(&plain, glyph), 0, "{glyph:?} has none");
+            assert!(
+                outline_pixels(&outlined, glyph) > 0,
+                "{glyph:?} is outlined"
+            );
+        }
+        let ticked = format!("{outlined}check = \"tick\"\n");
+        assert!(
+            outline_pixels(&ticked, Glyph::Check) > 0,
+            "a stroked mark is outlined too"
         );
     }
 }

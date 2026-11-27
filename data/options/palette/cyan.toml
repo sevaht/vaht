@@ -1,0 +1,21 @@
+# cyan: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted cyan. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/cyan.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Blues"
+dark = "#051114"
+mid = "#1f637a"
+dark_soft = "#2f3d42"
+mid_soft = "#3b4d54"
+light = "#5ca4bc"
+press_dark = "#144252"
+press_light = "#2985a3"
+menu = "#030a0c"
+menu_filled = "#222c30"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#5ca4bc40"   # behind the selected item
+select_text = "#7db6ca"   # its text, and its marks
+select_bg_filled = "#5ca4bc40"   # behind the selected item of a filled-in menu
+select_text_filled = "#9ac7d5"   # its text, and its marks

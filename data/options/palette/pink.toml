@@ -1,0 +1,21 @@
+# pink: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted pink. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/pink.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Reds and purples"
+dark = "#14060e"
+mid = "#772254"
+dark_soft = "#422f3a"
+mid_soft = "#543b4a"
+light = "#b86094"
+press_dark = "#4f1738"
+press_light = "#9e2e6f"
+menu = "#0c0308"
+menu_filled = "#30222a"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#b8609440"   # behind the selected item
+select_text = "#cd8eb3"   # its text, and its marks
+select_bg_filled = "#b8609440"   # behind the selected item of a filled-in menu
+select_text_filled = "#d4a0bf"   # its text, and its marks

@@ -371,14 +371,36 @@ impl<L: Link> SettingsApp<L> {
                 let combo = egui::ComboBox::from_id_salt(("style-option", &option.name))
                     .selected_text(now.as_str())
                     .show_ui(ui, |ui| {
-                        for (index, choice) in option.choices.iter().enumerate() {
-                            // The default is first, a line below it.
-                            if index == 1 {
-                                ui.separator();
+                        // The default is first, a line below it; then the choices
+                        // in no group, then each group under its heading.
+                        let mut shown = Vec::new();
+                        let mut headed: std::collections::BTreeMap<&str, Vec<&String>> =
+                            std::collections::BTreeMap::new();
+                        for choice in &option.choices {
+                            match option.groups.get(choice) {
+                                Some(group) if *choice != option.default => {
+                                    headed.entry(group).or_default().push(choice);
+                                }
+                                _ => shown.push(choice),
                             }
+                        }
+                        let mut draw = |ui: &mut Ui, choice: &String| {
                             if ui.selectable_label(choice == now, choice).clicked() && choice != now
                             {
                                 picked = Some(choice.clone());
+                            }
+                        };
+                        for (index, choice) in shown.into_iter().enumerate() {
+                            if index == 1 {
+                                ui.separator();
+                            }
+                            draw(ui, choice);
+                        }
+                        for (group, choices) in headed {
+                            ui.separator();
+                            ui.weak(group);
+                            for choice in choices {
+                                draw(ui, choice);
                             }
                         }
                     });
@@ -1118,16 +1140,22 @@ mod tests {
                     StyleOptionInfo {
                         name: "scheme".to_owned(),
                         label: Some("Color scheme".to_owned()),
+                        checkbox: None,
+                        group: None,
                         default: "graphite".to_owned(),
                         chosen: "blue".to_owned(),
                         choices: vec!["graphite".to_owned(), "blue".to_owned(), "red".to_owned()],
+                        groups: [("blue".to_owned(), "Blues".to_owned())].into(),
                     },
                     StyleOptionInfo {
                         name: "size".to_owned(),
                         label: None,
+                        checkbox: None,
+                        group: None,
                         default: "medium".to_owned(),
                         chosen: "medium".to_owned(),
                         choices: vec!["medium".to_owned(), "large".to_owned()],
+                        groups: std::collections::BTreeMap::new(),
                     },
                 ],
                 layout: None,
@@ -1152,6 +1180,7 @@ mod tests {
             .expect("a list for the first option")
             .click();
         harness.run();
+        harness.get_by_label("Blues");
         harness.get_by_label("red").click();
         harness.run();
         assert_eq!(

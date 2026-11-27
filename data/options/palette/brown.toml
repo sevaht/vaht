@@ -1,0 +1,21 @@
+# brown: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted brown. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/brown.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Warm"
+dark = "#110c08"
+mid = "#674832"
+dark_soft = "#42372f"
+mid_soft = "#54463b"
+light = "#a88870"
+press_dark = "#453021"
+press_light = "#8a6042"
+menu = "#0a0705"
+menu_filled = "#302822"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#a8887040"   # behind the selected item
+select_text = "#bba390"   # its text, and its marks
+select_bg_filled = "#a8887040"   # behind the selected item of a filled-in menu
+select_text_filled = "#c9b5a6"   # its text, and its marks

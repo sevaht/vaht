@@ -28,6 +28,7 @@ use crate::color::Color;
 use crate::corner::{Corner, CornerSet};
 use crate::image::Image;
 use crate::length::{Length, Sides};
+use crate::point_size::PointSize;
 use crate::text::{Font, FontWeight, Justify, TextEffect};
 use crate::texture::{Bevel, GradientDirection, ImageFit, Texture};
 use crate::widget::{Glyph, MarkSide};
@@ -828,8 +829,8 @@ impl BevelName {
 struct FontFile {
     /// The family name.
     family: String,
-    /// The size in points.
-    size: u16,
+    /// The size in points: a number, or a sum of numbers.
+    size: PointSize,
     /// `normal` or `bold`.
     #[serde(default)]
     weight: WeightName,
@@ -843,7 +844,7 @@ impl FontFile {
     fn into_font(self) -> Font {
         Font {
             family: self.family,
-            size_points: self.size,
+            size_points: self.size.points(),
             weight: match self.weight {
                 WeightName::Normal => FontWeight::Normal,
                 WeightName::Bold => FontWeight::Bold,

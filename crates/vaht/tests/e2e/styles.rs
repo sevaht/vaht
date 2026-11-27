@@ -12,8 +12,8 @@ const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
 /// Settings that choose the style `mine`.
 const SETTINGS: &str = "style = \"mine\"\n";
 
-/// The built-in style's border color, `grey60`.
-const BUILT_IN_BORDER: [u8; 3] = [153, 153, 153];
+/// The built-in style's border color, the focused accent (`grey55`).
+const BUILT_IN_BORDER: [u8; 3] = [140, 140, 140];
 
 /// A style whose focused titlebar is solid `color`, `height` pixels tall,
 /// with centered titles, under a black border `border` pixels wide.
@@ -93,7 +93,9 @@ fn without_a_style_named_the_built_in_one_applies() {
     let mut client = TestClient::connect(vaht.socket());
     client.open_windows(1);
     let (_, height) = titlebar_above_content(&client.screenshot(), BUILT_IN_BORDER);
-    assert_eq!(height, 20, "the built-in titlebar is 20 pixels tall");
+    // Its top row is the accent, which is the border's color too, so the
+    // count of the rows between ends one short: the titlebar is 20 tall.
+    assert_eq!(height, 19, "the built-in titlebar is 20 pixels tall");
 }
 
 #[test]

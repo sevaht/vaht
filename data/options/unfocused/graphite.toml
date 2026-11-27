@@ -1,0 +1,16 @@
+# graphite: the colors of unfocused windows, for a style with an `unfocused`
+# option (the default style has one): those of the graphite palette, so a style in
+# another palette has its unfocused windows and the rest of the taskbar in them.
+# Installed as /usr/share/vaht/options/unfocused/graphite.toml; copy it to
+# ~/.config/vaht/options/unfocused/<name>.toml and change it to make your own,
+# and choose it with `style_options = { unfocused = "<name>" }` in settings.toml.
+
+group = "Neutral"
+unf_dark = "grey5"
+unf_mid = "grey30"
+unf_dark_soft = "#2e2e2e"
+unf_mid_soft = "#404040"
+unf_press_dark = "grey20"
+unf_press_light = "grey40"
+unf_dim = "grey55"
+unf_text = "white"

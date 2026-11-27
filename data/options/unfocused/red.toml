@@ -1,0 +1,16 @@
+# red: the colors of unfocused windows, for a style with an `unfocused`
+# option (the default style has one): those of the red palette, so a style in
+# another palette has its unfocused windows and the rest of the taskbar in them.
+# Installed as /usr/share/vaht/options/unfocused/red.toml; copy it to
+# ~/.config/vaht/options/unfocused/<name>.toml and change it to make your own,
+# and choose it with `style_options = { unfocused = "<name>" }` in settings.toml.
+
+group = "Reds and purples"
+unf_dark = "#160303"
+unf_mid = "#861313"
+unf_dark_soft = "#422f2f"
+unf_mid_soft = "#543b3b"
+unf_press_dark = "#590d0d"
+unf_press_light = "#b31919"
+unf_dim = "grey55"
+unf_text = "white"

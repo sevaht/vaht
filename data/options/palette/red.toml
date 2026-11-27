@@ -1,0 +1,21 @@
+# red: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted red. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/red.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Reds and purples"
+dark = "#160303"
+mid = "#861313"
+dark_soft = "#422f2f"
+mid_soft = "#543b3b"
+light = "#c85050"
+press_dark = "#590d0d"
+press_light = "#b31919"
+menu = "#0d0202"
+menu_filled = "#302222"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#c8505040"   # behind the selected item
+select_text = "#da8b8b"   # its text, and its marks
+select_bg_filled = "#c8505040"   # behind the selected item of a filled-in menu
+select_text_filled = "#df9a9a"   # its text, and its marks

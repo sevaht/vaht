@@ -274,6 +274,12 @@ pub struct StyleOptionInfo {
     /// What to call it for people, if the style says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// What to call it as a checkbox, if it has two choices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkbox: Option<String>,
+    /// The group of options it is listed with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     /// The choice made when none is.
     pub default: String,
     /// The choice in effect.
@@ -281,6 +287,10 @@ pub struct StyleOptionInfo {
     /// The choices that can be made: the style's own and the shared ones,
     /// the default first, the rest sorted.
     pub choices: Vec<String>,
+    /// The group a choice says it is in, by choice: a list of many choices
+    /// may show them under these headings.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub groups: std::collections::BTreeMap<String, String>,
 }
 
 /// What vaht answers a request with.

@@ -1,0 +1,16 @@
+# pink: the colors of unfocused windows, for a style with an `unfocused`
+# option (the default style has one): those of the pink palette, so a style in
+# another palette has its unfocused windows and the rest of the taskbar in them.
+# Installed as /usr/share/vaht/options/unfocused/pink.toml; copy it to
+# ~/.config/vaht/options/unfocused/<name>.toml and change it to make your own,
+# and choose it with `style_options = { unfocused = "<name>" }` in settings.toml.
+
+group = "Reds and purples"
+unf_dark = "#14060e"
+unf_mid = "#772254"
+unf_dark_soft = "#422f3a"
+unf_mid_soft = "#543b4a"
+unf_press_dark = "#4f1738"
+unf_press_light = "#9e2e6f"
+unf_dim = "grey55"
+unf_text = "white"

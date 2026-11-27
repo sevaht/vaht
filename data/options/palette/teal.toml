@@ -1,0 +1,21 @@
+# teal: a color palette for styles with a `palette` option (the default style
+# has one): the greys of the default look tinted teal. It sets the variables
+# the default style defines; `dim` (unfocused text and pictures) is left alone.
+# Installed as /usr/share/vaht/options/palette/teal.toml; copy it to
+# ~/.config/vaht/options/palette/<name>.toml and change it to make your own, and
+# choose it with `style_options = { palette = "<name>" }` in settings.toml.
+
+group = "Greens"
+dark = "#071212"
+mid = "#2a6f6f"
+dark_soft = "#2f4242"
+mid_soft = "#3b5454"
+light = "#68b0b0"
+press_dark = "#1c4a4a"
+press_light = "#389494"
+menu = "#040b0b"
+menu_filled = "#223030"   # a menu's body, when it is filled in: dark and muted, in the hue
+select_bg = "#68b0b040"   # behind the selected item
+select_text = "#80bcbc"   # its text, and its marks
+select_bg_filled = "#68b0b040"   # behind the selected item of a filled-in menu
+select_text_filled = "#a1cece"   # its text, and its marks

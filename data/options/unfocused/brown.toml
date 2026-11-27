@@ -1,0 +1,16 @@
+# brown: the colors of unfocused windows, for a style with an `unfocused`
+# option (the default style has one): those of the brown palette, so a style in
+# another palette has its unfocused windows and the rest of the taskbar in them.
+# Installed as /usr/share/vaht/options/unfocused/brown.toml; copy it to
+# ~/.config/vaht/options/unfocused/<name>.toml and change it to make your own,
+# and choose it with `style_options = { unfocused = "<name>" }` in settings.toml.
+
+group = "Warm"
+unf_dark = "#110c08"
+unf_mid = "#674832"
+unf_dark_soft = "#42372f"
+unf_mid_soft = "#54463b"
+unf_press_dark = "#453021"
+unf_press_light = "#8a6042"
+unf_dim = "grey55"
+unf_text = "white"

@@ -837,7 +837,9 @@ items = [
   or at once on a click; releasing a button on an item chooses it (choosing a
   style or layout leaves the menus open, as Fluxbox's style menus do,
   so one can be tried after another, and the checked item moves; a middle or
-  Shift click leaves any item's menus open); a press
+  Shift click leaves any item's menus open); a menu's title is held and
+  dragged to move that menu, within the output, and it stays where it was put
+  when the menus open again after a choice that keeps them; a press
   elsewhere closes the menus and goes on. A menu stays in the usable
   area, off the taskbar; the action that opened it, run again while it is
   open, closes it, as in fluxland. A `custom-menu` naming no menu is an
@@ -1007,7 +1009,8 @@ exactly what each element gets.
     file, as Fluxbox styles use; stretched to fill the element, or with `tile`
     repeated at its own size), or
     `"parent"`;
-  - text: `font = { family, size, weight, style }`, `text_color`,
+  - text: `font = { family, size, weight, style }` (`size` in points: a number, or
+    a sum written as text, `"8 + 2"`), `text_color`,
     `text_effect` (`{ halo = color }` or `{ shadow = color, offset = [x, y] }`),
     `justify`;
   - menu items: `bullet` (`empty`, `triangle`, `square`, `diamond`,
@@ -1236,12 +1239,12 @@ changed in place with `*`); `vaht config files` lists the layouts there are.
 
 ### 10.5 Options: choices a style lets people make
 
-A style can offer named choices, such as a color scheme or a size, so one file
+A style can offer named choices, such as a color palette or a size, so one file
 serves many looks. It declares each **option** under `[options.<option>]`:
 
 ```toml
 [options.scheme]
-label = "Color scheme"             # optional: what to call it for people
+label = "Color palette"            # optional: what to call it for people
 default = "graphite"               # required, and written inline (below)
 [options.scheme.graphite]          # a choice: a table of variables
 face = { gradient = "vertical", from = "grey30", to = "grey5" }
@@ -1283,12 +1286,22 @@ height = "$bar"                    # `$name` inside text is the variable's text
   option `scheme` works with every style that declares `scheme` and uses the
   same variable names, and a file of yours replaces a style's own choice of the
   same name.
+- An option may say `checkbox = "Menus"`: with exactly two choices it is then
+  one checkbox in the `style-options` menu, checked when its second choice (not
+  the default) is chosen, or the one `checked = "<choice>"` names, and
+  independent of every other. A group (`group = "Misc"`) holds its options in
+  one submenu, checkboxes and lists alike, the group called Misc last. The
+  default style groups its two text outlines under Text Outlines (both
+  checked, as both are on), its sizes under Sizes, and the filled-in menu
+  background and the softer shading under Misc. The built-in menu has an
+  Appearance submenu (the styles, then this list inline); the list ends with
+  "Reset all to defaults".
 - A choice that does not exist, or cannot be read, is noted as a problem
   (against its own file) and the option's default is used. Options are listed
   sorted by name, each with its default choice first.
-- **Choosing.** `settings.toml`'s `style_options = { scheme = "blue", taskbar_size =
+- **Choosing.** `settings.toml`'s `style_options = { palette = "blue", taskbar_size =
   "large" }` makes a choice for each option it names; an option left out has its
-  default. `set-setting style_options.scheme blue` (and the `style-options` menu
+  default. `set-setting style_options.palette blue` (and the `style-options` menu
   list, a submenu of choices for each option of the style in use, the one in
   effect checked, which leaves the menus open as `styles` does) change it in
   place until `save-settings`. `vaht config files` lists each option's choices,
@@ -1302,29 +1315,47 @@ height = "$bar"                    # `$name` inside text is the variable's text
   green.toml`, named `file = "<style>/green.toml"`), not beside the style: a
   `.toml` directly in `styles/` is a style. The directories under `options/` and
   `styles/` are watched, so editing a choice file restyles open windows.
-- **The default style has nine options**, each its own set of variables:
-  `scheme` (default `graphite`, the greys: the colors `dark`, `mid`, `light`,
-  `dim`, `edge`, `press_dark`, `press_light` and `menu`, and the roles made of
-  them: `surface`, `titlebar`, `caption`, `button`, `entry`, `menu_hover` and
-  the rest of the list in `data/styles/default.toml`), `titlebar_size`,
-  `taskbar_size` and `menu_size` (each `small`, `medium`, the default, and
-  `large`, the taskbar also `xlarge`: the heights and font sizes of that part),
-  `font` (`dejavu_sans`, the default, `liberation_sans` and `sans`, fontconfig's
-  choice; yours go in `options/font/<name>.toml` as `font_family = "..."`),
-  `menu_title` (`scheme`, the scheme's own title, and `slate`, a grey-blue
-  horizontal gradient that goes with any scheme), `text_outline` (`scheme`,
-  the default: what the scheme says, a black outline for graphite; `black`, an
-  outline for any scheme; `none`), `buttons` (`backed`, the default: each
-  window button has the scheme's background; `flat`: drawn straight on the
-  titlebar) and `menu_marks` (`classic`:
-  a triangle and a filled box; `chevrons`: `>`, `>>` on the hovered item, and a
-  tick). vaht installs more schemes in `/usr/share/vaht/options/scheme/`: blue,
-  teal, green, amber, crimson, purple, slate, red, orange, gold, cyan, indigo,
-  pink and brown set the colors only, so every part follows them; `nord`,
-  `sage`, `green_tea` and `minimo` take their palettes from Fluxbox styles of
-  those names and give the roles whole (flat or gradient surfaces, dark text on
-  a light titlebar, no text halo, the corners rounded). Any style that declares
-  a `scheme` option with those variables can take them.
+- **The default style has nine options**, each its own set of variables. Its
+  look is one appearance, used wherever it applies: a *focused face* is the
+  palette's `accent`, a gradient, in the focused window's titlebar, the
+  taskbar's focused entry and a menu's title, and the border of a focused
+  window and of a menu is the accent too; an *unfocused face* is in an
+  unfocused titlebar and the taskbar's other entries (an unfocused window's
+  border is its own muted color); the *ground* is what the taskbar's bar sits
+  on. Window buttons and the title draw on the titlebar, which is in one
+  piece. The choices are `palette` (default `graphite`: colors only),
+  `unfocused` (whose colors the unfocused faces are in: `matching`, the
+  default, the palette's own, or the name of any palette, whose are in
+  `options/unfocused/<name>.toml`: graphite's gives a grey style with only the
+  focused window in color) and `shading` (`deep`, the default: gradients fade
+  to the palette's `dark`, near black; `soft`: to its muted `dark_soft`, and the
+  unfocused faces are the `mid_soft` and `dark_soft` of the palette they are
+  in). A menu's body is the one exception: `menu_body` is `dark`, or `filled`
+  (a dark, muted body in the palette's hue), and the palette gives each its own
+  color and its own selection (a tint behind the item, and a bright color for
+  its text and marks). A menu's marks are always the modern ones, chevrons
+  (`>>` on the item under the pointer) and a tick; a style may use the classic
+  ones (`bullet = "triangle"`, `check = "box"`). Windows are square and menus
+  rounded. A palette is the seven colors a tint sets (`dark`, `mid`, `light`,
+  `dim`, `press_dark`, `press_light`, `menu`) with the soft forms `dark_soft`
+  and `mid_soft`, and the colors made of them (`menu_filled`, `text`,
+  `accent`, `on_accent`, `select_bg` and `select_text` and their `_filled`
+  forms, `halo`, the color of the text outline, and the rest of the list in
+  `data/styles/default.toml`), which a palette may give whole. Then the
+  one-thing options: `bar_outline` and `menu_outline` (the text outline, on by
+  default, of the titlebars and taskbar and of menus with their marks, each
+  turned off alone) and `titlebar_size`, `taskbar_size` and `menu_size` (each
+  `small`, `medium`, the default, and `large`, the taskbar also `xlarge`: the
+  heights and font sizes of that part). The font is DejaVu Sans; a font's size
+  may be a number or a sum written as text, `"8 + 2"`, the way lengths are.
+- vaht installs the palettes in `/usr/share/vaht/options/palette/`: blue, teal,
+  green, amber, crimson, purple, slate, red, orange, gold, cyan, indigo, pink and
+  brown set the seven colors, so every part follows (`blue` is the muted frost
+  blue of the Nord colors). A choice's table or file may say `group =
+  "Blues"` (not a variable): the `style-options` menu and the settings window
+  list the choices of a group together, the default first, then the choices in
+  no group, then each group. Any style that declares `palette` with the
+  variables of the default style can take them.
 - `vaht import fluxbox` writes styles without options; `fluxbox-style` folds
   variants into options (§11).
 
