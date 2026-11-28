@@ -430,3 +430,128 @@ fn inferring_icons_can_be_turned_off() {
     assert_eq!(at(&opened, item_point(0)), MENU_BODY, "not inferred");
     assert_eq!(at(&opened, item_point(2)), NAMED_ICON, "a named one stays");
 }
+
+/// Starts vaht with a root menu of one item running `vaht-late-program`,
+/// and the data `files`.
+fn start_with_late_program(files: &[(&str, &[u8])]) -> (HeadlessVaht, TestClient) {
+    let menus = "[menu.root]\ntitle = \"test\"\nitems = [\n\
+         { label = \"Late\", command = \"exec vaht-late-program\" },\n]\n\
+         [menu.window]\nitems = []\n[menu.workspace]\nitems = []\n";
+    let vaht = HeadlessVaht::start_with_files(
+        Path::new(EXECUTABLE),
+        &[("menus.toml", menus.as_bytes())],
+        files,
+    );
+    let client = TestClient::connect(vaht.socket());
+    (vaht, client)
+}
+
+/// Writes the file `name` in `data`, making the directories it needs.
+fn install(data: &Path, name: &str, contents: &[u8]) {
+    let path = data.join(name);
+    std::fs::create_dir_all(path.parent().expect("a directory")).expect("made");
+    std::fs::write(path, contents).expect("written");
+}
+
+/// Opens and closes the root menu until its first item's icon is `color`,
+/// or a few seconds pass; returns whether it was.
+fn shows_icon_in_time(client: &mut TestClient, color: [u8; 3]) -> bool {
+    for _ in 0..60 {
+        client.click(OPENED_AT.0, OPENED_AT.1, BUTTON_RIGHT);
+        let shown = at(&client.screenshot(), item_point(0)) == color;
+        client.type_chord(&[keys::ESCAPE]);
+        if shown {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    false
+}
+
+const ENTRY: &[u8] =
+    b"[Desktop Entry]\nName=Late\nExec=vaht-late-program %U\nIcon=vaht-late-icon\n";
+
+#[test]
+fn a_desktop_entry_installed_while_vaht_runs_gives_its_program_an_icon() {
+    let (vaht, mut client) = start_with_late_program(&[(
+        "applications/other.desktop",
+        b"[Desktop Entry]\nExec=other\n",
+    )]);
+    client.click(OPENED_AT.0, OPENED_AT.1, BUTTON_RIGHT);
+    assert_eq!(
+        at(&client.screenshot(), item_point(0)),
+        MENU_BODY,
+        "no icon yet"
+    );
+    client.type_chord(&[keys::ESCAPE]);
+    install(
+        vaht.data_directory(),
+        "icons/hicolor/32x32/apps/vaht-late-icon.png",
+        &solid_png(32, PROGRAM_ICON),
+    );
+    install(vaht.data_directory(), "applications/late.desktop", ENTRY);
+    assert!(
+        shows_icon_in_time(&mut client, PROGRAM_ICON),
+        "found without a reload"
+    );
+}
+
+#[test]
+fn an_edited_desktop_entry_changes_the_icon_and_one_in_a_new_directory_counts() {
+    let (vaht, mut client) = start_with_late_program(&[
+        ("applications/late.desktop", ENTRY),
+        (
+            "icons/hicolor/32x32/apps/vaht-late-icon.png",
+            &solid_png(32, PROGRAM_ICON),
+        ),
+        (
+            "icons/hicolor/32x32/apps/vaht-other-icon.png",
+            &solid_png(32, NAMED_ICON),
+        ),
+    ]);
+    assert!(
+        shows_icon_in_time(&mut client, PROGRAM_ICON),
+        "the entry's icon"
+    );
+    // Edited in place: the entry names another icon.
+    install(
+        vaht.data_directory(),
+        "applications/late.desktop",
+        b"[Desktop Entry]\nName=Late\nExec=vaht-late-program %U\nIcon=vaht-other-icon\n",
+    );
+    assert!(
+        shows_icon_in_time(&mut client, NAMED_ICON),
+        "the edited entry's icon"
+    );
+    // Removed, and one made in a new subdirectory.
+    std::fs::remove_file(vaht.data_directory().join("applications/late.desktop")).expect("removed");
+    install(
+        vaht.data_directory(),
+        "applications/vendor/late.desktop",
+        b"[Desktop Entry]\nName=Late\nExec=vaht-late-program %U\nIcon=vaht-late-icon\n",
+    );
+    assert!(
+        shows_icon_in_time(&mut client, PROGRAM_ICON),
+        "the entry in the new directory"
+    );
+}
+
+#[test]
+fn an_applications_directory_made_after_vaht_started_is_watched() {
+    let (vaht, mut client) = start_with_late_program(&[(
+        "icons/hicolor/32x32/apps/vaht-late-icon.png",
+        &solid_png(32, PROGRAM_ICON),
+    )]);
+    client.click(OPENED_AT.0, OPENED_AT.1, BUTTON_RIGHT);
+    assert_eq!(
+        at(&client.screenshot(), item_point(0)),
+        MENU_BODY,
+        "no icon yet"
+    );
+    client.type_chord(&[keys::ESCAPE]);
+    install(vaht.data_directory(), "applications/late.desktop", ENTRY);
+    assert!(
+        shows_icon_in_time(&mut client, PROGRAM_ICON),
+        "found without a reload"
+    );
+}

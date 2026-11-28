@@ -244,6 +244,12 @@ pub struct Compositor {
     typesetter: Typesetter,
     /// Finds application icons, for the taskbar and menus.
     icons: vaht_ui::IconStore,
+    /// A watch on the desktop entries, which makes the icons forgotten when
+    /// one changes.
+    entry_watch: Option<crate::entry_watch::EntryWatch>,
+    /// The pause before the icons are forgotten after a desktop entry
+    /// changed; another change replaces it.
+    pub(crate) entry_refresh: Option<Timer<Self>>,
     /// Draws screenshots for capture clients.
     pub(crate) capture: ScreenCapture,
     /// vaht's own keymap, restored after a virtual keyboard used its own.
@@ -434,6 +440,8 @@ impl Compositor {
             tray_grant: None,
             typesetter: Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH),
             icons: vaht_ui::IconStore::from_environment(),
+            entry_watch: None,
+            entry_refresh: None,
             capture: ScreenCapture::default(),
             physical_keymap,
             keyboard_focus: None,
@@ -468,6 +476,7 @@ impl Compositor {
             rotation.follow(self.config.settings.logging);
         }
         self.config_source.watch(&self.loop_handle, &self.ledger);
+        self.watch_desktop_entries();
         self.start_taskbar_services();
         if let Backend::Drm(backend) = &mut self.backend {
             backend.set_input_settings(&self.config.settings.input);
@@ -751,10 +760,7 @@ impl Compositor {
             backend.set_input_settings(&config.settings.input);
         }
         // A reload is when icons installed or changed since show.
-        self.icons.forget();
-        for taskbar in self.taskbars.iter_mut() {
-            taskbar.forget_icons();
-        }
+        self.forget_desktop_entries();
         self.input.bindings_changed(&config.bindings);
         self.config = config;
         self.follow_session_settings(&session_before);
@@ -2530,6 +2536,32 @@ impl Compositor {
     pub(crate) fn show_time_change(&mut self) {
         self.schedule_render();
         self.schedule_clock();
+    }
+
+    /// Watches the directories of desktop entries, so a program installed or
+    /// an entry edited while vaht runs shows its icon without a reload.
+    fn watch_desktop_entries(&mut self) {
+        match crate::entry_watch::EntryWatch::start(
+            &self.loop_handle,
+            &self.ledger,
+            self.icons.data_directories(),
+        ) {
+            Ok(watch) => self.entry_watch = Some(watch),
+            Err(error) => tracing::debug!(
+                error = &error as &dyn std::error::Error,
+                "not watching the desktop entries; a reload looks at them again"
+            ),
+        }
+    }
+
+    /// Forgets what the icon store found, and has the taskbars look again,
+    /// so icons and entries installed or changed since show.
+    pub(crate) fn forget_desktop_entries(&mut self) {
+        self.icons.forget();
+        for taskbar in self.taskbars.iter_mut() {
+            taskbar.forget_icons();
+        }
+        self.schedule_render();
     }
 
     /// Starts what the taskbar keeps running: its clock's alarm and its

@@ -23,6 +23,7 @@ mod compositor;
 mod config;
 mod config_banner;
 mod cursor;
+mod entry_watch;
 pub mod event_source;
 mod execution;
 mod focus_target;

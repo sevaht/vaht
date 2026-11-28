@@ -377,7 +377,15 @@ rest by name, so a setting never silently does nothing:
   data directory, Flatpak's and Snap's too) and that entry's `Icon`, looked up
   in the icon theme the GTK settings name, the themes it inherits, `hicolor`,
   and every other installed theme (by each theme's `index.theme`), and then in
-  `pixmaps`: PNG, SVG, XPM and the other common picture formats; from
+  `pixmaps`: PNG, SVG, XPM and the other common picture formats; among entries
+  that match, one that runs its program with nothing but field codes (`%U`)
+  comes before one that runs it with arguments, as a browser's web apps do.
+  What is found, and what is not, is remembered until a reload, and until
+  half a second after a `.desktop` file is written, moved, created or deleted
+  in an `applications` directory of any data directory (or one in it), so an
+  installed program or an edited entry shows without a reload; vaht watches
+  those directories, and one that appears later. A picture changed on its own
+  shows after a reload; from
   `iconbar.usePixmap`), `[taskbar.tray]` with `pin_left` and `pin_right`
   (item ids, from `systray.pinLeft` and `systray.pinRight`), and
   `[taskbar.clock]` with `format`, checked when read. The tray hosts

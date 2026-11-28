@@ -52,7 +52,7 @@ pub struct HeadlessVaht {
     /// Its configuration directory; removed with the value.
     config: tempfile::TempDir,
     /// Its only XDG data directory; removed with the value.
-    _data: tempfile::TempDir,
+    data: tempfile::TempDir,
     /// Its XDG state directory, where its dialogs keep their history;
     /// removed with the value.
     state: tempfile::TempDir,
@@ -295,7 +295,7 @@ impl HeadlessVaht {
             socket: PathBuf::new(),
             runtime,
             config,
-            _data: data_directory,
+            data: data_directory,
             state,
             logs,
         };
@@ -333,6 +333,13 @@ impl HeadlessVaht {
     #[must_use]
     pub fn state_directory(&self) -> &Path {
         self.state.path()
+    }
+
+    /// Returns vaht's data directory, where a test can install desktop
+    /// entries and icons while vaht runs.
+    #[must_use]
+    pub fn data_directory(&self) -> &Path {
+        self.data.path()
     }
 
     /// Returns vaht's configuration directory, where a test can change the

@@ -129,6 +129,13 @@ impl IconStore {
     const EXTRA_DATA_DIRECTORIES: [&str; 2] =
         ["/var/lib/flatpak/exports/share", "/var/lib/snapd/desktop"];
 
+    /// Returns the data directories the store looks in, most important
+    /// first.
+    #[must_use]
+    pub fn data_directories(&self) -> &[PathBuf] {
+        &self.data_directories
+    }
+
     /// Creates a store looking in `data_directories`, most important first.
     #[must_use]
     pub fn new(data_directories: Vec<PathBuf>) -> Self {
