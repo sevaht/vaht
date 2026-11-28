@@ -659,6 +659,9 @@ pub(crate) enum WindowManagerAction {
     Shade,
     /// Toggles showing the window on every workspace.
     Stick,
+    /// Toggles the window showing only the wallpaper through its
+    /// transparent parts, not the windows behind it.
+    PseudoTransparent,
     /// Places the window on a cell of the usable area, given in thousandths
     /// of its width and height (`tile <x> <y> <width> <height>`; the left
     /// half is `tile 0 0 500 1000`).
@@ -957,6 +960,7 @@ impl WindowManagerAction {
             "fullscreen" => without_arguments(Self::Fullscreen),
             "shade" => without_arguments(Self::Shade),
             "stick" => without_arguments(Self::Stick),
+            "pseudo-transparent" => without_arguments(Self::PseudoTransparent),
             "snap-step" => arguments.parse().map(Self::SnapStep).map_err(|_unknown| {
                 format!("`snap-step` takes left, right, up or down, not `{arguments}`")
             }),
@@ -1071,6 +1075,7 @@ impl fmt::Display for WindowManagerAction {
             Self::Fullscreen => formatter.write_str("fullscreen"),
             Self::Shade => formatter.write_str("shade"),
             Self::Stick => formatter.write_str("stick"),
+            Self::PseudoTransparent => formatter.write_str("pseudo-transparent"),
             Self::Tile(cell) => write!(formatter, "tile {cell}"),
             Self::SnapStep(direction) => write!(formatter, "snap-step {direction}"),
             Self::Move(distance) => write!(formatter, "move {} {}", distance.x, distance.y),
@@ -1288,6 +1293,7 @@ mod tests {
             WindowManagerAction::Fullscreen,
             WindowManagerAction::Shade,
             WindowManagerAction::Stick,
+            WindowManagerAction::PseudoTransparent,
             WindowManagerAction::SnapStep(Direction::Left),
             WindowManagerAction::Tile(TileCell::new(500, 0, 500, 500).expect("a valid cell")),
             WindowManagerAction::Move((-10, 20).into()),

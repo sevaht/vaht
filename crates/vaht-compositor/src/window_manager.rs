@@ -516,10 +516,9 @@ impl WindowManager {
                 });
             }
             WindowManagerAction::Minimize => self.minimize(window),
-            WindowManagerAction::Shade => self.change_window(window, |target, _| {
-                target.set_shaded(!target.state().is_shaded);
-            }),
+            WindowManagerAction::Shade => self.toggle_shaded(window),
             WindowManagerAction::Stick => self.toggle_sticky(window),
+            WindowManagerAction::PseudoTransparent => self.toggle_pseudo_transparent(window),
             WindowManagerAction::Move(distance) => {
                 self.change_window(window, |target, metrics| target.move_by(*distance, metrics));
             }
@@ -1293,6 +1292,21 @@ impl WindowManager {
             }
         }
         self.focus_most_recent();
+    }
+
+    /// Rolls `window` up into its titlebar, or, when it is, down again.
+    fn toggle_shaded(&mut self, window: Option<WindowId>) {
+        self.change_window(window, |target, _| {
+            target.set_shaded(!target.state().is_shaded);
+        });
+    }
+
+    /// Switches `window` between showing the windows behind it through its
+    /// clear parts and showing only the wallpaper.
+    fn toggle_pseudo_transparent(&mut self, window: Option<WindowId>) {
+        self.change_window(window, |target, _| {
+            target.set_pseudo_transparent(!target.is_pseudo_transparent());
+        });
     }
 
     /// Shows `window` on every workspace, or, when it already is, only on

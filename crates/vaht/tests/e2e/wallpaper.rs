@@ -74,6 +74,23 @@ fn a_pseudo_transparent_window_shows_only_the_wallpaper() {
 }
 
 #[test]
+fn the_pseudo_transparent_action_switches_a_window_between_the_two_looks() {
+    let (_vaht, mut client) =
+        start_with_bindings(&centered(""), "[keys]\nF1 = \"pseudo-transparent\"\n");
+    client.open_windows(2);
+    client.clear_window(1);
+    assert_eq!(client.screenshot().rgb(MIDDLE.0, MIDDLE.1), WINDOW_COLOR);
+    client.type_chord(&[keys::F1]);
+    assert_eq!(client.screenshot().rgb(MIDDLE.0, MIDDLE.1), SKY, "on");
+    client.type_chord(&[keys::F1]);
+    assert_eq!(
+        client.screenshot().rgb(MIDDLE.0, MIDDLE.1),
+        WINDOW_COLOR,
+        "off"
+    );
+}
+
+#[test]
 fn set_alpha_makes_a_window_translucent_and_nothing_restores_it() {
     let (_vaht, mut client) = start_with_bindings(
         &centered(""),

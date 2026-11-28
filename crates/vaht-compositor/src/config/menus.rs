@@ -397,6 +397,8 @@ pub(crate) enum WindowToggle {
     Shade,
     /// On every workspace.
     Stick,
+    /// Showing only the wallpaper through its transparent parts.
+    PseudoTransparent,
     /// Maximized.
     Maximize,
     /// Minimized.
@@ -411,6 +413,7 @@ impl WindowToggle {
         match self {
             Self::Shade => "Shade",
             Self::Stick => "Stick",
+            Self::PseudoTransparent => "Pseudo-Transparent",
             Self::Maximize => "Maximize",
             Self::Minimize => "Minimize",
             Self::Fullscreen => "Fullscreen",
@@ -422,6 +425,7 @@ impl WindowToggle {
         match self {
             Self::Shade => WindowManagerAction::Shade,
             Self::Stick => WindowManagerAction::Stick,
+            Self::PseudoTransparent => WindowManagerAction::PseudoTransparent,
             Self::Maximize => WindowManagerAction::Maximize(Axes::Both),
             Self::Minimize => WindowManagerAction::Minimize,
             Self::Fullscreen => WindowManagerAction::Fullscreen,

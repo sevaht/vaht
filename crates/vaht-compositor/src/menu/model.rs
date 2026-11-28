@@ -457,6 +457,7 @@ impl<'state> MenuBuilder<'state> {
         let is_on = match toggle {
             WindowToggle::Shade => state.is_shaded,
             WindowToggle::Stick => state.is_sticky,
+            WindowToggle::PseudoTransparent => window.is_pseudo_transparent(),
             WindowToggle::Maximize => window.placement().is_fully_maximized(),
             WindowToggle::Minimize => state.is_minimized,
             WindowToggle::Fullscreen => window.placement().is_fullscreen(),

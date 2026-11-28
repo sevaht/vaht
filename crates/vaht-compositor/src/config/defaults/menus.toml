@@ -46,6 +46,7 @@ items = [
     { generate = "send-to-workspace" },
     { generate = "layer" },
     { generate = "alpha" },
+    { toggle = "pseudo-transparent" },
     { separator = true },
     { label = "Close", command = "close" },
 ]

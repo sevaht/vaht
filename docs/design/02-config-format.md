@@ -457,7 +457,7 @@ A command is written in one of three forms:
 | Area | Actions |
 |---|---|
 | Programs and session | `exec <command line>`, `focus-or-exec <app id> <command line>` (brings the topmost window with that application id forward, as the taskbar does, or runs the command if there is none; the id is compared without regard to case), `reload`, `exit`, `set-environment NAME value`, `set-setting key value`, `unset-setting key`, `save-settings` |
-| Window state | `close`, `kill`, `minimize`, `maximize [horizontal\|vertical]`, `fullscreen`, `shade`, `stick`, `raise`, `lower`, `set-layer <layer>`, `set-alpha <n>`, `toggle-frame`, `set-title [title]`, `set-title-dialog`, `mark-window <key>`, `go-to-marked-window <key>` |
+| Window state | `close`, `kill`, `minimize`, `maximize [horizontal\|vertical]`, `fullscreen`, `shade`, `stick`, `pseudo-transparent` (toggles showing only the wallpaper through the window's clear parts, as the rule of that name does), `raise`, `lower`, `set-layer <layer>`, `set-alpha <n>`, `toggle-frame`, `set-title [title]`, `set-title-dialog`, `mark-window <key>`, `go-to-marked-window <key>` |
 | Window placement | `move <dx> <dy>`, `move-to <x> <y>`, `resize <dw> <dh>`, `resize-to <w> <h>`, `snap-step <direction>`, `tile <cell>`, `send-to-output next\|previous\|<n>`, `arrange <style>` |
 | Grabs | `start-moving`, `start-resizing [nearest-corner\|<corner>]` |
 | Focus | `focus`, `next-window`, `previous-window`, `focus-direction <direction>`, `show-desktop` |
@@ -838,7 +838,7 @@ items = [
   - `separator`;
   - `icon` (optional on any item).
 - **Built so far:** `command`, `submenu`, `toggle` (`shade`, `stick`,
-  `maximize`, `minimize`, `fullscreen`), `generate` (`workspaces`,
+  `pseudo-transparent`, `maximize`, `minimize`, `fullscreen`), `generate` (`workspaces`,
   `send-to-workspace`, `window-list`, `alpha`, `layer`, `styles`; `inline =
   true` lists in place),
   `separator`, and a bare `label` (drawn disabled). The actions
