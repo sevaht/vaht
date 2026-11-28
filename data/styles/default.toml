@@ -458,7 +458,10 @@ text_color = "$mn_text"
 text_effect = "$mn_outline"
 glyph_color = "$mn_text"
 justify = "left"
-padding = [0, 20, 0, 21]
+# The room at each side: a menu item's icon (18 pixels at the usual height, a
+# pixel in) and a check mark or bullet (the item's height) fit in it, with a
+# few pixels between them and the text.
+padding = [0, 23, 0, 24]
 height = "$menu_item_height"
 bullet = "chevron"
 bullet_position = "right"

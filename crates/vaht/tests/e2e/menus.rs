@@ -412,7 +412,7 @@ fn an_item_running_a_program_shows_its_icon_in_the_margin_and_the_text_stays_put
     );
     assert_eq!(at(&opened, item_point(2)), NAMED_ICON, "named");
     // The text begins at the margin, as it does for an item with no icon.
-    let margin = OPENED_AT.0 + BORDER + 21;
+    let margin = OPENED_AT.0 + BORDER + 24;
     for index in 0..3 {
         let left = text_left(&opened, index);
         assert!(
