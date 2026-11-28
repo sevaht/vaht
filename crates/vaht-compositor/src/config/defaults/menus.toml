@@ -20,6 +20,10 @@
 #                                          vaht's own menu, the same wherever
 #                                          it is put
 #   { builtin = "window" }                 the items of a built-in menu, in place
+#   icon = "name-or-/path/to/image"        on a command, submenu or generated list:
+#                                          its icon; an item that runs a program
+#                                          shows the program's without one
+#                                          (`icon = ""` for none)
 #   { separator = true }                   a line
 #   { label = "..." }                      text that does nothing
 

@@ -10,7 +10,7 @@ use tiny_skia::{
 
 use crate::color::Color;
 use crate::geometry::{Insets, Rect};
-use crate::icon::WidgetIcon;
+use crate::icon::{IconPlacement, WidgetIcon};
 use crate::image::Image;
 use crate::layout::{Content, Layout, Placed};
 use crate::style::{BorderStyle, Style, WidgetState};
@@ -104,8 +104,21 @@ impl<'pixmap> Canvas<'pixmap> {
                 inner = inner.inset(Insets::uniform(style.border.width));
             }
             if let Some(icon) = &placed.icon {
-                self.draw_icon(icon, WidgetIcon::square_in(placed.rect));
-                inner = inner.without_left(WidgetIcon::span(placed.rect.height));
+                // An icon in the margin shares it with a mark there, so with
+                // one the icon goes after the margin and the text after it.
+                let has_mark_at_left = placed.mark.is_some() && placed.mark_side == MarkSide::Left;
+                let (square, offset) = match icon.placement {
+                    IconPlacement::InMargin if has_mark_at_left => (
+                        WidgetIcon::square_in(placed.rect.without_left(style.padding.left)),
+                        WidgetIcon::span(placed.rect.height),
+                    ),
+                    IconPlacement::BeforeText | IconPlacement::InMargin => (
+                        WidgetIcon::square_in(placed.rect),
+                        icon.text_offset(placed.rect.height, style.padding.left),
+                    ),
+                };
+                self.draw_icon(icon, square);
+                inner = inner.without_left(offset);
             }
             if let Some(mark) = placed.mark {
                 let side = placed.rect.height.min(placed.rect.width);

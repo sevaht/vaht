@@ -116,6 +116,8 @@ format = "%k:%M"
 [menus]
 # Whether lists of windows show each window's icon beside its title.
 window_icons = true
+# Whether an item that runs a program and names no icon shows the program's.
+infer_icons = true
 
 [blur]
 # Whether programs that ask (foot's blur=yes, panels) have what is behind

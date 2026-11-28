@@ -803,10 +803,7 @@ impl TaskbarContent {
                     .with_hit(TaskbarHit::TrayItem(entry.key))
                     .without_background();
                 match &entry.icon {
-                    Some(icon) => slot.with_icon(WidgetIcon {
-                        icon: icon.clone(),
-                        emphasis: IconEmphasis::Full,
-                    }),
+                    Some(icon) => slot.with_icon(WidgetIcon::new(icon.clone(), IconEmphasis::Full)),
                     None => slot,
                 }
             })
@@ -913,14 +910,14 @@ impl WindowListEntry {
             .with_button(TaskbarHit::Entry(self.window))
             .with_state(state);
         match &self.icon {
-            Some(icon) => entry.with_icon(WidgetIcon {
-                icon: icon.clone(),
-                emphasis: if self.is_minimized {
+            Some(icon) => entry.with_icon(WidgetIcon::new(
+                icon.clone(),
+                if self.is_minimized {
                     IconEmphasis::Faded
                 } else {
                     IconEmphasis::Full
                 },
-            }),
+            )),
             None => entry,
         }
     }

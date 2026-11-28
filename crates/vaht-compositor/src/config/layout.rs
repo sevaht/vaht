@@ -17,7 +17,7 @@ use super::library::Library;
 
 /// What a layout may set: whole tables, or single settings, by their dotted
 /// path in `settings.toml`. Presentation, not behavior.
-pub(crate) const PRESENTATION: [&str; 10] = [
+pub(crate) const PRESENTATION: [&str; 11] = [
     "taskbar",
     "windows.frame",
     "windows.focused_alpha",
@@ -28,6 +28,7 @@ pub(crate) const PRESENTATION: [&str; 10] = [
     "windows.snapping.layouts",
     "blur",
     "menus.window_icons",
+    "menus.infer_icons",
 ];
 
 /// The layout in effect, and what it contributes.

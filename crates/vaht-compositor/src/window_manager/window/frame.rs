@@ -656,10 +656,7 @@ impl PanelContent for Titlebar {
             .with_size(SizePolicy::Fill { weight: 1 })
             .with_hit(TitlebarHit::Label);
         let label = match &self.icon {
-            Some(icon) => label.with_icon(WidgetIcon {
-                icon: icon.clone(),
-                emphasis: IconEmphasis::Full,
-            }),
+            Some(icon) => label.with_icon(WidgetIcon::new(icon.clone(), IconEmphasis::Full)),
             None => label,
         };
         let children = self

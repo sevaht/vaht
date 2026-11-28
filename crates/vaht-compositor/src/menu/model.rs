@@ -120,6 +120,17 @@ impl MenuItem {
         }
     }
 
+    /// Returns whether the item shows a check mark.
+    pub(crate) const fn is_checked(&self) -> bool {
+        matches!(
+            self,
+            Self::Choice {
+                mark: Some(true),
+                ..
+            }
+        )
+    }
+
     /// Returns whether the item shows an icon.
     pub(crate) const fn has_icon(&self) -> bool {
         matches!(
@@ -350,6 +361,16 @@ impl<'state> MenuBuilder<'state> {
         }
     }
 
+    /// Returns the icon of the item `entry`: the one it names, else, if it
+    /// names none, the one for the program it runs.
+    fn icon_for(&self, entry: &MenuEntry) -> Option<vaht_ui::Icon> {
+        let name = match entry.icon() {
+            Some(name) => name.to_owned(),
+            None => entry.inferred_icon()?.key(),
+        };
+        self.named_icons.get(&name).cloned()
+    }
+
     /// Returns `definition`, which a pipe menu's command printed, as a
     /// model.
     pub(crate) fn build_printed(&self, definition: &MenuDefinition) -> MenuModel {
@@ -361,22 +382,16 @@ impl<'state> MenuBuilder<'state> {
         let mut items = Vec::new();
         for entry in &definition.items {
             match entry {
-                MenuEntry::Command {
-                    label,
-                    command,
-                    icon,
-                } => items.push(MenuItem::Choice {
+                MenuEntry::Command { label, command, .. } => items.push(MenuItem::Choice {
                     label: label.clone(),
                     choice: MenuChoice::Run {
                         command: command.clone(),
                         window: self.window,
                     },
                     mark: None,
-                    icon: icon
-                        .as_ref()
-                        .and_then(|name| self.named_icons.get(name).cloned()),
+                    icon: self.icon_for(entry),
                 }),
-                MenuEntry::Submenu { label, menu, icon } => {
+                MenuEntry::Submenu { label, menu, .. } => {
                     if depth >= Self::MAX_DEPTH {
                         tracing::warn!(menu, "menus nest too deep; not following");
                         continue;
@@ -385,23 +400,15 @@ impl<'state> MenuBuilder<'state> {
                         items.push(MenuItem::Submenu {
                             label: label.clone(),
                             menu: self.build_definition(submenu, depth + 1),
-                            icon: icon
-                                .as_ref()
-                                .and_then(|name| self.named_icons.get(name).cloned()),
+                            icon: self.icon_for(entry),
                             pipe: None,
                         });
                     }
                 }
-                MenuEntry::Pipe {
-                    label,
-                    command,
-                    icon,
-                } => items.push(MenuItem::Submenu {
+                MenuEntry::Pipe { label, command, .. } => items.push(MenuItem::Submenu {
                     label: label.clone(),
                     menu: Self::waiting(),
-                    icon: icon
-                        .as_ref()
-                        .and_then(|name| self.named_icons.get(name).cloned()),
+                    icon: self.icon_for(entry),
                     pipe: Some(command.clone()),
                 }),
                 MenuEntry::Toggle { label, toggle } => {
@@ -414,6 +421,7 @@ impl<'state> MenuBuilder<'state> {
                     label,
                     generator,
                     is_inline,
+                    ..
                 } => {
                     let generated = self.generate(*generator);
                     if *is_inline {
@@ -430,7 +438,7 @@ impl<'state> MenuBuilder<'state> {
                                 items: generated,
                             },
                             label,
-                            icon: None,
+                            icon: self.icon_for(entry),
                             pipe: None,
                         });
                     }

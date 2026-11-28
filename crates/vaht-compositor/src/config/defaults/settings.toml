@@ -162,6 +162,10 @@ submenu_delay_ms = 200
 search = "item-start"
 # Whether lists of windows show each window's icon beside its title.
 window_icons = true
+# Whether an item that runs a program (`exec`, `focus-or-exec`) and says nothing
+# of its icon shows the program's: the icon of its desktop entry or the icon
+# theme. `icon = ""` on an item says it has none.
+infer_icons = true
 
 [wallpaper]
 # An image (PNG, JPEG, WebP, GIF and other common formats) drawn under everything, such as "~/Pictures/sky.png" ("~/" is

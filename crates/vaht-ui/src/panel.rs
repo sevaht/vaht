@@ -1360,4 +1360,108 @@ mod tests {
             "a stroked mark is outlined too"
         );
     }
+
+    /// An item with an icon in `placement`, and a check mark at its left if
+    /// `has_mark`.
+    struct IconItem {
+        placement: crate::icon::IconPlacement,
+        has_mark: bool,
+    }
+
+    impl PanelContent for IconItem {
+        type Hit = ();
+
+        fn build(&self) -> Widget<()> {
+            let pixmap = Pixmap::new(18, 18).map(|mut pixmap| {
+                pixmap.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+                pixmap
+            });
+            let icon = crate::icon::Icon::fitted(&pixmap.expect("a pixmap"), 18).expect("an icon");
+            let mut widget = crate::icon::WidgetIcon::new(icon, crate::IconEmphasis::Full);
+            widget.placement = self.placement;
+            let item = Widget::text(StyleElement::MenuItem, "Hello".to_owned()).with_icon(widget);
+            if self.has_mark {
+                item.with_mark_on(Glyph::Check, crate::widget::MarkSide::Left)
+            } else {
+                item
+            }
+        }
+
+        fn state(&self) -> WidgetState {
+            WidgetState::Focused
+        }
+    }
+
+    /// Returns where the icon's red starts and ends, and where the text's
+    /// white starts, across a 100 by 20 item with a 21 pixel margin.
+    fn icon_and_text_columns(placement: crate::icon::IconPlacement, has_mark: bool) -> [u32; 3] {
+        let style = "[menu.item]\ntexture = { solid = \"black\" }\ntext_color = \"white\"\n\
+                     glyph_color = \"white\"\npadding = [0, 0, 0, 21]\njustify = \"left\"\n";
+        let layers = crate::style::StyleLayers::from_toml(style).expect("a valid style");
+        let mut typesetter = Typesetter::new(Typesetter::DEFAULT_DOTS_PER_INCH);
+        let mut panel = Panel::new(
+            IconItem {
+                placement,
+                has_mark,
+            },
+            Size::new(100, 20),
+        );
+        assert!(panel.paint(&Style::resolve(&layers), &mut typesetter));
+        let pixels = panel.pixels().expect("painted");
+        let column = |is_wanted: &dyn Fn(u8, u8, u8) -> bool, from_the_end: bool| {
+            let mut columns = (0..100).filter(|x| {
+                (0..20).any(|y| {
+                    let pixel = pixels.pixel(*x, y).expect("inside");
+                    is_wanted(pixel.red(), pixel.green(), pixel.blue())
+                })
+            });
+            if from_the_end {
+                columns.next_back()
+            } else {
+                columns.next()
+            }
+            .expect("drawn")
+        };
+        let is_red = |red: u8, green: u8, _: u8| red > 200 && green < 60;
+        let is_white = |red: u8, green: u8, blue: u8| red > 200 && green > 200 && blue > 200;
+        let (start, end) = (column(&is_red, false), column(&is_red, true));
+        // The text is the first white after the icon (a check mark's white
+        // may come before it).
+        let text = (end + 1..100)
+            .find(|x| {
+                (0..20).any(|y| {
+                    let pixel = pixels.pixel(*x, y).expect("inside");
+                    is_white(pixel.red(), pixel.green(), pixel.blue())
+                })
+            })
+            .expect("text is drawn");
+        [start, end, text]
+    }
+
+    #[test]
+    fn an_icon_in_the_margin_leaves_the_text_where_it_is() {
+        use crate::icon::IconPlacement;
+        let [start, end, text] = icon_and_text_columns(IconPlacement::InMargin, false);
+        assert!(
+            start <= 2 && end < 21,
+            "the icon is in the margin: {start}..{end}"
+        );
+        assert!(
+            (21..30).contains(&text),
+            "the text starts at the margin, not after the icon: {text}"
+        );
+        let [_, _, before] = icon_and_text_columns(IconPlacement::BeforeText, false);
+        assert!(
+            before >= 41,
+            "an icon before the text pushes it on: {before}"
+        );
+    }
+
+    #[test]
+    fn an_icon_and_a_check_mark_do_not_share_the_margin() {
+        use crate::icon::IconPlacement;
+        let [start, _, text] = icon_and_text_columns(IconPlacement::InMargin, true);
+        assert!(start >= 21, "the icon is after the margin: {start}");
+        assert!(text >= 41, "and the text after the icon: {text}");
+    }
 }

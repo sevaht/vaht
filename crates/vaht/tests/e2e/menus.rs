@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use vaht_test_support::{
-    BUTTON_LEFT, BUTTON_RIGHT, HeadlessVaht, Screenshot, TestClient, keys, wait_for_file,
+    BUTTON_LEFT, BUTTON_RIGHT, HeadlessVaht, Screenshot, TestClient, keys, solid_png, wait_for_file,
 };
 
 /// The executable cargo built for these tests.
@@ -238,7 +238,7 @@ fn changing_a_style_option_does_not_give_the_focus_to_a_window_when_none_had_it(
 /// item's icon goes.
 fn window_list_icon_spot(settings: &str) -> [u8; 3] {
     let icon = [0x00, 0xff, 0x00];
-    let png = vaht_test_support::solid_png(32, icon);
+    let png = solid_png(32, icon);
     let vaht = HeadlessVaht::start_with_files(
         Path::new(EXECUTABLE),
         &[
@@ -289,11 +289,11 @@ fn a_menu_item_shows_the_icon_it_names_or_the_image_it_points_to() {
         &[
             ("menus.toml", menus.as_bytes()),
             ("bindings.toml", b"[keys]\nF1 = \"root-menu\"\n"),
-            ("red.png", &vaht_test_support::solid_png(32, red)),
+            ("red.png", &solid_png(32, red)),
         ],
         &[(
             "icons/hicolor/32x32/apps/vaht-test-icon.png",
-            &vaht_test_support::solid_png(32, green),
+            &solid_png(32, green),
         )],
     );
     let mut client = TestClient::connect(vaht.socket());
@@ -348,4 +348,85 @@ fn a_pipe_menu_shows_what_its_command_prints() {
     client.type_chord(&[keys::DOWN]);
     client.type_chord(&[keys::ENTER]);
     wait_for_file(&marker, |_| true);
+}
+
+/// The color of the icon of the program the test menu runs.
+const PROGRAM_ICON: [u8; 3] = [0xe0, 0x30, 0x30];
+
+/// The color of the icon the test menu names.
+const NAMED_ICON: [u8; 3] = [0x30, 0x30, 0xe0];
+
+/// Starts vaht with a root menu of an item running a program with a desktop
+/// entry and icon, one saying it has no icon, and one naming its own;
+/// `settings` are added.
+fn start_with_icons(settings: &str) -> (HeadlessVaht, TestClient) {
+    let menus = "[menu.root]\ntitle = \"test\"\nitems = [\n\
+         { label = \"Program\", command = \"exec vaht-test-program --flag\" },\n\
+         { label = \"None\", command = \"exec vaht-test-program\", icon = \"\" },\n\
+         { label = \"Named\", command = \"exec true\", icon = \"vaht-named-icon\" },\n]\n\
+         [menu.window]\nitems = []\n[menu.workspace]\nitems = []\n";
+    let (program, named) = (solid_png(32, PROGRAM_ICON), solid_png(32, NAMED_ICON));
+    let vaht = HeadlessVaht::start_with_files(
+        Path::new(EXECUTABLE),
+        &[
+            ("menus.toml", menus.as_bytes()),
+            ("settings.toml", settings.as_bytes()),
+        ],
+        &[
+            (
+                "applications/vaht-test-program.desktop",
+                b"[Desktop Entry]\nName=Test\nExec=vaht-test-program %U\nIcon=vaht-program-icon\n",
+            ),
+            ("icons/hicolor/32x32/apps/vaht-program-icon.png", &program),
+            ("icons/hicolor/32x32/apps/vaht-named-icon.png", &named),
+        ],
+    );
+    let client = TestClient::connect(vaht.socket());
+    (vaht, client)
+}
+
+/// Returns the left edge of the first light pixel of the text in item
+/// `index`'s row, right of the margin's start.
+fn text_left(screenshot: &Screenshot, index: u32) -> u32 {
+    let (left, top) = (OPENED_AT.0 + BORDER, item_point(index).1 - ITEM_HEIGHT / 2);
+    (left + 19..left + 120)
+        .find(|x| {
+            (top..top + ITEM_HEIGHT).any(|y| {
+                let [red, green, blue] = screenshot.rgb(*x, y);
+                red > 200 && green > 200 && blue > 200
+            })
+        })
+        .expect("the label is drawn")
+}
+
+#[test]
+fn an_item_running_a_program_shows_its_icon_in_the_margin_and_the_text_stays_put() {
+    let (_vaht, mut client) = start_with_icons("");
+    client.click(OPENED_AT.0, OPENED_AT.1, BUTTON_RIGHT);
+    let opened = client.screenshot();
+    assert_eq!(at(&opened, item_point(0)), PROGRAM_ICON, "inferred");
+    assert_eq!(
+        at(&opened, item_point(1)),
+        MENU_BODY,
+        "`icon = \"\"` says none"
+    );
+    assert_eq!(at(&opened, item_point(2)), NAMED_ICON, "named");
+    // The text begins at the margin, as it does for an item with no icon.
+    let margin = OPENED_AT.0 + BORDER + 21;
+    for index in 0..3 {
+        let left = text_left(&opened, index);
+        assert!(
+            (margin..margin + 8).contains(&left),
+            "item {index}'s text starts at the margin, not after the icon: {left}"
+        );
+    }
+}
+
+#[test]
+fn inferring_icons_can_be_turned_off() {
+    let (_vaht, mut client) = start_with_icons("[menus]\ninfer_icons = false\n");
+    client.click(OPENED_AT.0, OPENED_AT.1, BUTTON_RIGHT);
+    let opened = client.screenshot();
+    assert_eq!(at(&opened, item_point(0)), MENU_BODY, "not inferred");
+    assert_eq!(at(&opened, item_point(2)), NAMED_ICON, "a named one stays");
 }

@@ -75,8 +75,8 @@ use crate::config::{
 };
 use crate::config::{CycleOrder, WindowCycle};
 use crate::config::{
-    FocusStealing, MenuEntry, OutputEntry, OutputMode, OutputScale, OutputTransform, SwitchFlip,
-    SwitchKind, TaskbarAction, TaskbarOutput,
+    FocusStealing, InferredIcon, MenuEntry, OutputEntry, OutputMode, OutputScale, OutputTransform,
+    SwitchFlip, SwitchKind, TaskbarAction, TaskbarOutput,
 };
 use crate::config_banner::ConfigBanner;
 use crate::cursor::Cursor;
@@ -3309,7 +3309,7 @@ impl Compositor {
         at: Point<i32, Logical>,
     ) -> bool {
         let window = window.or_else(|| self.window_manager.focused());
-        let model = self.with_menu_builder(window, &[], |builder| match request {
+        let model = self.with_menu_builder(window, (&[], &[]), |builder| match request {
             MenuRequest::Root => builder.build(Menus::ROOT),
             MenuRequest::Window => window.and_then(|_| builder.build(Menus::WINDOW)),
             MenuRequest::Workspace => builder.build(Menus::WORKSPACE),
@@ -3339,7 +3339,7 @@ impl Compositor {
     fn with_menu_builder<T>(
         &mut self,
         window: Option<WindowId>,
-        extra_icons: &[&str],
+        extra_icons: (&[&str], &[InferredIcon]),
         build: impl FnOnce(&MenuBuilder<'_>) -> T,
     ) -> T {
         let icons = self.window_icons_for_menus();
@@ -3434,8 +3434,15 @@ impl Compositor {
                     .map(str::to_owned)
                     .collect();
                 let icons: Vec<&str> = icons.iter().map(String::as_str).collect();
+                let inferred: Vec<InferredIcon> = definition
+                    .items
+                    .iter()
+                    .filter_map(MenuEntry::inferred_icon)
+                    .collect();
                 let window = self.menus.opened_for();
-                self.with_menu_builder(window, &icons, |builder| builder.build_printed(&definition))
+                self.with_menu_builder(window, (&icons, &inferred), |builder| {
+                    builder.build_printed(&definition)
+                })
             }
             Err(error) => {
                 tracing::warn!(error, "a pipe menu's command printed no menu");
@@ -3470,14 +3477,16 @@ impl Compositor {
     }
 
     /// Returns the icons `menus.toml` names, by the name written, those
-    /// found, sized for menu items.
+    /// found, sized for menu items; and, if the settings want them, the icons
+    /// of the programs its items run, by [`InferredIcon::key`].
     fn named_icons_for_menus(
         &mut self,
-        extra: &[&str],
+        (extra, extra_inferred): (&[&str], &[InferredIcon]),
     ) -> std::collections::HashMap<String, vaht_ui::Icon> {
         let size = vaht_ui::WidgetIcon::side(self.config.style.metrics().menu.item_height);
         let directory = self.config_source.directory();
-        self.config
+        let mut found: std::collections::HashMap<String, vaht_ui::Icon> = self
+            .config
             .menus
             .icons()
             .into_iter()
@@ -3486,7 +3495,21 @@ impl Compositor {
                 let lookup = Menus::icon_lookup(icon, directory)?;
                 Some((icon.to_owned(), self.icons.named(&lookup, size)?))
             })
-            .collect()
+            .collect();
+        if self.config.settings.menus.infer_icons {
+            let inferred = self.config.menus.inferred_icons();
+            for inferred in inferred.iter().chain(extra_inferred) {
+                let icon = inferred.names().iter().find_map(|name| {
+                    self.icons
+                        .app_icon(name, size)
+                        .or_else(|| self.icons.named(name, size))
+                });
+                if let Some(icon) = icon {
+                    found.insert(inferred.key(), icon);
+                }
+            }
+        }
+        found
     }
 
     /// Opens the submenu of the item highlighted in the last menu: the

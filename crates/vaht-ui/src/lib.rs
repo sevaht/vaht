@@ -34,7 +34,7 @@ pub use corner::{Corner, CornerArc, CornerRadii};
 #[doc(inline)]
 pub use geometry::{Insets, Point, Rect, Size};
 #[doc(inline)]
-pub use icon::{Icon, IconEmphasis, IconStore, WidgetIcon};
+pub use icon::{Icon, IconEmphasis, IconPlacement, IconStore, WidgetIcon};
 #[doc(inline)]
 pub use image::{Image, ImageError};
 #[doc(inline)]

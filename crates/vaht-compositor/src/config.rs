@@ -47,7 +47,9 @@ pub(crate) use self::command::{
 pub(crate) use self::layout::{LayoutFile, LayoutState};
 pub(crate) use self::lenient::{ConfigProblem, Loaded};
 pub(crate) use self::matcher::WindowMatcher;
-pub(crate) use self::menus::{MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle};
+pub(crate) use self::menus::{
+    InferredIcon, MenuDefinition, MenuEntry, MenuGenerator, Menus, WindowToggle,
+};
 pub(crate) use self::outputs::{
     HdrRequest, OutputEntry, OutputIdentity, OutputMode, OutputPlan, OutputProfile, OutputScale,
     OutputSettings, OutputTransform, Vrr,

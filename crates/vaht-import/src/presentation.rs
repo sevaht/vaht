@@ -7,7 +7,7 @@
 use toml_edit::{DocumentMut, Item, Table};
 
 /// What a layout may set, by dotted path in `settings.toml`.
-const PRESENTATION: [&str; 10] = [
+const PRESENTATION: [&str; 11] = [
     "taskbar",
     "windows.frame",
     "windows.focused_alpha",
@@ -18,6 +18,7 @@ const PRESENTATION: [&str; 10] = [
     "windows.snapping.layouts",
     "blur",
     "menus.window_icons",
+    "menus.infer_icons",
 ];
 
 /// Takes the presentation settings out of `settings` and returns them as the

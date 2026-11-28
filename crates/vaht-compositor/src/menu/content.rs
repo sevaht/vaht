@@ -60,19 +60,30 @@ impl MenuContent {
             fit(StyleElement::MenuTitle, WidgetState::Focused, title)
         });
         let icon_span = WidgetIcon::span(self.metrics.item_height);
+        // An icon is drawn in the margin the text keeps clear, so it adds
+        // only what the margin lacks, unless a check mark shares the margin.
+        let margin = style
+            .element_style(StyleElement::MenuItem, WidgetState::Focused)
+            .padding
+            .left;
+        let icon_extra = icon_span.saturating_sub(margin);
         let items = self
             .model
             .items
             .iter()
-            .filter_map(|item| Some((item.label()?, item.has_icon())))
-            .map(|(label, has_icon)| {
+            .filter_map(|item| Some((item.label()?, item.has_icon(), item.is_checked())))
+            .map(|(label, has_icon, is_checked)| {
                 // A highlighted item may be drawn in a wider font.
                 let text = fit(StyleElement::MenuItem, WidgetState::Focused, label).max(fit(
                     StyleElement::MenuItem,
                     WidgetState::Hovered,
                     label,
                 ));
-                if has_icon { text + icon_span } else { text }
+                match (has_icon, is_checked) {
+                    (false, _) => text,
+                    (true, false) => text + icon_extra,
+                    (true, true) => text + icon_span,
+                }
             })
             .max()
             .unwrap_or(0);
@@ -186,10 +197,9 @@ impl MenuContent {
     /// Returns `widget` showing `icon` at its left, if there is one.
     fn with_icon(widget: Widget<usize>, icon: Option<&vaht_ui::Icon>) -> Widget<usize> {
         match icon {
-            Some(icon) => widget.with_icon(WidgetIcon {
-                icon: icon.clone(),
-                emphasis: IconEmphasis::Full,
-            }),
+            Some(icon) => {
+                widget.with_icon(WidgetIcon::new(icon.clone(), IconEmphasis::Full).in_margin())
+            }
             None => widget,
         }
     }

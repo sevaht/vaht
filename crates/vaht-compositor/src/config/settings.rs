@@ -459,6 +459,9 @@ pub(crate) struct MenuSettings {
     pub(crate) search: MenuSearch,
     /// Whether lists of windows show each window's icon.
     pub(crate) window_icons: bool,
+    /// Whether an item that runs a program and names no icon shows the
+    /// program's.
+    pub(crate) infer_icons: bool,
 }
 
 /// How typing in an open menu finds an item (Fluxbox's `menuSearch`).
@@ -510,6 +513,7 @@ impl Default for MenuSettings {
             submenu_delay_ms: 200,
             search: MenuSearch::ItemStart,
             window_icons: true,
+            infer_icons: true,
         }
     }
 }

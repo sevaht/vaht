@@ -863,10 +863,23 @@ items = [
   each window's icon in lists of windows. `generate` also lists the
   display profiles (`profiles`, the one applied checked) and the outputs
   (`outputs`, choosing one makes it primary). An item running a command
-  or opening a submenu may show an `icon`: an icon theme's name for it
-  (`firefox`), or an image file if it has a `/` in it (`~/` is the home
-  directory, a relative path is from the configuration directory);
-  Fluxbox's `<icon>` on `[exec]` and `[submenu]` converts. A pipe menu,
+  or opening a submenu (a `generate` list's, too) may show an `icon`: an icon
+  theme's name for it (`firefox`), or an image file if it has a `/` in it
+  (`~/` is the home directory, a relative path is from the configuration
+  directory); Fluxbox's `<icon>` on `[exec]` and `[submenu]` converts. An
+  item that runs a program and names no icon shows the program's, if
+  `[menus] infer_icons` is on (it is): for `exec <command line>`, the icon of
+  the program the line runs (a leading `NAME=value` and `exec` are skipped; a
+  shell or wrapper such as `sh` and `env` gives none), and for
+  `focus-or-exec <app id> <command line>`, the application's, then the
+  program's. They are found as a window's are: the desktop entry (by file
+  name, `StartupWMClass`, the program its `Exec` runs, or its `Name`), then
+  the icon theme. `icon = ""` says an item has none. An icon is drawn in the
+  margin left of the text, so the text stays where it would be without one.
+  A style whose marks are at the left (`bullet_position = "left"`, as
+  Fluxbox's are) keeps its check mark there, so an item that is checked and
+  has an icon puts the icon after the margin; with the marks at the right, as
+  in the default style, they never meet. A pipe menu,
   `{ label = "Recent", pipe = "~/bin/recent" }`, runs its command with the
   shell each time it opens and shows what it prints: TOML with `items` (as
   a `[menu.<name>]` table holds them, `pipe` items too) and optionally a

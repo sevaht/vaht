@@ -230,6 +230,20 @@ impl fmt::Debug for Icon {
     }
 }
 
+/// Where a widget's icon goes in relation to the room its element's style
+/// keeps free at the left of its text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IconPlacement {
+    /// At the widget's left edge, and the text after it and after the
+    /// padding.
+    #[default]
+    BeforeText,
+    /// In the padding, where a menu keeps room for a check mark: the text
+    /// stays where it would be without an icon, unless the icon is wider
+    /// than the padding.
+    InMargin,
+}
+
 /// An icon shown beside a widget's text, and how strongly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WidgetIcon {
@@ -237,9 +251,40 @@ pub struct WidgetIcon {
     pub icon: Icon,
     /// How it is drawn.
     pub emphasis: IconEmphasis,
+    /// Where it goes.
+    pub placement: IconPlacement,
 }
 
 impl WidgetIcon {
+    /// Returns `icon` drawn as `emphasis` says, before the text.
+    #[must_use]
+    pub const fn new(icon: Icon, emphasis: IconEmphasis) -> Self {
+        Self {
+            icon,
+            emphasis,
+            placement: IconPlacement::BeforeText,
+        }
+    }
+
+    /// Returns the icon placed in the margin of the widget's text.
+    #[must_use]
+    pub fn in_margin(mut self) -> Self {
+        self.placement = IconPlacement::InMargin;
+        self
+    }
+
+    /// Returns how far the text of a widget `height` tall is pushed right by
+    /// its icon, given the room `padding` its style keeps at the left: all of
+    /// the icon's span before the text, and only what is more than the
+    /// padding in the margin.
+    #[must_use]
+    pub const fn text_offset(&self, height: u32, padding: u32) -> u32 {
+        match self.placement {
+            IconPlacement::BeforeText => Self::span(height),
+            IconPlacement::InMargin => Self::span(height).saturating_sub(padding),
+        }
+    }
+
     /// How far in from a widget's top, bottom and left edges its icon is
     /// drawn, and the gap after it: Fluxbox's iconbar draws its icon one
     /// pixel in.

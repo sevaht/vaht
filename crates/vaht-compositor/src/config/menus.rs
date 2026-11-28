@@ -54,20 +54,25 @@ impl Menus {
             .by_name
             .values()
             .flat_map(|menu| &menu.items)
-            .filter_map(|entry| match entry {
-                MenuEntry::Command { icon, .. }
-                | MenuEntry::Submenu { icon, .. }
-                | MenuEntry::Pipe { icon, .. } => icon.as_deref(),
-                MenuEntry::Toggle { .. }
-                | MenuEntry::Generate { .. }
-                | MenuEntry::Builtin { .. }
-                | MenuEntry::Separator
-                | MenuEntry::Inert { .. } => None,
-            })
+            .filter_map(MenuEntry::icon)
             .collect();
         icons.sort_unstable();
         icons.dedup();
         icons
+    }
+
+    /// Returns what each item that runs a program, and names no icon, is
+    /// looked up by, each once.
+    pub(crate) fn inferred_icons(&self) -> Vec<InferredIcon> {
+        let mut inferred: Vec<InferredIcon> = self
+            .by_name
+            .values()
+            .flat_map(|menu| &menu.items)
+            .filter_map(MenuEntry::inferred_icon)
+            .collect();
+        inferred.sort_unstable();
+        inferred.dedup();
+        inferred
     }
 
     /// Returns what to look the icon `icon` up by: a style's icon name as
@@ -222,6 +227,9 @@ pub(crate) enum MenuEntry {
         /// Whether the list's items stand in the menu itself, rather than
         /// in a submenu.
         is_inline: bool,
+        /// The icon shown beside its submenu, as a command's; none for a
+        /// list in place.
+        icon: Option<String>,
     },
     /// A submenu whose items a command prints, as TOML items, each time it
     /// opens (a pipe menu, as Openbox has them).
@@ -249,14 +257,35 @@ pub(crate) enum MenuEntry {
 }
 
 impl MenuEntry {
-    /// Returns the icon the item names, if it names one.
+    /// Returns the icon the item names, if it names one; `icon = ""`, which
+    /// says it has none, names nothing.
     pub(crate) fn icon(&self) -> Option<&str> {
         match self {
-            Self::Command { icon, .. } | Self::Submenu { icon, .. } | Self::Pipe { icon, .. } => {
-                icon.as_deref()
+            Self::Command { icon, .. }
+            | Self::Submenu { icon, .. }
+            | Self::Pipe { icon, .. }
+            | Self::Generate { icon, .. } => icon.as_deref().filter(|name| !name.is_empty()),
+            Self::Toggle { .. } | Self::Builtin { .. } | Self::Separator | Self::Inert { .. } => {
+                None
             }
-            Self::Toggle { .. }
+        }
+    }
+
+    /// Returns what an item that runs a program, and says nothing of its
+    /// icon, is looked up by: the program's icon. An item that says `icon =
+    /// ""` has none.
+    pub(crate) fn inferred_icon(&self) -> Option<InferredIcon> {
+        match self {
+            Self::Command {
+                command,
+                icon: None,
+                ..
+            } => InferredIcon::of(command),
+            Self::Command { icon: Some(_), .. }
+            | Self::Submenu { .. }
+            | Self::Pipe { .. }
             | Self::Generate { .. }
+            | Self::Toggle { .. }
             | Self::Builtin { .. }
             | Self::Separator
             | Self::Inert { .. } => None,
@@ -317,7 +346,8 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
                 }),
             };
         }
-        if file.icon.is_some() && file.command.is_none() && file.submenu.is_none() {
+        let opens_submenu = file.submenu.is_some() || (file.generate.is_some() && !file.inline);
+        if file.icon.is_some() && file.command.is_none() && !opens_submenu {
             return Err(de::Error::custom(
                 "only an item running a command or opening a submenu shows an icon",
             ));
@@ -373,6 +403,7 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
                 label: file.label,
                 generator,
                 is_inline: file.inline,
+                icon: file.icon,
             },
             (None, None, None, None, true) if file.label.is_none() => Self::Separator,
             (None, None, None, None, false) => match file.label {
@@ -387,6 +418,69 @@ impl<'de> serde::Deserialize<'de> for MenuEntry {
         };
         Ok(entry)
     }
+}
+
+/// What an item that runs a program is looked up by when it names no icon:
+/// the names to try, best first, for the program's icon.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct InferredIcon(Vec<String>);
+
+impl InferredIcon {
+    /// Returns what `command` is looked up by, if it runs a program: `exec`
+    /// the program of its command line, and `focus-or-exec` the application
+    /// id, then that program.
+    pub(crate) fn of(command: &Command) -> Option<Self> {
+        let Command::Run(action) = command else {
+            return None;
+        };
+        let names: Vec<String> = if let Action::Exec(command_line) = action {
+            program_of(command_line).into_iter().collect()
+        } else if let Action::FocusOrExec {
+            app_id,
+            command_line,
+        } = action
+        {
+            std::iter::once(app_id.clone())
+                .chain(program_of(command_line))
+                .collect()
+        } else {
+            return None;
+        };
+        (!names.is_empty()).then_some(Self(names))
+    }
+
+    /// Returns the names to look the icon up by, best first.
+    pub(crate) fn names(&self) -> &[String] {
+        &self.0
+    }
+
+    /// Returns the name an icon found for this is kept under, which no icon a
+    /// menu names itself is.
+    pub(crate) fn key(&self) -> String {
+        format!("app:{}", self.0.join("|"))
+    }
+}
+
+/// The shells and wrappers whose command line says nothing of what it runs.
+const OPAQUE_PROGRAMS: [&str; 8] = ["sh", "bash", "zsh", "fish", "dash", "env", "sudo", "setsid"];
+
+/// Returns the name of the program `command_line` runs: its first word that is
+/// not a `NAME=value` setting or the `exec` word, quotes taken off and the
+/// directory dropped; none if that is a shell or a wrapper, or there is none.
+fn program_of(command_line: &str) -> Option<String> {
+    let word = command_line.split_whitespace().find(|word| {
+        let is_setting = word.split_once('=').is_some_and(|(name, _)| {
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|letter| letter.is_alphanumeric() || letter == '_')
+        });
+        !is_setting && *word != "exec"
+    })?;
+    let word = word.trim_matches(['"', '\'']);
+    let program = word.rsplit('/').next().unwrap_or(word);
+    (!program.is_empty() && !program.starts_with('-') && !OPAQUE_PROGRAMS.contains(&program))
+        .then(|| program.to_owned())
 }
 
 /// A window state a menu item toggles.
@@ -558,6 +652,70 @@ mod tests {
         }
     }
 
+    #[rstest]
+    #[case::plain("kitty", Some("kitty"))]
+    #[case::with_arguments("kitty --single-instance", Some("kitty"))]
+    #[case::a_path("/usr/bin/brave --incognito", Some("brave"))]
+    #[case::settings_first("GDK_BACKEND=x11 FOO=1 steam -silent", Some("steam"))]
+    #[case::the_exec_word("exec xterm", Some("xterm"))]
+    #[case::quoted("\"spotify-launcher\"", Some("spotify-launcher"))]
+    #[case::a_shell("sh -c 'something'", None)]
+    #[case::a_wrapper("env FOO=1", None)]
+    #[case::nothing("", None)]
+    #[case::only_settings("FOO=1", None)]
+    #[case::an_option("--help", None)]
+    fn the_program_a_command_line_runs_is_named(
+        #[case] line: &str,
+        #[case] expected: Option<&str>,
+    ) {
+        assert_eq!(program_of(line).as_deref(), expected, "{line}");
+    }
+
+    #[test]
+    fn an_icon_is_looked_up_for_the_programs_an_item_runs_unless_it_says_otherwise() {
+        let menus = read(
+            "[menu.root]\nitems = [\n\
+             { label = \"a\", command = \"exec kitty --x\" },\n\
+             { label = \"b\", command = \"focus-or-exec Spotify spotify-launcher\" },\n\
+             { label = \"c\", command = \"exec xterm\", icon = \"\" },\n\
+             { label = \"d\", command = \"exec xterm\", icon = \"named\" },\n\
+             { label = \"e\", command = \"reload\" },\n\
+             { label = \"f\", generate = \"styles\", icon = \"palette\" },\n]\n",
+        )
+        .expect("valid");
+        let items = &menus.get("root").expect("read").items;
+        let names = |index: usize| {
+            items[index]
+                .inferred_icon()
+                .map(|icon| icon.names().to_vec())
+        };
+        assert_eq!(names(0), Some(vec!["kitty".to_owned()]));
+        assert_eq!(
+            names(1),
+            Some(vec!["Spotify".to_owned(), "spotify-launcher".to_owned()])
+        );
+        assert_eq!(names(2), None, "it says it has none");
+        assert_eq!(names(3), None, "it names one");
+        assert_eq!(names(4), None, "it runs no program");
+        assert_eq!(items[2].icon(), None, "an empty name is no icon");
+        assert_eq!(items[3].icon(), Some("named"));
+        assert_eq!(
+            items[5].icon(),
+            Some("palette"),
+            "a list's submenu may have one"
+        );
+        assert_eq!(menus.icons(), ["named", "palette"]);
+        assert_eq!(menus.inferred_icons().len(), 2);
+    }
+
+    #[test]
+    fn an_icon_on_a_list_in_place_is_refused() {
+        let error =
+            read("[menu.root]\nitems = [{ generate = \"styles\", inline = true, icon = \"x\" }]\n")
+                .expect_err("an inline list has no item to show it");
+        assert!(error.to_string().contains("only an item"), "{error}");
+    }
+
     #[test]
     fn a_menu_the_file_leaves_out_is_the_built_in_one() {
         let menus =
@@ -638,6 +796,7 @@ mod tests {
                     label: None,
                     generator: MenuGenerator::Workspaces,
                     is_inline: false,
+                    icon: None,
                 },
                 MenuEntry::Separator,
                 MenuEntry::Inert {
