@@ -101,9 +101,24 @@ pub(crate) enum FrameChoice {
     Frameless,
 }
 
+/// How far the pointer must move, in pixels, before a drag of a window that
+/// is not floating (maximized, tiled) begins: a click on its edge is no drag.
+const DRAG_THRESHOLD: i32 = 4;
+
 /// A drag of the window in progress.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum DragProgress {
+    /// A press that may become a drag of a window that is not floating,
+    /// which is restored only once the pointer has moved: a click on its
+    /// edge leaves it as it is.
+    Pending {
+        /// What the drag will be.
+        drag: WindowDrag,
+        /// Where the pointer was pressed.
+        pointer: Point<f64, Logical>,
+        /// How a resize will be shown.
+        style: ResizeStyle,
+    },
     /// A move, which began with the content's corner at `origin`.
     Move {
         /// Where the content's corner was when the move began.
@@ -658,6 +673,26 @@ impl Window {
         style: ResizeStyle,
         metrics: Metrics,
     ) {
+        if self.placement == Placement::Floating {
+            self.start_drag(drag, pointer, style, metrics);
+        } else {
+            // Restoring the window waits for the pointer to move.
+            self.drag = Some(DragProgress::Pending {
+                drag,
+                pointer,
+                style,
+            });
+        }
+    }
+
+    /// Starts the drag the pointer, pressed at `pointer`, has begun.
+    fn start_drag(
+        &mut self,
+        drag: WindowDrag,
+        pointer: Point<f64, Logical>,
+        style: ResizeStyle,
+        metrics: Metrics,
+    ) {
         match drag {
             WindowDrag::Move => {
                 self.float(Some(pointer), metrics);
@@ -712,6 +747,18 @@ impl Window {
         snap: &EdgeSnap,
         metrics: Metrics,
     ) {
+        if let Some(DragProgress::Pending {
+            drag,
+            pointer,
+            style,
+        }) = self.drag
+        {
+            if delta.x.abs().max(delta.y.abs()) < DRAG_THRESHOLD {
+                return;
+            }
+            self.drag = None;
+            self.start_drag(drag, pointer, style, metrics);
+        }
         match self.drag {
             Some(DragProgress::Move { origin }) => {
                 let outer = self.outer_area(metrics);
@@ -728,7 +775,7 @@ impl Window {
                 let size = anchor.edges.resize(anchor.initial.size, delta, limits);
                 self.drag = Some(DragProgress::Outline { anchor, size });
             }
-            Some(DragProgress::Resize(_)) | None => {}
+            Some(DragProgress::Resize(_) | DragProgress::Pending { .. }) | None => {}
         }
     }
 
@@ -749,7 +796,7 @@ impl Window {
     /// still anchored when it arrives.
     pub(crate) fn end_drag(&mut self) {
         match &mut self.drag {
-            Some(DragProgress::Move { .. }) => self.drag = None,
+            Some(DragProgress::Move { .. } | DragProgress::Pending { .. }) => self.drag = None,
             Some(DragProgress::Resize(anchor)) => {
                 let (before, asked) = (self.committed.geometry.size, self.requested.size);
                 if asked.is_none_or(|asked| asked == before) {

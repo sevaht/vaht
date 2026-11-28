@@ -116,6 +116,24 @@ fn dragging_a_maximized_window_by_its_top_pixel_drags_it_rather_than_resizing() 
 }
 
 #[test]
+fn clicking_the_edge_of_a_maximized_window_leaves_it_maximized() {
+    let mut desktop = Desktop::with_windows(1);
+    desktop.type_chord(&[keys::LEFT_SUPER, keys::UP]);
+    let maximized = desktop.content().expect("the window is shown");
+    let top = (maximized.left + (maximized.right - maximized.left) / 2, 0);
+    // One click on the topmost pixel, the pointer not moving, and then
+    // moving it a pixel or two with the button held: neither is a drag.
+    desktop.client.move_pointer_to(top.0, top.1);
+    desktop.client.press(BUTTON_LEFT);
+    desktop.client.release(BUTTON_LEFT);
+    assert_eq!(desktop.content(), Some(maximized), "a click restored it");
+    desktop.client.press(BUTTON_LEFT);
+    desktop.client.move_pointer_to(top.0 + 2, top.1);
+    desktop.client.release(BUTTON_LEFT);
+    assert_eq!(desktop.content(), Some(maximized), "a twitch restored it");
+}
+
+#[test]
 fn a_window_dragged_along_with_a_drag_follows_the_pointer_and_stays_where_dropped() {
     // A browser's tab dragged out: the new window rides the drag. The
     // dragged window is the lower right of the two, so it sets the

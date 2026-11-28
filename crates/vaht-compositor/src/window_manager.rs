@@ -2253,6 +2253,8 @@ mod tests {
             },
         ] {
             desk.manager.begin_drag(window, drag, (960.0, 40.0).into());
+            // A maximized window is floated once the pointer has moved.
+            desk.manager.follow_drag(window, (6, 6).into(), 0);
             // The size the client is asked to be: what the drag floats it at.
             let asked = desk
                 .manager
