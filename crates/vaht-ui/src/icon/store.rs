@@ -85,6 +85,10 @@ struct EntryInfo {
     window_class: Option<String>,
     /// The name of the program `Exec` runs.
     program: Option<String>,
+    /// Whether `Exec` runs it with nothing but field codes (`%U`) after it:
+    /// the application itself, not one of its parts (a web app a browser
+    /// installed runs the browser with `--app-id=...`).
+    is_plain: bool,
     /// The `Name`.
     name: Option<String>,
 }
@@ -495,11 +499,19 @@ impl IconStore {
             &|entry| same(&entry.program),
             &|entry| same(&entry.name),
         ];
+        // Of entries that match, one that is the application itself comes
+        // before one that runs it with arguments (a browser's web apps run
+        // the browser too).
         passes.iter().find_map(|matches| {
-            entries
-                .iter()
-                .filter(|entry| matches(entry))
-                .find_map(|entry| entry.icon.clone())
+            let found = || {
+                entries
+                    .iter()
+                    .filter(|entry| matches(entry) && entry.icon.is_some())
+            };
+            found()
+                .find(|entry| entry.is_plain)
+                .or_else(|| found().next())
+                .and_then(|entry| entry.icon.clone())
         })
     }
 
@@ -547,12 +559,25 @@ impl EntryInfo {
                     "Icon" => entry.icon = Some(value.to_owned()),
                     "StartupWMClass" => entry.window_class = Some(value.to_owned()),
                     "Name" => entry.name = Some(value.to_owned()),
-                    "Exec" => entry.program = Self::program_of(value),
+                    "Exec" => {
+                        entry.program = Self::program_of(value);
+                        entry.is_plain = Self::is_plain(value);
+                    }
                     _ => {}
                 }
             }
         }
         Some(entry)
+    }
+
+    /// Returns whether the `Exec` line `exec` gives its program no arguments
+    /// but field codes.
+    fn is_plain(exec: &str) -> bool {
+        let mut words = exec.split_whitespace();
+        words
+            .find(|word| *word != "env" && !word.contains('=') && !word.starts_with('%'))
+            .is_some()
+            && words.all(|word| word.starts_with('%'))
     }
 
     /// Returns the name of the program the `Exec` line `exec` runs: the first
@@ -970,6 +995,36 @@ mod tests {
             middle(&store.app_icon("scratch pad", 20).expect("by Name")),
             (0, 255, 0)
         );
+    }
+
+    #[test]
+    fn the_application_comes_before_the_things_run_with_its_program() {
+        // A browser's installed web apps run the browser with arguments, and
+        // may be listed first; the browser's own entry is the plain one.
+        let data = DataDirectory::new();
+        data.picture("pixmaps/app.png", 32, Color::rgb(255, 0, 0));
+        data.picture("pixmaps/web.png", 32, Color::rgb(0, 255, 0));
+        data.file(
+            "applications/browser-web-app.desktop",
+            "[Desktop Entry]\nName=Torrents\nExec=/opt/browser/browser --app-id=abc\nIcon=web\n",
+        );
+        data.file(
+            "applications/browser.desktop",
+            "[Desktop Entry]\nName=Browser\nExec=browser %U\nIcon=app\n",
+        );
+        let mut store = data.store();
+        assert_eq!(
+            middle(&store.app_icon("browser", 20).expect("by Exec")),
+            (255, 0, 0)
+        );
+        // With no plain entry, one that runs it with arguments still serves.
+        let only = DataDirectory::new();
+        only.picture("pixmaps/web.png", 32, Color::rgb(0, 255, 0));
+        only.file(
+            "applications/web-app.desktop",
+            "[Desktop Entry]\nExec=browser --app-id=abc\nIcon=web\n",
+        );
+        assert!(only.store().app_icon("browser", 20).is_some());
     }
 
     #[test]
