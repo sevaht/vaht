@@ -28,6 +28,8 @@ use smithay::wayland::selection::data_device::{
 };
 
 use crate::Compositor;
+use crate::protocols::toplevel_drag::{HeldCancel, HeldSource};
+use std::sync::Arc;
 
 /// A client moving the pointer within its own surface, as Xwayland does
 /// for an X program's warp.
@@ -118,10 +120,19 @@ impl DndGrabHandler for Compositor {
         _seat: Seat<Self>,
         _location: Point<f64, Logical>,
     ) {
+        // A window dragged along is let go, even where nothing accepted the
+        // drop: its program is told the drag was dropped, not cancelled.
+        let is_window_dragged = self.dragged_window().is_some();
+        if let Some(held) = self.held_drag.take() {
+            held.end(is_window_dragged);
+        }
         self.dragged_source = None;
     }
 
     fn cancelled(&mut self, _seat: Seat<Self>, _location: Point<f64, Logical>) {
+        if let Some(held) = self.held_drag.take() {
+            held.end(false);
+        }
         self.dragged_source = None;
     }
 }
@@ -149,7 +160,10 @@ impl WaylandDndGrabHandler for Compositor {
                 self.dragged_source = (&source as &dyn std::any::Any)
                     .downcast_ref::<WlDataSource>()
                     .cloned();
-                let grab = DnDGrab::new_pointer(&self.display_handle, start_data, source, seat);
+                let held = Arc::new(HeldCancel::new(source));
+                self.held_drag = Some(Arc::<HeldCancel<S>>::clone(&held));
+                let grab =
+                    DnDGrab::new_pointer(&self.display_handle, start_data, HeldSource(held), seat);
                 pointer.set_grab(self, grab, serial, Focus::Keep);
             }
             None => source.cancel(),

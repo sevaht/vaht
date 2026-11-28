@@ -180,6 +180,8 @@ pub struct Compositor {
     /// The data source of the drag and drop in progress, if a program's
     /// (`wl_data_device`): a window attached to it follows the pointer.
     pub(crate) dragged_source: Option<WlDataSource>,
+    /// The same drag's source, which is told how the drag ended.
+    pub(crate) held_drag: Option<std::sync::Arc<dyn crate::protocols::toplevel_drag::EndsDrag>>,
     /// The surfaces asking that the session not go idle.
     pub(crate) idle_inhibitors: IdleInhibitors<WlSurface>,
     /// The session lock.
@@ -344,6 +346,7 @@ impl Compositor {
     }
 
     /// Sets up every subsystem and starts accepting clients.
+    #[expect(clippy::too_many_lines, reason = "it makes each subsystem in turn")]
     fn new(
         handle: &LoopHandle<'static, Self>,
         display: &Display<Self>,
@@ -401,6 +404,7 @@ impl Compositor {
             xwayland_lifecycle: XwaylandLifecycle::new(allows_xwayland),
             pointer_lock_hint: None,
             dragged_source: None,
+            held_drag: None,
             idle_inhibitors: IdleInhibitors::default(),
             session_lock: SessionLock::default(),
             frame_pacing: FramePacing::default(),
@@ -1938,7 +1942,7 @@ impl Compositor {
     /// Returns the window attached to the drag and drop in progress
     /// (`xdg_toplevel_drag_v1`), with where the pointer holds it, if one
     /// is.
-    fn dragged_window(&self) -> Option<(WindowId, Point<i32, Logical>)> {
+    pub(crate) fn dragged_window(&self) -> Option<(WindowId, Point<i32, Logical>)> {
         let source = self.dragged_source.as_ref()?;
         let attached = self.protocols.toplevel_drags.attached_to(source)?;
         let window = self.toplevels.window_of(&attached.surface)?;
@@ -3099,7 +3103,28 @@ impl Compositor {
         tracing::debug!(%action, window = ?context.window, "running an action");
         match action {
             Action::WindowManager(action) => self.window_manager.run(action, context.window),
-            Action::Exec(command_line) => self.launcher.run(command_line),
+            Action::FocusOrExec {
+                app_id,
+                command_line,
+            } => {
+                let found = self
+                    .window_manager
+                    .windows_top_down()
+                    .find(|window| window.app_id().eq_ignore_ascii_case(app_id))
+                    .map(Window::id);
+                if let Some(window) = found {
+                    self.window_manager.activate(window);
+                } else {
+                    let token = self.launch_token();
+                    self.launcher.run_activating(command_line, &token);
+                }
+            }
+            Action::Exec(command_line) => {
+                // What the user asked to start may bring a window of an
+                // already running program forward, with this token.
+                let token = self.launch_token();
+                self.launcher.run_activating(command_line, &token);
+            }
             Action::StartMoving => self.start_drag(None, context),
             Action::StartResizing(from) => self.start_drag(Some(*from), context),
             Action::Reload => self.reload_configuration(),

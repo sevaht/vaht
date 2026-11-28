@@ -73,6 +73,9 @@ struct Streams<'fd> {
     output: Option<&'fd std::os::fd::OwnedFd>,
     /// Its error output's.
     errors: Option<&'fd std::os::fd::OwnedFd>,
+    /// The activation token it is given (`XDG_ACTIVATION_TOKEN`), so a
+    /// window it asks to be brought forward is.
+    activation_token: Option<&'fd str>,
 }
 
 impl Launcher {
@@ -153,6 +156,21 @@ impl Launcher {
         }
     }
 
+    /// Starts `command_line` with the shell, given the activation token
+    /// `token` in `XDG_ACTIVATION_TOKEN`: what the user asked for with a key
+    /// or a menu item, so a window its program asks to be brought forward
+    /// is (a second instance starting only to raise the first).
+    pub(crate) fn run_activating(&mut self, command_line: &str, token: &str) {
+        let arguments = ["sh", "-c", command_line].map(OsStr::new);
+        let streams = Streams {
+            activation_token: Some(token),
+            ..Streams::default()
+        };
+        if let Err(error) = self.start(Path::new(Self::SHELL), &arguments, command_line, streams) {
+            Self::warn_not_started(&error, command_line);
+        }
+    }
+
     /// Starts `first` with the shell, and each of `then` once it is done,
     /// as the autostart programs follow the activation environment's
     /// update: services they start must find the session.
@@ -187,7 +205,7 @@ impl Launcher {
         let arguments = ["sh", "-c", command_line].map(OsStr::new);
         let streams = Streams {
             output: Some(&writer),
-            errors: None,
+            ..Streams::default()
         };
         self.start(Path::new(Self::SHELL), &arguments, command_line, streams)?;
         Ok(File::from(std::os::fd::OwnedFd::from(reader)))
@@ -271,8 +289,8 @@ impl Launcher {
                 // its own, so the pipe ends when the dialog does.
                 let writer = std::os::fd::OwnedFd::from(writer);
                 let streams = Streams {
-                    output: None,
                     errors: Some(&writer),
+                    ..Streams::default()
                 };
                 let pid = self.start(executable, arguments, &what, streams)?;
                 Ok((pid, reader))
@@ -451,17 +469,29 @@ impl Launcher {
             &file_actions,
             &attributes,
             &arguments,
-            &self.environment_block(),
+            &self.environment_block(streams.activation_token),
         )
         .map_err(SpawnError::Spawn)
     }
 
     /// Returns vaht's environment with this launcher's variables set, as
     /// `NAME=value` strings.
-    fn environment_block(&self) -> Vec<CString> {
+    fn environment_block(&self, activation_token: Option<&str>) -> Vec<CString> {
         let mut variables: BTreeMap<OsString, OsString> = std::env::vars_os().collect();
         variables.extend(self.environment.clone());
         variables.retain(|name, _| !self.removed.contains(name));
+        match activation_token {
+            Some(token) => {
+                variables.insert(
+                    OsString::from("XDG_ACTIVATION_TOKEN"),
+                    OsString::from(token),
+                );
+            }
+            // A token of vaht's own environment is not one for this program.
+            None => {
+                variables.remove(OsStr::new("XDG_ACTIVATION_TOKEN"));
+            }
+        }
         variables
             .iter()
             .filter_map(|(name, value)| {

@@ -668,3 +668,29 @@ fn a_turned_output_is_captured_as_it_shows() {
     );
     assert_eq!(turned.rgb(5, 2), SKY, "the wallpaper above");
 }
+
+#[test]
+fn a_window_dragged_along_with_a_drag_stays_where_it_is_dropped_on_another_output() {
+    let (_vaht, mut client) = two_outputs();
+    client.open_windows(2);
+    let first = client
+        .screenshot_of("HEADLESS-1")
+        .bounds_of(WINDOW_COLOR)
+        .expect("the windows show");
+    // A tab dragged out of the first window, onto the second output.
+    let drop = (FIRST_WIDTH + 200, 200);
+    client.drag_window_along((0, 1), (10, 10), (first.left + 5, first.top + 5), drop);
+    let on_second =
+        |client: &mut TestClient| client.screenshot_of("HEADLESS-2").bounds_of(WINDOW_COLOR);
+    assert!(
+        on_second(&mut client).is_some(),
+        "carried onto the second output"
+    );
+    client.release(BUTTON_LEFT);
+    client.move_pointer_to(drop.0 + 50, drop.1 + 50);
+    let dropped = on_second(&mut client).expect("left on the second output");
+    assert!(
+        dropped.left <= 200 && dropped.top <= 200,
+        "left where it was dropped: {dropped:?}"
+    );
+}

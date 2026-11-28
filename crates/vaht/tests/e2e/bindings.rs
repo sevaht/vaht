@@ -8,7 +8,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use vaht_test_support::{BUTTON_LEFT, HeadlessVaht, TestClient, WINDOW_COLOR, keys, wait_for_file};
+use vaht_test_support::{
+    BUTTON_LEFT, HeadlessVaht, KeyboardFocus, TestClient, WINDOW_COLOR, keys, wait_for_file,
+};
 
 /// The executable cargo built for these tests.
 const EXECUTABLE: &str = env!("CARGO_BIN_EXE_vaht");
@@ -78,6 +80,60 @@ fn a_key_binding_starts_a_program_that_vaht_reaps() {
     let report = vaht.stop();
     assert_eq!(report.live_count("program"), 0, "the program was reaped");
     report.assert_nothing_left_behind();
+}
+
+#[test]
+fn a_program_a_key_starts_may_bring_a_window_forward_with_its_activation_token() {
+    let files = WrittenFiles::new();
+    let bindings = format!(
+        "[keys]\n\"Super+T\" = \"exec echo $XDG_ACTIVATION_TOKEN > '{}'\"\n",
+        files.path("token").display()
+    );
+    let vaht =
+        HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("bindings.toml", &bindings)]);
+    let mut client = TestClient::connect(vaht.socket());
+    client.open_windows(2);
+    assert_eq!(
+        client.keyboard_focus(),
+        KeyboardFocus::Window(1),
+        "the second window has the focus"
+    );
+    // Without the token, an ask from a program the user did not just start
+    // is refused.
+    client.activate_window(0, "not-a-token");
+    assert_eq!(client.keyboard_focus(), KeyboardFocus::Window(1));
+    client.type_chord(&SUPER_T);
+    let token = files.wait_for("token");
+    assert!(!token.trim().is_empty(), "the program was given a token");
+    // The program the key started asks for the first window with it.
+    client.activate_window(0, token.trim());
+    assert_eq!(client.keyboard_focus(), KeyboardFocus::Window(0));
+}
+
+#[test]
+fn focus_or_exec_brings_the_applications_window_forward_or_else_runs_the_command() {
+    let files = WrittenFiles::new();
+    let bindings = format!(
+        "[keys]\n\"Super+T\" = \"focus-or-exec VAHT.test echo ran >> '{}'\"\n",
+        files.path("ran").display()
+    );
+    let vaht =
+        HeadlessVaht::start_with_config(Path::new(EXECUTABLE), &[("bindings.toml", &bindings)]);
+    let mut client = TestClient::connect(vaht.socket());
+    // With no window of the application, the command runs.
+    client.type_chord(&SUPER_T);
+    assert_eq!(files.wait_for("ran"), "ran\n");
+    // With a window of the application (its application id is
+    // `vaht.test`, the case aside), the key runs nothing.
+    client.open_windows(1);
+    client.type_chord(&SUPER_T);
+    assert_eq!(client.keyboard_focus(), KeyboardFocus::Window(0));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        std::fs::read_to_string(files.path("ran")).expect("written"),
+        "ran\n",
+        "the command ran only the once"
+    );
 }
 
 #[test]

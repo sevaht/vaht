@@ -5,7 +5,8 @@
 //! within [`ACTIVATION_PATIENCE`]: the window is restored, its workspace
 //! shown, and it is raised and focused. Any other request is refused and
 //! logged, so a program in the background cannot take focus by itself,
-//! unless a rule says the window may (`focus_stealing = "allow"`), or the
+//! unless the program was started by a key or menu item a moment ago (it
+//! has the token vaht gave it in `XDG_ACTIVATION_TOKEN`), or a rule says the window may (`focus_stealing = "allow"`), or the
 //! user clicked the program's tray item a moment ago
 //! (`activation_grace_ms`); a rule saying `"deny"` refuses even a good
 //! token.
@@ -25,6 +26,26 @@ use crate::window_manager::Window;
 
 /// How long after its making a token still activates a window.
 const ACTIVATION_PATIENCE: Duration = Duration::from_secs(10);
+
+/// Marks a token vaht made for a program it started because the user asked
+/// (a key or a menu item): any window that program asks to bring forward is
+/// brought, as the user just asked for it.
+#[derive(Debug)]
+struct LaunchToken;
+
+impl Compositor {
+    /// Returns a new activation token for a program the user just asked to
+    /// start, in the form the program reads from `XDG_ACTIVATION_TOKEN`.
+    pub(crate) fn launch_token(&mut self) -> String {
+        // Tokens too old to be honored are forgotten.
+        self.protocols
+            .activation
+            .retain_tokens(|_, data| data.timestamp.elapsed() < ACTIVATION_PATIENCE);
+        let (token, data) = self.protocols.activation.create_external_token(None);
+        data.user_data.insert_if_missing_threadsafe(|| LaunchToken);
+        token.as_str().to_owned()
+    }
+}
 
 impl XdgActivationHandler for Compositor {
     fn activation_state(&mut self) -> &mut XdgActivationState {
@@ -49,6 +70,8 @@ impl XdgActivationHandler for Compositor {
             .map(|client| client.id());
         let is_from_focus = focused_client.is_some() && token_data.client_id == focused_client;
         let is_asked_for = is_from_focus && token_data.timestamp.elapsed() < ACTIVATION_PATIENCE;
+        let is_launched = token_data.user_data.get::<LaunchToken>().is_some()
+            && token_data.timestamp.elapsed() < ACTIVATION_PATIENCE;
         let policy = self
             .window_manager
             .window(window)
@@ -65,7 +88,7 @@ impl XdgActivationHandler for Compositor {
                         u32::try_from(credentials.pid).is_ok_and(|client| client == pid)
                     })
         });
-        if policy.honors(is_asked_for || is_granted) {
+        if policy.honors(is_asked_for || is_granted || is_launched) {
             tracing::debug!(window = %window, "activation honored");
             self.window_manager.activate(window);
         } else {

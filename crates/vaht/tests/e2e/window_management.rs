@@ -10,8 +10,8 @@ use std::process::Command;
 
 use vaht_ipc::{Reply, WindowInfo};
 use vaht_test_support::{
-    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, HeadlessVaht, Screenshot, TestClient, WINDOW_COLOR,
-    WINDOW_SIZE, keys,
+    BUILT_IN_METRICS, BUTTON_LEFT, Bounds, DragEnd, HeadlessVaht, Screenshot, TestClient,
+    WINDOW_COLOR, WINDOW_SIZE, keys,
 };
 
 /// The executable cargo built for these tests.
@@ -152,6 +152,23 @@ fn a_window_dragged_along_with_a_drag_follows_the_pointer_and_stays_where_droppe
         corner_at(490, 440),
         "left where it was let go"
     );
+}
+
+#[test]
+fn a_window_dragged_along_is_dropped_not_cancelled_where_no_window_takes_the_drop() {
+    // A browser's tab let go over the desktop, or another program: the
+    // program that dragged the window out must be told the drop was
+    // performed, or it takes the window back as a cancelled drag.
+    let mut desktop = Desktop::with_windows(2);
+    let first = desktop.content().expect("the windows show");
+    desktop.client.drag_window_along(
+        (0, 1),
+        (10, 10),
+        (first.left + 5, first.top + 5),
+        (700, 500),
+    );
+    desktop.client.release(BUTTON_LEFT);
+    assert_eq!(desktop.client.drag_end(), DragEnd::Dropped);
 }
 
 #[test]

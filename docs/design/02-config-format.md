@@ -456,7 +456,7 @@ A command is written in one of three forms:
 
 | Area | Actions |
 |---|---|
-| Programs and session | `exec <command line>`, `reload`, `exit`, `set-environment NAME value`, `set-setting key value`, `unset-setting key`, `save-settings` |
+| Programs and session | `exec <command line>`, `focus-or-exec <app id> <command line>` (brings the topmost window with that application id forward, as the taskbar does, or runs the command if there is none; the id is compared without regard to case), `reload`, `exit`, `set-environment NAME value`, `set-setting key value`, `unset-setting key`, `save-settings` |
 | Window state | `close`, `kill`, `minimize`, `maximize [horizontal\|vertical]`, `fullscreen`, `shade`, `stick`, `raise`, `lower`, `set-layer <layer>`, `set-alpha <n>`, `toggle-frame`, `set-title [title]`, `set-title-dialog`, `mark-window <key>`, `go-to-marked-window <key>` |
 | Window placement | `move <dx> <dy>`, `move-to <x> <y>`, `resize <dw> <dh>`, `resize-to <w> <h>`, `snap-step <direction>`, `tile <cell>`, `send-to-output next\|previous\|<n>`, `arrange <style>` |
 | Grabs | `start-moving`, `start-resizing [nearest-corner\|<corner>]` |
@@ -748,7 +748,10 @@ focus_stealing = "allow"        # FocusProtection {Gain}; also "deny", "default"
   taskbar; `set-layer` moves one), and `focus_stealing` (`allow`: the
   window comes forward whenever its program asks, as Steam's tray menu
   needs, from `[FocusProtection] {Gain}`; `deny`: never by its program's
-  asking; `default`: when the focused program made the token, recently.
+  asking; `default`: when the focused program made the token, recently, or
+  vaht did for a program a key or menu item just started, which finds it in
+  `XDG_ACTIVATION_TOKEN`: a second instance raising the first, as `exec
+  discord` does.
   It decides a new window's first focus too: `allow` takes it even when
   `focus_new_windows` is off, `deny` gives it back to the window that had
   it), `output` (a head number, from 1 left to right as Fluxbox's

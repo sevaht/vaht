@@ -10,7 +10,13 @@
 //! the compositor asks it which window, if any, the drag in progress
 //! carries.
 
-use std::sync::Mutex;
+use std::any::Any;
+use std::os::fd::OwnedFd;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use smithay::input::dnd::{DndAction, Source, SourceMetadata};
+use smithay::utils::IsAlive;
 
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::XdgToplevel;
 use smithay::reexports::wayland_protocols::xdg::toplevel_drag::v1::server::xdg_toplevel_drag_manager_v1::{self, XdgToplevelDragManagerV1};
@@ -24,6 +30,102 @@ use smithay::reexports::wayland_server::{
 use smithay::utils::{Logical, Point};
 
 use crate::Compositor;
+
+/// A drag's source, which is told it was cancelled only once the grab has
+/// said why it ended.
+///
+/// A drag dropped where no window accepts it is cancelled, which a program
+/// that dragged a window out (a browser's tab) takes as "put it back". But
+/// the user let go of a window, wherever that was: it is dropped, and stays.
+/// So the cancelling is held until [`EndsDrag::end`] tells which it was.
+#[derive(Debug)]
+pub(crate) struct HeldCancel<S: Source> {
+    /// The source.
+    source: S,
+    /// Whether the source asked to be cancelled, and was not yet told.
+    is_held: AtomicBool,
+}
+
+impl<S: Source> HeldCancel<S> {
+    /// Holds the cancelling of `source`.
+    pub(crate) const fn new(source: S) -> Self {
+        Self {
+            source,
+            is_held: AtomicBool::new(false),
+        }
+    }
+}
+
+/// What the compositor tells a drag's source when the drag has ended.
+pub(crate) trait EndsDrag: Send + Sync {
+    /// Tells the source it was dropped (`as_drop`), or cancelled, if it
+    /// asked to be cancelled and was not told.
+    fn end(&self, as_drop: bool);
+}
+
+impl<S: Source> EndsDrag for HeldCancel<S> {
+    fn end(&self, as_drop: bool) {
+        if self.is_held.swap(false, Ordering::AcqRel) {
+            if as_drop {
+                self.source.drop_performed();
+            } else {
+                self.source.cancel();
+            }
+        }
+    }
+}
+
+impl<S: Source> Drop for HeldCancel<S> {
+    fn drop(&mut self) {
+        // A drag that ended in no way the compositor was told of is cancelled.
+        self.end(false);
+    }
+}
+
+/// The source of a drag, as the drag handles it: a [`HeldCancel`] shared
+/// with the compositor, which ends it.
+#[derive(Debug)]
+pub(crate) struct HeldSource<S: Source>(pub(crate) Arc<HeldCancel<S>>);
+
+impl<S: Source> IsAlive for HeldSource<S> {
+    fn alive(&self) -> bool {
+        self.0.source.alive()
+    }
+}
+
+impl<S: Source> Source for HeldSource<S> {
+    fn is_client_local(&self, target: &dyn Any) -> bool {
+        self.0.source.is_client_local(target)
+    }
+
+    fn metadata(&self) -> Option<SourceMetadata> {
+        self.0.source.metadata()
+    }
+
+    fn accepted(&self, mime_type: Option<String>) {
+        self.0.source.accepted(mime_type);
+    }
+
+    fn choose_action(&self, action: DndAction) {
+        self.0.source.choose_action(action);
+    }
+
+    fn send(&self, mime_type: &str, fd: OwnedFd) {
+        self.0.source.send(mime_type, fd);
+    }
+
+    fn drop_performed(&self) {
+        self.0.source.drop_performed();
+    }
+
+    fn cancel(&self) {
+        self.0.is_held.store(true, Ordering::Release);
+    }
+
+    fn finished(&self) {
+        self.0.source.finished();
+    }
+}
 
 /// A window attached to a drag, and where the pointer holds it.
 #[derive(Debug, Clone, PartialEq)]

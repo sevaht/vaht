@@ -21,6 +21,7 @@ use smithay_client_toolkit::reexports::protocols_misc::server_decoration::client
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_manager_v1::ExtSessionLockManagerV1;
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_v1::ExtSessionLockV1;
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
+use smithay_client_toolkit::reexports::protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActivationV1;
 use smithay_client_toolkit::data_device_manager::DataDeviceManagerState;
 use smithay_client_toolkit::data_device_manager::data_device::DataDevice;
 use smithay_client_toolkit::reexports::client::protocol::wl_data_device_manager::DndAction;
@@ -120,6 +121,17 @@ pub enum KeyboardFocus {
     Layer(usize),
 }
 
+/// How the drag this client started ended, as its source was told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragEnd {
+    /// It has not ended, or the source was told nothing.
+    Pending,
+    /// The drop was performed (`dnd_drop_performed`).
+    Dropped,
+    /// It was cancelled (`cancelled`).
+    Cancelled,
+}
+
 /// A client connected to vaht.
 #[derive(Debug)]
 pub struct TestClient {
@@ -145,6 +157,8 @@ pub struct TestClient {
     idle_notifier: ExtIdleNotifierV1,
     /// Keeps the session awake.
     idle_inhibitors: ZwpIdleInhibitManagerV1,
+    /// Asks for windows to be brought forward, with a token.
+    activation: XdgActivationV1,
     /// Asks for the server's frame, KDE's way.
     kde_decorations: OrgKdeKwinServerDecorationManager,
     /// Hears the fractional scale vaht prefers for a surface.
@@ -232,6 +246,7 @@ impl TestClient {
         let idle_notifier: ExtIdleNotifierV1 = bind(&globals, &handle, "ext_idle_notifier_v1");
         let idle_inhibitors: ZwpIdleInhibitManagerV1 =
             bind(&globals, &handle, "zwp_idle_inhibit_manager_v1");
+        let activation: XdgActivationV1 = bind(&globals, &handle, "xdg_activation_v1");
         let kde_decorations: OrgKdeKwinServerDecorationManager =
             bind(&globals, &handle, "org_kde_kwin_server_decoration_manager");
         let fractional_scales: WpFractionalScaleManagerV1 =
@@ -279,6 +294,7 @@ impl TestClient {
             shortcut_inhibitors,
             idle_notifier,
             idle_inhibitors,
+            activation,
             kde_decorations,
             fractional_scales,
             data_device,
@@ -1004,6 +1020,18 @@ impl TestClient {
         self.roundtrip();
     }
 
+    /// Asks vaht to bring window `index` forward, with `token`: what a
+    /// program does when it was started with `XDG_ACTIVATION_TOKEN`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the client has no such window or the connection fails.
+    pub fn activate_window(&mut self, index: usize, token: &str) {
+        let surface = self.state.windows[index].wl_surface().clone();
+        self.activation.activate(token.to_owned(), &surface);
+        self.roundtrip();
+    }
+
     /// Locks the session, as a screen locker does: a surface filled with
     /// `color` on every output. Returns whether vaht said it is locked.
     ///
@@ -1147,6 +1175,17 @@ impl TestClient {
             layer.commit();
         }
         self.roundtrip();
+    }
+
+    /// Returns how the drag this client started ended, once vaht has handled
+    /// everything sent so far.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the connection to vaht fails.
+    pub fn drag_end(&mut self) -> DragEnd {
+        self.roundtrip();
+        self.state.drag_end
     }
 
     /// Returns what has the client's keyboard focus, once vaht has handled

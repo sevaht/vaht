@@ -25,7 +25,7 @@ mod selection;
 mod session_lock;
 mod surfaces;
 pub(crate) use self::surfaces::tell_output_scale;
-mod toplevel_drag;
+pub(crate) mod toplevel_drag;
 mod toplevel_management;
 mod virtual_input;
 mod window_hints;

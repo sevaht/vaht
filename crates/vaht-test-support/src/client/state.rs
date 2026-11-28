@@ -21,6 +21,7 @@ use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client:
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_surface_v1::{self, ExtSessionLockSurfaceV1};
 use smithay_client_toolkit::reexports::protocols::ext::session_lock::v1::client::ext_session_lock_v1::{self, ExtSessionLockV1};
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1;
+use smithay_client_toolkit::reexports::protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActivationV1;
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{self, WpFractionalScaleV1};
 use smithay_client_toolkit::reexports::protocols::wp::idle_inhibit::zv1::client::zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1;
@@ -190,6 +191,8 @@ pub(super) struct ClientState {
     pub(super) capture_transform: wl_output::Transform,
     /// The surface with keyboard focus, as vaht last told.
     pub(super) keyboard_focus: Option<wl_surface::WlSurface>,
+    /// How the drag the client started ended, as its source was told.
+    pub(super) drag_end: super::DragEnd,
     /// How far the mouse moved, as relative motion told, in all.
     pub(super) relative_motion: (f64, f64),
     /// Whether vaht holds the pointer locked for the client.
@@ -271,6 +274,7 @@ impl ClientState {
             capture_result: None,
             capture_transform: wl_output::Transform::Normal,
             keyboard_focus: None,
+            drag_end: super::DragEnd::Pending,
             relative_motion: (0.0, 0.0),
             is_pointer_locked: false,
             received_keys: Vec::new(),
@@ -464,6 +468,7 @@ ignore_events!(
     ExtIdleNotifierV1,
     ZwpIdleInhibitManagerV1,
     ZwpIdleInhibitorV1,
+    XdgActivationV1,
     WpFractionalScaleManagerV1,
     XdgToplevelDragManagerV1,
     XdgToplevelDragV1,
@@ -1167,9 +1172,13 @@ impl DataSourceHandler for ClientState {
     ) {
     }
 
-    fn cancelled(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+    fn cancelled(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {
+        self.drag_end = super::DragEnd::Cancelled;
+    }
 
-    fn dnd_dropped(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+    fn dnd_dropped(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {
+        self.drag_end = super::DragEnd::Dropped;
+    }
 
     fn dnd_finished(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
 

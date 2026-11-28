@@ -378,6 +378,17 @@ pub(crate) enum Action {
     WindowManager(WindowManagerAction),
     /// Runs a command line with `sh -c` (`exec <command line>`).
     Exec(String),
+    /// Brings the topmost window of an application forward, as the taskbar
+    /// does (restored, its workspace shown, raised, focused), if it has one;
+    /// otherwise runs the command line (`focus-or-exec <app id> <command
+    /// line>`).
+    FocusOrExec {
+        /// The application id of the window to look for, compared without
+        /// regard to case.
+        app_id: String,
+        /// What to run when there is none.
+        command_line: String,
+    },
     /// Moves the window with the pointer while the button that started it
     /// is held; only a mouse binding can start it.
     StartMoving,
@@ -729,6 +740,19 @@ impl Action {
         match name {
             "exec" if arguments.is_empty() => Err("`exec` needs a command line".to_owned()),
             "exec" => Ok(Self::Exec(arguments.to_owned())),
+            "focus-or-exec" => {
+                let (app_id, command_line) = arguments
+                    .split_once(char::is_whitespace)
+                    .map(|(app_id, command_line)| (app_id, command_line.trim()))
+                    .filter(|(_, command_line)| !command_line.is_empty())
+                    .ok_or_else(|| {
+                        "`focus-or-exec` needs an application id, then a command line".to_owned()
+                    })?;
+                Ok(Self::FocusOrExec {
+                    app_id: app_id.to_owned(),
+                    command_line: command_line.to_owned(),
+                })
+            }
             "start-moving" => without_arguments(Self::StartMoving),
             "start-resizing" => ResizeFrom::parse(arguments).map(Self::StartResizing),
             "reload" => without_arguments(Self::Reload),
@@ -872,6 +896,10 @@ impl fmt::Display for Action {
         match self {
             Self::WindowManager(action) => action.fmt(formatter),
             Self::Exec(command_line) => write!(formatter, "exec {command_line}"),
+            Self::FocusOrExec {
+                app_id,
+                command_line,
+            } => write!(formatter, "focus-or-exec {app_id} {command_line}"),
             Self::StartMoving => formatter.write_str("start-moving"),
             Self::StartResizing(from) => write!(formatter, "start-resizing {from}"),
             Self::Reload => formatter.write_str("reload"),
@@ -1279,6 +1307,10 @@ mod tests {
         ];
         let mut actions = vec![
             Action::Exec("kitty --single-instance".to_owned()),
+            Action::FocusOrExec {
+                app_id: "Spotify".to_owned(),
+                command_line: "spotify-launcher --flag".to_owned(),
+            },
             Action::StartMoving,
             Action::StartResizing(ResizeFrom::NearestCorner),
             Action::Reload,
@@ -1409,6 +1441,7 @@ mod tests {
     #[case::toggle_of_nothing("{ toggle = [] }", "needs a command")]
     #[case::unwanted_arguments("\"close now\"", "takes no arguments")]
     #[case::missing_command_line("\"exec\"", "needs a command line")]
+    #[case::missing_focus_or_exec_command("\"focus-or-exec spotify\"", "needs an application id")]
     #[case::empty_sequence("[]", "does nothing")]
     #[case::two_actions_in_a_table("{ close = {}, raise = {} }", "exactly one action")]
     #[case::zero_rate("{ repeat = \"raise\", rate = 0 }", "whole number")]
