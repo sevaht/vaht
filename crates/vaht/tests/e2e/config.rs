@@ -204,6 +204,23 @@ fn a_change_in_place_is_made_with_the_set_setting_action_too() {
     assert!(config(&vaht, &["get"]).contains("  blur.spread = 3\n"));
 }
 
+#[test]
+fn unsetting_the_style_options_puts_every_choice_back_at_once() {
+    let vaht = start("");
+    config(&vaht, &["set", "style_options.taskbar_size", "large"]);
+    config(&vaht, &["set", "style_options.shading", "soft"]);
+    let changed = config(&vaht, &["get"]);
+    assert!(
+        changed.contains("* style_options.taskbar_size = \"large\""),
+        "{changed}"
+    );
+    let output = message(&vaht, &["run", "unset-setting", "style_options"]);
+    assert!(output.status.success(), "{output:?}");
+    let reset = config(&vaht, &["get"]);
+    assert!(!reset.contains("style_options.taskbar_size"), "{reset}");
+    assert!(!reset.contains("* style_options"), "{reset}");
+}
+
 /// Collects the dotted path of every setting `value` holds: the leaves, and
 /// a table whose keys are free (an empty one has none to give).
 fn leaf_paths(value: &serde_json::Value, prefix: &[String], paths: &mut Vec<Vec<String>>) {

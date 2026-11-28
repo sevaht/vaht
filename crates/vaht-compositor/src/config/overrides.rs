@@ -230,6 +230,10 @@ impl SettingOverrides {
     #[must_use]
     pub(crate) fn with(&self, change: SettingChange, file: &toml::Table) -> Self {
         let mut changes = self.changes.clone();
+        // A change of a table replaces the changes made inside it.
+        changes.retain(|made| {
+            made.change.key == change.key || !made.change.key.starts_with(&change.key)
+        });
         let file_said = match changes
             .iter()
             .position(|made| made.change.key == change.key)
@@ -402,5 +406,36 @@ mod tests {
                 .with(change("focus.model click"), &original)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn changing_a_table_replaces_the_changes_inside_it() {
+        let original = file("");
+        let inside = |key: &str, value: &str| {
+            SettingChange::new(
+                &["style_options", key],
+                &toml::Value::String(value.to_owned()),
+            )
+        };
+        let changed = SettingOverrides::default()
+            .with(inside("palette", "blue"), &original)
+            .with(inside("shading", "soft"), &original);
+        assert_eq!(changed.keys().len(), 2);
+        // Putting the whole table back to the default, which the file has none
+        // of, leaves nothing changed.
+        let reset = changed.with(
+            SettingChange::unset(vec!["style_options".to_owned()]),
+            &original,
+        );
+        assert!(reset.is_empty());
+        // Where the file has the table, the table's removal is the change.
+        let saved = file("[style_options]\npalette = \"red\"\n");
+        let reset = SettingOverrides::default()
+            .with(inside("palette", "blue"), &saved)
+            .with(
+                SettingChange::unset(vec!["style_options".to_owned()]),
+                &saved,
+            );
+        assert_eq!(reset.keys(), [vec!["style_options".to_owned()]]);
     }
 }
